@@ -59,9 +59,39 @@ Where a mod publishes its logic as data (Chisel and Rechiseled variant groups as
 
 ## Third-party plugins
 
-Loaded from `~/autosketch/plugins/*.js` (ESM). Plugins run with full trust, like any Node module, so this is documented clearly. A future option is to run them in the QuickJS sandbox with a restricted API.
+Loaded from `<workspace>/plugins/*.js` and `*.mjs` (ESM; the workspace defaults to `~/autosketch`), in file-name order, when the instance loads.
+
+**Full trust.** A plugin file is imported like any Node module and runs with the server's permissions: it can read and write files, use the network and start processes. Only put files there that you would run yourself. A future option is to run them in the QuickJS sandbox with a restricted API.
+
+- The default export is one plugin, an array of plugins, or a function `({ z }) => plugin | plugin[]`. The factory form hands over the server's `zod`, because a plugin folder has no `node_modules` and action `params` must be zod schemas.
+- A file that fails to import, or an export that isn't a valid plugin (id `[a-z0-9_-]`, non-empty `namespaces`, hooks are functions, actions have a description, zod params and `run`), is skipped with a warning in `instance_info`. It never stops the server.
+- A plugin whose id matches a built-in one replaces it (with a warning), so a user can override built-in knowledge. A second file with an already-loaded id is skipped.
+- The file's content hash becomes the plugin's `cacheKey`, part of the palette cache key, so editing a plugin rebuilds cached palettes.
+
+## Discovering actions
+
+`ops_list({ namespace? })` lists every active plugin's actions as `<plugin>.<op>(params) — description`, filtered by plugin id or mod namespace (05). The parameter signature is derived from the zod schema (`sel, shape: string, camo?: string`).
+
+## Implementation status
+
+| Item | Status |
+|------|--------|
+| Plugin API (`plugins/types.ts`) | `id`, `namespaces`, `modVersions`, `variantTagNamespaces`, `classify`, `families`, `render`, `items`, `validateNbt`, `actions`, `docs`, plus `cacheKey` (set by the loader). All but `id`/`namespaces` optional |
+| `families` | Applied by palette ingestion after generic shape grouping: a hint's base heads a family even when it is a partial block, listed shapes and variants move into it, `category`/`buildable` override. Unknown ids are ignored |
+| `render` | `render(pos, state, nbt, ctx)` returns a code model (cuboid elements, optional `overlay`) or null. The baker tries hooks before the block's own model: `bake(state)` calls them with `pos`/`nbt` undefined (cached), `bakeAt(pos, state, nbt)` with the block entity (not cached). `ctx` gives the registry and any state's JSON model as parts, for re-skinning. `render.ts` still bakes by state only; calling `bakeAt` for block entities lands with the framed/copycat work |
+| `validateNbt` | Hook and `validateNbt(plugins, state, nbt)` helper (warnings prefixed by plugin id; a throwing hook becomes a warning). No caller yet: export and NBT-setting ops adopt it with wave 2 |
+| `actions` | Typed (`description`, zod `params`, `run(ctx, args)` over the document API). Listed by `ops_list`. No built-in plugin defines actions yet, and running them (a tool, and script bindings from silo C) comes with wave 2 |
+| `vanilla` code-drawn models | In `assets/builtin-models/`, not a plugin, so they work with plugins disabled (02). Chests (single and double halves, latch), shulker boxes, beds (head/foot, legs), standing/wall/hanging signs, standing/wall banners (cloth tinted by dye), mob heads (floor and wall) and the bell body (overlaid on its JSON frame). Hand-written geometry over the instance's own entity textures; a missing texture falls back to the particle texture, and UVs follow the real texture's aspect (packs redraw 64×32 skins at 64×64). Used only when a block's JSON model has no geometry, so packs with real models win. Not drawn: banner patterns, sign text, player skins from NBT, the conduit and decorated pot |
+| `create` | Casings: buildable `metal` (generic rules put them in `wood`, as they are axe-mined). Full-cube machines with plain faces (chassis, gearshift, chute, packager, clutch, vault, …): non-buildable. `metal_girder`: a buildable partial-block family. Metal bars: panes of their metal block |
+| `createdeco` | Each metal set grouped under `<metal>_sheet_metal`: door, trapdoor, bars (pane), mesh fence (fence), hull (variant). Corner, cracked and mossy bricks: variants of their colour's bricks (red: `minecraft:bricks`). Long, short and tiled bricks stay separate families (03). Shipping containers stay buildable despite their front face |
+| Measured on Craftoria | `create` + `createdeco` change 105 block assignments: 22 Create families reclassified (8 casings to metal, 14 machines excluded), a girder family added, brass bars attached, 6 metal sets and 8 brick colours regrouped. (03's "plugins change ≤5 families" figure predates these two plugins) |
+| Third-party loading | `plugins/loader.ts`, wired into instance loading. Full trust, documented above |
+| `ops_list` | `server/tools/plugins.ts` |
+| `framedblocks`, `copycats` | Classification only (non-buildable shapes). Actions, camo rendering and frame + camo `items`: wave 2 |
+| `chisel`, `rechiseled`, `chipped` | Variant grouping by tags. `chisel.pattern` / `chisel.randomize`: wave 2 |
 
 ## Open questions
 
-- Where are FramedBlocks' and Copycats' camo NBT schemas documented? (Verify against blocks saved from Craftoria.)
+- Where are FramedBlocks' and Copycats' camo NBT schemas documented? (Verify against blocks saved from Craftoria.) Unverified; no in-game samples are planned.
 - Connected textures (CTM, Fusion, Athena): approximate with the base texture in v1?
+- Some resource packs redraw entity skins with a different layout, not just a different size (the Craftoria skeleton skull draws transparent). Fall back to the particle texture when the sampled area is fully transparent?

@@ -8,7 +8,7 @@
  L4  Scripts        build(window_bay, along facade.front, every 4)        (QuickJS)
  L3  Generators     roof · arch · staircase · tower · wall_run · window · stamp(prefab)
  L2  Brushes/edits  fill · hollow · shell · replace · smooth · extrude · offset · sweep · array · mirror · rotate · move
- L1  Selections     box · polygon · cylinder · sphere · component · mask(predicate) · boolean ops
+ L1  Selections     shapes · magic wand/similar · view box/lasso · semantic · grow/shrink · boolean ops
  L0  Blocks         set_blocks([{pos, block}])                            (escape hatch)
 ```
 
@@ -16,18 +16,74 @@ Every layer is a TypeScript function in `ops/`. The MCP tools and the script API
 
 ## Selections (L1)
 
-A selection is a reusable, nameable region expression. It is cheap and does not touch the document until an op uses it.
+A selection is a reusable, nameable region expression. It is cheap and does not touch the document until an op uses it. The suite follows what 3D and voxel editors offer: box and freehand selection, magic select and boolean combination in Axiom; Select Linked, Select Similar, Select More/Less and Checker Deselect in Blender; shape and region modifiers in WorldEdit. Each tool is adapted for an agent, which has no viewport and no mouse.
+
+### Shapes
 
 ```ts
-sel.box(min, max)               sel.polygon(points2d, y0, y1)
-sel.cylinder(center, r, h, axis) sel.sphere(center, r)
-sel.component("tower_ne")       sel.face("keep", "front")          // a facade plane of a component
-sel.mask(base, { block: "#minecraft:logs" | predicate })
-sel.union(a, b)  sel.subtract(a, b)  sel.intersect(a, b)
-sel.shell(a, thickness)  sel.offset(a, dx, dy, dz)  sel.expand(a, n)  sel.layer(a, y)
+sel.box(min, max)                    sel.polygon(points2d, y0, y1)      // prism over a footprint
+sel.cylinder(center, r, h, axis)     sel.ellipsoid(center, radii)       // sel.sphere(center, r)
+sel.hull(points)                     // convex hull of points
+sel.tube(path, r)                    // polyline/bezier with a radius: roads, walls, pipes
+sel.plane(axis, at, within?)         // a one-block slab
 ```
 
-Tools accept a selection inline or by name (`select({ name: "nave", ... })` stores it).
+### Picking (magic wand family)
+
+Seeded from a position, from a pixel in an earlier render (resolved by `raycast`, `06`), or from an existing selection:
+
+```ts
+sel.connected(seed, { match, tolerance?, connectivity?: 6|18|26, within? })
+    // flood fill ("magic wand" / Select Linked). match: "solid" | "block" | "state" |
+    //   "family" | "role" | "colour" (palette colour index, 03) | predicate
+sel.similar(seed | sel, { by, tolerance?, within? })
+    // everything alike, connected or not (Select Similar). by: block | family | tag | role |
+    //   "prop:facing" (any state property) | colour
+sel.component(id, { mask?: true })   sel.kind("tower")   sel.tagged("ruined")
+sel.view_box(view, rect_px, { depth: "visible" | "through" })
+sel.view_lasso(view, polygon_px, { depth: "visible" | "through" })
+    // box or lasso drawn on a previous render. "visible" = only the surface blocks the camera
+    //   saw; "through" = the whole volume behind the outline (x-ray select)
+```
+
+### Semantic
+
+These are derived from analysis (`06`), so they use its vocabulary:
+
+```ts
+sel.face("keep", "front")      sel.storey(2, "keep")     sel.roof("keep")
+sel.room(seed | id)            // enclosed air, by flood fill
+sel.interior(sel)              // enclosed air inside a shell
+sel.openings("keep.front")     // windows, doors, gaps in a wall plane
+sel.surface(sel, { dirs? })    // exposed blocks (only those facing up, out, …)
+sel.top(sel)                   // heightmap surface: terrain, roof tops
+sel.changed(since)             // the diff since a checkpoint or op (06)
+```
+
+### Modifiers
+
+```ts
+sel.union(a, b)  sel.subtract(a, b)  sel.intersect(a, b)  sel.xor(a, b)  sel.invert(a, within)
+sel.expand(a, n | [dx,dy,dz] | { up, down, north, … })   sel.contract(a, …)     // geometric
+sel.grow(a, n, { match? })   sel.shrink(a, n)          // topological, along connected blocks (Select More/Less)
+sel.offset(a, dx, dy, dz)    sel.mirror(a, axis, about)   sel.rotate(a, turns, pivot)
+sel.shell(a, thickness)      sel.edges(a)              sel.layer(a, y | "min" | "max")
+sel.slab(a, axis, from, to)  sel.bbox(a)               sel.convex(a)   sel.fill_holes(a)
+sel.filter(a, { block | family | role | tag | air: false } | predicate)
+sel.checker(a, { size })     sel.random(a, ratio, seed)   sel.every(a, n, { along })
+```
+
+### Naming and feedback
+
+- `select({ name: "nave", ... })` stores a selection. Tools accept a selection inline or by name. `sel.last` is the most recent selection.
+- **Expressions are lazy.** A named selection is re-evaluated each time it's used, so `connected` and `similar` follow later edits. `sel.freeze(a)` stores the resolved voxel mask instead.
+- Without a viewport the agent can't see what it selected, so every selection call returns a summary: block count, bounding box (public coordinates), top families, and the components touched. `highlight: true` adds a small render with the selection tinted (`06`).
+
+Selections also define the work and context volumes of a scoped session (`11`). Any selection works; it is resolved to a voxel mask at fork time. Inside a sandbox, ops that write outside the work volume are refused.
+
+## Auto-connection
+
+Ops recompute the shapes of blocks that connect to their neighbours: fences, walls, panes and bars, stair shapes, redstone, chests, and plugin-declared connecting blocks (`09`). Like the game, they update both the written block and its neighbours. The game derives these **connection properties** from the surrounding blocks, so the document treats them as derived state, not content. That distinction matters at sandbox seams (`11`). `raw: true` on an op writes states exactly as given (the escape hatch).
 
 ## Edits & brushes (L2)
 

@@ -36,12 +36,14 @@ z↓   0123456789012345
 
 ### Renders (images)
 
-`render({ views, region?, cutaway?, highlight?, size?, style? })`
+`render({ views, region?, cutaway?, highlight?, size?, style?, context? })`
 
 - **Views:** `iso_ne|iso_nw|iso_se|iso_sw` (3/4 isometric), `front|back|left|right|top` (orthographic elevations, resolved via `front`, `01`), `component:<id>` (auto-framed), or a custom camera `{ yaw, pitch, distance, target }`.
 - **Multi-view contact sheet:** `views: ["iso_ne","iso_sw","front","top"]` renders one image as a 2×2 grid. This is cheaper than four calls and makes comparison easier.
 - **Cutaway:** `{ maxY }`, `{ plane: "x", at, keep: "west" }`, or a component's interior.
+- **Subregions:** `region` takes any selection (`05`). Only blocks inside it are drawn, and only they hide faces, so a cut through solid material draws as a closed surface. The camera frames the region tightly, and axis ticks show the region's own coordinates. This was verified for boxes on 2026-11-07 (a cube cut from a 40×12×40 solid). Masks are not supported yet.
 - **Highlight:** a selection or the last op's diff drawn as a tint or outline.
+- **Context volume** (in a sandbox, `11`; not yet implemented): `context: "ghost"` (default, desaturated and translucent) | `"normal"` | `"hide"`, so read-only surroundings are never mistaken for editable blocks.
 - **Overlays:** axis ticks every 4/8/16 blocks (adaptive), a compass, component labels (optional), and storey lines (optional).
 - **Styles:** `textured` (default, real models and textures from `02`), `flat` (mean colours, faster and clearer for structure), `depth` (shaded by distance, for reading 3D form), `xray` (translucent shell).
 - The renderer is a pure-JS software rasterizer: baked models → triangles → z-buffer → PNG via `pngjs`. Back-face and occlusion culling at block level.

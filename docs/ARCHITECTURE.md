@@ -12,6 +12,7 @@ The agent has to understand (a) **what it can build with**: blocks, materials, p
 - **Glance, then select.** Large choice sets are shown as tilemap sheets with stable cell IDs. The model picks whole sets in one action.
 - **Text first, images on demand.** Exact structure goes as compact text. Images are for gestalt and verification.
 - **Semantic handles over coordinates.** Agents act on named components, selections and anchors, not raw block lists.
+- **Isolate, don't scroll.** On large builds each job runs in a sandbox holding only its work and context volumes, so the rest of the build never enters the subagent's context (`11`).
 - **Advise, don't constrain.** Heuristics and style knowledge are retrievable and customizable, never hard-enforced.
 
 ## Component map
@@ -63,6 +64,7 @@ The agent has to understand (a) **what it can build with**: blocks, materials, p
 | 8 | Formats & export | Axiom `.schem`/`.bp`, Create `.nbt`, export targets | [design/08-formats.md](design/08-formats.md) |
 | 9 | Mod-compat plugins | Per-mod grouping, render hints and code-based actions | [design/09-mod-compat.md](design/09-mod-compat.md) |
 | 10 | Testing & evaluation | Unit/golden tests and the agent benchmark suite | [design/10-testing.md](design/10-testing.md) |
+| 11 | Scoped sessions | Isolated sandboxes (work + read-only context volume) for subagents, lock and wait, merge as one patch | [design/11-scoped-sessions.md](design/11-scoped-sessions.md) |
 
 ## Dependency rules
 

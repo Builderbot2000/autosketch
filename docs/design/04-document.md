@@ -1,6 +1,6 @@
 # 04 — Document Model
 
-**One schematic per session.** Other schematics enter only as **prefabs** stamped from the library (`07`).
+**One schematic per session.** Other schematics enter only as **prefabs** stamped from the library (`07`). A session may also hold **sandboxes**: isolated sub-documents forked from it for subagent jobs, addressed by `scope` id and merged back as a single journal entry (`11`).
 
 ## Session
 

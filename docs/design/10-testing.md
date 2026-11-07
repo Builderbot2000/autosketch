@@ -33,6 +33,7 @@ This measures whether the perception and palette design actually help the agent.
   - *Model-graded* rubric over final renders (style match, proportion), with fixed judge prompts.
   - *Cost:* total tokens, image tokens, tool calls.
 - **Ablations:** the same suite with features toggled (no `analyze`, no components, text-only, images-only, no palette sheets). This is how we decide which perception features earn their token cost.
+- **Scoped sessions (`11`):** large builds done two ways, monolithically by one agent and with delegation to sandboxed subagents allowed. They are compared on cross-part consistency (matching reference lines, palette, repeated elements), defects, total tokens and wall time. This tests the premise that block-coordinate volume is the main cause of attention drift, and whether the delegation overhead pays off. Small and medium prompts in the main suite also record how often agents fork. There it should be almost never, which calibrates the skill's delegation threshold.
 - **Results:** written to `test/eval/results/<date>-<git-sha>.json` plus a summary table. Regressions are compared against the last baseline.
 
 ## Commands

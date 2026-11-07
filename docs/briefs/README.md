@@ -49,11 +49,11 @@ A wave starts when the previous wave's dependencies have merged. Within a wave, 
 | `src/server/session.ts`, the `tool()` wrapper in `server.ts` | D (resource registration), F (scope addressing) | D's small change lands early in wave 1. F's lands in wave 3 |
 | `package.json` | C (quickjs), G (none expected), I (scripts) | Trivial conflicts: rebase and re-run `npm install` |
 
-## Items no agent can close
+## Unverified items (no in-game checks planned)
 
-These need the user in-game, so teams leave them open and work around them as the specs describe:
+These would need someone in-game, and that is not planned. Don't wait on them or ask for samples. Work from the best evidence available (the mods' public source, existing behaviour), keep the uncertain part isolated in one place, warn where the specs already say to, and leave the item marked unverified in the spec:
 
-- How Axiom `.bp` stores block entities and entities (needs a blueprint with a chest or sign and an armor stand).
-- Whether Axiom accepts an Autosketch-written blueprint, and which folder Axiom reads `.schem` from.
-- The Craftoria server's real `maxTotalSchematicSize`.
-- FramedBlocks and Copycats camo NBT, from blocks saved in Craftoria.
+- How Axiom `.bp` stores block entities and entities. Keep the current behaviour: leave them out on write, with a warning pointing to `.schem`.
+- Whether Axiom accepts an Autosketch-written blueprint, and which folder Axiom reads `.schem` from. Keep the current targets.
+- The Craftoria server's real `maxTotalSchematicSize`. Keep reading the local config, defaulting to 256 KB.
+- FramedBlocks and Copycats camo NBT layout (silo E).

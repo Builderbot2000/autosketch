@@ -18,7 +18,7 @@ Cover what asset data can't express: blocks drawn by game code, camo appearance 
 5. **`ops_list({ namespace })`** tool for discovering plugin actions.
 
 **Wave 2**
-6. **FramedBlocks and Copycats:** `framed.shape`, `framed.camo`, `copycat.shape`, `copycat.camo`, rendering framed blocks with the camo texture, and `items` returning frame plus camo. Camo NBT layouts are unverified (open question in `09`; the user must supply saved blocks). Build against your best reading of the mods' public source, isolate the NBT layout in one function, and mark it unverified in the spec.
+6. **FramedBlocks and Copycats:** `framed.shape`, `framed.camo`, `copycat.shape`, `copycat.camo`, rendering framed blocks with the camo texture, and `items` returning frame plus camo. Camo NBT layouts are unverified (open question in `09`), and no in-game samples are coming. Build against your best reading of the mods' public source, isolate the NBT layout in one function per mod, and mark it unverified in the spec.
 7. **Chisel family:** `chisel.pattern` and `chisel.randomize`, converting within a variant group read from the instance's data.
 8. **Plugin actions in scripts:** register actions with silo C's script API if it has merged.
 

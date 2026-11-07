@@ -64,7 +64,7 @@ describe("MCP server", () => {
     const tools = (await client.listTools()).tools.map((t) => t.name).sort();
     expect(tools).toEqual([
       "block_info", "checkpoint", "clear", "doc_info", "doc_list", "doc_new", "doc_open", "fill", "history", "instance_info",
-      "palette_pick", "palette_sheet", "palette_show", "redo", "replace", "restore", "set_blocks", "undo", "view_slice",
+      "palette_pick", "palette_sheet", "palette_show", "redo", "render", "replace", "restore", "set_blocks", "undo", "view_slice",
     ]);
     expect(client.getInstructions()).toMatch(/palette:<name>\.<role>/);
   });
@@ -154,6 +154,10 @@ describe("MCP server", () => {
     const slice = (await call("view_slice", { axis: "z", at: 0 })).text;
     expect(slice).toMatch(/elevation looking north/);
     expect(slice).toMatch(/andesite_stairs\[facing=south\] \(1\)/);
+
+    const pic = await client.callTool({ name: "render", arguments: { views: ["iso_se"], size: 256 } });
+    expect((pic.content as Content)[0]).toMatchObject({ type: "image", mimeType: "image/png" });
+    expect(textOf(pic)).toMatch(/render 256×256 · iso_se/);
 
     const grow = await call("set_blocks", { blocks: [{ pos: [-2, 0, 0], block: "oak_planks" }] });
     expect(grow.text).toMatch(/doc 7×4×5 \(x×y×z\), 83 blocks · bounds \(-2,0,0\)–\(4,3,4\)/);

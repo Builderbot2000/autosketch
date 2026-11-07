@@ -5,7 +5,7 @@ A local, FOSS MCP server that lets AI agents build Minecraft schematics with hig
 - Reads blocks and textures from **your own** Minecraft instance (vanilla or CurseForge, modded included). No game assets are shipped.
 - Exports to **Axiom** (`.bp` / `.schem`) and **Create** (`.nbt`) schematics.
 
-Status: early development. Material palettes, documents and basic editing (fill, replace, undo, checkpoints, text slices) work; renders and export are next. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Status: early development. Material palettes, documents, basic editing (fill, replace, undo, checkpoints, text slices) and renders work; export to Axiom/Create is next. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Use with Claude Code
 
@@ -35,6 +35,7 @@ The first start indexes the instance (tens of seconds for a large modpack); late
 | `replace` / `clear` | Swap blocks by id, state, tag or `*` (optionally keeping facing/half/axis); empty a box |
 | `undo` / `redo` / `checkpoint` / `restore` / `history` | Every op is one undo step; named checkpoints for risky work |
 | `view_slice` | One layer as a character grid with legend: plan (y) or elevation (x/z) |
+| `render` | Textured views from your instance's own models: iso corners, elevations, top, custom cameras; 2×2 contact sheet, region zoom, cutaway |
 
 Materials work anywhere a block does: `"stone_bricks"`, `"oak_stairs[facing=east]"`, `"a 70%, b 30%"`, `"palette:<name>.<role>"`, gradients, noise and patterns.
 

@@ -13,11 +13,11 @@ BUILDING:
 1. doc_new({name, size?, front?}) starts a document (saved automatically to the workspace); doc_open/doc_list reopen saved ones. One document is open at a time.
 2. Shape with fill({box, material, mode}) — mode fill|hollow|outline|walls — then add details with set_blocks. replace swaps materials (keep_states for stairs/logs). clear empties a box.
 3. Every block argument takes a material: "stone_bricks", "oak_stairs[facing=east,half=top]", "a 70%, b 30%", "palette:<name>.<role>", {gradient}, {noise}, {pattern}. Mixes are deterministic per document seed.
-4. Check with view_slice({axis:"y", at}) (plan) or axis "z"/"x" (elevations): exact text grids, cheaper than images. doc_info summarises the document.
+4. Check your work. view_slice({axis:"y", at}) (plan) or axis "z"/"x" (elevations) gives exact text grids: use it for positions. render() draws the real blocks: use it for the look (proportion, gaps, materials blending together, doors and openings) after each major step, and zoom with region or cutaway:{maxY} to inspect details. doc_info summarises the document.
 5. Each op is one undo step: undo/redo, checkpoint({name}) before risky multi-step work, restore({name}) to go back, history() to re-orient.
 Register important parts with fill(..., as:"keep") so later work can refer to them; doc_info lists components.
 Coordinates never move while you edit: building below 0 (e.g. a roof overhang at x=-1) just extends the bounds into negative numbers. Exports shift the build so its minimum corner is (0,0,0).
 
-COST: the overview is ~1.5k tokens; zoom/family/series sheets are ~0.1–0.5k; palette_pick/palette_show/block_info and all edit results are text (<300); view_slice is ~0.1–1.5k depending on size. Pick from the overview you already have instead of re-requesting it.
+COST: the overview is ~1.5k tokens; zoom/family/series sheets are ~0.1–0.5k; palette_pick/palette_show/block_info and all edit results are text (<300); view_slice is ~0.1–1.5k depending on size; render is ~350 tokens per 512px view (the default 4-view sheet at 768px is ~800). Pick from the overview you already have instead of re-requesting it.
 
 CONVENTIONS: X = east(+)/west(-), Y = up, Z = south(+)/north(-). Boxes are inclusive {min,max}. The "front" of a build is south (+Z) unless changed. Stairs "facing" is the direction you walk to climb them.`;

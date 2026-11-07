@@ -1,0 +1,191 @@
+import type { RGB } from "../../palette/color.js";
+import type { Image } from "../../palette/image.js";
+
+/**
+ * Pure-JS triangle rasterizer with a z-buffer (docs/design/06-perception.md). Orthographic
+ * cameras only, so affine texture interpolation is exact. Draws at a supersampled size and
+ * downsamples for anti-aliasing.
+ */
+
+export type V3 = [number, number, number];
+
+export interface Camera {
+  right: V3;
+  up: V3;
+  /** Into the scene: larger dot(p, forward) = farther away. */
+  forward: V3;
+  /** Pixels per block. */
+  scale: number;
+  /** Screen-space centre (in camera units) placed at the image centre. */
+  cx: number;
+  cy: number;
+  width: number;
+  height: number;
+}
+
+export function dot(a: V3, b: V3): number {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+export function cross(a: V3, b: V3): V3 {
+  return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+}
+
+export function normalize(a: V3): V3 {
+  const l = Math.hypot(a[0], a[1], a[2]) || 1;
+  return [a[0] / l, a[1] / l, a[2] / l];
+}
+
+/** Camera basis looking along -toward (toward = direction from the scene to the camera). */
+export function basis(toward: V3, upHint: V3 = [0, 1, 0]): { right: V3; up: V3; forward: V3 } {
+  const forward = normalize([-toward[0], -toward[1], -toward[2]]);
+  let right = cross(forward, upHint);
+  if (Math.hypot(...right) < 1e-6) right = cross(forward, [0, 0, -1]);
+  right = normalize(right);
+  const up = cross(right, forward);
+  return { right, up, forward };
+}
+
+export class Raster {
+  readonly color: Float32Array;
+  readonly depth: Float32Array;
+
+  constructor(
+    readonly width: number,
+    readonly height: number,
+    readonly cam: Camera,
+  ) {
+    this.color = new Float32Array(width * height * 3);
+    this.depth = new Float32Array(width * height).fill(Infinity);
+  }
+
+  /** World point → [px, py, depth] in this raster's pixels. */
+  project(x: number, y: number, z: number): V3 {
+    const c = this.cam;
+    const sx = x * c.right[0] + y * c.right[1] + z * c.right[2];
+    const sy = x * c.up[0] + y * c.up[1] + z * c.up[2];
+    const d = x * c.forward[0] + y * c.forward[1] + z * c.forward[2];
+    return [(sx - c.cx) * c.scale + this.width / 2, -(sy - c.cy) * c.scale + this.height / 2, d];
+  }
+
+  fillBackground(top: RGB, bottom: RGB): void {
+    for (let y = 0; y < this.height; y++) {
+      const t = y / Math.max(1, this.height - 1);
+      const r = top[0] + (bottom[0] - top[0]) * t, g = top[1] + (bottom[1] - top[1]) * t, b = top[2] + (bottom[2] - top[2]) * t;
+      for (let x = 0; x < this.width; x++) {
+        const i = (y * this.width + x) * 3;
+        this.color[i] = r;
+        this.color[i + 1] = g;
+        this.color[i + 2] = b;
+      }
+    }
+  }
+
+  /**
+   * Textured triangle. p: screen points; uv: texture coords 0..1. mode "opaque" alpha-tests and
+   * writes depth; "blend" alpha-blends behind nearer opaque pixels without writing depth.
+   */
+  triangle(p0: V3, p1: V3, p2: V3, uv: number[], img: Image, tint: RGB | undefined, shade: number, mode: "opaque" | "blend", flat?: RGB): void {
+    const minX = Math.max(0, Math.floor(Math.min(p0[0], p1[0], p2[0])));
+    const maxX = Math.min(this.width - 1, Math.ceil(Math.max(p0[0], p1[0], p2[0])));
+    const minY = Math.max(0, Math.floor(Math.min(p0[1], p1[1], p2[1])));
+    const maxY = Math.min(this.height - 1, Math.ceil(Math.max(p0[1], p1[1], p2[1])));
+    if (minX > maxX || minY > maxY) return;
+    const area = (p1[0] - p0[0]) * (p2[1] - p0[1]) - (p1[1] - p0[1]) * (p2[0] - p0[0]);
+    if (Math.abs(area) < 1e-9) return;
+    const inv = 1 / area;
+    const tw = img.width, th = img.height, td = img.data;
+    const tr = tint ? tint[0] / 255 : 1, tg = tint ? tint[1] / 255 : 1, tb = tint ? tint[2] / 255 : 1;
+    for (let y = minY; y <= maxY; y++) {
+      const py = y + 0.5;
+      for (let x = minX; x <= maxX; x++) {
+        const px = x + 0.5;
+        const w0 = ((p1[0] - px) * (p2[1] - py) - (p1[1] - py) * (p2[0] - px)) * inv;
+        const w1 = ((p2[0] - px) * (p0[1] - py) - (p2[1] - py) * (p0[0] - px)) * inv;
+        const w2 = 1 - w0 - w1;
+        if (w0 < -1e-6 || w1 < -1e-6 || w2 < -1e-6) continue;
+        const z = w0 * p0[2] + w1 * p1[2] + w2 * p2[2];
+        const di = y * this.width + x;
+        // Small bias so coplanar overlays (e.g. a pane against glass) favour the later quad.
+        if (z >= this.depth[di]! - 1e-5) continue;
+        let r: number, g: number, b: number, a: number;
+        if (flat) {
+          [r, g, b] = flat;
+          a = 255;
+        } else {
+          const u = w0 * uv[0]! + w1 * uv[2]! + w2 * uv[4]!;
+          const v = w0 * uv[1]! + w1 * uv[3]! + w2 * uv[5]!;
+          const tx = Math.min(tw - 1, Math.max(0, Math.floor(u * tw)));
+          const ty = Math.min(th - 1, Math.max(0, Math.floor(v * th)));
+          const ti = (ty * tw + tx) * 4;
+          r = td[ti]!;
+          g = td[ti + 1]!;
+          b = td[ti + 2]!;
+          a = td[ti + 3]!;
+        }
+        if (mode === "opaque" && a < 128) continue;
+        if (a === 0) continue;
+        r *= tr * shade;
+        g *= tg * shade;
+        b *= tb * shade;
+        const ci = di * 3;
+        if (mode === "opaque") {
+          this.color[ci] = r;
+          this.color[ci + 1] = g;
+          this.color[ci + 2] = b;
+          this.depth[di] = z;
+        } else {
+          const t = a / 255;
+          this.color[ci] = this.color[ci]! * (1 - t) + r * t;
+          this.color[ci + 1] = this.color[ci + 1]! * (1 - t) + g * t;
+          this.color[ci + 2] = this.color[ci + 2]! * (1 - t) + b * t;
+        }
+      }
+    }
+  }
+
+  /** Line in screen space (Xiaolin-free: simple stepping), blended, no depth test. */
+  line(a: V3, b: V3, rgb: RGB, alpha: number, width = 1, depthTest = false): void {
+    const steps = Math.max(1, Math.ceil(Math.max(Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1]))));
+    const half = Math.floor(width / 2);
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const x = Math.round(a[0] + (b[0] - a[0]) * t), y = Math.round(a[1] + (b[1] - a[1]) * t), z = a[2] + (b[2] - a[2]) * t;
+      for (let dy = -half; dy < width - half; dy++)
+        for (let dx = -half; dx < width - half; dx++) {
+          const xx = x + dx, yy = y + dy;
+          if (xx < 0 || yy < 0 || xx >= this.width || yy >= this.height) continue;
+          const di = yy * this.width + xx;
+          if (depthTest && z >= this.depth[di]!) continue;
+          const ci = di * 3;
+          this.color[ci] = this.color[ci]! * (1 - alpha) + rgb[0] * alpha;
+          this.color[ci + 1] = this.color[ci + 1]! * (1 - alpha) + rgb[1] * alpha;
+          this.color[ci + 2] = this.color[ci + 2]! * (1 - alpha) + rgb[2] * alpha;
+        }
+    }
+  }
+
+  /** Box-filter downsample by an integer factor into an RGBA image region. */
+  downsampleInto(dst: Image, ox: number, oy: number, factor: number): void {
+    const w = Math.floor(this.width / factor), h = Math.floor(this.height / factor);
+    const n = factor * factor;
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        let r = 0, g = 0, b = 0;
+        for (let sy = 0; sy < factor; sy++)
+          for (let sx = 0; sx < factor; sx++) {
+            const ci = ((y * factor + sy) * this.width + (x * factor + sx)) * 3;
+            r += this.color[ci]!;
+            g += this.color[ci + 1]!;
+            b += this.color[ci + 2]!;
+          }
+        const X = ox + x, Y = oy + y;
+        if (X < 0 || Y < 0 || X >= dst.width || Y >= dst.height) continue;
+        const di = (Y * dst.width + X) * 4;
+        dst.data[di] = r / n;
+        dst.data[di + 1] = g / n;
+        dst.data[di + 2] = b / n;
+        dst.data[di + 3] = 255;
+      }
+  }
+}

@@ -7,7 +7,10 @@ import { fromPublic, type Box, type PublicBox, type Vec3 } from "../core/region.
 import type { Document } from "../document/document.js";
 import { clear, fill, replace, setBlocks, type OpEnv } from "../ops/edit.js";
 import type { MaterialExpr } from "../ops/material.js";
+import { BlockBaker } from "../perception/render/bake.js";
+import { renderDocument, VIEW_NAMES, type View } from "../perception/render/render.js";
 import { viewSlice } from "../perception/slice.js";
+import { TextureLoader, Tinter } from "../palette/textures.js";
 import type { InstanceContext } from "./context.js";
 import { formatEdit, formatHistory, formatInfo, shiftLine, sizeLine } from "./format.js";
 import { INSTRUCTIONS } from "./instructions.js";
@@ -225,6 +228,22 @@ type ToolFn = <S extends z.ZodRawShape>(
   config: { title: string; description: string; inputSchema: S; readOnly?: boolean },
   run: (c: InstanceContext, args: z.infer<z.ZodObject<S>>) => Promise<Result> | Result,
 ) => unknown;
+
+/** One block baker per loaded instance (models and textures are cached inside it). */
+const bakers = new WeakMap<InstanceContext, Promise<BlockBaker>>();
+function bakerFor(c: InstanceContext): Promise<BlockBaker> {
+  let p = bakers.get(c);
+  if (!p) {
+    p = (async () => {
+      const loader = new TextureLoader(c.stack);
+      const tinter = new Tinter(loader);
+      await tinter.init();
+      return new BlockBaker(c.stack, loader, tinter, c.registry);
+    })();
+    bakers.set(c, p);
+  }
+  return p;
+}
 
 function registerDocumentTools(tool: ToolFn, session: Session): void {
   const env = (c: InstanceContext): OpEnv => ({ registry: c.registry, index: c.palette });
@@ -447,6 +466,45 @@ function registerDocumentTools(tool: ToolFn, session: Session): void {
       inputSchema: { limit: z.number().int().min(1).max(200).optional() },
     },
     (_c, a) => text(formatHistory(session.require(), a.limit ?? 20)),
+  );
+
+  tool(
+    "render",
+    {
+      title: "Render",
+      description:
+        "Draws the build with the instance's real block models and textures. views (max 4, shared in one image): iso_se|iso_sw|iso_ne|iso_nw (3/4 views from that corner), " +
+        "front|back|left|right (flat elevations, resolved through the document's front), top (plan, north up), or {yaw, pitch} (camera bearing from the build: 0 north, 90 east; pitch above horizon). " +
+        "Default: iso_se, iso_nw, front, top at 768px (~800 tokens). One view at 512px is ~350 tokens. region zooms to a box; cutaway:{maxY} hides everything above y to look inside. " +
+        "Axis ticks label block coordinates; N marks north. style flat = mean colours (structure only). Image + caption.",
+      inputSchema: {
+        views: z
+          .array(z.union([z.enum(VIEW_NAMES), z.object({ yaw: z.number(), pitch: z.number().min(-89).max(89) })]))
+          .min(1)
+          .max(4)
+          .optional(),
+        region: boxSchema.optional(),
+        cutaway: z.object({ maxY: z.number().int() }).optional(),
+        size: z.number().int().min(128).max(1024).optional().describe("Longest side in pixels (default 768 for several views, 512 for one)"),
+        style: z.enum(["textured", "flat"]).optional(),
+      },
+    },
+    async (c, a) => {
+      const doc = session.require();
+      const r = await renderDocument(doc, await bakerFor(c), {
+        ...(a.views ? { views: a.views as View[] } : {}),
+        ...(a.region ? { region: box(a.region as PublicBox) } : {}),
+        ...(a.cutaway ? { cutaway: a.cutaway } : {}),
+        ...(a.size ? { size: a.size } : {}),
+        ...(a.style ? { style: a.style } : {}),
+      });
+      return {
+        content: [
+          { type: "image", data: r.png.toString("base64"), mimeType: "image/png" },
+          { type: "text", text: r.caption },
+        ],
+      };
+    },
   );
 
   tool(

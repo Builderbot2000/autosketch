@@ -10,6 +10,7 @@ import type { AutosketchPlugin } from "../plugins/types.js";
 import { materialList, type MaterialList } from "./materials.js";
 import { isGzip, readNbt } from "./nbt.js";
 import { documentFromSnapshot, snapshotBlockCount, snapshotOf, type Snapshot } from "./snapshot.js";
+import { decodeBlueprint, encodeBlueprint, isBlueprint } from "./axiom.js";
 import { decodeSponge, encodeSponge, type Decoded, type SpongeVersion } from "./sponge.js";
 import { decodeStructure, encodeStructure, splitToFit } from "./structure.js";
 
@@ -55,6 +56,8 @@ export interface ExportEnv {
   plugins?: readonly AutosketchPlugin[];
   /** Create size limit in KB (default: read from the instance config, else 256). */
   createLimitKb?: number;
+  /** Renders a .bp thumbnail (PNG) of a local region; a blank one is used without it. */
+  thumbnail?: (region: Box) => Promise<Buffer>;
 }
 
 export interface ExportResult {
@@ -74,8 +77,6 @@ export async function exportDocument(doc: Document, req: ExportRequest, env: Exp
   const warnings: string[] = [];
   const target = req.target;
   const format = req.format ?? defaultFormat(target, req.path);
-  if (format === "bp")
-    throw new Error("Axiom .bp writing is not available yet: its layout must first be checked against a blueprint saved by Axiom. Export format \"schem\" instead (Axiom reads .schem).");
   if (target === "path" && !req.path) throw new Error('target "path" needs a path');
   if (target && target !== "path" && !env.instanceRoot) throw new Error(`target "${target}" needs a Minecraft instance; use target "path" instead`);
 
@@ -102,15 +103,31 @@ export async function exportDocument(doc: Document, req: ExportRequest, env: Exp
     const p = resolve(req.path!);
     file = extname(p) ? p : join(p, name + ext);
   } else if (target === "create") file = join(env.instanceRoot!, "schematics", name + ext);
-  else if (target === "axiom") file = join(env.instanceRoot!, "schematics", name + ext);
+  else if (target === "axiom") file = join(env.instanceRoot!, ...(format === "bp" ? ["config", "axiom", "blueprints"] : ["schematics"]), name + ext);
   else {
     file = join(env.defaultDir, name + ext);
     ours = true;
   }
   const overwrite = ours || !!req.overwrite;
 
+  let thumbnail: Buffer | undefined;
+  if (format === "bp") {
+    if (snap.blockEntities.length || snap.entities.length)
+      warnings.push(`left out ${[snap.blockEntities.length ? `${snap.blockEntities.length} block entities (chest contents, sign text…)` : "", snap.entities.length ? `${snap.entities.length} entities` : ""].filter(Boolean).join(" and ")}: their .bp layout isn't verified yet. Export format "schem" to keep them.`);
+    if (env.thumbnail) {
+      const region = req.region ?? doc.localBounds()!;
+      try {
+        thumbnail = await env.thumbnail(region);
+      } catch (e) {
+        warnings.push(`thumbnail failed (${(e as Error).message}); wrote a blank one`);
+      }
+    }
+  }
+
   const encode = (s: Snapshot): Buffer => {
     switch (format) {
+      case "bp":
+        return encodeBlueprint(s, { ...(thumbnail ? { thumbnail } : {}), ...(req.includeAir ? { includeAir: true } : {}) });
       case "schem":
         return encodeSponge(s, { ...(req.schemVersion ? { version: req.schemVersion } : {}) });
       case "nbt":
@@ -159,7 +176,7 @@ export async function exportDocument(doc: Document, req: ExportRequest, env: Exp
 
 function defaultFormat(target: ExportTarget | undefined, path: string | undefined): ExportFormat {
   if (target === "create") return "nbt";
-  if (target === "axiom") return "schem"; // "bp" once its writer exists
+  if (target === "axiom") return "bp";
   if (target === "path" && path) {
     const ext = extname(path).toLowerCase();
     for (const [f, e] of Object.entries(EXTENSIONS)) if (e === ext) return f as ExportFormat;
@@ -171,7 +188,9 @@ function defaultFormat(target: ExportTarget | undefined, path: string | undefine
 function hintFor(target: ExportTarget | undefined, format: ExportFormat, names: string[]): string {
   const list = names.join(", ");
   if (target === "create") return `In game: Schematic Table → select ${list} → upload, then print it with a Schematicannon.`;
+  if (target === "axiom" && format === "bp") return `In game: Axiom → Blueprints → ${list}.`;
   if (target === "axiom") return `In game: load ${list}.schem from the instance's schematics/ folder with Axiom (or //schem load with WorldEdit).`;
+  if (format === "bp") return "Copy into <instance>/config/axiom/blueprints/ to see it in Axiom's blueprint browser.";
   if (format === "nbt") return "Copy into the instance's schematics/ folder for Create, or a world's generated/<namespace>/structure/ folder for structure blocks.";
   if (format === "schem") return "Works with Axiom, WorldEdit and FAWE (schematics/ folder).";
   return "Open with doc_open({path}).";
@@ -213,7 +232,7 @@ export type ImportFormat = "schem" | "nbt" | "native" | "bp" | "litematic" | "sc
 /** Detects a file's format from its contents (falls back to the extension for error messages). */
 export function detectFormat(buf: Buffer, path = ""): ImportFormat {
   const ext = extname(path).toLowerCase();
-  if (ext === ".bp") return "bp";
+  if (isBlueprint(buf)) return "bp";
   if (ext === ".litematic") return "litematic";
   let root;
   try {
@@ -245,13 +264,14 @@ export async function importFile(path: string, opts: { name: string; registry?: 
   if (format === "native") {
     doc = decodeNative(buf, opts.palettes ? { palettes: opts.palettes } : {});
     doc.meta.source = path;
-  } else if (format === "schem" || format === "nbt") {
-    const dec: Decoded = format === "schem" ? decodeSponge(buf, opts.registry ? { registry: opts.registry } : {}) : decodeStructure(buf, opts.registry ? { registry: opts.registry } : {});
+  } else if (format === "schem" || format === "nbt" || format === "bp") {
+    const ro = opts.registry ? { registry: opts.registry } : {};
+    const dec: Decoded = format === "schem" ? decodeSponge(buf, ro) : format === "nbt" ? decodeStructure(buf, ro) : decodeBlueprint(buf, ro);
     warnings.push(...dec.warnings);
     doc = documentFromSnapshot(dec.snapshot, { name: opts.name, dataVersion: dec.snapshot.dataVersion, source: path, ...(opts.front ? { front: opts.front } : {}) });
     if (opts.palettes) doc.palettes = opts.palettes;
   } else {
-    const why = { bp: "Axiom .bp reading waits on a verified layout; save it as .schem from Axiom instead", litematic: "Litematica files are planned, not supported yet", schematic: "legacy MCEdit .schematic files need a legacy ID map (not supported)" }[format];
+    const why = { litematic: "Litematica files are planned, not supported yet", schematic: "legacy MCEdit .schematic files need a legacy ID map (not supported)" }[format];
     throw new Error(`can't import ${basename(path)}: ${why}`);
   }
   doc.meta.name = opts.name;

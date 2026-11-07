@@ -166,26 +166,33 @@ export class Raster {
   }
 
   /** Box-filter downsample by an integer factor into an RGBA image region. */
-  downsampleInto(dst: Image, ox: number, oy: number, factor: number): void {
+  /**
+   * Box-filters into `dst`. With `transparent`, pixels nothing was drawn on stay clear and edges get
+   * partial alpha (coverage from the depth buffer), for thumbnails.
+   */
+  downsampleInto(dst: Image, ox: number, oy: number, factor: number, transparent = false): void {
     const w = Math.floor(this.width / factor), h = Math.floor(this.height / factor);
     const n = factor * factor;
     for (let y = 0; y < h; y++)
       for (let x = 0; x < w; x++) {
-        let r = 0, g = 0, b = 0;
+        let r = 0, g = 0, b = 0, covered = 0;
         for (let sy = 0; sy < factor; sy++)
           for (let sx = 0; sx < factor; sx++) {
-            const ci = ((y * factor + sy) * this.width + (x * factor + sx)) * 3;
-            r += this.color[ci]!;
-            g += this.color[ci + 1]!;
-            b += this.color[ci + 2]!;
+            const pi = (y * factor + sy) * this.width + (x * factor + sx);
+            if (transparent && this.depth[pi] === Infinity) continue;
+            covered++;
+            r += this.color[pi * 3]!;
+            g += this.color[pi * 3 + 1]!;
+            b += this.color[pi * 3 + 2]!;
           }
         const X = ox + x, Y = oy + y;
         if (X < 0 || Y < 0 || X >= dst.width || Y >= dst.height) continue;
         const di = (Y * dst.width + X) * 4;
-        dst.data[di] = r / n;
-        dst.data[di + 1] = g / n;
-        dst.data[di + 2] = b / n;
-        dst.data[di + 3] = 255;
+        const k = Math.max(1, covered);
+        dst.data[di] = r / k;
+        dst.data[di + 1] = g / k;
+        dst.data[di + 2] = b / k;
+        dst.data[di + 3] = transparent ? Math.round((covered / n) * 255) : 255;
       }
   }
 }

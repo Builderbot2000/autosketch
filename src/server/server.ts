@@ -295,7 +295,7 @@ function registerDocumentTools(tool: ToolFn, session: Session): void {
       title: "Open document",
       description:
         "Opens a saved document by name and makes it current (the previous one is saved and closed). With path, imports a schematic file instead " +
-        "(.schem v1–v3, Create/structure .nbt, .autosketch) as a new workspace document named name (default: the file name). Unknown blocks and block-entity NBT are kept. " +
+        "(.schem v1–v3, Axiom .bp, Create/structure .nbt, .autosketch) as a new workspace document named name (default: the file name). Unknown blocks and block-entity NBT are kept. " +
         "Undo history starts fresh. Text.",
       inputSchema: {
         name: z.string().optional().describe("Workspace document name (required unless path is given)"),
@@ -499,17 +499,17 @@ function registerDocumentTools(tool: ToolFn, session: Session): void {
       title: "Export",
       description:
         "Writes the document (or region) as a schematic file. The file's minimum corner is (0,0,0); the result gives the document-local offset. " +
-        "target axiom → .schem in the instance's schematics/ folder · create → structure .nbt in schematics/, checked against Create's size limit, with a material list · " +
+        "target axiom → Axiom blueprint .bp (with a rendered thumbnail) in config/axiom/blueprints/, or .schem in schematics/ with format:\"schem\" · create → structure .nbt in schematics/, checked against Create's size limit, with a material list · " +
         "path → any file or folder (format from the extension) · omitted → the document's exports/ folder. Never overwrites outside exports/ without overwrite:true. " +
         "split:true tiles an over-limit Create export and writes a placement guide. Text.",
       inputSchema: {
         target: z.enum(["axiom", "create", "path"]).optional(),
-        format: z.enum(["schem", "nbt", "native", "bp"]).optional().describe("Default: schem for axiom, nbt for create, from the extension for path"),
+        format: z.enum(["schem", "nbt", "native", "bp"]).optional().describe("Default: bp for axiom, nbt for create, from the extension for path, else schem. .bp leaves out block entities (use schem to keep chest contents etc.)"),
         path: z.string().optional().describe("File or folder for target path"),
         name: z.string().optional().describe("File name without extension (default: the document name)"),
         region: boxSchema.optional(),
         schem_version: z.union([z.literal(2), z.literal(3)]).optional().describe(".schem version (default 3)"),
-        include_air: z.boolean().optional().describe(".nbt: write explicit air so placing clears the space"),
+        include_air: z.boolean().optional().describe(".nbt/.bp: write explicit air so placing clears the space"),
         split: z.boolean().optional(),
         overwrite: z.boolean().optional(),
       },
@@ -538,6 +538,7 @@ function registerDocumentTools(tool: ToolFn, session: Session): void {
           plugins: c.plugins,
           ...(c.info.root ? { instanceRoot: c.info.root } : {}),
           ...(dataVersion ? { dataVersion } : {}),
+          thumbnail: async (region) => (await renderDocument(doc, await bakerFor(c), { views: ["iso_se"], size: 96, thumbnail: true, region })).png,
         },
       );
       return text(formatExport(r));

@@ -45,7 +45,8 @@ export function isGzip(buf: Buffer): boolean {
 
 /** Parses big-endian NBT, gzipped or not. */
 export function readNbt(buf: Buffer): NBT {
-  return nbt.parseUncompressed(isGzip(buf) ? gunzipSync(buf) : buf);
+  // Big schematics have byte arrays past prismarine-nbt's 16M default guard; volume is checked by the decoders.
+  return (nbt.parseUncompressed as (d: Buffer, f?: string, o?: { noArraySizeCheck?: boolean }) => NBT)(isGzip(buf) ? gunzipSync(buf) : buf, "big", { noArraySizeCheck: true });
 }
 
 export function writeGzipNbt(root: NBT): Buffer {

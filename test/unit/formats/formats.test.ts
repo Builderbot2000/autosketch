@@ -9,6 +9,10 @@ import { Document } from "../../../src/document/document.js";
 import { detectFormat, exportDocument, importFile, readCreateLimitKb } from "../../../src/formats/index.js";
 import { materialList, vanillaItems } from "../../../src/formats/materials.js";
 import { readNbt, T } from "../../../src/formats/nbt.js";
+import { BP_MAGIC, decodeBlueprint, encodeBlueprint, packLongs, splitBlueprint, unpackLongs } from "../../../src/formats/axiom.js";
+import nbt from "prismarine-nbt";
+import { PNG } from "pngjs";
+import { gzipSync } from "node:zlib";
 import { documentFromSnapshot, snapshotOf } from "../../../src/formats/snapshot.js";
 import { decodeSponge, decodeVarints, encodeSponge, encodeVarints } from "../../../src/formats/sponge.js";
 import { decodeStructure, encodeStructure, splitToFit } from "../../../src/formats/structure.js";
@@ -110,6 +114,82 @@ describe("Sponge .schem", () => {
   });
 });
 
+describe("Axiom .bp", () => {
+  it("packs indices like vanilla sections (no straddling, low bits first)", () => {
+    for (const bits of [4, 5, 6, 7, 9, 13]) {
+      const ids = new Uint16Array(4096).map((_, i) => (i * 2654435761) % (1 << bits));
+      const longs = packLongs(ids, bits);
+      expect(longs.length).toBe(Math.ceil(4096 / Math.floor(64 / bits)));
+      expect(unpackLongs(longs, bits)).toEqual(ids);
+    }
+    // 4 bits: index i sits at bits 4i..4i+3 of the first long.
+    const ids = new Uint16Array(4096);
+    ids[0] = 1;
+    ids[15] = 0xf;
+    expect(packLongs(ids, 4)[0]).toEqual([0xf0000000 | 0, 1]);
+    expect(unpackLongs([], 4).every((v) => v === 0)).toBe(true);
+  });
+
+  it("writes the verified container layout and round-trips blocks", () => {
+    const doc = sample();
+    const snap = snapshotOf(doc);
+    const thumb = PNG.sync.write(Object.assign(new PNG({ width: 96, height: 96 }), {}));
+    const buf = encodeBlueprint(snap, { thumbnail: thumb, author: "me", tags: ["test"] });
+    expect(buf.readInt32BE(0)).toBe(BP_MAGIC | 0);
+    const parts = splitBlueprint(buf);
+    expect(parts.thumbnail.equals(thumb)).toBe(true);
+    const header = nbt.simplify(nbt.parseUncompressed(parts.header));
+    expect(header).toMatchObject({ Name: "sample", Author: "me", Tags: ["test"], Version: 2, ContainsAir: 0, BlockCount: doc.blockCount() });
+    const data = readNbt(parts.data).value;
+    expect(Object.keys(data).sort()).toEqual(["BlockEntities", "BlockRegion", "DataVersion", "Entities"]);
+
+    const dec = decodeBlueprint(buf, { registry });
+    expect(dec.header.author).toBe("me");
+    const back = documentFromSnapshot(dec.snapshot, { name: "b", dataVersion: 3955, source: "t" });
+    const blocksOf = (c: ReturnType<typeof content>) => c.blocks;
+    expect(blocksOf(content(back))).toEqual(blocksOf(content(doc)));
+  });
+
+  it("treats void_air as empty, explicit air as air, and finds the extent of a centred blueprint", () => {
+    // Hand-built blueprint: one section at section coords (-1,0,-1) with two blocks.
+    const ids = new Uint16Array(4096);
+    ids[(2 << 8) | (15 << 4) | 14] = 1; // (-2, 2, -1)
+    ids[(0 << 8) | (13 << 4) | 15] = 2; // (-1, 0, -3)
+    ids[(0 << 8) | (15 << 4) | 14] = 3; // explicit air at (-2, 0, -1): inside the extent, but no block
+    const pal = ["minecraft:void_air", "minecraft:stone", "minecraft:oak_stairs[facing=east]", "minecraft:air"].map((st) => {
+      const [name, props] = st.split("[");
+      return { Name: T.str(name!), ...(props ? { Properties: T.compound({ facing: T.str("east") }) } : {}) };
+    });
+    const data = nbt.writeUncompressed({
+      type: "compound", name: "",
+      value: {
+        DataVersion: T.int(3955),
+        BlockRegion: T.compoundList([T.compound({ X: T.int(-1), Y: T.int(0), Z: T.int(-1), BlockStates: T.compound({ palette: T.compoundList(pal.map((p) => T.compound(p))), data: { type: "longArray", value: packLongs(ids, 4) } }) })]),
+      },
+    });
+    const header = nbt.writeUncompressed({ type: "compound", name: "", value: { Name: T.str("hand"), Version: T.int(2), BlockCount: T.int(2) } });
+    const gz = gzipSync(data);
+    const thumb = Buffer.from([1, 2, 3]);
+    const buf = Buffer.alloc(16 + header.length + thumb.length + gz.length);
+    let o = buf.writeInt32BE(BP_MAGIC | 0, 0);
+    o = buf.writeInt32BE(header.length, o); o += header.copy(buf, o);
+    o = buf.writeInt32BE(thumb.length, o); o += thumb.copy(buf, o);
+    o = buf.writeInt32BE(gz.length, o); gz.copy(buf, o);
+
+    const d = decodeBlueprint(buf, { registry });
+    expect(d.snapshot.size).toEqual([2, 3, 3]); // x -2..-1, y 0..2, z -3..-1
+    const back = documentFromSnapshot(d.snapshot, { name: "h", dataVersion: 3955, source: "t" });
+    expect(content(back).blocks).toEqual(["0,2,2=minecraft:stone", "1,0,0=minecraft:oak_stairs[facing=east,half=bottom]"]);
+    expect(() => decodeBlueprint(buf.subarray(0, 30))).toThrow(/truncated blueprint/);
+    expect(() => decodeBlueprint(Buffer.from("not a blueprint"))).toThrow(/bad magic/);
+  });
+
+  it("writes explicit air with includeAir", () => {
+    const dec = decodeBlueprint(encodeBlueprint(snapshotOf(sample()), { includeAir: true }));
+    expect(dec.header.containsAir).toBe(true);
+  });
+});
+
 describe("structure .nbt", () => {
   it("round-trips and omits air unless asked", () => {
     const doc = sample();
@@ -175,6 +255,26 @@ describe("materials", () => {
 });
 
 describe("export and import", () => {
+  it("writes Axiom exports as blueprints with a rendered thumbnail and imports them back", async () => {
+    const doc = sample();
+    const instance2 = join(dir, "instance-axiom");
+    let asked: unknown;
+    const thumb = PNG.sync.write(new PNG({ width: 96, height: 96 }));
+    const r = await exportDocument(doc, { target: "axiom" }, { instanceRoot: instance2, defaultDir: join(dir, "wsA"), registry, thumbnail: async (b) => ((asked = b), thumb) });
+    expect(r.format).toBe("bp");
+    expect(r.files[0]!.path).toBe(join(instance2, "config", "axiom", "blueprints", "sample.bp"));
+    expect(r.hint).toMatch(/Axiom → Blueprints → sample/);
+    expect(asked).toEqual(doc.localBounds());
+    const buf = await readFile(r.files[0]!.path);
+    expect(splitBlueprint(buf).thumbnail.equals(thumb)).toBe(true);
+    expect(detectFormat(buf, "whatever.dat")).toBe("bp");
+    const imp = await importFile(r.files[0]!.path, { name: "fromBp", registry });
+    expect(content(imp.doc).blocks).toEqual(content(doc).blocks);
+
+    const schem = await exportDocument(doc, { target: "axiom", format: "schem" }, { instanceRoot: instance2, defaultDir: join(dir, "wsA") });
+    expect(schem.files[0]!.path).toBe(join(instance2, "schematics", "sample.schem"));
+  });
+
   const instance = join(dir, "instance");
 
   it("writes Create exports into the instance, reading its size limit, and refuses to overwrite", async () => {
@@ -225,14 +325,16 @@ describe("export and import", () => {
     expect(imp.doc.localBounds()!.min).toEqual([0, 0, 0]);
   });
 
-  it("exports a region, a path with format from the extension, and rejects .bp for now", async () => {
+  it("exports a region, a path with format from the extension, and .bp with a warning for dropped NBT", async () => {
     const doc = sample();
     const env = { defaultDir: join(dir, "ws3"), registry };
     const r = await exportDocument(doc, { target: "path", path: join(dir, "out", "floor.nbt"), region: { min: [0, 0, 0], max: [4, 1, 5] } }, env);
     expect(r.format).toBe("nbt");
     expect(r.size).toEqual([4, 1, 5]);
     expect(r.blocks).toBe(20);
-    await expect(exportDocument(doc, { format: "bp" }, env)).rejects.toThrow(/\.bp writing is not available yet/);
+    const bp = await exportDocument(doc, { format: "bp" }, env);
+    expect(bp.files[0]!.path).toMatch(/sample\.bp$/);
+    expect(bp.warnings.join()).toMatch(/left out 1 block entities .* and 1 entities/);
     await expect(exportDocument(doc, { target: "path", path: join(dir, "x.zip") }, env)).rejects.toThrow(/can't tell the format/);
   });
 });

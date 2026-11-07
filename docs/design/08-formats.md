@@ -19,7 +19,21 @@ gzip NBT. `Schematic { Version: 3, DataVersion, Width, Height, Length, Offset, B
 
 ### Axiom `.bp`
 
-A binary container (magic header, NBT header with name, author, tags and block count, an embedded PNG thumbnail, and compressed NBT block data in 16³ region sections with paletted states plus block entities). **The exact layout must be verified** against blueprints saved by Axiom 6.1.5 before writing. The test fixtures will be real files saved from Craftoria. Writing `.bp` gives the user a proper thumbnail in Axiom's blueprint browser, rendered by our own renderer (`06`).
+Verified on 2026-11-07 against a real blueprint in Craftoria's `config/axiom/blueprints/`. Decoded block for block, it matched the same build's `.schem` (20.9M positions), and every section repacked to Axiom's exact bits.
+
+```
+int32 magic 0x0AE5BB36
+int32 n + n bytes   header: uncompressed NBT {Name, Author, Tags[], BlockCount, ContainsAir (byte),
+                    LockedThumbnail (byte), ThumbnailYaw 135f, ThumbnailPitch 30f, Version 2}
+int32 n + n bytes   thumbnail: PNG, 96×96, transparent background
+int32 n + n bytes   block data: gzip NBT {DataVersion, BlockRegion[], BlockEntities[], Entities[]}
+```
+
+- `BlockRegion` entries are 16³ sections `{X, Y, Z (section coords), BlockStates {palette, data}}`, packed like vanilla chunk sections: at least 4 bits per index, `floor(64/bits)` indices per long with none split across two longs, low bits first, index order x, then z, then y.
+- `minecraft:void_air` marks positions the blueprint leaves untouched. `minecraft:air` (only with `ContainsAir`) clears them.
+- Axiom saves blueprints centred on their own origin, so the reader finds the extent from the decoded blocks. The writer puts the minimum corner at (0,0,0) (`01`).
+- **Not verified yet:** how block entities and entities are stored, because the fixture had none. The writer leaves them out and warns, pointing to `.schem`. The reader accepts block entities carrying `x/y/z` and otherwise warns.
+- Writing `.bp` gives the blueprint browser a real thumbnail, rendered by our own renderer (`06`) from the south-east, matching Axiom's default yaw and pitch.
 
 ### Structure `.nbt` (Create)
 
@@ -61,14 +75,16 @@ export({
 |-------|--------|
 | Sponge `.schem` | Writes v3 (default) and v2. Reads v1–v3. Palette states are canonicalised on import. States the registry rejects or doesn't know are kept verbatim, with a warning. Checked against an independent NBT reader (nbtlib). |
 | Structure `.nbt` | Reads and writes. Air is omitted unless `include_air` is set. A file with several `palettes` imports its first palette, with a warning. |
-| Axiom `.bp` | Not built. Export and import both fail with a clear message that points to `.schem`. |
+| Axiom `.bp` | Reads and writes, with a rendered thumbnail. Block entities and entities are left out on write, with a warning. `test/local/blueprints.test.ts` checks every blueprint in a real instance: decode, bit-exact repacking, round-trip, and equality with a `.schem` twin when one is present. |
 | Create size limit | Read from `<instance>/config/create-server.toml` (then `defaultconfigs/`), defaulting to 256 KB. Over the limit, the export fails unless `split` is set. Split pieces come from halving the longest axis, are named `<name>_1…n`, and come with a `<name>_placement.txt` guide. |
 | Material list | Covers vanilla's systematic block → item cases: wall variants, crops, doors, beds and tall plants counted once, double slabs, candles, pickles, eggs, petals, snow layers, potted plants. Fluids, portals and technical blocks are listed as not printable. Plugins can answer for their own blocks through `items(state, nbt)` (`09`). |
-| Targets | `axiom` and `create` write to `<instance>/schematics/`. `path` writes to any file or folder. With no target, the export goes to `<workspace>/<doc>/exports/`, the only place exports may overwrite without `overwrite:true`. |
+| Targets | `axiom` writes `.bp` to `<instance>/config/axiom/blueprints/`, or `.schem` to `schematics/` with `format:"schem"`. `create` writes to `<instance>/schematics/`. `path` writes to any file or folder. With no target, the export goes to `<workspace>/<doc>/exports/`, the only place exports may overwrite without `overwrite:true`. |
 | Import | `doc_open({path})` creates a new workspace document named after the file. Block entities and entities are kept. A DataVersion mismatch produces a warning. |
 | Entities | Stored in the document with `Pos` in document coordinates. Exports translate them with the blocks and drop those outside the exported region. |
 
 ## Open questions
 
-- Verify the Axiom `.bp` layout and whether Axiom reads `.schem` from `schematics/` or only from its own folder in 6.x. Craftoria's `config/axiom/blueprints/` was empty on 2026-11-07, so there is no fixture yet: save one blueprint from Axiom to unblock this.
+- How does `.bp` store block entities and entities? This needs a blueprint containing a chest or sign and an armor stand or item frame.
+- Does Axiom read `.schem` from `schematics/`, or from `config/axiom/blueprints/` next to `.bp` files?
+- Does Axiom accept a blueprint Autosketch wrote? Confirm by opening one in the blueprint browser.
 - Check the Craftoria server's actual `maxTotalSchematicSize`. The local `config/create-server.toml` says 256, but a server sets its own value per world (`serverconfig/`).

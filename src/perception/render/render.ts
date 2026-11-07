@@ -30,6 +30,8 @@ export interface RenderOptions {
   /** Output size in pixels (longest side). */
   size?: number;
   style?: "textured" | "flat";
+  /** Plain picture for a file thumbnail: transparent background, no grid, ticks, compass or caption room; size may go down to 32. */
+  thumbnail?: boolean;
 }
 
 export interface RenderResult {
@@ -66,7 +68,7 @@ interface Scene {
 export async function renderDocument(doc: Document, baker: BlockBaker, opts: RenderOptions = {}): Promise<RenderResult> {
   const views = opts.views?.length ? opts.views : DEFAULT_VIEWS;
   if (views.length > 4) throw new Error("render takes at most 4 views per call (they share one image)");
-  const size = Math.min(1024, Math.max(128, Math.round(opts.size ?? (views.length > 1 ? 768 : 512))));
+  const size = Math.min(1024, Math.max(opts.thumbnail ? 32 : 128, Math.round(opts.size ?? (views.length > 1 ? 768 : 512))));
   const scene = await buildScene(doc, baker, opts);
   if (!scene) {
     const img = new Image(256, 64);
@@ -83,7 +85,7 @@ export async function renderDocument(doc: Document, baker: BlockBaker, opts: Ren
   const notes: string[] = [];
   views.forEach((v, i) => {
     const ox = (i % cols) * cellW, oy = Math.floor(i / cols) * cellH;
-    const scale = drawView(out, ox, oy, cellW, cellH, v, scene, doc.meta.front, opts.style ?? "textured");
+    const scale = drawView(out, ox, oy, cellW, cellH, v, scene, doc.meta.front, opts.style ?? "textured", opts.thumbnail ?? false);
     notes.push(`${viewLabel(v)} ${scale.toFixed(1)} px/block`);
   });
   if (cols * rows > 1) {
@@ -173,7 +175,7 @@ function viewLabel(v: View): string {
   return typeof v === "object" ? `yaw ${v.yaw} pitch ${v.pitch}` : v;
 }
 
-function drawView(out: Image, ox: number, oy: number, w: number, h: number, v: View, s: Scene, front: Facing, style: "textured" | "flat"): number {
+function drawView(out: Image, ox: number, oy: number, w: number, h: number, v: View, s: Scene, front: Facing, style: "textured" | "flat", thumbnail = false): number {
   const { toward, upHint, kind } = cameraFor(v, front);
   const b = basis(toward, upHint);
   // Fit the drawn box (plus a little room for tick labels) into the cell.
@@ -181,20 +183,21 @@ function drawView(out: Image, ox: number, oy: number, w: number, h: number, v: V
   for (const x of [s.box.min[0], s.box.max[0]]) for (const y of [s.box.min[1], s.box.max[1]]) for (const z of [s.box.min[2], s.box.max[2]]) corners.push([x, y, z]);
   const sxs = corners.map((c) => c[0] * b.right[0] + c[1] * b.right[1] + c[2] * b.right[2]);
   const sys = corners.map((c) => c[0] * b.up[0] + c[1] * b.up[1] + c[2] * b.up[2]);
-  const margin = 26;
+  const margin = thumbnail ? 2 : 26;
+  const capRoom = thumbnail ? 0 : 10;
   const spanX = Math.max(1, Math.max(...sxs) - Math.min(...sxs)), spanY = Math.max(1, Math.max(...sys) - Math.min(...sys));
-  const scale = Math.min((w - 2 * margin) / spanX, (h - 2 * margin - 10) / spanY);
+  const scale = Math.min((w - 2 * margin) / spanX, (h - 2 * margin - capRoom) / spanY);
   const cam: Camera = {
     ...b,
     scale: scale * SS,
     cx: (Math.max(...sxs) + Math.min(...sxs)) / 2,
-    cy: (Math.max(...sys) + Math.min(...sys)) / 2 - 5 / scale,
+    cy: (Math.max(...sys) + Math.min(...sys)) / 2 - capRoom / 2 / scale,
     width: w * SS,
     height: h * SS,
   };
   const r = new Raster(w * SS, h * SS, cam);
-  r.fillBackground(BG_TOP, BG_BOTTOM);
-  if (kind !== "elevation") drawGrid(r, s.box, scale);
+  if (!thumbnail) r.fillBackground(BG_TOP, BG_BOTTOM);
+  if (!thumbnail && kind !== "elevation") drawGrid(r, s.box, scale);
 
   // Opaque pass, collecting translucent quads for a sorted blended pass.
   const blended: { q: BakedQuad; x: number; y: number; z: number; d: number }[] = [];
@@ -221,8 +224,8 @@ function drawView(out: Image, ox: number, oy: number, w: number, h: number, v: V
   blended.sort((a, c) => c.d - a.d);
   for (const e of blended) drawQuad(r, e.q, e.x, e.y, e.z, "blend", style);
 
-  r.downsampleInto(out, ox, oy, SS);
-  drawOverlays(out, ox, oy, w, h, r, s.box, kind, v, toward);
+  r.downsampleInto(out, ox, oy, SS, thumbnail);
+  if (!thumbnail) drawOverlays(out, ox, oy, w, h, r, s.box, kind, v, toward);
   return scale;
 }
 

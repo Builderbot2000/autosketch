@@ -5,14 +5,15 @@ import { colorName } from "../palette/color.js";
 import { describePalette, pickPalette } from "../palette/pick.js";
 import { fromPublic, type Box, type PublicBox, type Vec3 } from "../core/region.js";
 import type { Document } from "../document/document.js";
-import { clear, fill, replace, setBlocks, type OpEnv } from "../ops/edit.js";
+import { clear, fill, replace, setBlocks, type OpEnv, type Region } from "../ops/edit.js";
+import { checkSelectionName, resolveSelection, summarize, type SelExpr } from "../ops/selection.js";
 import type { MaterialExpr } from "../ops/material.js";
 import { BlockBaker } from "../perception/render/bake.js";
 import { renderDocument, VIEW_NAMES, type View } from "../perception/render/render.js";
 import { viewSlice } from "../perception/slice.js";
 import { TextureLoader, Tinter } from "../palette/textures.js";
 import type { InstanceContext } from "./context.js";
-import { formatEdit, formatExport, formatHistory, formatInfo, shiftLine, sizeLine } from "./format.js";
+import { formatEdit, formatExport, formatSelection, formatHistory, formatInfo, shiftLine, sizeLine } from "./format.js";
 import { INSTRUCTIONS } from "./instructions.js";
 import { exportDocument, importFile } from "../formats/index.js";
 import { dataVersionFor } from "../core/version.js";
@@ -226,6 +227,16 @@ const materialSchema = z
       '{"gradient":[...],"axis":"y","range":[0,12]}, {"noise":[...],"scale":6}, {"pattern":"checker|stripes_x|stripes_y|stripes_z","blocks":[...],"size":1}. Entries nest.',
   );
 
+const selSchema = z
+  .union([z.string(), z.record(z.string(), z.unknown())])
+  .describe(
+    'Selection: {"min":[x,y,z],"max":[x,y,z]} box · "all" · "last" · "<name>" · {"component":"id"} · {"cylinder":{"center":[x,y,z],"radius":r,"height":h,"axis":"y"}} (center = base centre) · ' +
+      '{"sphere":{"center","radius"}} · {"ellipsoid":{"center","radii"}} · {"polygon":{"points":[[x,z],...],"y":[y0,y1]}} · {"plane":{"axis","at","within"?}} · ' +
+      '{"connected":{"seed":[x,y,z],"match":"block|state|family|solid|air","connectivity":6|18|26,"within"?}} (flood fill) · {"similar":{"seed","by":"block|state|family","within"?}} · ' +
+      '{"union":[a,b]} {"intersect":[a,b]} {"subtract":[a,b]} {"xor":[a,b]} {"invert":a,"within"?} · {"expand":a,"by":n|[dx,dy,dz]|{"up":n,...}} {"contract":a,"by":..} {"offset":a,"by":[dx,dy,dz]} · ' +
+      '{"shell":a,"thickness"?,"walls_only"?} {"layer":a,"y":n|"min"|"max"} {"surface":a} {"bbox":a} {"filter":a,"block"?:"oak_planks|#tag|*","air"?:bool}. Nest freely.',
+  );
+
 type ToolFn = <S extends z.ZodRawShape>(
   name: string,
   config: { title: string; description: string; inputSchema: S; readOnly?: boolean },
@@ -251,6 +262,23 @@ function bakerFor(c: InstanceContext): Promise<BlockBaker> {
 function registerDocumentTools(tool: ToolFn, session: Session): void {
   const env = (c: InstanceContext): OpEnv => ({ registry: c.registry, index: c.palette });
   const box = (b: PublicBox): Box => fromPublic(b as PublicBox);
+  /**
+   * The region an op works on, from `sel` (any selection) or `box` (the older shorthand). Records it
+   * as "last". Returns notes from resolution (e.g. a flood fill whose seed didn't match).
+   */
+  const regionOf = (c: InstanceContext, doc: Document, a: { sel?: unknown; box?: unknown }, fallback?: SelExpr): { region: Region; label?: string; notes: string[] } => {
+    if (a.sel !== undefined && a.box !== undefined) throw new Error("give sel or box, not both");
+    if (a.box !== undefined) {
+      doc.lastSelection = a.box as SelExpr;
+      return { region: box(a.box as PublicBox), notes: [] };
+    }
+    const expr = (a.sel ?? fallback) as SelExpr | undefined;
+    if (expr === undefined) throw new Error('give sel (a selection, e.g. {"min":[0,0,0],"max":[4,3,4]}) or box');
+    const r = resolveSelection(expr, { doc, registry: c.registry, index: c.palette });
+    if (expr !== "last") doc.lastSelection = expr;
+    if (r.mask.isEmpty()) throw new Error(["the selection is empty", ...r.notes].join("; "));
+    return { region: r.mask, ...(typeof expr === "string" && expr !== "all" ? { label: `sel "${expr}"` } : {}), notes: r.notes };
+  };
   /** Runs an edit on the open document and schedules the autosave. */
   const edit = (run: (doc: Document) => string): Result => {
     const doc = session.require();
@@ -346,6 +374,48 @@ function registerDocumentTools(tool: ToolFn, session: Session): void {
   );
 
   tool(
+    "select",
+    {
+      title: "Select",
+      description:
+        "Resolves a selection and reports what it covers (block count, solid/air, bounding box, top blocks, components touched), so you can check it before an op uses it. " +
+        "name stores it for reuse as sel:\"<name>\" (stored as an expression: flood fills and filters follow later edits). name alone shows a stored selection; delete:true removes it; " +
+        "no arguments lists stored selections. Every op's selection also becomes \"last\". Text, <150 tokens.",
+      inputSchema: {
+        sel: selSchema.optional(),
+        name: z.string().optional().describe("Store the selection under this name"),
+        delete: z.boolean().optional(),
+      },
+      readOnly: false,
+    },
+    (c, a) => {
+      const doc = session.require();
+      if (a.delete) {
+        if (!a.name) throw new Error("delete needs name");
+        if (!doc.selections.delete(a.name)) throw new Error(`no selection named "${a.name}"`);
+        doc.revision++;
+        session.touch();
+        return text(`deleted selection "${a.name}"`);
+      }
+      if (a.sel === undefined && !a.name) {
+        const lines = [...doc.selections].map(([k, e]) => `${k}: ${JSON.stringify(e).slice(0, 100)}`);
+        if (doc.lastSelection !== undefined) lines.push(`last: ${JSON.stringify(doc.lastSelection).slice(0, 100)}`);
+        return text(lines.length ? lines.join("\n") : "No stored selections. select({sel, name}) stores one.");
+      }
+      const expr = (a.sel ?? a.name) as SelExpr;
+      if (a.sel !== undefined && a.name) checkSelectionName(a.name);
+      const r = resolveSelection(expr, { doc, registry: c.registry, index: c.palette });
+      if (a.sel !== undefined && a.name) {
+        doc.selections.set(a.name, a.sel as SelExpr);
+        doc.revision++;
+        session.touch();
+      }
+      if (expr !== "last") doc.lastSelection = a.name ?? expr;
+      return text(formatSelection(summarize(doc, r.mask), r.notes, a.sel !== undefined ? a.name : undefined, c.registry));
+    },
+  );
+
+  tool(
     "set_blocks",
     {
       title: "Set blocks",
@@ -363,10 +433,12 @@ function registerDocumentTools(tool: ToolFn, session: Session): void {
     {
       title: "Fill box",
       description:
-        "Fills a box with a material. mode: fill (solid, default) · hollow (shell of the material, inside cleared to air) · outline (shell only, inside untouched) · " +
-        "walls (four vertical sides only, no floor or ceiling). thickness sets the shell width. as:\"name\" registers the box as a component. One undo step. Text.",
+        "Fills a selection (sel) or box with a material. mode: fill (solid, default) · hollow (shell of the material, inside cleared to air) · outline (shell only, inside untouched) · " +
+        "walls (sides only, no floor or ceiling) — shells follow the selection's shape, so a cylinder makes a round tower. thickness sets the shell width. " +
+        "as:\"name\" registers the box (a selection's bounding box) as a component. One undo step. Text.",
       inputSchema: {
-        box: boxSchema,
+        sel: selSchema.optional(),
+        box: boxSchema.optional().describe("Shorthand for sel:{min,max}"),
         material: materialSchema,
         mode: z.enum(["fill", "hollow", "outline", "walls"]).optional(),
         thickness: z.number().int().min(1).max(16).optional(),
@@ -377,20 +449,31 @@ function registerDocumentTools(tool: ToolFn, session: Session): void {
     },
     (c, a) =>
       edit((doc) => {
-        const r = fill(doc, env(c), box(a.box as PublicBox), a.material as MaterialExpr, {
+        const { region, label, notes } = regionOf(c, doc, a);
+        const r = fill(doc, env(c), region, a.material as MaterialExpr, {
           ...(a.mode ? { mode: a.mode } : {}),
           ...(a.thickness ? { thickness: a.thickness } : {}),
           ...(a.as ? { as: a.as } : {}),
           ...(a.kind ? { kind: a.kind } : {}),
+          ...(label ? { label } : {}),
         });
-        return formatEdit(doc, r, a.as ? [`component: ${a.as}`] : []);
+        return formatEdit(doc, r, [...(a.as ? [`component: ${a.as}`] : []), ...notes.map((n) => `note: ${n}`)]);
       }),
   );
 
   tool(
     "clear",
-    { title: "Clear box", description: "Sets every block in a box to air. One undo step. Text.", inputSchema: { box: boxSchema }, readOnly: false },
-    (_c, a) => edit((doc) => formatEdit(doc, clear(doc, box(a.box as PublicBox)))),
+    {
+      title: "Clear",
+      description: "Sets every block in a selection (sel) or box to air. One undo step. Text.",
+      inputSchema: { sel: selSchema.optional(), box: boxSchema.optional().describe("Shorthand for sel:{min,max}") },
+      readOnly: false,
+    },
+    (c, a) =>
+      edit((doc) => {
+        const { region, label, notes } = regionOf(c, doc, a);
+        return formatEdit(doc, clear(doc, region, label), notes.map((n) => `note: ${n}`));
+      }),
   );
 
   tool(
@@ -398,21 +481,23 @@ function registerDocumentTools(tool: ToolFn, session: Session): void {
     {
       title: "Replace blocks",
       description:
-        'Replaces matching blocks with a material inside a box (default: the whole document). from: "oak_planks" (any state), "oak_stairs[half=top]" (those states), ' +
+        'Replaces matching blocks with a material inside a selection (default: the whole document). from: "oak_planks" (any state), "oak_stairs[half=top]" (those states), ' +
         '"#minecraft:logs" (a tag), "*" (any non-air), "air" (fill empty space). keep_states copies facing/half/axis… onto the new block (e.g. oak_stairs → spruce_stairs). One undo step. Text.',
       inputSchema: {
         from: z.string(),
         to: materialSchema,
-        box: boxSchema.optional(),
+        sel: selSchema.optional().describe("Where to replace (default: the whole document)"),
+        box: boxSchema.optional().describe("Shorthand for sel:{min,max}"),
         keep_states: z.boolean().optional(),
       },
       readOnly: false,
     },
     (c, a) =>
       edit((doc) => {
-        const b = a.box ? box(a.box as PublicBox) : doc.localBounds();
-        if (!b) throw new Error("The document is empty; nothing to replace.");
-        return formatEdit(doc, replace(doc, env(c), b, a.from, a.to as MaterialExpr, a.keep_states ? { keepStates: true } : {}));
+        if (!doc.localBounds()) throw new Error("The document is empty; nothing to replace.");
+        const { region, label, notes } = regionOf(c, doc, a, "all");
+        const r = replace(doc, env(c), region, a.from, a.to as MaterialExpr, { ...(a.keep_states ? { keepStates: true } : {}), ...(label ? { label } : {}) });
+        return formatEdit(doc, r, notes.map((n) => `note: ${n}`));
       }),
   );
 

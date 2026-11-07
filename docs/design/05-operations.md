@@ -152,6 +152,18 @@ warnings: 12 positions had block entities (dropped)
 
 The optional `preview: true` returns a small render of the affected region with changes highlighted (`06`).
 
+## Implementation status
+
+| Piece | Status |
+|-------|--------|
+| Selection representation | JSON expression trees, since tool calls send JSON (the `sel.*` JS form is for scripting and will compile to the same trees). They resolve to a sparse 16³-chunked bitmask (`src/core/mask.ts`) in document-local coordinates. One selection may cover at most 8M blocks. |
+| Shapes | `{min,max}` box shorthand, `box`, `"all"`, `cylinder` (center is the base centre; radius + 0.5 like WorldEdit; any axis), `sphere`, `ellipsoid`, `polygon` (prism; the edges are part of the shape), `plane`, `component`. |
+| Picking | `connected` (flood fill; match block/state/family/solid/air; connectivity 6/18/26; `within`; a seed on air adds a note) and `similar` (block/state/family). Seeds from renders (`view_box`/`view_lasso`/`raycast`) wait on `06`. |
+| Modifiers | `union`, `intersect`, `subtract`, `xor`, `invert`, `expand`/`contract` (box kernel; a number, `[dx,dy,dz]`, or per direction), `offset`, `shell` (6-neighbour erosion, or 4-neighbour with `walls_only`; equals fill's box shells exactly), `layer`, `surface`, `bbox`, `filter` (block matcher and/or air). |
+| Naming | `select({sel, name})` stores an expression, re-evaluated on each use. Stored selections are saved with the document (not journaled). `"last"` is the previous op's or select's selection. Every `select` returns a summary: count, solid and air, bbox, top blocks, components touched. |
+| Ops | `fill`, `clear` and `replace` take `sel`, with `box` kept as shorthand. A selection that is exactly a box takes the box fast path. Shell modes follow the selection's shape, so walls on a cylinder make a round tower. |
+| Not yet | `hull`, `tube`, semantic selections (`face`, `storey`, `room`, `interior`, `openings`, `changed`, which need `06`), `grow`/`shrink`, `mirror`/`rotate` (with the transforms), `checker`/`random`/`every`, `freeze`, `highlight` renders. |
+
 ## Open questions
 
 - The exact script API surface. Proposal: generate TypeScript `.d.ts` from the op registry and expose it as an MCP resource so the agent can read it.

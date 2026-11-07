@@ -64,7 +64,7 @@ describe("MCP server", () => {
     const tools = (await client.listTools()).tools.map((t) => t.name).sort();
     expect(tools).toEqual([
       "block_info", "checkpoint", "clear", "doc_info", "doc_list", "doc_new", "doc_open", "export", "fill", "history", "instance_info",
-      "palette_pick", "palette_sheet", "palette_show", "redo", "render", "replace", "restore", "set_blocks", "undo", "view_slice",
+      "palette_pick", "palette_sheet", "palette_show", "redo", "render", "replace", "restore", "select", "set_blocks", "undo", "view_slice",
     ]);
     expect(client.getInstructions()).toMatch(/palette:<name>\.<role>/);
   });
@@ -206,5 +206,37 @@ describe("MCP server", () => {
     expect(session.doc!.meta.name).toBe("shed-v2");
     expect((await call("doc_open", { path: file })).text).toMatch(/"shed-v2" already exists/);
     expect((await call("doc_open", {})).text).toMatch(/Give name/);
+  });
+
+  it("selects, stores and reuses selections in ops", async () => {
+    const ctx = await fixtureContext();
+    const session = new Session(workspace);
+    const client = await connect(Promise.resolve(ctx), session);
+    const call = async (name: string, args: Record<string, unknown> = {}) => {
+      const r = await client.callTool({ name, arguments: args });
+      return { text: textOf(r), error: !!r.isError };
+    };
+    await call("doc_new", { name: "tower", seed: 1, overwrite: true });
+    const ring = { shell: { cylinder: { center: [5, 0, 5], radius: 3, height: 6 } }, walls_only: true };
+    const s = await call("select", { sel: ring, name: "ring" });
+    expect(s.text).toMatch(/^stored "ring" · \d+ blocks \(0 solid, \d+ air\) · bbox \(2,0,2\)–\(8,5,8\) = 7×6×7/);
+    const f = await call("fill", { sel: "ring", material: "andesite", as: "tower" });
+    expect(f.text).toMatch(/ok · fill · \d+ blocks changed[\s\S]*component: tower/);
+    expect((await call("history")).text).toMatch(/fill sel "ring" andesite as tower/);
+    expect((await call("select", { name: "ring" })).text).toMatch(/\d+ solid, 0 air[\s\S]*top: andesite[\s\S]*components: tower/);
+
+    // Flood fill from the wall picks the whole connected tower; replace inside a selection.
+    const wallPos = [2, 0, 5];
+    expect((await call("replace", { from: "andesite", to: "oak_planks", sel: { layer: { connected: { seed: wallPos } }, y: "max" } })).text).toMatch(/ok · replace/);
+    expect((await call("select", { sel: { filter: "all", block: "oak_planks" } })).text).toMatch(/top: oak_planks/);
+    expect((await call("clear", { sel: "last" })).text).toMatch(/ok · clear/);
+    expect((await call("select", { sel: { filter: "all", block: "oak_planks" } })).text).toBe("selection is empty");
+
+    expect((await call("select")).text).toMatch(/^ring: \{"shell"[\s\S]*last: /);
+    expect((await call("doc_info")).text).toMatch(/selections: ring/);
+    expect((await call("fill", { sel: "ring", box: { min: [0, 0, 0], max: [0, 0, 0] }, material: "andesite" })).text).toBe("give sel or box, not both");
+    expect((await call("fill", { sel: { connected: { seed: [0, 7, 0], match: "solid" } }, material: "andesite" })).text).toMatch(/selection is empty; connected: the seed/);
+    expect((await call("select", { name: "ring", delete: true })).text).toBe('deleted selection "ring"');
+    expect((await call("select", { sel: "all", name: "all" })).text).toMatch(/"all" is reserved/);
   });
 });

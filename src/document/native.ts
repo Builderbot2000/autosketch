@@ -76,6 +76,7 @@ export function encodeNative(doc: Document): Buffer {
       Entities: { type: "list", value: { type: "compound", value: doc.entities.map((c) => c.value) } },
       Components: str(JSON.stringify([...doc.components.values()])),
       Palettes: str(JSON.stringify(doc.palettes.toJSON())),
+      ...(doc.selections.size ? { Selections: str(JSON.stringify(Object.fromEntries(doc.selections))) } : {}),
     },
   };
   return gzipSync(nbt.writeUncompressed(root));
@@ -136,6 +137,7 @@ export function decodeNative(buf: Buffer, opts: { palettes?: PaletteBook } = {})
   }
   doc.entities = listOf<Compound["value"]>(v.Entities).map((value) => ({ type: "compound", value }));
   for (const c of JSON.parse(text(v.Components) ?? "[]") as Component[]) doc.components.set(c.id, c);
+  for (const [k, e] of Object.entries(JSON.parse(text(v.Selections) ?? "{}") as Record<string, string | Record<string, unknown>>)) doc.selections.set(k, e);
   return doc;
 }
 

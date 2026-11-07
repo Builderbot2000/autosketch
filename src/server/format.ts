@@ -4,6 +4,7 @@ import { boxSize, formatBox, formatVec, type Vec3 } from "../core/region.js";
 import type { Document, EditResult } from "../document/document.js";
 import type { ExportResult } from "../formats/index.js";
 import { formatMaterialList } from "../formats/materials.js";
+import type { SelectionSummary } from "../ops/selection.js";
 
 /** Terse op results (docs/design/05-operations.md, "Op result contract"). */
 
@@ -46,6 +47,7 @@ export function formatInfo(doc: Document, registry: Registry | undefined, path: 
     });
     lines.push(`components: ${cs.join("; ")}`);
   }
+  if (doc.selections.size) lines.push(`selections: ${[...doc.selections.keys()].join(", ")}`);
   const pals = doc.palettes.list();
   if (pals.length) lines.push(`palettes: ${pals.map((p) => `${p.name} [${Object.keys(p.roles).join(", ")}]`).join("; ")}`);
   const j = doc.journal;
@@ -86,5 +88,16 @@ export function formatExport(r: ExportResult): string {
   lines.push(r.hint);
   if (r.materials) lines.push(formatMaterialList(r.materials));
   for (const w of r.warnings) lines.push(`warning: ${w}`);
+  return lines.join("\n");
+}
+
+export function formatSelection(s: SelectionSummary, notes: string[], storedAs: string | undefined, registry?: Registry): string {
+  if (!s.count) return ["selection is empty", ...notes.map((x) => `note: ${x}`)].join("\n");
+  const lines = [
+    `${storedAs ? `stored "${storedAs}" · ` : ""}${n(s.count)} blocks (${n(s.solid)} solid, ${n(s.count - s.solid)} air) · bbox ${formatBox(s.bbox!)} = ${boxSize(s.bbox!).join("×")}`,
+  ];
+  if (s.top.length) lines.push(`top: ${s.top.map(([id, k]) => `${shortState(id, registry)} ${n(k)}`).join(", ")}`);
+  if (s.components.length) lines.push(`components: ${s.components.join(", ")}`);
+  for (const x of notes) lines.push(`note: ${x}`);
   return lines.join("\n");
 }

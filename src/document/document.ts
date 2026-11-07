@@ -70,6 +70,13 @@ export class Document {
   origin: Vec3 = [0, 0, 0];
   /** Grow-only bounds in store coordinates (declared size ∪ everything ever written). */
   bounds?: Box;
+  /**
+   * Named selection expressions (05), re-evaluated on each use. Not journaled (like checkpoints);
+   * saved with the document. Kept as plain JSON so this module doesn't depend on ops.
+   */
+  selections = new Map<string, string | Record<string, unknown>>();
+  /** The most recent selection an op or select used ("last"). Not saved. */
+  lastSelection?: string | Record<string, unknown>;
   /** Bumped on every change; the session uses it for autosave. */
   revision = 0;
 

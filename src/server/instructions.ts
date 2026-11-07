@@ -11,7 +11,8 @@ Prefer materials with stairs/slab pips for roofs and trim. Check a role's availa
 
 BUILDING:
 1. doc_new({name, size?, front?}) starts a document (saved automatically to the workspace); doc_open/doc_list reopen saved ones. One document is open at a time.
-2. Shape with fill({box, material, mode}) — mode fill|hollow|outline|walls — then add details with set_blocks. replace swaps materials (keep_states for stairs/logs). clear empties a box.
+2. Shape with fill({sel, material, mode}) — mode fill|hollow|outline|walls — then add details with set_blocks. replace swaps materials (keep_states for stairs/logs). clear empties a selection.
+   sel is a selection: a box {min,max}, a shape ({cylinder}, {sphere}, {polygon}…), a pick ({connected} flood fill, {similar}), a component, or a combination ({union}, {subtract}, {shell}, {expand}, {layer}, {filter}…). Shells follow the shape: fill({sel:{cylinder:{center,radius,height}}, mode:"walls"}) builds a round tower. select({sel, name}) checks what a selection covers and stores it for reuse as sel:"<name>"; "last" is the previous op's selection.
 3. Every block argument takes a material: "stone_bricks", "oak_stairs[facing=east,half=top]", "a 70%, b 30%", "palette:<name>.<role>", {gradient}, {noise}, {pattern}. Mixes are deterministic per document seed.
 4. Check your work. view_slice({axis:"y", at}) (plan) or axis "z"/"x" (elevations) gives exact text grids: use it for positions. render() draws the real blocks: use it for the look (proportion, gaps, materials blending together, doors and openings) after each major step, and zoom with region or cutaway:{maxY} to inspect details. doc_info summarises the document.
 5. Each op is one undo step: undo/redo, checkpoint({name}) before risky multi-step work, restore({name}) to go back, history() to re-orient.

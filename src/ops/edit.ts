@@ -1,5 +1,6 @@
 import type { Registry } from "../assets/registry.js";
 import { canonicalState, parseState, stateId, formatState } from "../core/blockstate.js";
+import { Mask, shellOf } from "../core/mask.js";
 import { boxVolume, formatBox, type Box, type Vec3 } from "../core/region.js";
 import type { Document, EditResult, Transaction } from "../document/document.js";
 import type { PaletteIndex } from "../palette/index.js";
@@ -19,6 +20,28 @@ export interface OpEnv {
 export const MAX_OP_VOLUME = 8_000_000;
 
 export type FillMode = "fill" | "hollow" | "outline" | "walls";
+
+/** Where an op works: a box (fast path) or a resolved selection mask. */
+export type Region = Box | Mask;
+
+function checkMask(m: Mask): void {
+  const n = m.count();
+  if (n > MAX_OP_VOLUME) throw new Error(`the selection has ${n.toLocaleString("en-US")} blocks; one op may touch at most ${MAX_OP_VOLUME.toLocaleString("en-US")}. Split it up.`);
+}
+
+/** A selection that is exactly a box takes the box path. */
+function asBox(r: Region): Box | undefined {
+  return r instanceof Mask ? r.isBox() : r;
+}
+
+function regionLabel(r: Region, label?: string): string {
+  if (label) return label;
+  if (r instanceof Mask) {
+    const b = r.bbox();
+    return `sel ${r.count()} blocks${b ? ` in ${formatBox(b)}` : ""}`;
+  }
+  return formatBox(r);
+}
 
 function materialContext(doc: Document, env: OpEnv, tx: Transaction, box?: Box): MaterialContext {
   return {
@@ -72,9 +95,11 @@ export interface FillOptions {
   mode?: FillMode;
   /** Shell thickness for hollow/outline/walls (default 1). */
   thickness?: number;
-  /** Register the box as a component. */
+  /** Register the box (a selection's bounding box) as a component. */
   as?: string;
   kind?: string;
+  /** Short description of the region for history (default: the box, or the selection's size). */
+  label?: string;
 }
 
 /**
@@ -82,28 +107,48 @@ export interface FillOptions {
  * the material with the inside cleared to air; outline = shell only, inside untouched; walls =
  * the four vertical sides only (floor and ceiling untouched).
  */
-export function fill(doc: Document, env: OpEnv, box: Box, material: MaterialExpr, opts: FillOptions = {}): EditResult {
-  checkVolume(box);
+export function fill(doc: Document, env: OpEnv, region: Region, material: MaterialExpr, opts: FillOptions = {}): EditResult {
   const mode = opts.mode ?? "fill";
   const t = Math.max(1, Math.floor(opts.thickness ?? 1));
-  const summary = `fill${mode === "fill" ? "" : ` ${mode}`} ${formatBox(box)} ${describeMaterial(material)}${opts.as ? ` as ${opts.as}` : ""}`;
+  const summary = `fill${mode === "fill" ? "" : ` ${mode}`} ${regionLabel(region, opts.label)} ${describeMaterial(material)}${opts.as ? ` as ${opts.as}` : ""}`;
+  const box = asBox(region);
+  if (box) {
+    checkVolume(box);
+    return doc.edit("fill", summary, (tx) => {
+      const m = compileMaterial(material, materialContext(doc, env, tx, box));
+      for (let y = box.min[1]; y < box.max[1]; y++)
+        for (let z = box.min[2]; z < box.max[2]; z++)
+          for (let x = box.min[0]; x < box.max[0]; x++) {
+            if (inMode(mode, box, x, y, z, t)) tx.set(x, y, z, m(x, y, z));
+            else if (mode === "hollow") tx.clear(x, y, z);
+          }
+      if (opts.as) tx.setComponent({ id: opts.as, box, ...(opts.kind ? { kind: opts.kind } : {}) });
+    });
+  }
+  const mask = region as Mask;
+  checkMask(mask);
+  const bb = mask.bbox();
+  if (!bb) throw new Error("the selection is empty; nothing to fill");
   return doc.edit("fill", summary, (tx) => {
-    const m = compileMaterial(material, materialContext(doc, env, tx, box));
-    for (let y = box.min[1]; y < box.max[1]; y++)
-      for (let z = box.min[2]; z < box.max[2]; z++)
-        for (let x = box.min[0]; x < box.max[0]; x++) {
-          if (inMode(mode, box, x, y, z, t)) tx.set(x, y, z, m(x, y, z));
-          else if (mode === "hollow") tx.clear(x, y, z);
-        }
-    if (opts.as) tx.setComponent({ id: opts.as, box, ...(opts.kind ? { kind: opts.kind } : {}) });
+    const m = compileMaterial(material, materialContext(doc, env, tx, bb));
+    const write = mode === "fill" ? mask : shellOf(mask, t, mode === "walls");
+    write.forEach((x, y, z) => tx.set(x, y, z, m(x, y, z)));
+    if (mode === "hollow") mask.forEach((x, y, z) => !write.has(x, y, z) && tx.clear(x, y, z));
+    if (opts.as) tx.setComponent({ id: opts.as, box: bb, ...(opts.kind ? { kind: opts.kind } : {}) });
   });
 }
 
-export function clear(doc: Document, box: Box): EditResult {
-  checkVolume(box);
-  return doc.edit("clear", `clear ${formatBox(box)}`, (tx) => {
-    for (let y = box.min[1]; y < box.max[1]; y++) for (let z = box.min[2]; z < box.max[2]; z++) for (let x = box.min[0]; x < box.max[0]; x++) tx.clear(x, y, z);
-  });
+export function clear(doc: Document, region: Region, label?: string): EditResult {
+  const box = asBox(region);
+  if (box) {
+    checkVolume(box);
+    return doc.edit("clear", `clear ${regionLabel(box, label)}`, (tx) => {
+      for (let y = box.min[1]; y < box.max[1]; y++) for (let z = box.min[2]; z < box.max[2]; z++) for (let x = box.min[0]; x < box.max[0]; x++) tx.clear(x, y, z);
+    });
+  }
+  const mask = region as Mask;
+  checkMask(mask);
+  return doc.edit("clear", `clear ${regionLabel(mask, label)}`, (tx) => mask.forEach((x, y, z) => tx.clear(x, y, z)));
 }
 
 /**
@@ -134,15 +179,22 @@ export function blockMatcher(spec: string, registry?: Registry): (state: string)
 export interface ReplaceOptions {
   /** Copy matching properties (facing, half, axis…) from the old block onto the new one. */
   keepStates?: boolean;
+  label?: string;
 }
 
-export function replace(doc: Document, env: OpEnv, box: Box, from: string, to: MaterialExpr, opts: ReplaceOptions = {}): EditResult {
-  checkVolume(box);
+export function replace(doc: Document, env: OpEnv, region: Region, from: string, to: MaterialExpr, opts: ReplaceOptions = {}): EditResult {
   const match = blockMatcher(from, env.registry);
-  return doc.edit("replace", `replace ${from} → ${describeMaterial(to)} in ${formatBox(box)}`, (tx) => {
+  const asB = asBox(region);
+  const mask = asB ? undefined : (region as Mask);
+  if (asB) checkVolume(asB);
+  else checkMask(mask!);
+  const box = asB ?? mask!.bbox();
+  if (!box) throw new Error("the selection is empty; nothing to replace");
+  return doc.edit("replace", `replace ${from} → ${describeMaterial(to)} in ${regionLabel(region, opts.label)}`, (tx) => {
     const m = compileMaterial(to, materialContext(doc, env, tx, box));
     const air = from.trim() === "minecraft:air" || from.trim() === "air";
     const visit = (x: number, y: number, z: number, cur: string) => {
+      if (mask && !mask.has(x, y, z)) return;
       if (!match(cur)) return;
       let next = m(x, y, z);
       if (opts.keepStates) next = tx.intern(copyStates(cur, doc.states.get(next), env.registry));

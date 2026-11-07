@@ -44,7 +44,7 @@ export function registerDocumentTools({ tool, session }: ToolDeps): void {
       title: "Open document",
       description:
         "Opens a saved document by name and makes it current (the previous one is saved and closed). With path, imports a schematic file instead " +
-        "(.schem v1–v3, Axiom .bp, Create/structure .nbt, Litematica .litematic, .autosketch) as a new workspace document named name (default: the file name). Unknown blocks and block-entity NBT are kept. " +
+        "(.schem v1–v3, Axiom .bp, Create/structure .nbt, Litematica .litematic, legacy MCEdit .schematic, .autosketch) as a new workspace document named name (default: the file name). Unknown blocks and block-entity NBT are kept. " +
         "Undo history starts fresh. Text.",
       inputSchema: {
         name: z.string().optional().describe("Workspace document name (required unless path is given)"),

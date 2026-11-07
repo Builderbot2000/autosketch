@@ -14,6 +14,7 @@ import { decodeBlueprint, encodeBlueprint, isBlueprint } from "./axiom.js";
 import { decodeSponge, encodeSponge, type Decoded, type SpongeVersion } from "./sponge.js";
 import { decodeStructure, encodeStructure, splitToFit } from "./structure.js";
 import { decodeLitematic, encodeLitematic, type LitematicRegion } from "./litematic.js";
+import { decodeSchematic } from "./schematic.js";
 
 /**
  * Export and import (docs/design/08-formats.md). Export writes a normalised snapshot of the
@@ -247,10 +248,10 @@ export function detectFormat(buf: Buffer, path = ""): ImportFormat {
   const v = root.value;
   if (root.name === "Autosketch" || v.Version && v.Meta && v.Sections) return "native";
   if (v.Schematic || (v.Version && (v.BlockData || v.Blocks || v.Palette))) return "schem";
-  if (v.Materials && v.Blocks) return "schematic";
+  if (v.Blocks && (v.Materials || v.Data)) return "schematic";
   if (v.size && v.blocks) return "nbt";
   if (v.Regions) return "litematic";
-  throw new Error(`${basename(path) || "file"} is NBT but not a schematic format Autosketch reads (.schem, .nbt, .autosketch)`);
+  throw new Error(`${basename(path) || "file"} is NBT but not a schematic format Autosketch reads (.schem, .bp, .nbt, .litematic, .schematic, .autosketch)`);
 }
 
 export interface Imported {
@@ -268,16 +269,15 @@ export async function importFile(path: string, opts: { name: string; registry?: 
   if (format === "native") {
     doc = decodeNative(buf, opts.palettes ? { palettes: opts.palettes } : {});
     doc.meta.source = path;
-  } else if (format === "schem" || format === "nbt" || format === "bp" || format === "litematic") {
+  } else {
     const ro = opts.registry ? { registry: opts.registry } : {};
     const lite = format === "litematic" ? decodeLitematic(buf, ro) : undefined;
-    const dec: Decoded = lite ?? (format === "schem" ? decodeSponge(buf, ro) : format === "nbt" ? decodeStructure(buf, ro) : decodeBlueprint(buf, ro));
+    const dec: Decoded =
+      lite ?? (format === "schem" ? decodeSponge(buf, ro) : format === "nbt" ? decodeStructure(buf, ro) : format === "schematic" ? decodeSchematic(buf, ro) : decodeBlueprint(buf, ro));
     warnings.push(...dec.warnings);
     doc = documentFromSnapshot(dec.snapshot, { name: opts.name, dataVersion: dec.snapshot.dataVersion, source: path, ...(opts.front ? { front: opts.front } : {}) });
     if (lite && lite.regions.length > 1) addRegionComponents(doc, lite.regions);
     if (opts.palettes) doc.palettes = opts.palettes;
-  } else {
-    throw new Error(`can't import ${basename(path)}: legacy MCEdit .schematic files need a legacy ID map (not supported)`);
   }
   doc.meta.name = opts.name;
   if (opts.front) doc.meta.front = opts.front;

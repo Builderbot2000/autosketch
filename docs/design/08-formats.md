@@ -10,7 +10,7 @@ Builds reach the server through either **Axiom** (instant paste, needs creative/
 | Axiom Blueprint | `.bp` | ✅ | ✅ | Axiom blueprint browser |
 | Vanilla structure NBT | `.nbt` | ✅ | ✅ | Create schematics, structure blocks |
 | Litematica | `.litematic` | ✅ | ✅ | Litematica |
-| MCEdit legacy | `.schematic` | later (needs a legacy ID map) | ✗ | old builds |
+| MCEdit legacy | `.schematic` | ✅ (hand-written legacy ID table) | ✗ | old builds |
 | Native | `.autosketch` | ✅ | ✅ | Autosketch (`04`) |
 
 ### Sponge `.schem` (v3)
@@ -43,6 +43,16 @@ gzip NBT. `{ MinecraftDataVersion, Version: 7, SubVersion: 1, Metadata {Name, Au
 - A region's `Size` may be negative on any axis, meaning it extends from `Position` the other way. Block entity `x/y/z` and entity `Pos` are relative to the region's minimum corner.
 - **Multi-region files** import as one document over the regions' enclosing box. Each region is also registered as a component (`kind: "litematica_region"`, id from the region name), since regions are exactly the named parts components model. Where regions overlap, a later region's non-air block wins, with a warning.
 - The writer produces one region named after the build. Version 7 is Litematica's 1.20.5+ layout (data components). **Not verified in game:** that Litematica on 1.21.1 opens the files we write.
+
+### MCEdit `.schematic` (legacy, read only)
+
+gzip NBT. `Schematic { Width, Height, Length, Materials: "Alpha", Blocks (byte[]), Data (byte[]), AddBlocks? (high nibbles for ids > 255), TileEntities[], Entities[], SchematicaMapping? }`, index order x, then z, then y.
+
+- Numeric ids and data values go through `formats/legacy.ts`, a **hand-written** table of 1.12's vanilla ids (0–255) with their common variants and orientations, targeting 1.21 names. No permissively licensed flattening table was available in `node_modules`, and the table is our own: no game data is copied.
+- An id the table doesn't know becomes `legacy:id_<id>[data=<d>]`: an unknown block that renders magenta and round-trips (`01`). A known id with an unmapped data value takes its default variant. Both are counted in a warning.
+- Upper door halves and double plants take their facing and variant from the block below, as the old format split them.
+- Schematica's `SchematicaMapping` (name → id) names modded ids; their data values are dropped with a warning.
+- Block entities and entities are kept verbatim in their pre-1.13 layout, with a warning. Imported documents carry DataVersion 3955 (1.21.1), the names the table targets.
 
 ### Structure `.nbt` (Create)
 
@@ -89,6 +99,7 @@ export({
 | Material list | Covers vanilla's systematic block → item cases: wall variants, crops, doors, beds and tall plants counted once, double slabs, candles, pickles, eggs, petals, snow layers, potted plants. Fluids, portals and technical blocks are listed as not printable. Plugins can answer for their own blocks through `items(state, nbt)` (`09`). |
 | Targets | `axiom` writes `.bp` to `<instance>/config/axiom/blueprints/`, or `.schem` to `schematics/` with `format:"schem"`. `create` writes to `<instance>/schematics/`. `path` writes to any file or folder. With no target, the export goes to `<workspace>/<doc>/exports/`, the only place exports may overwrite without `overwrite:true`. |
 | Litematica `.litematic` | Reads (versions up to 7, multi-region merged with regions as components) and writes one region. Round-trip and multi-region tests use synthetic fixtures. Not checked in game. |
+| MCEdit `.schematic` | Reads, including `AddBlocks` and `SchematicaMapping`, through a hand-written legacy ID table. Unknown ids stay visible as `legacy:id_<id>` blocks. Import tests use synthetic fixtures. Never written. |
 | Import | `doc_open({path})` creates a new workspace document named after the file. Block entities and entities are kept. A DataVersion mismatch produces a warning. |
 | Entities | Stored in the document with `Pos` in document coordinates. Exports translate them with the blocks and drop those outside the exported region. |
 

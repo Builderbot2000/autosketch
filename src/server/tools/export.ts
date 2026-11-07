@@ -19,7 +19,7 @@ export function registerExportTools({ tool, session }: ToolDeps): void {
         "split:true tiles an over-limit Create export and writes a placement guide. Text.",
       inputSchema: {
         target: z.enum(["axiom", "create", "path"]).optional(),
-        format: z.enum(["schem", "nbt", "native", "bp"]).optional().describe("Default: bp for axiom, nbt for create, from the extension for path, else schem. .bp leaves out block entities (use schem to keep chest contents etc.)"),
+        format: z.enum(["schem", "nbt", "native", "bp", "litematic"]).optional().describe("Default: bp for axiom, nbt for create, from the extension for path, else schem. .bp leaves out block entities (use schem to keep chest contents etc.)"),
         path: z.string().optional().describe("File or folder for target path"),
         name: z.string().optional().describe("File name without extension (default: the document name)"),
         region: boxSchema.optional(),

@@ -229,6 +229,7 @@ export class Document {
   }
 
   undo(): { entry: JournalEntry; shift?: Vec3 } | undefined {
+    this.journal.ensureUndo(); // loads an on-disk journal segment when undo reaches past memory (04)
     if (!this.journal.canUndo) return undefined;
     const e = this.journal.entries[--this.journal.cursor]!;
     this.apply(e, "before");
@@ -236,6 +237,7 @@ export class Document {
   }
 
   redo(): { entry: JournalEntry; shift?: Vec3 } | undefined {
+    this.journal.ensureRedo();
     if (!this.journal.canRedo) return undefined;
     const e = this.journal.entries[this.journal.cursor++]!;
     this.apply(e, "after");
@@ -273,10 +275,10 @@ export class Document {
     const target = this.journal.cursorFor(cp);
     if (target === undefined) throw new Error(`checkpoint "${name}" can no longer be restored: the ops after it were replaced by newer edits or trimmed from memory`);
     const originBefore: Vec3 = [...this.origin];
-    const steps = Math.abs(target - this.journal.cursor);
-    const direction = target < this.journal.cursor ? "undo" : target > this.journal.cursor ? "redo" : "none";
-    while (this.journal.cursor > target) this.undo();
-    while (this.journal.cursor < target) this.redo();
+    const steps = Math.abs(target - this.journal.position);
+    const direction = target < this.journal.position ? "undo" : target > this.journal.position ? "redo" : "none";
+    while (this.journal.position > target) this.undo();
+    while (this.journal.position < target) this.redo();
     return { steps, direction, ...shiftOf(originBefore, this.origin) };
   }
 }

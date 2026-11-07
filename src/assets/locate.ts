@@ -16,8 +16,9 @@ export type LayerSpec =
   | { kind: "builtin"; id: string; role: LayerRole; name: string };
 
 export interface InstanceInfo {
+  /** Game folder (mods/, config/, schematics/). For Prism/MultiMC this is the instance's minecraft/ folder. */
   root: string;
-  launcher: "curseforge" | "vanilla" | "generic";
+  launcher: "curseforge" | "prism" | "vanilla" | "generic";
   name: string;
   mcVersion: string;
   loader?: { name: string; version: string };
@@ -31,16 +32,26 @@ export interface LocateOptions {
   version?: string;
   /** Explicit path to the client jar; overrides detection. */
   baseJar?: string;
+  /**
+   * Pinned mod order inside `mod_resources`, lowest priority first (02, Known approximation).
+   * Each entry names a mod jar: its file name, its name before the version (`create` matches
+   * `create-1.21.1-6.0.4.jar`), or a `*` glob. Pinned jars sit above the alphabetical rest, in the
+   * order given, so the last entry wins a conflict.
+   */
+  modOrder?: string[];
 }
 
 export async function locateInstance(rootIn: string, opts: LocateOptions = {}): Promise<InstanceInfo> {
   const root = resolve(rootIn);
   if (!(await isDir(root))) throw new Error(`instance folder not found: ${root}`);
   if (await isFile(join(root, "minecraftinstance.json"))) return locateCurseForge(root, opts);
+  if (await isFile(join(root, "instance.cfg"))) return locatePrism(root, opts);
+  // Pointed at a Prism/MultiMC game folder (.minecraft or minecraft inside the instance).
+  if (/^\.?minecraft$/.test(basename(root)) && (await isFile(join(root, "..", "instance.cfg")))) return locatePrism(resolve(root, ".."), opts);
   if (await isDir(join(root, "versions"))) return locateVanilla(root, opts);
   if (opts.baseJar) return locateGeneric(root, opts);
   throw new Error(
-    `could not recognise ${root} as a Minecraft instance (no minecraftinstance.json or versions/ folder). ` +
+    `could not recognise ${root} as a Minecraft instance (no minecraftinstance.json, instance.cfg or versions/ folder). ` +
       `Pass baseJar to use it as a generic instance.`,
   );
 }
@@ -76,7 +87,7 @@ async function locateCurseForge(root: string, opts: LocateOptions): Promise<Inst
     }
   }
 
-  const layers = await modpackLayers(root, baseJar, loaderJar, warnings);
+  const layers = await modpackLayers(root, baseJar, loaderJar, warnings, opts.modOrder);
   return { root, launcher: "curseforge", name: meta.name ?? basename(root), mcVersion, loader, layers, warnings };
 }
 
@@ -89,6 +100,67 @@ async function findLoaderJar(install: string, loader: { name: string; version: s
         : [];
   for (const c of candidates) if (await isFile(c)) return c;
   return undefined;
+}
+
+interface MmcPack {
+  components?: { uid?: string; version?: string; cachedName?: string }[];
+}
+
+/** mmc-pack.json component uid → loader name. */
+const MMC_LOADERS: Record<string, string> = {
+  "net.neoforged": "neoforge",
+  "net.minecraftforge": "forge",
+  "net.fabricmc.fabric-loader": "fabric",
+  "org.quiltmc.quilt-loader": "quilt",
+};
+
+/**
+ * Prism Launcher / MultiMC (docs/design/02-assets-registry.md): `<data>/instances/<name>/` holds
+ * `instance.cfg` (INI, `name=`) and `mmc-pack.json` (components with versions); the game folder
+ * is `minecraft/` (Prism) or `.minecraft/` (MultiMC, older Prism). Jars come from the shared
+ * `<data>/libraries/` maven cache.
+ */
+async function locatePrism(instDir: string, opts: LocateOptions): Promise<InstanceInfo> {
+  const warnings: string[] = [];
+  const cfg = await readFile(join(instDir, "instance.cfg"), "utf8").catch(() => "");
+  const name = /^name=(.*)$/m.exec(cfg)?.[1]?.trim() || basename(instDir);
+  let pack: MmcPack = {};
+  try {
+    pack = JSON.parse(await readFile(join(instDir, "mmc-pack.json"), "utf8")) as MmcPack;
+  } catch {
+    warnings.push(`no readable mmc-pack.json in ${instDir}`);
+  }
+  const comps = pack.components ?? [];
+  const mcVersion = opts.version ?? comps.find((c) => c.uid === "net.minecraft")?.version;
+  if (!mcVersion && !opts.baseJar) throw new Error(`can't tell the game version of ${instDir} (no net.minecraft component in mmc-pack.json); pass version`);
+
+  let gameDir = join(instDir, "minecraft");
+  if (!(await isDir(gameDir)) && (await isDir(join(instDir, ".minecraft")))) gameDir = join(instDir, ".minecraft");
+  if (!(await isDir(gameDir))) warnings.push(`game folder not found in ${instDir} (minecraft/ or .minecraft/)`);
+
+  const data = resolve(instDir, "..", "..");
+  const libs = join(data, "libraries");
+  const baseCandidates = mcVersion
+    ? [join(libs, "com/mojang/minecraft", mcVersion, `minecraft-${mcVersion}-client.jar`), join(data, "versions", mcVersion, `${mcVersion}.jar`)]
+    : [];
+  let baseJar = opts.baseJar && resolve(opts.baseJar);
+  if (!baseJar) for (const c of baseCandidates) if (await isFile(c)) (baseJar ??= c);
+  if (!baseJar) throw new Error(`base game jar not found (looked in ${baseCandidates.join(", ")}); start the instance once in the launcher, or pass baseJar`);
+
+  let loader: InstanceInfo["loader"];
+  let loaderJar: string | undefined;
+  for (const c of comps) {
+    const ln = c.uid && MMC_LOADERS[c.uid];
+    if (!ln || !c.version) continue;
+    loader = { name: ln, version: c.version };
+    loaderJar = await findLoaderJar(data, loader, mcVersion ?? "");
+    if (!loaderJar && (ln === "neoforge" || ln === "forge")) warnings.push(`${ln} ${c.version} jar not found under ${libs}; its own assets will be missing`);
+    break;
+  }
+
+  const layers = await modpackLayers(gameDir, baseJar, loaderJar, warnings, opts.modOrder);
+  const version = mcVersion ?? (await jarVersion(baseJar)) ?? "unknown";
+  return { root: gameDir, launcher: "prism", name, mcVersion: version, ...(loader ? { loader } : {}), layers, warnings };
 }
 
 async function locateVanilla(root: string, opts: LocateOptions): Promise<InstanceInfo> {
@@ -105,7 +177,7 @@ async function locateVanilla(root: string, opts: LocateOptions): Promise<Instanc
   const baseJar = opts.baseJar ?? join(root, "versions", version!, `${version}.jar`);
   if (!(await isFile(baseJar))) throw new Error(`base game jar not found at ${baseJar}`);
   const mcVersion = version ?? (await jarVersion(baseJar)) ?? "unknown";
-  const layers = await modpackLayers(root, baseJar, undefined, warnings);
+  const layers = await modpackLayers(root, baseJar, undefined, warnings, opts.modOrder);
   return { root, launcher: "vanilla", name: basename(root), mcVersion, layers, warnings };
 }
 
@@ -114,7 +186,7 @@ async function locateGeneric(root: string, opts: LocateOptions): Promise<Instanc
   const baseJar = resolve(opts.baseJar!);
   if (!(await isFile(baseJar))) throw new Error(`base game jar not found at ${baseJar}`);
   const mcVersion = opts.version ?? (await jarVersion(baseJar)) ?? "unknown";
-  const layers = await modpackLayers(root, baseJar, undefined, warnings);
+  const layers = await modpackLayers(root, baseJar, undefined, warnings, opts.modOrder);
   return { root, launcher: "generic", name: basename(root), mcVersion, layers, warnings };
 }
 
@@ -146,12 +218,13 @@ async function jarVersion(jar: string): Promise<string | undefined> {
  * Mod-to-mod order inside mod_resources follows the loader's mod sorting, which we can't reproduce
  * without running it; conflicts between mods over the same asset path are rare.
  */
-async function modpackLayers(root: string, baseJar: string, loaderJar: string | undefined, warnings: string[]): Promise<LayerSpec[]> {
+async function modpackLayers(root: string, baseJar: string, loaderJar: string | undefined, warnings: string[], modOrder?: string[]): Promise<LayerSpec[]> {
   const layers: LayerSpec[] = [{ kind: "archive", id: `minecraft:${basename(baseJar)}`, role: "base", path: baseJar }];
 
   const modGroup: LayerSpec[] = [];
   if (loaderJar) modGroup.push({ kind: "archive", id: `loader:${basename(loaderJar)}`, role: "loader", path: loaderJar });
-  for (const f of (await listDir(join(root, "mods"))).filter((f) => f.endsWith(".jar")).sort(localeless)) {
+  const jars = (await listDir(join(root, "mods"))).filter((f) => f.endsWith(".jar")).sort(localeless);
+  for (const f of pinModOrder(jars, modOrder, warnings)) {
     modGroup.push({ kind: "archive", id: `mod:${f}`, role: "mod", path: join(root, "mods", f) });
   }
   if (await isDir(join(root, "kubejs"))) {
@@ -192,6 +265,26 @@ async function modpackLayers(root: string, baseJar: string, loaderJar: string | 
   return layers;
 }
 
+/**
+ * Applies a pinned order (LocateOptions.modOrder) to alphabetically sorted mod jars: unpinned jars
+ * first, then each pinned entry's matches in the order given. Unmatched entries are warned about.
+ */
+export function pinModOrder(jars: string[], order: string[] | undefined, warnings: string[] = []): string[] {
+  if (!order?.length) return jars;
+  const pinned: string[] = [];
+  const taken = new Set<string>();
+  for (const entry of order) {
+    const e = entry.trim().toLowerCase();
+    if (!e) continue;
+    // A glob, else the exact file name, else the name before a version ("create" → "create-1.21.1-6.0.4.jar").
+    const re = e.includes("*") ? new RegExp(`^${e.split("*").map(escapeRe).join(".*")}$`) : new RegExp(`^${escapeRe(e)}(\\.jar|[-_+][0-9v].*)?$`);
+    const hits = jars.filter((j) => !taken.has(j) && re.test(j.toLowerCase()));
+    if (!hits.length) warnings.push(`modOrder entry "${entry}" matches no jar in mods/`);
+    for (const h of hits) (taken.add(h), pinned.push(h));
+  }
+  return [...jars.filter((j) => !taken.has(j)), ...pinned];
+}
+
 async function packsIn(dir: string, role: LayerRole, idPrefix: string): Promise<LayerSpec[]> {
   const out: LayerSpec[] = [];
   for (const f of (await listDir(dir)).sort(localeless)) {
@@ -220,6 +313,7 @@ export async function readSelectedPacks(optionsTxt: string): Promise<string[] | 
   }
 }
 
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const localeless = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 async function listDir(p: string): Promise<string[]> {

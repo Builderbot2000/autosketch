@@ -51,26 +51,27 @@ export function formatInfo(doc: Document, registry: Registry | undefined, path: 
   const pals = doc.palettes.list();
   if (pals.length) lines.push(`palettes: ${pals.map((p) => `${p.name} [${Object.keys(p.roles).join(", ")}]`).join("; ")}`);
   const j = doc.journal;
-  lines.push(`history: ${j.cursor} op${j.cursor === 1 ? "" : "s"}${j.canRedo ? `, ${j.entries.length - j.cursor} redoable` : ""}${j.checkpoints.size ? ` · checkpoints: ${[...j.checkpoints.keys()].join(", ")}` : ""}`);
+  lines.push(`history: ${j.position} op${j.position === 1 ? "" : "s"}${j.canRedo ? `, ${j.seqs.length - j.position} redoable` : ""}${j.checkpoints.size ? ` · checkpoints: ${[...j.checkpoints.keys()].join(", ")}` : ""}`);
   if (path) lines.push(`saved at ${path}`);
   return lines.join("\n");
 }
 
 export function formatHistory(doc: Document, limit: number): string {
   const j = doc.journal;
-  if (j.entries.length === 0) return "No ops yet.";
+  if (j.seqs.length === 0) return "No ops yet.";
   const cps = new Map<number, string[]>();
   for (const c of j.checkpoints.values()) cps.set(c.seq, [...(cps.get(c.seq) ?? []), c.name]);
   const lines: string[] = [];
-  const start = Math.max(0, j.entries.length - limit);
-  if (start > 0 || j.dropped > 0) lines.push(`… ${start + j.dropped} earlier op(s)`);
-  if (start === 0 && cps.has(0)) lines.push(`  ◆ checkpoint ${cps.get(0)!.join(", ")} (start)`);
-  j.entries.slice(start).forEach((e, k) => {
+  // Chain positions: the journal may hold older ops on disk (04, Persistence).
+  const start = Math.max(0, j.seqs.length - limit);
+  if (start > 0 || j.lost > 0) lines.push(`… ${start + j.lost} earlier op(s)`);
+  if (start === 0 && j.lost === 0 && cps.has(0)) lines.push(`  ◆ checkpoint ${cps.get(0)!.join(", ")} (start)`);
+  j.peek(start, j.seqs.length).forEach((e, k) => {
     const i = start + k;
-    const mark = i < j.cursor ? " " : "↷";
+    const mark = i < j.position ? " " : "↷";
     lines.push(`${mark} #${e.seq} ${e.summary} · ${n(e.before.length)} changed`);
     const names = cps.get(e.seq);
-    if (names && i < j.cursor + 1) lines.push(`  ◆ checkpoint ${names.join(", ")}`);
+    if (names && i < j.position + 1) lines.push(`  ◆ checkpoint ${names.join(", ")}`);
   });
   if (j.canRedo) lines.push("↷ = undone (redo brings it back; a new edit discards it)");
   return lines.join("\n");

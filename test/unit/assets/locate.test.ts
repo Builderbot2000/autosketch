@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { join } from "node:path";
-import { locateInstance } from "../../../src/assets/locate.js";
+import { locateInstance, pinModOrder } from "../../../src/assets/locate.js";
 import { openStack } from "../../../src/assets/pack.js";
 import { makeZip, tempDir, writeTree } from "../../helpers/fixtures.js";
 
@@ -110,5 +110,70 @@ describe("locateInstance (vanilla / generic)", () => {
 
   it("rejects unrecognised folders", async () => {
     await expect(locateInstance(await tempDir())).rejects.toThrow(/could not recognise/);
+  });
+});
+
+describe("pinned mod order", () => {
+  const jars = ["a_mod.jar", "b_mod.jar", "create-1.21.1-6.0.4.jar", "createaddition-1.5.jar", "zeta-1.0.jar"];
+
+  it("moves pinned jars above the alphabetical rest, last entry highest", () => {
+    const warnings: string[] = [];
+    expect(pinModOrder(jars, ["zeta", "create", "a_mod.jar"], warnings)).toEqual(["b_mod.jar", "createaddition-1.5.jar", "zeta-1.0.jar", "create-1.21.1-6.0.4.jar", "a_mod.jar"]);
+    expect(warnings).toEqual([]);
+    expect(pinModOrder(jars, ["create*"])).toEqual(["a_mod.jar", "b_mod.jar", "zeta-1.0.jar", "create-1.21.1-6.0.4.jar", "createaddition-1.5.jar"]);
+    expect(pinModOrder(jars, undefined)).toBe(jars);
+    pinModOrder(jars, ["nothing"], warnings);
+    expect(warnings).toEqual(['modOrder entry "nothing" matches no jar in mods/']);
+  });
+
+  it("applies to the located layers", async () => {
+    const info = await locateInstance(await makeCurseForge(), { modOrder: ["a_mod"] });
+    expect(info.layers.filter((l) => l.role === "mod").map((l) => l.id)).toEqual(["mod:b_mod.jar", "mod:a_mod.jar"]);
+  });
+});
+
+describe("locateInstance (Prism / MultiMC)", () => {
+  async function makePrism(gameDir: "minecraft" | ".minecraft"): Promise<{ data: string; inst: string }> {
+    const data = await tempDir();
+    const inst = join(data, "instances/My Pack");
+    await writeTree(data, {
+      "libraries/com/mojang/minecraft/1.21.1/minecraft-1.21.1-client.jar": makeZip({ "version.json": { id: "1.21.1" }, "assets/minecraft/textures/block/stone.png": "vanilla" }),
+      "libraries/net/neoforged/neoforge/21.1.262/neoforge-21.1.262-universal.jar": makeZip({ "assets/neoforge/lang/en_us.json": "{}" }),
+    });
+    await writeTree(inst, {
+      "instance.cfg": "[General]\nInstanceType=OneSix\nname=My Pack\n",
+      "mmc-pack.json": {
+        formatVersion: 1,
+        components: [
+          { uid: "org.lwjgl3", version: "3.3.3" },
+          { uid: "net.minecraft", version: "1.21.1" },
+          { uid: "net.neoforged", version: "21.1.262" },
+        ],
+      },
+      [gameDir + "/mods/z_mod.jar"]: makeZip({ "assets/minecraft/textures/block/stone.png": "z" }),
+      [gameDir + "/options.txt"]: 'resourcePacks:["vanilla","mod_resources"]\n',
+    });
+    return { data, inst };
+  }
+
+  it("reads instance.cfg and mmc-pack.json, and takes jars from the libraries cache", async () => {
+    const { data, inst } = await makePrism("minecraft");
+    const info = await locateInstance(inst);
+    expect(info).toMatchObject({ launcher: "prism", name: "My Pack", mcVersion: "1.21.1", loader: { name: "neoforge", version: "21.1.262" }, root: join(inst, "minecraft") });
+    expect(info.warnings).toEqual([]);
+    expect(info.layers).toEqual([
+      { kind: "archive", id: "minecraft:minecraft-1.21.1-client.jar", role: "base", path: join(data, "libraries/com/mojang/minecraft/1.21.1/minecraft-1.21.1-client.jar") },
+      { kind: "archive", id: "loader:neoforge-21.1.262-universal.jar", role: "loader", path: join(data, "libraries/net/neoforged/neoforge/21.1.262/neoforge-21.1.262-universal.jar") },
+      { kind: "archive", id: "mod:z_mod.jar", role: "mod", path: join(inst, "minecraft/mods/z_mod.jar") },
+    ]);
+    const { stack } = await openStack(info, { indexCache: false });
+    expect((await stack.read("assets/minecraft/textures/block/stone.png"))?.toString()).toBe("z");
+  });
+
+  it("accepts MultiMC's .minecraft folder, pointed at directly", async () => {
+    const { inst } = await makePrism(".minecraft");
+    const info = await locateInstance(join(inst, ".minecraft"));
+    expect(info).toMatchObject({ launcher: "prism", root: join(inst, ".minecraft") });
+    expect(info.layers.map((l) => l.id)).toContain("mod:z_mod.jar");
   });
 });

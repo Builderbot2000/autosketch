@@ -1,3 +1,4 @@
+import { biomeClimate, colormapPixel, DEFAULT_TINT_BIOME, type BiomeClimate } from "../assets/biomes.js";
 import { texturePath } from "../assets/models.js";
 import type { PackStack } from "../assets/pack.js";
 import { rgbToLab, type Lab, type RGB } from "./color.js";
@@ -111,27 +112,33 @@ export const DYE_COLORS: [string, RGB][] = [
 ];
 
 /**
- * Tint for a block's tinted faces at a default biome (plains). Reads the instance's own colormaps,
- * so resource packs that recolour grass/foliage are respected.
+ * Tint for a block's tinted faces at a configurable biome (default plains, 02). Reads the
+ * instance's own colormaps, so resource packs that recolour grass/foliage are respected.
  */
 export class Tinter {
   private grass?: RGB;
   private foliage?: RGB;
-  constructor(private readonly textures: TextureLoader) {}
+  private readonly climate: BiomeClimate;
+  constructor(
+    private readonly textures: TextureLoader,
+    biome: string = DEFAULT_TINT_BIOME,
+  ) {
+    this.climate = biomeClimate(biome);
+  }
 
   async init(): Promise<void> {
-    // Plains: temperature 0.8, downfall 0.4 → colormap coordinates.
+    const b = this.climate;
     const sample = async (id: string, fallback: RGB): Promise<RGB> => {
       const img = await this.textures.load(id);
       if (!img) return fallback;
-      const t = 0.8, d = 0.4 * t;
-      const x = Math.min(img.width - 1, Math.round((1 - t) * (img.width - 1)));
-      const y = Math.min(img.height - 1, Math.round((1 - d) * (img.height - 1)));
-      const [r, g, b] = img.get(x, y);
-      return [r, g, b];
+      const [x, y] = colormapPixel(b, img.width, img.height);
+      const [r, g, bl] = img.get(x, y);
+      return [r, g, bl];
     };
-    this.grass = await sample("minecraft:colormap/grass", [0x91, 0xbd, 0x59]);
-    this.foliage = await sample("minecraft:colormap/foliage", [0x77, 0xab, 0x2f]);
+    let grass = b.grass ?? (await sample("minecraft:colormap/grass", [0x91, 0xbd, 0x59]));
+    if (b.grassBlend) grass = [0, 1, 2].map((i) => (grass[i]! + b.grassBlend![i]!) >> 1) as RGB;
+    this.grass = grass;
+    this.foliage = b.foliage ?? (await sample("minecraft:colormap/foliage", [0x77, 0xab, 0x2f]));
   }
 
   /**

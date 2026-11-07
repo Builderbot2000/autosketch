@@ -10,7 +10,9 @@ Supported, in priority order:
 |----------|-----------|----------|--------------|
 | CurseForge | `minecraftinstance.json` | `curseforge/minecraft/Install/versions/<ver>/<ver>.jar` | `mods/`, `resourcepacks/`, `kubejs/assets`, `dynamic-resource-pack-cache/` |
 | Vanilla launcher | `.minecraft/versions/<ver>/` | `<ver>.jar` | `resourcepacks/` |
-| Prism / MultiMC | `instance.cfg` + `mmc-pack.json` | libraries cache | later |
+| Prism / MultiMC | `instance.cfg` + `mmc-pack.json` | `<data>/libraries/com/mojang/minecraft/<ver>/minecraft-<ver>-client.jar` (else `<data>/versions/<ver>/<ver>.jar`) | same as CurseForge, under the game folder `minecraft/` (Prism) or `.minecraft/` (MultiMC) |
+
+**Prism / MultiMC:** the instance folder (`<data>/instances/<name>/`) or its game folder may be given. The name comes from `instance.cfg` (`name=`). The game version and loader come from `mmc-pack.json` components (`net.minecraft`; `net.neoforged`, `net.minecraftforge`, `net.fabricmc.fabric-loader`, `org.quiltmc.quilt-loader`). The loader jar is looked up in the same `libraries/` maven layout as CurseForge's `Install/`. `InstanceInfo.root` is the game folder, so export targets write to `minecraft/schematics/` and the like. The libraries jar exists only after the launcher has started the instance once; the error says so.
 
 Configured by path (`AUTOSKETCH_INSTANCE`, or the `instance` argument at server start). WSL paths (`/mnt/c/...`) must work.
 
@@ -33,7 +35,7 @@ Layer order (lowest priority first), as implemented in `locate.ts`:
 
 **Pack overlays** (`pack.mcmeta` `overlays.entries`) are applied as higher-priority sub-folder layers, with assets matched against the resource pack format and data against the data pack format (1.21.1: 34 / 48).
 
-**Known approximation:** mod-to-mod order inside `mod_resources` follows the loader's dependency sort, which we don't reproduce. Conflicts over the same path between mods are rare. A future config option can pin the order.
+**Known approximation:** mod-to-mod order inside `mod_resources` follows the loader's dependency sort, which we don't reproduce. Conflicts over the same path between mods are rare. **Pinned mod order** (`modOrder`, `--mod-order a,b` or `AUTOSKETCH_MOD_ORDER`) fixes a conflict: each entry names a jar by file name, by its name before the version (`create` matches `create-1.21.1-6.0.4.jar`) or by a `*` glob. Pinned jars sit above the alphabetical rest in the order given, so the last entry wins. An entry matching nothing is warned about.
 
 Jars are indexed by central directory only (file list, no decompression). Only `assets/`, `data/`, `resourcepacks/`, top-level pack folders, `META-INF/jarjar/` and mod metadata are indexed. Entries are decompressed lazily. A small LRU of file handles avoids fd exhaustion.
 
@@ -45,7 +47,7 @@ Jars are indexed by central directory only (file list, no decompression). Only `
 - `models/block/*.json`: parent chain, texture variable resolution (`#var`), `elements` (from/to, per-face uv, rotation, `tintindex`, `cullface`), and builtin parents (`builtin/entity`, `builtin/generated`).
 - Output: a **baked model** per block state, made of cuboids with resolved texture refs, cached by state key.
 - **Code-drawn blocks** (chests, signs, beds, banners, heads, shulkers, bells) have no usable JSON model. They get hand-written fallback models in `assets/builtin-models/`.
-- **Tint:** `tintindex` faces use the grass/foliage colormaps at a configurable default biome (plains), plus fixed tints for water, redstone and stems.
+- **Tint:** `tintindex` faces use the grass/foliage colormaps at a configurable default biome (plains), plus fixed tints for water, redstone and stems. The biome is set with `tintBiome` (`--tint-biome` or `AUTOSKETCH_TINT_BIOME`, e.g. `jungle`, `minecraft:swamp`) and applies to renders, palette sheets and colour stats. `assets/biomes.ts` holds the vanilla overworld climates (temperature, downfall) and the code-side colours: fixed badlands and swamp colours (swamp grass varies by noise in game; we take one), mangrove foliage, and the dark forest grass blend. A non-default biome is part of the palette cache key. An unknown name fails at startup with the list of known biomes.
 - Unresolvable models fall back to the `particle` texture on a full cube, flagged `approximate`.
 
 ## Registry (`assets/registry.ts`)
@@ -88,10 +90,22 @@ A block with no assets but present in a schematic is "unknown" (`01`).
 |------|-----|----------|
 | `jar-index.json.gz` | per jar: absolute path + size + mtime | Filtered central-directory listings. Unchanged jars skip re-indexing |
 | `registry-<fp>.json.gz` | stack fingerprint (layer ids and fingerprints, in order) + `CACHE_VERSION` | The full registry |
+| `palette-<fp>-<key>.json.gz` | stack fingerprint + plugin set + tint biome (when not plains) + palette code hash | Families, series and per-family texture averages (colour stats) (`03`) |
+| `sheets/<key>.png` | stack fingerprint + palette index (families, series) + sheet code hash + tint biome + sheet spec (sheet, page, zoom) | Rendered tilemap sheets. Turned on by the server; `SheetRenderer` leaves it off unless given `cacheDir` |
 
-Later: texture averages, palette families and rendered sheets, keyed by the same fingerprint.
+Texture averages are stored per family inside the palette file, since that is the only place they are used; per-block stats are an intermediate step of building it. Nothing prunes stale entries yet: files for an older stack or code version simply stop being read.
 
 **Warm start on Craftoria** (WSL, instance on `/mnt/c`) is about 3.5 s: locate about 0.7 s, stack about 2.8 s, registry about 0.2 s. What remains is filesystem latency through WSL's 9p bridge (stat/open on about 650 files, walking `kubejs/`), not parsing. A native Linux or Windows filesystem should be much faster.
+
+## Implementation status
+
+| Piece | Status |
+|-------|--------|
+| Locator | CurseForge, vanilla launcher, Prism / MultiMC (instance folder or its game folder), generic (with `baseJar`). Unit tests use synthetic layouts. |
+| Pack VFS | Built, with overlays, built-in packs, nested jars and the jar index cache. Pinned mod order (`modOrder`) built. |
+| Model resolution | Built. Tint biome configurable (`tintBiome`, default plains). Code-drawn fallbacks: silo E (`builtin-models/`). |
+| Registry | Built, cached. |
+| Caches | Jar index, registry, palette (families and texture averages), rendered sheets. No pruning. |
 
 ## Legal stance
 

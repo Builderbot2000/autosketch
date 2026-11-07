@@ -1,10 +1,17 @@
 import type { Compound } from "prismarine-nbt";
 import type { Box, Vec3 } from "../core/region.js";
 import type { Component } from "./components.js";
+import type { JournalStore } from "./journal-store.js";
 
 /**
  * Journal (docs/design/04-document.md): one entry per op, holding a sparse before/after diff in
  * store coordinates, so undo/redo replays exactly regardless of later origin shifts.
+ *
+ * The history is a chain of entries (`seqs`). Memory holds a contiguous window of it (`entries`,
+ * starting at chain index `start`); `cursor` is the undo point inside the window. With a store
+ * attached (`journal-store.ts`), entries outside the window live in on-disk segments and are
+ * loaded back when undo or redo reaches them, so history survives reopening and memory stays
+ * under the cap. Without a store, entries over the cap are dropped from the front (`lost`).
  */
 export interface JournalEntry {
   seq: number;
@@ -39,13 +46,19 @@ export interface Checkpoint {
 }
 
 export class Journal {
-  /** Applied entries are entries[0..cursor); entries[cursor..] can be redone. */
+  /** The in-memory window: chain entries [start, start + entries.length). */
   readonly entries: JournalEntry[] = [];
+  /** Applied entries end at window index `cursor`; entries[cursor..] can be redone. */
   cursor = 0;
+  /** Chain index of entries[0]. */
+  start = 0;
+  /** Sequence numbers of the whole reachable history, in order (increasing). */
+  readonly seqs: number[] = [];
+  /** Entries dropped before a store was attached (no longer reachable). */
+  lost = 0;
   private nextSeq = 1;
-  /** Entries dropped from the front to respect the memory cap. */
-  dropped = 0;
   readonly checkpoints = new Map<string, Checkpoint>();
+  store?: JournalStore;
 
   constructor(private readonly maxBytes = 256 * 1024 * 1024) {}
 
@@ -53,38 +66,178 @@ export class Journal {
     return this.nextSeq++;
   }
 
-  /** Records a committed op: discards the redo tail, then trims old entries to the memory cap. */
+  get next(): number {
+    return this.nextSeq;
+  }
+
+  /** Entries before the window (on disk or lost); history() reports them as earlier ops. */
+  get dropped(): number {
+    return this.lost + this.start;
+  }
+
+  /** Applied entries in the whole reachable history. */
+  get position(): number {
+    return this.start + this.cursor;
+  }
+
+  /** Records a committed op: discards the redo tail, then trims the window to the memory cap. */
   push(e: JournalEntry): void {
+    const discarded = this.seqs.splice(this.position);
     this.entries.length = this.cursor;
+    if (discarded.length) this.store?.discard(discarded);
     this.entries.push(e);
+    this.seqs.push(e.seq);
     this.cursor = this.entries.length;
-    let bytes = this.entries.reduce((s, x) => s + entryBytes(x), 0);
-    while (bytes > this.maxBytes && this.entries.length > 1) {
-      bytes -= entryBytes(this.entries.shift()!);
-      this.cursor--;
-      this.dropped++;
-    }
+    this.trim();
   }
 
   get canUndo(): boolean {
-    return this.cursor > 0;
+    return this.position > 0;
   }
   get canRedo(): boolean {
-    return this.cursor < this.entries.length;
+    return this.position < this.seqs.length;
   }
 
   /** seq of the last applied entry (0 when none). */
   get headSeq(): number {
-    return this.cursor > 0 ? this.entries[this.cursor - 1]!.seq : 0;
+    return this.position > 0 ? this.seqs[this.position - 1]! : 0;
+  }
+
+  /** Makes sure the entry undo would revert is in memory (loading its segment if needed). */
+  ensureUndo(): void {
+    if (this.cursor > 0 || this.start === 0 || !this.store) return;
+    this.loadBefore();
+    this.trim();
+  }
+
+  /** Makes sure the entry redo would apply is in memory. */
+  ensureRedo(): void {
+    if (this.cursor < this.entries.length || this.start + this.entries.length >= this.seqs.length || !this.store) return;
+    this.loadAfter();
+    this.trim();
   }
 
   /**
-   * Cursor position for a checkpoint, or undefined when it can no longer be reached (its op was
-   * discarded by a later edit after undo, or trimmed by the memory cap).
+   * Chain position for a checkpoint (applied entries when it was made), or undefined when it can
+   * no longer be reached (its op was discarded by a later edit after undo, or lost to the cap).
    */
   cursorFor(cp: Checkpoint): number | undefined {
-    if (cp.seq === 0) return this.dropped === 0 ? 0 : undefined;
-    const i = this.entries.findIndex((e) => e.seq === cp.seq);
+    if (cp.seq === 0) return this.lost === 0 ? 0 : undefined;
+    const i = this.chainIndex(cp.seq);
     return i < 0 ? undefined : i + 1;
+  }
+
+  /** Writes entries not yet on disk and the index. No-op without a store. */
+  persist(): void {
+    const store = this.store;
+    if (!store) return;
+    store.append(this.entries.filter((e) => !store.has(e.seq)));
+    store.writeIndex({ nextSeq: this.nextSeq, lost: this.lost, checkpoints: [...this.checkpoints.values()] });
+  }
+
+  /** Attaches a store and restores the chain it holds, with `head` (a seq) as the undo point. */
+  attach(store: JournalStore, index: { nextSeq: number; lost: number; checkpoints: Checkpoint[] }, head: number): boolean {
+    const seqs = store.allSeqs();
+    const pos = head === 0 ? 0 : seqs.indexOf(head) + 1;
+    if (head !== 0 && pos === 0) return false;
+    this.store = store;
+    this.seqs.splice(0, this.seqs.length, ...seqs);
+    this.entries.length = 0;
+    this.start = pos;
+    this.cursor = 0;
+    this.lost = index.lost;
+    this.nextSeq = Math.max(index.nextSeq, (seqs[seqs.length - 1] ?? 0) + 1, head + 1);
+    this.checkpoints.clear();
+    for (const c of index.checkpoints) this.checkpoints.set(c.name, c);
+    return true;
+  }
+
+  /** Entries at chain indices [from, to), from memory or read from disk without caching (for history()). */
+  peek(from: number, to: number): JournalEntry[] {
+    const out: JournalEntry[] = [];
+    const read = new Map<string, JournalEntry[]>();
+    for (let i = Math.max(0, from); i < Math.min(to, this.seqs.length); i++) {
+      const w = i - this.start;
+      if (w >= 0 && w < this.entries.length) {
+        out.push(this.entries[w]!);
+        continue;
+      }
+      const seq = this.seqs[i]!;
+      const ref = this.store?.segmentOf(seq);
+      if (!ref) continue;
+      let seg = read.get(ref.file);
+      if (!seg) read.set(ref.file, (seg = this.store!.read(ref)));
+      const e = seg.find((x) => x.seq === seq);
+      if (e) out.push(e);
+    }
+    return out;
+  }
+
+  /** Loads every reachable entry into memory (before moving the journal to another store). */
+  loadAll(): void {
+    if (!this.store) return;
+    while (this.start > 0) this.loadBefore();
+    while (this.start + this.entries.length < this.seqs.length) this.loadAfter();
+  }
+
+  /** Prepends the on-disk entries just before the window (the rest of their segment). */
+  private loadBefore(): void {
+    const seq = this.seqs[this.start - 1]!;
+    const ref = this.store?.segmentOf(seq);
+    if (!ref) throw new Error(`journal segment for op #${seq} is missing`);
+    const older = this.store!.read(ref).filter((e) => {
+      const i = this.chainIndex(e.seq);
+      return i >= 0 && i < this.start;
+    });
+    if (!older.length) throw new Error(`journal segment ${ref.file} does not hold op #${seq}`);
+    this.entries.unshift(...older);
+    this.start -= older.length;
+    this.cursor += older.length;
+  }
+
+  /** Appends the on-disk entries just after the window. */
+  private loadAfter(): void {
+    const end = this.start + this.entries.length;
+    const seq = this.seqs[end]!;
+    const ref = this.store?.segmentOf(seq);
+    if (!ref) throw new Error(`journal segment for op #${seq} is missing`);
+    const newer = this.store!.read(ref).filter((e) => this.chainIndex(e.seq) >= end);
+    if (!newer.length) throw new Error(`journal segment ${ref.file} does not hold op #${seq}`);
+    this.entries.push(...newer);
+  }
+
+  private chainIndex(seq: number): number {
+    // seqs only grow, so binary search.
+    let lo = 0, hi = this.seqs.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1, v = this.seqs[mid]!;
+      if (v === seq) return mid;
+      if (v < seq) lo = mid + 1;
+      else hi = mid - 1;
+    }
+    return -1;
+  }
+
+  /** Keeps the window under the memory cap, never evicting the entry undo needs next. */
+  private trim(): void {
+    let bytes = this.entries.reduce((s, x) => s + entryBytes(x), 0);
+    if (bytes <= this.maxBytes) return;
+    if (!this.store) {
+      while (bytes > this.maxBytes && this.cursor > 1) {
+        const e = this.entries.shift()!;
+        bytes -= entryBytes(e);
+        this.seqs.shift();
+        this.cursor--;
+        this.lost++;
+      }
+      return;
+    }
+    this.persist(); // everything evicted must be on disk first
+    while (bytes > this.maxBytes && this.cursor > 1) {
+      bytes -= entryBytes(this.entries.shift()!);
+      this.start++;
+      this.cursor--;
+    }
+    while (bytes > this.maxBytes && this.entries.length > this.cursor) bytes -= entryBytes(this.entries.pop()!);
   }
 }

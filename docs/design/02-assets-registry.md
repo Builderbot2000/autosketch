@@ -10,7 +10,9 @@ Supported, in priority order:
 |----------|-----------|----------|--------------|
 | CurseForge | `minecraftinstance.json` | `curseforge/minecraft/Install/versions/<ver>/<ver>.jar` | `mods/`, `resourcepacks/`, `kubejs/assets`, `dynamic-resource-pack-cache/` |
 | Vanilla launcher | `.minecraft/versions/<ver>/` | `<ver>.jar` | `resourcepacks/` |
-| Prism / MultiMC | `instance.cfg` + `mmc-pack.json` | libraries cache | later |
+| Prism / MultiMC | `instance.cfg` + `mmc-pack.json` | `<data>/libraries/com/mojang/minecraft/<ver>/minecraft-<ver>-client.jar` (else `<data>/versions/<ver>/<ver>.jar`) | same as CurseForge, under the game folder `minecraft/` (Prism) or `.minecraft/` (MultiMC) |
+
+**Prism / MultiMC:** the instance folder (`<data>/instances/<name>/`) or its game folder may be given. The name comes from `instance.cfg` (`name=`). The game version and loader come from `mmc-pack.json` components (`net.minecraft`; `net.neoforged`, `net.minecraftforge`, `net.fabricmc.fabric-loader`, `org.quiltmc.quilt-loader`). The loader jar is looked up in the same `libraries/` maven layout as CurseForge's `Install/`. `InstanceInfo.root` is the game folder, so export targets write to `minecraft/schematics/` and the like. The libraries jar exists only after the launcher has started the instance once; the error says so.
 
 Configured by path (`AUTOSKETCH_INSTANCE`, or the `instance` argument at server start). WSL paths (`/mnt/c/...`) must work.
 

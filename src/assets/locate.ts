@@ -16,8 +16,9 @@ export type LayerSpec =
   | { kind: "builtin"; id: string; role: LayerRole; name: string };
 
 export interface InstanceInfo {
+  /** Game folder (mods/, config/, schematics/). For Prism/MultiMC this is the instance's minecraft/ folder. */
   root: string;
-  launcher: "curseforge" | "vanilla" | "generic";
+  launcher: "curseforge" | "prism" | "vanilla" | "generic";
   name: string;
   mcVersion: string;
   loader?: { name: string; version: string };
@@ -37,10 +38,13 @@ export async function locateInstance(rootIn: string, opts: LocateOptions = {}): 
   const root = resolve(rootIn);
   if (!(await isDir(root))) throw new Error(`instance folder not found: ${root}`);
   if (await isFile(join(root, "minecraftinstance.json"))) return locateCurseForge(root, opts);
+  if (await isFile(join(root, "instance.cfg"))) return locatePrism(root, opts);
+  // Pointed at a Prism/MultiMC game folder (.minecraft or minecraft inside the instance).
+  if (/^\.?minecraft$/.test(basename(root)) && (await isFile(join(root, "..", "instance.cfg")))) return locatePrism(resolve(root, ".."), opts);
   if (await isDir(join(root, "versions"))) return locateVanilla(root, opts);
   if (opts.baseJar) return locateGeneric(root, opts);
   throw new Error(
-    `could not recognise ${root} as a Minecraft instance (no minecraftinstance.json or versions/ folder). ` +
+    `could not recognise ${root} as a Minecraft instance (no minecraftinstance.json, instance.cfg or versions/ folder). ` +
       `Pass baseJar to use it as a generic instance.`,
   );
 }
@@ -89,6 +93,67 @@ async function findLoaderJar(install: string, loader: { name: string; version: s
         : [];
   for (const c of candidates) if (await isFile(c)) return c;
   return undefined;
+}
+
+interface MmcPack {
+  components?: { uid?: string; version?: string; cachedName?: string }[];
+}
+
+/** mmc-pack.json component uid → loader name. */
+const MMC_LOADERS: Record<string, string> = {
+  "net.neoforged": "neoforge",
+  "net.minecraftforge": "forge",
+  "net.fabricmc.fabric-loader": "fabric",
+  "org.quiltmc.quilt-loader": "quilt",
+};
+
+/**
+ * Prism Launcher / MultiMC (docs/design/02-assets-registry.md): `<data>/instances/<name>/` holds
+ * `instance.cfg` (INI, `name=`) and `mmc-pack.json` (components with versions); the game folder
+ * is `minecraft/` (Prism) or `.minecraft/` (MultiMC, older Prism). Jars come from the shared
+ * `<data>/libraries/` maven cache.
+ */
+async function locatePrism(instDir: string, opts: LocateOptions): Promise<InstanceInfo> {
+  const warnings: string[] = [];
+  const cfg = await readFile(join(instDir, "instance.cfg"), "utf8").catch(() => "");
+  const name = /^name=(.*)$/m.exec(cfg)?.[1]?.trim() || basename(instDir);
+  let pack: MmcPack = {};
+  try {
+    pack = JSON.parse(await readFile(join(instDir, "mmc-pack.json"), "utf8")) as MmcPack;
+  } catch {
+    warnings.push(`no readable mmc-pack.json in ${instDir}`);
+  }
+  const comps = pack.components ?? [];
+  const mcVersion = opts.version ?? comps.find((c) => c.uid === "net.minecraft")?.version;
+  if (!mcVersion && !opts.baseJar) throw new Error(`can't tell the game version of ${instDir} (no net.minecraft component in mmc-pack.json); pass version`);
+
+  let gameDir = join(instDir, "minecraft");
+  if (!(await isDir(gameDir)) && (await isDir(join(instDir, ".minecraft")))) gameDir = join(instDir, ".minecraft");
+  if (!(await isDir(gameDir))) warnings.push(`game folder not found in ${instDir} (minecraft/ or .minecraft/)`);
+
+  const data = resolve(instDir, "..", "..");
+  const libs = join(data, "libraries");
+  const baseCandidates = mcVersion
+    ? [join(libs, "com/mojang/minecraft", mcVersion, `minecraft-${mcVersion}-client.jar`), join(data, "versions", mcVersion, `${mcVersion}.jar`)]
+    : [];
+  let baseJar = opts.baseJar && resolve(opts.baseJar);
+  if (!baseJar) for (const c of baseCandidates) if (await isFile(c)) (baseJar ??= c);
+  if (!baseJar) throw new Error(`base game jar not found (looked in ${baseCandidates.join(", ")}); start the instance once in the launcher, or pass baseJar`);
+
+  let loader: InstanceInfo["loader"];
+  let loaderJar: string | undefined;
+  for (const c of comps) {
+    const ln = c.uid && MMC_LOADERS[c.uid];
+    if (!ln || !c.version) continue;
+    loader = { name: ln, version: c.version };
+    loaderJar = await findLoaderJar(data, loader, mcVersion ?? "");
+    if (!loaderJar && (ln === "neoforge" || ln === "forge")) warnings.push(`${ln} ${c.version} jar not found under ${libs}; its own assets will be missing`);
+    break;
+  }
+
+  const layers = await modpackLayers(gameDir, baseJar, loaderJar, warnings);
+  const version = mcVersion ?? (await jarVersion(baseJar)) ?? "unknown";
+  return { root: gameDir, launcher: "prism", name, mcVersion: version, ...(loader ? { loader } : {}), layers, warnings };
 }
 
 async function locateVanilla(root: string, opts: LocateOptions): Promise<InstanceInfo> {

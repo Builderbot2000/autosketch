@@ -112,3 +112,49 @@ describe("locateInstance (vanilla / generic)", () => {
     await expect(locateInstance(await tempDir())).rejects.toThrow(/could not recognise/);
   });
 });
+
+describe("locateInstance (Prism / MultiMC)", () => {
+  async function makePrism(gameDir: "minecraft" | ".minecraft"): Promise<{ data: string; inst: string }> {
+    const data = await tempDir();
+    const inst = join(data, "instances/My Pack");
+    await writeTree(data, {
+      "libraries/com/mojang/minecraft/1.21.1/minecraft-1.21.1-client.jar": makeZip({ "version.json": { id: "1.21.1" }, "assets/minecraft/textures/block/stone.png": "vanilla" }),
+      "libraries/net/neoforged/neoforge/21.1.262/neoforge-21.1.262-universal.jar": makeZip({ "assets/neoforge/lang/en_us.json": "{}" }),
+    });
+    await writeTree(inst, {
+      "instance.cfg": "[General]\nInstanceType=OneSix\nname=My Pack\n",
+      "mmc-pack.json": {
+        formatVersion: 1,
+        components: [
+          { uid: "org.lwjgl3", version: "3.3.3" },
+          { uid: "net.minecraft", version: "1.21.1" },
+          { uid: "net.neoforged", version: "21.1.262" },
+        ],
+      },
+      [gameDir + "/mods/z_mod.jar"]: makeZip({ "assets/minecraft/textures/block/stone.png": "z" }),
+      [gameDir + "/options.txt"]: 'resourcePacks:["vanilla","mod_resources"]\n',
+    });
+    return { data, inst };
+  }
+
+  it("reads instance.cfg and mmc-pack.json, and takes jars from the libraries cache", async () => {
+    const { data, inst } = await makePrism("minecraft");
+    const info = await locateInstance(inst);
+    expect(info).toMatchObject({ launcher: "prism", name: "My Pack", mcVersion: "1.21.1", loader: { name: "neoforge", version: "21.1.262" }, root: join(inst, "minecraft") });
+    expect(info.warnings).toEqual([]);
+    expect(info.layers).toEqual([
+      { kind: "archive", id: "minecraft:minecraft-1.21.1-client.jar", role: "base", path: join(data, "libraries/com/mojang/minecraft/1.21.1/minecraft-1.21.1-client.jar") },
+      { kind: "archive", id: "loader:neoforge-21.1.262-universal.jar", role: "loader", path: join(data, "libraries/net/neoforged/neoforge/21.1.262/neoforge-21.1.262-universal.jar") },
+      { kind: "archive", id: "mod:z_mod.jar", role: "mod", path: join(inst, "minecraft/mods/z_mod.jar") },
+    ]);
+    const { stack } = await openStack(info, { indexCache: false });
+    expect((await stack.read("assets/minecraft/textures/block/stone.png"))?.toString()).toBe("z");
+  });
+
+  it("accepts MultiMC's .minecraft folder, pointed at directly", async () => {
+    const { inst } = await makePrism(".minecraft");
+    const info = await locateInstance(join(inst, ".minecraft"));
+    expect(info).toMatchObject({ launcher: "prism", root: join(inst, ".minecraft") });
+    expect(info.layers.map((l) => l.id)).toContain("mod:z_mod.jar");
+  });
+});

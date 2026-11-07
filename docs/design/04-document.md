@@ -60,7 +60,7 @@ interface Component {
 ### Journal and checkpoints
 
 - Every op is one **journal entry**: a sparse before/after diff (positions, old/new state ids, NBT), the op name, and its args.
-- `undo` / `redo` with unlimited depth in memory, capped by memory use. Old entries are compacted to disk.
+- `undo` / `redo` with unlimited depth, memory capped: old entries are compacted to disk segments (Persistence) and survive reopening.
 - **Checkpoints:** `checkpoint({ name })` and `restore({ name })`. These are cheap named markers in the journal. The agent should checkpoint before risky multi-step work. The server instructions recommend it.
 - `history()` returns a terse op list for the agent to orient itself after context loss.
 
@@ -70,13 +70,32 @@ interface Component {
 <workspace>/
   <doc-name>/
     doc.autosketch       # native format: gzip NBT (voxels, NBT, components, palettes, meta)
-    journal/             # compacted journal segments (not yet: v1 keeps the journal in memory, so undo history starts fresh on open)
+    journal/             # journal segments (<firstSeq>-<lastSeq>.seg) + index.json
     exports/             # last exported .schem/.bp/.nbt (08)
 ```
 
 - The workspace defaults to `~/autosketch/`, configurable.
 - Autosave after each op (debounced). A crash loses at most the last op.
 - The native format is a superset of what the export formats can hold (components, palettes, journal). Exports are lossy views of it.
+
+### Journal segments
+
+- The history is a chain of entries. Memory holds a contiguous **window** of it. Each save appends the entries not yet on disk to `journal/` as an immutable segment, merging into the last segment while it is under about 4 MB, then rewrites `index.json` (segment list in history order, next sequence number, checkpoints). The journal is written before `doc.autosketch`, whose `Meta.JournalHead` names the last applied op.
+- Segments name block states by string, with their own small table, because the document's state table is renumbered on every save.
+- **Memory bound:** when the window passes the cap, it is persisted, then entries furthest from the undo point leave memory (never the one undo needs next). Undo or redo past the window loads the neighbouring segment back. Without a store (a document never saved in the workspace) the old behaviour stays: the oldest entries are dropped.
+- **Reopen:** `doc_open` attaches the segments and puts the undo point at `JournalHead`. Nothing is read until undo, redo or `history()` needs it. If `JournalHead` isn't in the chain (the journal and document disagree after a crash or a foreign save), history starts fresh and the next save replaces the folder.
+- A new edit after undo discards the redo tail on disk too, rewriting a segment that also holds kept entries.
+- Imports (`doc_open({path})`) and `doc_new` start a fresh journal folder. Only files named `doc.autosketch` (the workspace layout) persist a journal; `saveNative`/`loadNative` take `journal: boolean` to override.
+- Checkpoints are saved with the index. Creating one doesn't bump the revision, so it reaches disk with the next save.
+
+## Implementation status
+
+| Piece | Status |
+|-------|--------|
+| Voxel store, components, journal, checkpoints | Built (`document/`). |
+| Native format | Built (`native.ts`), including `JournalHead`. |
+| Journal persistence | Built (`journal.ts`, `journal-store.ts`): segments, memory window with load-back, history across reopen, redo-tail discard on disk, mismatch fallback. Synchronous file I/O: undo and redo are synchronous. |
+| Sandboxes (`11`) | Not built here (silo F). |
 
 ## Open questions
 

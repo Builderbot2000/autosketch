@@ -1,17 +1,20 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
 import nbt, { type Compound, type NBT } from "prismarine-nbt";
 import type { Box, Vec3 } from "../core/region.js";
 import { PaletteBook, type NamedPalette } from "../palette/pick.js";
 import type { Component } from "./components.js";
 import { Document, FACINGS, type DocMeta, type Facing } from "./document.js";
+import { JournalStore } from "./journal-store.js";
 import { StateTable, VoxelStore, type Section } from "./voxels.js";
 
 /**
  * Native document format `.autosketch` (docs/design/04-document.md): gzip NBT holding voxels
  * (16³ sections, local palette + bit-packed indices), block entities, entities, components,
- * palettes and meta. The journal is not persisted in v1: undo history starts fresh on open.
+ * palettes and meta. `Meta.JournalHead` records the seq of the last applied op; the journal
+ * itself lives in segments under `<doc>/journal/` (journal-store.ts), written and reopened by
+ * saveNative/loadNative for workspace documents (files named `doc.autosketch`).
  */
 
 export const NATIVE_VERSION = 1;
@@ -66,6 +69,7 @@ export function encodeNative(doc: Document): Buffer {
           Seed: int(meta.seed),
           CreatedAt: str(meta.createdAt),
           ...(meta.source ? { Source: str(meta.source) } : {}),
+          JournalHead: int(doc.journal.headSeq),
         },
       },
       Origin: ints([...doc.origin]),
@@ -138,20 +142,53 @@ export function decodeNative(buf: Buffer, opts: { palettes?: PaletteBook } = {})
   doc.entities = listOf<Compound["value"]>(v.Entities).map((value) => ({ type: "compound", value }));
   for (const c of JSON.parse(text(v.Components) ?? "[]") as Component[]) doc.components.set(c.id, c);
   for (const [k, e] of Object.entries(JSON.parse(text(v.Selections) ?? "{}") as Record<string, string | Record<string, unknown>>)) doc.selections.set(k, e);
+  journalHeads.set(doc, num(m.JournalHead) ?? 0);
   return doc;
 }
 
-export async function saveNative(doc: Document, path: string): Promise<number> {
+/** Seq of the last applied op when a decoded document was saved. */
+const journalHeads = new WeakMap<Document, number>();
+
+export interface JournalOption {
+  /** Persist/restore the journal in `<dir>/journal/` (default: only for files named doc.autosketch, the workspace layout). */
+  journal?: boolean;
+}
+
+const wantsJournal = (path: string, opts: JournalOption) => opts.journal ?? basename(path) === "doc.autosketch";
+
+/**
+ * Saves the document. With the journal on, entries not yet on disk go to `<dir>/journal/` first,
+ * so the saved document's JournalHead always names a persisted op.
+ */
+export async function saveNative(doc: Document, path: string, opts: JournalOption = {}): Promise<number> {
   const buf = encodeNative(doc);
   await mkdir(dirname(path), { recursive: true });
+  if (wantsJournal(path, opts)) {
+    const dir = join(dirname(path), "journal");
+    const j = doc.journal;
+    if (j.store?.dir !== dir) {
+      j.loadAll(); // moving to a new folder (or first save): bring everything into memory, start fresh there
+      j.store = JournalStore.create(dir, doc.states);
+    }
+    j.persist();
+  }
   const tmp = `${path}.tmp`;
   await writeFile(tmp, buf);
   await rename(tmp, path);
   return buf.length;
 }
 
-export async function loadNative(path: string, opts: { palettes?: PaletteBook } = {}): Promise<Document> {
-  return decodeNative(await readFile(path), opts);
+/**
+ * Loads a document. With the journal on, undo history continues from the saved segments when
+ * they match the document (its JournalHead is in them); otherwise history starts fresh.
+ */
+export async function loadNative(path: string, opts: { palettes?: PaletteBook } & JournalOption = {}): Promise<Document> {
+  const doc = decodeNative(await readFile(path), opts);
+  if (wantsJournal(path, opts)) {
+    const opened = JournalStore.open(join(dirname(path), "journal"), doc.states);
+    if (opened) doc.journal.attach(opened.store, opened.index, journalHeads.get(doc) ?? 0);
+  }
+  return doc;
 }
 
 type Tag = Compound["value"][string];

@@ -2,6 +2,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { PNG } from "pngjs";
+import type { Compound } from "prismarine-nbt";
 import { Document } from "../../../src/document/document.js";
 import { encodeBlueprint } from "../../../src/formats/axiom.js";
 import { snapshotOf } from "../../../src/formats/snapshot.js";
@@ -272,7 +273,56 @@ describe("stamp", () => {
     expect(doc.getState(0, 0, 0)).toBe("minecraft:oak_stairs[facing=east,half=bottom]");
     expect(r.warnings).toContain("wood: minecraft:granite has no stairs; kept minecraft:oak_stairs there");
     expect(() => stampPrefab(doc, env, prefab, loaded, { at: [0, 0, 0], remap: { roof: "granite" } })).toThrow(/has no role "roof"/);
-    expect(() => stampPrefab(doc, env, prefab, loaded, { at: [0, 0, 0], rotate: 90 })).toThrow(/silo A/);
+    expect(() => stampPrefab(doc, env, prefab, loaded, { at: [0, 0, 0], rotate: 45 })).toThrow(/multiple of 90/);
+  });
+
+  it("rotates a stamp: blocks, states, anchors and the component box turn with it", async () => {
+    const { c, prefab, loaded, doc } = await setup();
+    const r = stampPrefab(doc, { registry: c.registry, index: c.palette }, prefab, loaded, { at: [10, 5, 10], rotate: 90 });
+    // 3×2×1 along x becomes 1×2×3 along z; the base anchor (middle of the row) stays on `at`.
+    expect(r.origin).toEqual([10, 5, 9]);
+    expect(r.changed).toBe(4);
+    for (const z of [9, 10, 11]) expect(doc.getState(10, 5, z)).toBe("minecraft:andesite");
+    expect(doc.getState(10, 6, 10)).toBe("minecraft:oak_stairs[facing=south,half=bottom]");
+    expect(doc.getState(11, 5, 10)).toBe("minecraft:air");
+    expect(doc.componentLocal("step")).toMatchObject({ box: { min: [10, 5, 9], max: [11, 7, 12] }, anchors: { base: [10, 5, 10], top: [10, 6, 10] } });
+    doc.undo();
+    expect(doc.blockCount()).toBe(0);
+  });
+
+  it("mirrors, then rotates, and moves block entities with their blocks", async () => {
+    const c = await libraryContext();
+    const d = await tmp();
+    const src = Document.create({ name: "src", dataVersion: 3955 });
+    const nbt: Compound = { type: "compound", value: { id: { type: "string", value: "minecraft:chest" }, Lock: { type: "string", value: "k" } } };
+    src.edit("b", "b", (tx) => {
+      tx.set(0, 0, 0, "minecraft:andesite");
+      tx.set(2, 0, 0, "minecraft:oak_stairs[facing=east,half=bottom]");
+      tx.set(0, 0, 1, "minecraft:chest[facing=north,type=left]", nbt);
+    });
+    const { prefab } = await savePrefab([userRoot(d)], snapshotOf(src), { name: "lshape", anchors: { corner: [0, 0, 0] } });
+    const loaded = await loadPrefab(prefab, c.registry);
+    const env = { registry: c.registry, index: c.palette };
+
+    const m = Document.create({ name: "m", dataVersion: 3955 });
+    const rm = stampPrefab(m, env, prefab, loaded, { at: [0, 0, 0], anchor: "corner", mirror: "x" });
+    // Mirror x across the prefab's own centre: x → 2 - x, so the anchor block is now at prefab x = 2.
+    expect(rm.origin).toEqual([-2, 0, 0]);
+    expect(m.getState(0, 0, 0)).toBe("minecraft:andesite");
+    expect(m.getState(-2, 0, 0)).toMatch(/^minecraft:oak_stairs\[facing=west/);
+    expect(m.getState(0, 0, 1)).toMatch(/^minecraft:chest\[facing=north,type=right/);
+    expect(m.getBlockEntity(0, 0, 1)).toEqual(nbt);
+
+    const t = Document.create({ name: "t", dataVersion: 3955 });
+    const rt = stampPrefab(t, env, prefab, loaded, { at: [5, 0, 5], anchor: "corner", mirror: "x", rotate: 90 });
+    // Mirrored then turned clockwise: (x,z) → (2-x, z) → (1-z, 2-x).
+    expect(rt.origin).toEqual([4, 0, 3]);
+    expect(t.getState(5, 0, 5)).toBe("minecraft:andesite");
+    expect(t.getState(5, 0, 3)).toMatch(/^minecraft:oak_stairs\[facing=north/);
+    expect(t.getState(4, 0, 5)).toMatch(/^minecraft:chest\[facing=east,type=right/);
+    expect(t.getBlockEntity(4, 0, 5)).toEqual(nbt);
+    expect(t.getBlockEntity(5, 0, 6)).toBeUndefined();
+    expect(t.componentLocal("lshape")).toMatchObject({ box: { min: [4, 0, 3], max: [6, 1, 6] }, anchors: { corner: [5, 0, 5] } });
   });
 
   it("warns about namespaces missing from the instance and keeps unknown blocks", async () => {

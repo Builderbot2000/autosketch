@@ -1,8 +1,11 @@
 import { z } from "zod";
-import type { PublicBox } from "../../core/region.js";
+import type { Mask } from "../../core/mask.js";
+import type { Box, PublicBox } from "../../core/region.js";
+import { resolveSelection, type SelExpr } from "../../ops/selection.js";
+import { analyzeStructure, formatAnalysis } from "../../perception/analyze.js";
 import { renderDocument, VIEW_NAMES, type View } from "../../perception/render/render.js";
 import { viewSlice } from "../../perception/slice.js";
-import { bakerFor, box, boxSchema, image, text, type ToolDeps } from "./shared.js";
+import { bakerFor, box, boxSchema, image, selSchema, text, type ToolDeps } from "./shared.js";
 
 /** Renders and slices (06). */
 export function registerPerceptionTools({ tool, session }: ToolDeps): void {
@@ -54,5 +57,31 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
       },
     },
     (c, a) => text(viewSlice(session.require(), c.registry, { axis: a.axis, at: a.at, ...(a.region ? { region: box(a.region as PublicBox) } : {}) })),
+  );
+
+  tool(
+    "analyze",
+    {
+      title: "Analyze structure",
+      description:
+        "Structural summary of the build (or of one component / selection): footprint, storeys with floor heights, wall thickness and material, " +
+        "windows and doors per facade (front/back/left/right via the document's front), roof type, ridge, pitch and overhang, enclosed rooms, " +
+        "issues (floating blocks, roof gaps) and proposed components with boxes. Use it to check \"does this make sense?\" before rendering. Text, ~200–400 tokens.",
+      inputSchema: {
+        component: z.string().optional().describe("Analyse only this component's box"),
+        region: selSchema.optional().describe("Analyse only this selection"),
+      },
+    },
+    (c, a) => {
+      const doc = session.require();
+      if (a.component !== undefined && a.region !== undefined) throw new Error("give component or region, not both");
+      let region: Box | Mask | undefined;
+      if (a.component !== undefined) {
+        const comp = doc.componentLocal(a.component);
+        if (!comp) throw new Error(`no component "${a.component}"${doc.components.size ? ` (have: ${[...doc.components.keys()].join(", ")})` : ""}`);
+        region = comp.box;
+      } else if (a.region !== undefined) region = resolveSelection(a.region as SelExpr, { doc, registry: c.registry, index: c.palette }).mask;
+      return text(formatAnalysis(analyzeStructure(doc, { registry: c.registry, index: c.palette, ...(region ? { region } : {}) }), c.registry));
+    },
   );
 }

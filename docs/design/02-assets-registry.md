@@ -16,14 +16,28 @@ Configured by path (`AUTOSKETCH_INSTANCE`, or the `instance` argument at server 
 
 ## Layered pack VFS (`assets/pack.ts`)
 
-A read-only virtual filesystem over zip jars and folders, resolved like the game's resource manager:
+A read-only virtual filesystem over zip jars and folders, resolved like the game's resource manager. Single files (models, textures, blockstates) come from the topmost layer that has them. Tags and other merging data are read from every layer (`readAll`).
+
+Layer order (lowest priority first), as implemented in `locate.ts`:
 
 1. Base game jar
-2. Mod jars (all of `mods/*.jar`; `META-INF/jarjar` nested jars included)
-3. Generated packs: `kubejs/assets`, `dynamic-resource-pack-cache`, mod-provided built-in packs
-4. User resource packs, in the order of `options.txt` `resourcePacks`. Later entries win.
+2. The `mod_resources` group, placed where `options.txt` lists it:
+   - the loader jar (NeoForge/Forge `-universal.jar`)
+   - mod jars, alphabetical (`*.jar` only; `.disabled` is skipped). `META-INF/jarjar` nested jars with assets or data sit just below their parent.
+   - generated packs: `kubejs/` (assets and data), `dynamic-resource-pack-cache/*`, `dynamic-data-pack-cache/*`
+   - the instance `datapacks/` folder
+3. The remaining `options.txt` `resourcePacks` entries, in order: `file/<name>` resolves to `resourcepacks/<name>`. Bare names and `mod/<id>:<name>` are **built-in packs** inside the game or mod jars. `fabric` and `openloader/…` entries are skipped.
+4. OpenLoader packs (`config/openloader/packs`, filename order). They are force-enabled and placed on top.
 
-Jars are indexed by central directory only (file list, no decompression). Entries are decompressed lazily and cached. Craftoria has about 530 jars, so the cold index must run in seconds and the warm (cached) index in under 1 s.
+**Built-in packs:** the conventional location is `resourcepacks/<name>/`, but mods may register any folder in code. XyCraft registers `add_xycraft_overrides_stone` from `OverridesStone/`. As a fallback, top-level pack folders in jars are matched by normalised name, preferring jars whose name matches.
+
+**Pack overlays** (`pack.mcmeta` `overlays.entries`) are applied as higher-priority sub-folder layers, with assets matched against the resource pack format and data against the data pack format (1.21.1: 34 / 48).
+
+**Known approximation:** mod-to-mod order inside `mod_resources` follows the loader's dependency sort, which we don't reproduce. Conflicts over the same path between mods are rare. A future config option can pin the order.
+
+Jars are indexed by central directory only (file list, no decompression). Only `assets/`, `data/`, `resourcepacks/`, top-level pack folders, `META-INF/jarjar/` and mod metadata are indexed. Entries are decompressed lazily. A small LRU of file handles avoids fd exhaustion.
+
+**Measured on Craftoria** (WSL, instance on `/mnt/c`): 656 layers (532 mod jars, 59 nested jars, 38 OpenLoader packs), 409k indexed entries, 32,274 blockstate files across 526 namespaces. Cold open takes about 4–5 s with about 265 MB RSS. The persistent index cache (below) should bring a warm start under 1 s.
 
 ## Model resolution (`assets/models.ts`)
 

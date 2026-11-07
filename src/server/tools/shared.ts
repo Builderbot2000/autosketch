@@ -102,7 +102,7 @@ export function bakerFor(c: InstanceContext): Promise<BlockBaker> {
   if (!p) {
     p = (async () => {
       const loader = new TextureLoader(c.stack);
-      const tinter = new Tinter(loader);
+      const tinter = new Tinter(loader, c.tintBiome);
       await tinter.init();
       return new BlockBaker(c.stack, loader, tinter, c.registry);
     })();

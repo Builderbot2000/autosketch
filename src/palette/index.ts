@@ -1,3 +1,4 @@
+import { DEFAULT_TINT_BIOME } from "../assets/biomes.js";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
@@ -80,12 +81,15 @@ export interface PaletteOptions {
   plugins?: readonly AutosketchPlugin[];
   cacheDir?: string | false;
   concurrency?: number;
+  /** Biome for colormapped tints (02; default plains). Part of the cache key. */
+  tintBiome?: string;
 }
 
 export async function loadPaletteIndex(stack: PackStack, registry: Registry, opts: PaletteOptions = {}): Promise<{ index: PaletteIndex; cached: boolean }> {
   const fingerprint = registry.data.fingerprint;
   const cacheDir = opts.cacheDir === false ? undefined : (opts.cacheDir ?? defaultCacheDir());
-  const pluginKey = (opts.plugins ?? []).map((p) => p.id).join(",");
+  const tint = opts.tintBiome?.replace(/^minecraft:/, "").toLowerCase();
+  const pluginKey = (opts.plugins ?? []).map((p) => p.id).join(",") + (tint && tint !== DEFAULT_TINT_BIOME ? `|tint:${tint}` : "");
   const file = cacheDir && join(cacheDir, `palette-${fingerprint.slice(0, 16)}-${hashString(pluginKey)}.json.gz`);
   if (file) {
     try {
@@ -108,7 +112,7 @@ export async function loadPaletteIndex(stack: PackStack, registry: Registry, opt
 export async function buildPaletteIndexData(stack: PackStack, registry: Registry, opts: PaletteOptions = {}): Promise<PaletteIndexData> {
   const { families, series, looseCount } = buildFamilies(registry, opts.plugins ?? []);
   const textures = new TextureLoader(stack);
-  const tinter = new Tinter(textures);
+  const tinter = new Tinter(textures, opts.tintBiome);
   await tinter.init();
 
   const stats: Record<string, FamilyStats> = {};

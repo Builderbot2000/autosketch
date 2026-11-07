@@ -374,9 +374,10 @@ export class SheetRenderer {
   constructor(
     private readonly index: PaletteIndex,
     stack: PackStack,
+    opts: { tintBiome?: string } = {},
   ) {
     this.textures = new TextureLoader(stack);
-    this.tinter = new Tinter(this.textures);
+    this.tinter = new Tinter(this.textures, opts.tintBiome);
   }
 
   async render(spec: SheetSpec): Promise<RenderedSheet> {

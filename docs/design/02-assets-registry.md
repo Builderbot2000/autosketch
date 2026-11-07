@@ -47,7 +47,7 @@ Jars are indexed by central directory only (file list, no decompression). Only `
 - `models/block/*.json`: parent chain, texture variable resolution (`#var`), `elements` (from/to, per-face uv, rotation, `tintindex`, `cullface`), and builtin parents (`builtin/entity`, `builtin/generated`).
 - Output: a **baked model** per block state, made of cuboids with resolved texture refs, cached by state key.
 - **Code-drawn blocks** (chests, signs, beds, banners, heads, shulkers, bells) have no usable JSON model. They get hand-written fallback models in `assets/builtin-models/`.
-- **Tint:** `tintindex` faces use the grass/foliage colormaps at a configurable default biome (plains), plus fixed tints for water, redstone and stems.
+- **Tint:** `tintindex` faces use the grass/foliage colormaps at a configurable default biome (plains), plus fixed tints for water, redstone and stems. The biome is set with `tintBiome` (`--tint-biome` or `AUTOSKETCH_TINT_BIOME`, e.g. `jungle`, `minecraft:swamp`) and applies to renders, palette sheets and colour stats. `assets/biomes.ts` holds the vanilla overworld climates (temperature, downfall) and the code-side colours: fixed badlands and swamp colours (swamp grass varies by noise in game; we take one), mangrove foliage, and the dark forest grass blend. A non-default biome is part of the palette cache key. An unknown name fails at startup with the list of known biomes.
 - Unresolvable models fall back to the `particle` texture on a full cube, flagged `approximate`.
 
 ## Registry (`assets/registry.ts`)

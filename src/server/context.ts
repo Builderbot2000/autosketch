@@ -1,3 +1,4 @@
+import { biomeClimate } from "../assets/biomes.js";
 import { locateInstance, type InstanceInfo, type LocateOptions } from "../assets/locate.js";
 import { openStack, type PackStack } from "../assets/pack.js";
 import { loadRegistry, type Registry } from "../assets/registry.js";
@@ -19,15 +20,19 @@ export interface InstanceContext {
   book: PaletteBook;
   warnings: string[];
   timings: Record<string, number>;
+  /** Biome for colormapped tints (02); undefined = plains. */
+  tintBiome?: string;
 }
 
 export interface ServerConfig extends LocateOptions {
   instance: string;
   /** Folder for documents (default ~/autosketch). */
   workspace?: string;
+  /** Biome for grass/foliage tints in renders, sheets and colour stats (default plains). */
+  tintBiome?: string;
 }
 
-/** Reads config from CLI args (--instance, --version, --base-jar, --mod-order a,b) and env (AUTOSKETCH_*). */
+/** Reads config from CLI args (--instance, --version, --base-jar, --mod-order a,b, --tint-biome) and env (AUTOSKETCH_*). */
 export function configFromEnv(argv = process.argv.slice(2), env = process.env): ServerConfig | undefined {
   const arg = (name: string) => {
     const i = argv.indexOf(`--${name}`);
@@ -42,6 +47,8 @@ export function configFromEnv(argv = process.argv.slice(2), env = process.env): 
   if (baseJar) cfg.baseJar = baseJar;
   const modOrder = arg("mod-order") ?? env.AUTOSKETCH_MOD_ORDER;
   if (modOrder) cfg.modOrder = modOrder.split(",").map((s) => s.trim()).filter(Boolean);
+  const tintBiome = arg("tint-biome") ?? env.AUTOSKETCH_TINT_BIOME;
+  if (tintBiome) cfg.tintBiome = tintBiome;
   const workspace = arg("workspace") ?? env.AUTOSKETCH_WORKSPACE;
   if (workspace) cfg.workspace = workspace;
   return cfg;
@@ -56,12 +63,14 @@ export async function loadInstanceContext(cfg: ServerConfig, log: (msg: string) 
     log(`${label}: ${timings[label]} ms`);
     return r;
   };
+  if (cfg.tintBiome) biomeClimate(cfg.tintBiome); // fail early on a misspelt biome
+  const tint = cfg.tintBiome ? { tintBiome: cfg.tintBiome } : {};
   const info = await time("locate", () => locateInstance(cfg.instance, cfg));
   log(`instance ${info.name}: Minecraft ${info.mcVersion}${info.loader ? `, ${info.loader.name} ${info.loader.version}` : ""}, ${info.layers.length} layers`);
   const { stack, warnings } = await time("pack stack", () => openStack(info));
   const { registry } = await time("registry", () => loadRegistry(stack, { mcVersion: info.mcVersion, onProgress: log }));
   const plugins = activePlugins(BUILTIN_PLUGINS, registry);
-  const { index } = await time("palette", () => loadPaletteIndex(stack, registry, { plugins }));
+  const { index } = await time("palette", () => loadPaletteIndex(stack, registry, { plugins, ...tint }));
   log(`ready: ${registry.size} blocks, ${index.buildable().length} buildable families`);
   return {
     info: { name: info.name, mcVersion: info.mcVersion, loader: info.loader, launcher: info.launcher, root: info.root },
@@ -69,9 +78,10 @@ export async function loadInstanceContext(cfg: ServerConfig, log: (msg: string) 
     registry,
     palette: index,
     plugins,
-    sheets: new SheetRenderer(index, stack),
+    sheets: new SheetRenderer(index, stack, tint),
     book: new PaletteBook(),
     warnings: [...warnings, ...registry.data.warnings],
     timings,
+    ...tint,
   };
 }

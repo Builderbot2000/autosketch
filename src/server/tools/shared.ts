@@ -56,12 +56,13 @@ export const selSchema = z
       '{"sphere":{"center","radius"}} · {"ellipsoid":{"center","radii"}} · {"polygon":{"points":[[x,z],...],"y":[y0,y1]}} · {"plane":{"axis","at","within"?}} · ' +
       '{"connected":{"seed":[x,y,z],"match":"block|state|family|solid|air","connectivity":6|18|26,"within"?}} (flood fill) · {"similar":{"seed","by":"block|state|family","within"?}} · ' +
       '{"union":[a,b]} {"intersect":[a,b]} {"subtract":[a,b]} {"xor":[a,b]} {"invert":a,"within"?} · {"expand":a,"by":n|[dx,dy,dz]|{"up":n,...}} {"contract":a,"by":..} {"offset":a,"by":[dx,dy,dz]} · ' +
-      '{"shell":a,"thickness"?,"walls_only"?} {"layer":a,"y":n|"min"|"max"} {"surface":a} {"bbox":a} {"filter":a,"block"?:"oak_planks|#tag|*","air"?:bool}. Nest freely.',
+      '{"shell":a,"thickness"?,"walls_only"?} {"layer":a,"y":n|"min"|"max"} {"surface":a} {"bbox":a} {"filter":a,"block"?:"oak_planks|#tag|*","air"?:bool} · ' +
+      '{"rotate":a,"turns":n,"pivot"?:[x,y,z]} (clockwise from above) {"mirror":a,"axis":"x|y|z","about"?:n}. Nest freely.',
   );
 
 // ---- helpers -------------------------------------------------------------------------------------
 
-export const env = (c: InstanceContext): OpEnv => ({ registry: c.registry, index: c.palette });
+export const env = (c: InstanceContext): OpEnv => ({ registry: c.registry, index: c.palette, plugins: c.plugins });
 export const box = (b: PublicBox): Box => fromPublic(b);
 
 /**

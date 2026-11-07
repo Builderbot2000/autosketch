@@ -3,7 +3,9 @@ import { canonicalState, parseState, stateId, formatState } from "../core/blocks
 import { Mask, shellOf } from "../core/mask.js";
 import { boxVolume, formatBox, type Box, type Vec3 } from "../core/region.js";
 import type { Document, EditResult, Transaction } from "../document/document.js";
+import type { StateOverride } from "../core/rotate.js";
 import type { PaletteIndex } from "../palette/index.js";
+import type { AutosketchPlugin } from "../plugins/types.js";
 import { compileMaterial, type MaterialContext, type MaterialExpr } from "./material.js";
 
 /**
@@ -14,6 +16,43 @@ import { compileMaterial, type MaterialContext, type MaterialExpr } from "./mate
 export interface OpEnv {
   registry?: Registry;
   index?: PaletteIndex;
+  /** Active plugins: state-rotation overrides (01) and connection hooks (05). */
+  plugins?: readonly AutosketchPlugin[];
+}
+
+/** Plugin rotate overrides, in plugin order (09). */
+export function stateOverrides(env: OpEnv): StateOverride[] {
+  return (env.plugins ?? []).flatMap((p) => (p.rotate ? [p.rotate.bind(p)] : []));
+}
+
+/** Options every op shares (05): `raw` skips auto-connection; `as`/`kind` register a component. */
+export interface CommonOptions {
+  raw?: boolean;
+  as?: string;
+  kind?: string;
+}
+
+/** Runs an op body as one journal entry (05). */
+export function opEdit<T>(doc: Document, _env: OpEnv, op: string, summary: string, _opts: CommonOptions, body: (tx: Transaction) => T): EditResult & { value: T } {
+  return doc.edit(op, summary, body);
+}
+
+/** Registers `opts.as` for a local half-open box (04: ops register what they create). */
+export function registerAs(tx: Transaction, opts: CommonOptions, box: Box): void {
+  if (opts.as) tx.setComponent({ id: opts.as, box, ...(opts.kind ? { kind: opts.kind } : {}) });
+}
+
+/** Bounding box of a region; throws when it is empty. */
+export function regionBox(r: Region): Box {
+  const b = r instanceof Mask ? r.bbox() : r;
+  if (!b || boxVolume(b) === 0) throw new Error("the selection is empty");
+  return b;
+}
+
+/** Throws when a region is over the per-op volume limit. */
+export function checkRegion(r: Region): void {
+  if (r instanceof Mask) checkMask(r);
+  else checkVolume(r);
 }
 
 /** Largest box a single op may touch, to keep a typo from writing billions of blocks. */
@@ -65,10 +104,10 @@ export interface BlockPlacement {
   block: MaterialExpr;
 }
 
-export function setBlocks(doc: Document, env: OpEnv, blocks: BlockPlacement[], summary?: string): EditResult {
+export function setBlocks(doc: Document, env: OpEnv, blocks: BlockPlacement[], summary?: string, opts: CommonOptions = {}): EditResult {
   if (blocks.length === 0) throw new Error("no blocks given");
   if (blocks.length > 100_000) throw new Error("set_blocks takes at most 100,000 blocks per call; use fill for regions");
-  return doc.edit("set_blocks", summary ?? `set_blocks ${blocks.length}`, (tx) => {
+  return opEdit(doc, env, "set_blocks", summary ?? `set_blocks ${blocks.length}${opts.as ? ` as ${opts.as}` : ""}`, opts, (tx) => {
     const ctx = materialContext(doc, env, tx);
     const cache = new Map<string, ReturnType<typeof compileMaterial>>();
     for (const b of blocks) {
@@ -77,6 +116,11 @@ export function setBlocks(doc: Document, env: OpEnv, blocks: BlockPlacement[], s
       let m = cache.get(k);
       if (!m) cache.set(k, (m = compileMaterial(b.block, ctx)));
       tx.set(b.pos[0], b.pos[1], b.pos[2], m(...b.pos));
+    }
+    if (opts.as) {
+      const ps = blocks.map((b) => b.pos);
+      const lo = [0, 1, 2].map((a) => Math.min(...ps.map((p) => p[a]!))) as Vec3, hi = [0, 1, 2].map((a) => Math.max(...ps.map((p) => p[a]!)) + 1) as Vec3;
+      registerAs(tx, opts, { min: lo, max: hi });
     }
   });
 }
@@ -91,13 +135,10 @@ function inMode(mode: FillMode, box: Box, x: number, y: number, z: number, t: nu
   return Math.min(dx, dy, dz) < t;
 }
 
-export interface FillOptions {
+export interface FillOptions extends CommonOptions {
   mode?: FillMode;
   /** Shell thickness for hollow/outline/walls (default 1). */
   thickness?: number;
-  /** Register the box (a selection's bounding box) as a component. */
-  as?: string;
-  kind?: string;
   /** Short description of the region for history (default: the box, or the selection's size). */
   label?: string;
 }
@@ -114,7 +155,7 @@ export function fill(doc: Document, env: OpEnv, region: Region, material: Materi
   const box = asBox(region);
   if (box) {
     checkVolume(box);
-    return doc.edit("fill", summary, (tx) => {
+    return opEdit(doc, env, "fill", summary, opts, (tx) => {
       const m = compileMaterial(material, materialContext(doc, env, tx, box));
       for (let y = box.min[1]; y < box.max[1]; y++)
         for (let z = box.min[2]; z < box.max[2]; z++)
@@ -122,33 +163,40 @@ export function fill(doc: Document, env: OpEnv, region: Region, material: Materi
             if (inMode(mode, box, x, y, z, t)) tx.set(x, y, z, m(x, y, z));
             else if (mode === "hollow") tx.clear(x, y, z);
           }
-      if (opts.as) tx.setComponent({ id: opts.as, box, ...(opts.kind ? { kind: opts.kind } : {}) });
+      registerAs(tx, opts, box);
     });
   }
   const mask = region as Mask;
   checkMask(mask);
   const bb = mask.bbox();
   if (!bb) throw new Error("the selection is empty; nothing to fill");
-  return doc.edit("fill", summary, (tx) => {
+  return opEdit(doc, env, "fill", summary, opts, (tx) => {
     const m = compileMaterial(material, materialContext(doc, env, tx, bb));
     const write = mode === "fill" ? mask : shellOf(mask, t, mode === "walls");
     write.forEach((x, y, z) => tx.set(x, y, z, m(x, y, z)));
     if (mode === "hollow") mask.forEach((x, y, z) => !write.has(x, y, z) && tx.clear(x, y, z));
-    if (opts.as) tx.setComponent({ id: opts.as, box: bb, ...(opts.kind ? { kind: opts.kind } : {}) });
+    registerAs(tx, opts, bb);
   });
 }
 
-export function clear(doc: Document, region: Region, label?: string): EditResult {
+/** clear: sets a region to air. `opts.env` lets auto-connection use the registry (neighbours of the hole update). */
+export function clear(doc: Document, region: Region, label?: string, opts: CommonOptions & { env?: OpEnv } = {}): EditResult {
+  const env = opts.env ?? {};
   const box = asBox(region);
+  const summary = `clear ${regionLabel(region, label)}${opts.as ? ` as ${opts.as}` : ""}`;
   if (box) {
     checkVolume(box);
-    return doc.edit("clear", `clear ${regionLabel(box, label)}`, (tx) => {
+    return opEdit(doc, env, "clear", summary, opts, (tx) => {
       for (let y = box.min[1]; y < box.max[1]; y++) for (let z = box.min[2]; z < box.max[2]; z++) for (let x = box.min[0]; x < box.max[0]; x++) tx.clear(x, y, z);
+      registerAs(tx, opts, box);
     });
   }
   const mask = region as Mask;
   checkMask(mask);
-  return doc.edit("clear", `clear ${regionLabel(mask, label)}`, (tx) => mask.forEach((x, y, z) => tx.clear(x, y, z)));
+  return opEdit(doc, env, "clear", summary, opts, (tx) => {
+    mask.forEach((x, y, z) => tx.clear(x, y, z));
+    registerAs(tx, opts, regionBox(mask));
+  });
 }
 
 /**
@@ -176,7 +224,7 @@ export function blockMatcher(spec: string, registry?: Registry): (state: string)
   };
 }
 
-export interface ReplaceOptions {
+export interface ReplaceOptions extends CommonOptions {
   /** Copy matching properties (facing, half, axis…) from the old block onto the new one. */
   keepStates?: boolean;
   label?: string;
@@ -190,7 +238,8 @@ export function replace(doc: Document, env: OpEnv, region: Region, from: string,
   else checkMask(mask!);
   const box = asB ?? mask!.bbox();
   if (!box) throw new Error("the selection is empty; nothing to replace");
-  return doc.edit("replace", `replace ${from} → ${describeMaterial(to)} in ${regionLabel(region, opts.label)}`, (tx) => {
+  return opEdit(doc, env, "replace", `replace ${from} → ${describeMaterial(to)} in ${regionLabel(region, opts.label)}${opts.as ? ` as ${opts.as}` : ""}`, opts, (tx) => {
+    registerAs(tx, opts, box);
     const m = compileMaterial(to, materialContext(doc, env, tx, box));
     const air = from.trim() === "minecraft:air" || from.trim() === "air";
     const visit = (x: number, y: number, z: number, cur: string) => {

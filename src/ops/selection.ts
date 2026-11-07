@@ -1,6 +1,7 @@
 import type { Registry } from "../assets/registry.js";
 import { stateId } from "../core/blockstate.js";
 import { Mask, shellOf } from "../core/mask.js";
+import { defaultPivot, mirrorPos, rotatePos, type MirrorAxis } from "../core/rotate.js";
 import { boxVolume, formatBox, fromPublic, intersectBox, isEmptyBox, type Box, type PublicBox, type Vec3 } from "../core/region.js";
 import type { Document } from "../document/document.js";
 import type { PaletteIndex } from "../palette/index.js";
@@ -20,6 +21,7 @@ import { blockMatcher, MAX_OP_VOLUME } from "./edit.js";
  * Modifiers   {"expand":a,"by":n|[dx,dy,dz]|{up,down,north,south,east,west}} · {"contract":a,"by":..}
  *             {"offset":a,"by":[dx,dy,dz]} · {"shell":a,"thickness"?,"walls_only"?} · {"layer":a,"y":n|"min"|"max"}
  *             {"surface":a} · {"bbox":a} · {"filter":a,"block"?:"..","air"?:bool}
+ *             {"rotate":a,"turns":n,"pivot"?:[x,y,z]} · {"mirror":a,"axis":"x|y|z","about"?:n}
  */
 
 export type SelExpr = string | { [k: string]: unknown };
@@ -260,6 +262,31 @@ const BUILDERS: Record<string, (e: Record<string, unknown>, b: BuildEnv) => Mask
   contract: (e, b) => morph(b.ev(e.contract), parseBy(e.by ?? 1, "contract.by"), "erode"),
 
   offset: (e, b) => b.ev(e.offset).translated(vec(e.by, "offset.by")),
+
+  rotate: (e, b) => {
+    const m = b.ev(e.rotate);
+    const turns = int(e.turns ?? 1, "rotate.turns");
+    const bb = m.bbox();
+    if (!bb) return m;
+    const pivot = e.pivot !== undefined ? vec(e.pivot, "rotate.pivot") : defaultPivot(bb);
+    const out = new Mask();
+    m.forEach((x, y, z) => out.add(...rotatePos([x, y, z], turns, pivot)));
+    return out;
+  },
+
+  mirror: (e, b) => {
+    const m = b.ev(e.mirror);
+    const axis = e.axis as MirrorAxis;
+    if (!["x", "y", "z"].includes(axis)) throw new Error('mirror.axis must be "x", "y" or "z"');
+    const bb = m.bbox();
+    if (!bb) return m;
+    const a = "xyz".indexOf(axis);
+    const about = e.about !== undefined ? num(e.about, "mirror.about") : (bb.min[a]! + bb.max[a]! - 1) / 2;
+    if (!Number.isInteger(about * 2)) throw new Error("mirror.about must be a block coordinate or a half (e.g. 4 or 4.5)");
+    const out = new Mask();
+    m.forEach((x, y, z) => out.add(...mirrorPos([x, y, z], axis, about)));
+    return out;
+  },
 
   shell: (e, b) => {
     const m = b.ev(e.shell);

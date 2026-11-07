@@ -63,8 +63,8 @@ describe("MCP server", () => {
     const client = await connect(fixtureContext());
     const tools = (await client.listTools()).tools.map((t) => t.name).sort();
     expect(tools).toEqual([
-      "block_info", "checkpoint", "clear", "doc_info", "doc_list", "doc_new", "doc_open", "export", "fill", "history", "instance_info",
-      "palette_pick", "palette_sheet", "palette_show", "redo", "render", "replace", "restore", "select", "set_blocks", "undo", "view_slice",
+      "block_info", "checkpoint", "clear", "copy", "doc_info", "doc_list", "doc_new", "doc_open", "export", "fill", "history", "instance_info",
+      "mirror", "move", "palette_pick", "palette_sheet", "palette_show", "redo", "render", "replace", "restore", "rotate", "select", "set_blocks", "undo", "view_slice",
     ]);
     expect(client.getInstructions()).toMatch(/palette:<name>\.<role>/);
   });

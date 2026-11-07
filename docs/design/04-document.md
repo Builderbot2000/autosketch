@@ -30,9 +30,10 @@ interface Document {
 
 ### Voxel store
 
-- Chunked into 16³ sections, each with a local palette of block-state ids and bit-packed indices. Empty sections are not stored.
+- Chunked into 16³ sections. Empty sections are not stored. In memory a section is a flat array of global state ids (8 KB). The native file stores each section as a local palette plus bit-packed indices.
 - A global state table interns canonical state strings (`01`) as integer ids.
-- Bounds grow on write and are normalised on save (`01`).
+- Bounds grow on write, into negative coordinates if needed, and never shift existing coordinates while editing. Exports normalise them (`01`, `08`).
+- Implementation: blocks are stored in internal "store" coordinates plus an `origin` offset, and journal entries use store coordinates, so a future explicit re-origin is O(1) and keeps undo valid.
 - Expected scale: v1 targets builds up to about 512³ in bounding box with a few million non-air blocks.
 
 ### Component graph (semantic layer)
@@ -69,7 +70,7 @@ interface Component {
 <workspace>/
   <doc-name>/
     doc.autosketch       # native format: gzip NBT (voxels, NBT, components, palettes, meta)
-    journal/             # compacted journal segments
+    journal/             # compacted journal segments (not yet: v1 keeps the journal in memory, so undo history starts fresh on open)
     exports/             # last exported .schem/.bp/.nbt (08)
 ```
 

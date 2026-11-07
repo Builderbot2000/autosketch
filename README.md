@@ -5,7 +5,7 @@ A local, FOSS MCP server that lets AI agents build Minecraft schematics with hig
 - Reads blocks and textures from **your own** Minecraft instance (vanilla or CurseForge, modded included). No game assets are shipped.
 - Exports to **Axiom** (`.bp` / `.schem`) and **Create** (`.nbt`) schematics.
 
-Status: early development. Material palettes work; building tools are next. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Status: early development. Material palettes, documents and basic editing (fill, replace, undo, checkpoints, text slices) work; renders and export are next. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Use with Claude Code
 
@@ -13,6 +13,8 @@ Status: early development. Material palettes work; building tools are next. See 
 npm install && npm run build
 claude mcp add autosketch -- node /path/to/autosketch/dist/server/index.js --instance "/path/to/your/minecraft/instance"
 ```
+
+Documents are saved to `~/autosketch/<name>/doc.autosketch` (change with `--workspace` or `AUTOSKETCH_WORKSPACE`).
 
 The instance is a CurseForge instance folder (e.g. `.../curseforge/minecraft/Instances/<pack>`), a vanilla `.minecraft` folder (add `--version 1.21.1`), or any folder with `mods/` plus `--base-jar <client.jar>`. Under WSL, Windows paths look like `/mnt/c/Users/<you>/...`.
 
@@ -27,6 +29,14 @@ The first start indexes the instance (tens of seconds for a large modpack); late
 | `palette_show` | Describes saved palettes: blocks, colours, shapes available per role |
 | `block_info` | Block properties, defaults, shape, family, variants; or search by name |
 | `instance_info` | What instance is loaded, counts, warnings |
+| `doc_new` / `doc_open` / `doc_list` / `doc_info` | Start, reopen, list and summarise documents (one open at a time, autosaved) |
+| `fill` | Fill a box with a material; modes fill, hollow, outline, walls; `as` registers a component |
+| `set_blocks` | Place individual blocks (details: doors, lanterns, single stairs) |
+| `replace` / `clear` | Swap blocks by id, state, tag or `*` (optionally keeping facing/half/axis); empty a box |
+| `undo` / `redo` / `checkpoint` / `restore` / `history` | Every op is one undo step; named checkpoints for risky work |
+| `view_slice` | One layer as a character grid with legend: plan (y) or elevation (x/z) |
+
+Materials work anywhere a block does: `"stone_bricks"`, `"oak_stairs[facing=east]"`, `"a 70%, b 30%"`, `"palette:<name>.<role>"`, gradients, noise and patterns.
 
 ## Development
 

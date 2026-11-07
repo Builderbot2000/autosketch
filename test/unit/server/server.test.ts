@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { PNG } from "pngjs";
@@ -8,6 +11,10 @@ import { layoutSheet, columnLabel, SheetRenderer } from "../../../src/palette/sh
 import type { InstanceContext } from "../../../src/server/context.js";
 import { configFromEnv } from "../../../src/server/context.js";
 import { createServer } from "../../../src/server/server.js";
+import { Session } from "../../../src/server/session.js";
+
+const workspace = mkdtempSync(join(tmpdir(), "autosketch-ws-"));
+afterAll(() => rmSync(workspace, { recursive: true, force: true }));
 import { solidPng } from "../../helpers/fixtures.js";
 import { fakeRegistry, partial } from "../../helpers/registry.js";
 import { memStack } from "../../helpers/stack.js";
@@ -40,8 +47,8 @@ async function fixtureContext(): Promise<InstanceContext> {
   };
 }
 
-async function connect(ctx: Promise<InstanceContext>) {
-  const server = createServer(ctx);
+async function connect(ctx: Promise<InstanceContext>, session = new Session(workspace)) {
+  const server = createServer(ctx, { session });
   const [a, b] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "test", version: "0" });
   await Promise.all([server.connect(a), client.connect(b)]);
@@ -55,7 +62,10 @@ describe("MCP server", () => {
   it("advertises tools and instructions", async () => {
     const client = await connect(fixtureContext());
     const tools = (await client.listTools()).tools.map((t) => t.name).sort();
-    expect(tools).toEqual(["block_info", "instance_info", "palette_pick", "palette_sheet", "palette_show"]);
+    expect(tools).toEqual([
+      "block_info", "checkpoint", "clear", "doc_info", "doc_list", "doc_new", "doc_open", "fill", "history", "instance_info",
+      "palette_pick", "palette_sheet", "palette_show", "redo", "replace", "restore", "set_blocks", "undo", "view_slice",
+    ]);
     expect(client.getInstructions()).toMatch(/palette:<name>\.<role>/);
   });
 
@@ -117,5 +127,47 @@ describe("MCP server", () => {
     expect(configFromEnv(["--instance", "/x", "--version", "1.21.1"], {})).toEqual({ instance: "/x", version: "1.21.1" });
     expect(configFromEnv([], { AUTOSKETCH_INSTANCE: "/y" })).toEqual({ instance: "/y" });
     expect(configFromEnv([], {})).toBeUndefined();
+    expect(configFromEnv(["--instance", "/x", "--workspace", "/w"], {})).toEqual({ instance: "/x", workspace: "/w" });
+  });
+
+  it("builds, checks, undoes, checkpoints and reopens a document", async () => {
+    const ctx = await fixtureContext();
+    const session = new Session(workspace);
+    const client = await connect(Promise.resolve(ctx), session);
+    const call = async (name: string, args: Record<string, unknown> = {}) => {
+      const r = await client.callTool({ name, arguments: args });
+      return { text: textOf(r), error: !!r.isError };
+    };
+
+    expect((await call("fill", { box: { min: [0, 0, 0], max: [1, 1, 1] }, material: "andesite" })).text).toMatch(/No document is open/);
+    expect((await call("doc_new", { name: "hut", size: [5, 4, 5], seed: 3 })).text).toMatch(/created "hut"[\s\S]*doc 5×4×5/);
+    expect((await call("doc_new", { name: "hut" })).text).toMatch(/already exists/);
+
+    const walls = await call("fill", { box: { min: [0, 0, 0], max: [4, 3, 4] }, material: "andesite", mode: "hollow", as: "hut" });
+    expect(walls.text).toMatch(/^ok · fill · 82 blocks changed · box \(0,0,0\)–\(4,3,4\)\ncomponent: hut/);
+    expect((await call("checkpoint", { name: "shell" })).text).toMatch(/checkpoint "shell" at op #1/);
+    await call("set_blocks", { blocks: [{ pos: [2, 1, 0], block: "andesite_stairs[facing=south]" }] });
+    expect((await call("replace", { from: "andesite", to: "oak_planks 50%, andesite 50%" })).error).toBe(false);
+    const bad = await call("set_blocks", { blocks: [{ pos: [0, 0, 0], block: "andesite_stairs[facing=up]" }] });
+    expect(bad).toEqual({ error: true, text: "facing=up is invalid for minecraft:andesite_stairs; valid: north|south|east|west" });
+
+    const slice = (await call("view_slice", { axis: "z", at: 0 })).text;
+    expect(slice).toMatch(/elevation looking north/);
+    expect(slice).toMatch(/andesite_stairs\[facing=south\] \(1\)/);
+
+    const grow = await call("set_blocks", { blocks: [{ pos: [-2, 0, 0], block: "oak_planks" }] });
+    expect(grow.text).toMatch(/doc 7×4×5 \(x×y×z\), 83 blocks · bounds \(-2,0,0\)–\(4,3,4\)/);
+    expect((await call("undo")).text).toMatch(/undid 1: #4 set_blocks 1\ndoc 5×4×5/);
+    expect((await call("history")).text).toMatch(/#1 fill hollow[\s\S]*◆ checkpoint shell[\s\S]*↷ #4/);
+    expect((await call("restore", { name: "shell" })).text).toMatch(/restored "shell" \(undid 2 ops\)/);
+    const info = (await call("doc_info")).text;
+    expect(info).toMatch(/bounds \(0,0,0\)–\(4,3,4\) = 5×4×5 \(x×y×z\) · 82 blocks/);
+    expect(info).toMatch(/components: hut \(0,0,0\)–\(4,3,4\)/);
+
+    // Saved on close, reopened with the same content.
+    await session.close();
+    expect((await call("doc_list")).text).toMatch(/^hut · /);
+    expect((await call("doc_open", { name: "hut" })).text).toMatch(/82 blocks[\s\S]*components: hut/);
+    expect((await call("doc_open", { name: "nope" })).text).toMatch(/no document "nope"[\s\S]*have: hut/);
   });
 });

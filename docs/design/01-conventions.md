@@ -5,8 +5,9 @@ These contracts are shared by every tool, render label and file format. Changing
 ## Coordinates
 
 - **Axes match Minecraft:** +X = east, +Y = up, +Z = south. Integer block coordinates.
-- **Document-local space.** Every coordinate an agent sees is local to the current schematic. Local (0,0,0) is the **minimum corner** of the schematic's bounding box. World placement is an export concern (`08`), never an ops concern.
-- **Negative coordinates are allowed while editing.** If an op writes outside the current bounds, the document grows. On save, the bounds are normalised so the minimum corner is (0,0,0). The op result reports any shift: `"origin shifted by (-3,0,0)"`.
+- **Document-local space.** Every coordinate an agent sees is local to the current schematic. A new document starts with (0,0,0) at the minimum corner of its declared size. World placement is an export concern (`08`), never an ops concern.
+- **Coordinates are stable while editing.** If an op writes outside the current bounds, the document grows, into negative coordinates if needed (a roof overhang at x=-1 makes the bounds start at -1). Existing coordinates never change, so a planned build stays valid op after op. Op results report the bounds when they extend below zero. **Exports normalise**: the exported file's minimum corner is (0,0,0), and the export result reports the offset.
+  - *Why:* an earlier rule renumbered the document after every op so the minimum corner stayed at (0,0,0). In the first real test build each roof-overhang row shifted every later coordinate by one, which smeared the build. Agents plan in absolute coordinates, so the frame must not move under them.
 
 ## Regions
 

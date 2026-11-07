@@ -99,6 +99,22 @@ describe("dye series", () => {
   ]);
   const { families, series } = buildFamilies(reg, []);
 
+  it("does not turn other mods' colour sets into suffix magnets", () => {
+    const reg2 = fakeRegistry([
+      ...DYES.map((d) => ({ id: `minecraft:${d}_wool` })),
+      // A mod with dye-coloured planks forms its own series…
+      ...DYES.map((d) => ({ id: `colormod:${d}_planks` })),
+      // …but vanilla and other woods must stay ordinary families.
+      ...["oak", "spruce", "birch", "jungle", "acacia", "dark_oak", "mangrove", "cherry"].map((w) => ({ id: `minecraft:${w}_planks`, tags: ["minecraft:planks"] })),
+      ...["fir", "maple", "willow", "palm", "redwood", "ebony", "cypress", "aspen"].map((w) => ({ id: `woodmod:${w}_planks`, tags: ["minecraft:planks"] })),
+    ]);
+    const r = buildFamilies(reg2, []);
+    expect(r.series.map((s) => s.id).sort()).toEqual(["colormod:*_planks", "minecraft:*_wool"]);
+    expect(r.families.find((f) => f.id === "minecraft:oak_planks")).toMatchObject({ category: "wood" });
+    expect(r.families.find((f) => f.id === "minecraft:oak_planks")!.series).toBeUndefined();
+    expect(r.families.find((f) => f.id === "woodmod:fir_planks")!.series).toBeUndefined();
+  });
+
   it("adds extra-dye mods as a series by suffix", () => {
     expect(series.find((s) => s.id === "dyemod:*_wool")?.members).toHaveLength(10);
     expect(families.find((f) => f.id === "dyemod:peach_wool")!.category).toBe("colored");

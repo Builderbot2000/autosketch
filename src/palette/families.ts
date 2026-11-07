@@ -294,11 +294,14 @@ export function buildFamilies(registry: Registry, plugins: readonly AutosketchPl
   }
   // Mods that add extra dye colours (Dyenamics: peach_wool, aquamarine_concrete…) join by suffix:
   // any family "<colour>_<rest>" where a dye series "*_<rest>" exists.
-  const suffixes = [...new Set(series.map((x) => x.id.slice(x.id.indexOf("*") + 1)).filter((r) => r.startsWith("_")))];
+  // Only vanilla dye-series suffixes count: a mod's own colour set (e.g. coloured planks) must not
+  // pull unrelated families like oak/spruce planks into a fake series.
+  const suffixes = [...new Set(series.filter((x) => x.id.startsWith("minecraft:*_")).map((x) => x.id.slice(x.id.indexOf("*") + 1)))];
   const extra = new Map<string, string[]>();
   for (const f of families.values()) {
     if (f.series) continue;
     const [ns, path] = split(f.base);
+    if (ns === "minecraft") continue;
     const rest = suffixes.find((r) => path.endsWith(r) && /^[a-z]+(_[a-z]+)?$/.test(path.slice(0, -r.length)));
     if (!rest) continue;
     const key = `${ns}:*${rest}`;

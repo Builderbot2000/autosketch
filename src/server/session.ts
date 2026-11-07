@@ -1,7 +1,8 @@
 import { access, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { Vec3 } from "../core/region.js";
+import { NO_EVENTS, type EventSink } from "../core/events.js";
+import { toPublic, type Vec3 } from "../core/region.js";
 import { dataVersionFor } from "../core/version.js";
 import { Document, type Facing } from "../document/document.js";
 import { loadNative, saveNative } from "../document/native.js";
@@ -21,6 +22,8 @@ export const AUTOSAVE_MS = 400;
 
 export class Session {
   doc?: Document;
+  /** Observability sink (12), handed to each document this session opens. Never read back. */
+  events: EventSink = NO_EVENTS;
   private savedRevision = -1;
   private timer?: NodeJS.Timeout;
   private saving: Promise<void> = Promise.resolve();
@@ -57,6 +60,7 @@ export class Session {
       ...(opts.seed !== undefined ? { seed: opts.seed } : {}),
     });
     this.savedRevision = -1;
+    this.observe(this.doc);
     await this.flush();
     return this.doc;
   }
@@ -73,6 +77,7 @@ export class Session {
     doc.meta.name = name;
     this.doc = doc;
     this.savedRevision = doc.revision;
+    this.observe(doc);
     return doc;
   }
 
@@ -83,6 +88,7 @@ export class Session {
     await this.close();
     this.doc = doc;
     this.savedRevision = -1;
+    this.observe(doc);
     await this.flush();
     return doc;
   }
@@ -137,7 +143,16 @@ export class Session {
 
   async close(): Promise<void> {
     await this.flush();
+    if (this.doc && this.events.enabled) this.events.emit({ kind: "session.close", name: this.doc.meta.name });
     this.doc = undefined;
+  }
+
+  /** Hands the sink to a newly current document and announces it (12, `session.open`). */
+  private observe(doc: Document): void {
+    doc.events = this.events;
+    if (!this.events.enabled) return;
+    const b = doc.localBounds();
+    this.events.emit({ kind: "session.open", name: doc.meta.name, ...(b ? { bounds: toPublic(b) } : {}) });
   }
 }
 

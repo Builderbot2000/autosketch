@@ -4,13 +4,17 @@
  *
  *   autosketch --instance "/path/to/instance" [--version 1.21.1] [--base-jar client.jar] [--workspace ~/autosketch]
  *   (or AUTOSKETCH_INSTANCE / AUTOSKETCH_VERSION / AUTOSKETCH_BASE_JAR / AUTOSKETCH_WORKSPACE)
+ *   settings: --set observe.log=false (or AUTOSKETCH_OBSERVE_LOG=false), see core/settings.ts
  *
  * stdout carries the protocol; all logging goes to stderr.
  */
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { Settings } from "../core/settings.js";
+import { startObserve, type Observer } from "../observe/index.js";
 import { configFromEnv, loadInstanceContext } from "./context.js";
-import { createServer } from "./server.js";
+import { createServer, SERVER_VERSION } from "./server.js";
 import { defaultWorkspace, Session } from "./session.js";
+import { bakerFor } from "./tools/shared.js";
 
 const log = (msg: string) => process.stderr.write(`[autosketch] ${msg}\n`);
 
@@ -24,6 +28,16 @@ async function main(): Promise<void> {
   ctx.catch((e: Error) => log(`failed to load instance: ${e.message}`));
   const workspace = cfg.workspace ?? defaultWorkspace();
   const session = new Session(workspace, log);
+  // Observability (12): the process entry point is the one place that wires observe/ in; the
+  // session, documents and tool wrapper only see the EventSink.
+  let observer: Observer;
+  try {
+    observer = startObserve({ workspace, settings: Settings.from(), version: SERVER_VERSION, getDoc: () => session.doc, getBaker: async () => bakerFor(await ctx), log });
+  } catch (e) {
+    log((e as Error).message);
+    process.exit(2);
+  }
+  session.events = observer.sink("base");
   const server = createServer(ctx, { session });
   const transport = new StdioServerTransport();
   // Save the open document before exiting, so a closed client never loses the last op.
@@ -31,7 +45,8 @@ async function main(): Promise<void> {
   const shutdown = async (code: number) => {
     if (closing) return;
     closing = true;
-    await session.flush();
+    await session.close();
+    await observer.close();
     process.exit(code);
   };
   transport.onclose = () => void shutdown(0);

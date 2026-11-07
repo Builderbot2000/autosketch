@@ -2,6 +2,7 @@ import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mc
 import type { z } from "zod";
 import type { InstanceContext } from "./context.js";
 import { INSTRUCTIONS } from "./instructions.js";
+import { noteError, observeCall } from "./observe-call.js";
 import { defaultWorkspace, Session } from "./session.js";
 import { TOOL_GROUPS } from "./tools/index.js";
 import { fail, type ResourceFn, type Result, type ToolFn } from "./tools/shared.js";
@@ -31,7 +32,7 @@ export function createServer(ctx: Promise<InstanceContext>, opts: ServerOptions 
     server.registerTool(
       name,
       { title: config.title, description: config.description, inputSchema: config.inputSchema, annotations: { readOnlyHint: config.readOnly ?? true, openWorldHint: false } },
-      (async (args: z.infer<z.ZodObject<S>>) => {
+      observeCall(() => session.events, name, async (args: z.infer<z.ZodObject<S>>) => {
         let c: InstanceContext;
         try {
           c = await ctx;
@@ -41,7 +42,7 @@ export function createServer(ctx: Promise<InstanceContext>, opts: ServerOptions 
         try {
           return await run(c, args);
         } catch (e) {
-          return fail((e as Error).message);
+          return noteError(fail((e as Error).message), e);
         }
       }) as never,
     );

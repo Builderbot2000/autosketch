@@ -130,6 +130,34 @@ The server never sees model tokens. It records response sizes, and the eval runn
 4. `deltas.bin`, then the timeline, the activity map and drill-in.
 5. Replay and `autosketch observe <path>`, then the eval-runner join.
 
+## Implementation status
+
+Phases 1 and 2 are built. Phases 3–5 wait on scoped sessions (`11`).
+
+| Piece | Status |
+|-------|--------|
+| `EventSink` | `src/core/events.ts`: the interface, `NO_EVENTS` (the default on every `Document` and `Session`), the typed `ObserveEvent` union for every kind in the table (scope kinds defined, not yet emitted) and `refusalCode()`. `document/` and `server/` import only this. |
+| Bus | `src/observe/bus.ts`. Stamps the envelope and calls subscribers synchronously; a throwing subscriber is isolated. Adds the server version to `session.open`. |
+| Hooks | `Document`: `doc.op` after each commit, `doc.undo`/`doc.redo` per step (so `restore` logs each step), `doc.checkpoint`. Payloads are built in `src/document/events.ts`, only when the sink is enabled. `Session`: `session.open` on create/open/adopt, `session.close` on close. Tool wrapper (`src/server/observe-call.ts`): `call.start`, `call.end` (ms, ok, text characters, image count, pixels read from the PNG header) and `call.refused`. `call.start`/`call.end` share a `call` number. `render.produced` is emitted for snapshots only; the `render` tool does not emit it yet. |
+| `events.ndjson` | `src/observe/log.ts`. Buffered, flushed every 200 ms off the call path. Past an 8 MB unwritten backlog, events are dropped and the next line is an `observe.dropped` marker with the count. |
+| Settings | `src/core/settings.ts` (general: `--set key=value`, then `AUTOSKETCH_<KEY>`, then the default). Observe keys in `src/observe/settings.ts`: `observe.log`, `observe.snapshots`, `observe.retainSessions`. The others in the table come with phases 3–4. |
+| Time-lapse | `src/observe/snapshots.ts`. `flat`, `iso_ne`, 512² into `snapshots/<seq>.png`, plus a `render.produced` event with `source: "snapshot"`. |
+| Wiring | `src/server/index.ts` (the process entry point) calls `startObserve()` and gives the session `observer.sink("base")`. Shutdown closes the session, waits up to 3 s for a pending snapshot, then flushes the log. |
+| Tests | `test/unit/observe/`: kinds-table payloads and `seq` order for ops, checkpoint, undo and redo; tool results identical with the log on and off; refusals; a stalled disk never blocking `emit`; op latency with and without the log; snapshots. `test/unit/core/settings.test.ts`. |
+| Not built | HTTP viewer, `deltas.bin` and `state.add`, replay, `autosketch observe`, scope events (phases 3–5). |
+
+Decisions made while building phases 1–2:
+
+- **`jseq`, not `seq`.** The payload's journal sequence number is called `jseq`, because `seq` is the envelope's session-wide counter.
+- **Counts by block, not family.** `doc.op` carries `counts: { placed: { "<block id>": n }, removed: n }`. `document/` can't see families (`palette/`). A viewer that wants families can map block ids itself.
+- **Boxes** are public inclusive boxes in the document's local frame after the op (the same frame as the op's result). `doc.op` adds `shift` when the op moved the origin.
+- **Refusals** are errors that carry a `refusal: "<code>"` property. The tool wrapper notes the error behind each error result, logs `call.refused` with that code and returns the result unchanged. Scoped sessions (`11`) should throw refusals this way.
+- **Which folder.** A server session can open several documents. Each document's events go to `<workspace>/<doc>/observe/<session-id>/`. Events from before any document is open (the `call.start` of the `doc_new` that opens one) are held (at most 256) and written to the next document's log. `seq` stays unique and increasing across all of them, so one document's log can have gaps.
+- **Pruning** runs when the session first writes to a document's `observe/` folder, not at process start: the server doesn't know which documents it will touch until then.
+- **Snapshot modes.** `"checkpoint"` renders after checkpoints on the base document; `"merge"` renders after `scope.merge`, so it renders nothing until scoped sessions exist. Renders are debounced (500 ms), wait until no tool call is in flight, and are serialised. A burst of triggers produces one snapshot of the latest state, named by the bus `seq` when its render starts.
+- **Main-thread rendering.** Snapshot renders run on the main thread, after tool calls finish. A tool call that arrives mid-render waits for the rasterizer's synchronous part. A worker thread would remove that, but it needs its own copy of the document and the pack stack. Not worth it until a large build shows the delay.
+- **Reading `perception/`.** Snapshots call `perception/render`, as this doc specifies. `ARCHITECTURE.md` lists only `document/` and `assets/` for `observe/`, so that rule should add `perception/` (read-only).
+
 ## Open questions
 
 - **Large documents in the browser.** At what size does the 3D view need chunked meshing with level of detail, or should it switch to the top-down map automatically? It should be measured on a large Craftoria build before deciding.

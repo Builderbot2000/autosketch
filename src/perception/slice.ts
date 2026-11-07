@@ -20,7 +20,15 @@ export interface SliceOptions {
   at: number;
   /** Local half-open box limiting the other two axes (defaults to the document bounds). */
   region?: Box;
+  /**
+   * grid (default): one character per block. runs: each row as runs of the same block
+   * ("x0-15 S, x20 G"), empty rows skipped: shorter for sparse layers, so the cap is larger.
+   */
+  mode?: "grid" | "runs";
 }
+
+/** Larger cap for run-length slices, which cost per run instead of per block. */
+export const SLICE_RUNS_MAX = 256;
 
 export function viewSlice(doc: Document, registry: Registry | undefined, opts: SliceOptions): string {
   const bounds = doc.localBounds();
@@ -38,14 +46,16 @@ export function viewSlice(doc: Document, registry: Registry | undefined, opts: S
   const [ca, ra, rowsDown] = a === 1 ? [0, 2, true] : a === 2 ? [0, 1, false] : [2, 1, false];
   const size = boxSize(layer);
   const notes: string[] = [];
+  const runs = opts.mode === "runs";
+  const cap = runs ? SLICE_RUNS_MAX : SLICE_MAX;
   let c0 = layer.min[ca]!, c1 = layer.max[ca]!, r0 = layer.min[ra]!, r1 = layer.max[ra]!;
-  if (size[ca]! > SLICE_MAX) {
-    c1 = c0 + SLICE_MAX;
+  if (size[ca]! > cap) {
+    c1 = c0 + cap;
     notes.push(`cropped ${axisName(ca)} to ${c0}..${c1 - 1} of ${layer.min[ca]}..${layer.max[ca]! - 1}; pass region to see the rest`);
   }
-  if (size[ra]! > SLICE_MAX) {
-    if (rowsDown) r1 = r0 + SLICE_MAX;
-    else r0 = r1 - SLICE_MAX;
+  if (size[ra]! > cap) {
+    if (rowsDown) r1 = r0 + cap;
+    else r0 = r1 - cap;
     notes.push(`cropped ${axisName(ra)} to ${r0}..${r1 - 1} of ${layer.min[ra]}..${layer.max[ra]! - 1}; pass region to see the rest`);
   }
 
@@ -71,6 +81,32 @@ export function viewSlice(doc: Document, registry: Registry | undefined, opts: S
   }
   const chars = assignChars([...counts.keys()].sort((x, y) => counts.get(y)! - counts.get(x)! || (x < y ? -1 : 1)), registry);
   if (chars.overflow) notes.push(`${chars.overflow} rarer states share "?"`);
+  const charOf = (s: string) => (s === "minecraft:air" ? "." : chars.map.get(s) ?? "?");
+  const legendLine = () => {
+    const legend = [...chars.map].map(([s, ch]) => `${ch} ${shortState(s, registry)} (${counts.get(s)})`);
+    return legend.length ? `legend: . air, ${legend.join(", ")}` : "legend: . air (layer is empty)";
+  };
+
+  if (runs) {
+    const out: string[] = [`${opts.axis}=${opts.at}  rows ${axisName(ra)}${rowsDown ? "↓" : "↑"} ${rowsDown ? `${r0}..${r1 - 1}` : `${r1 - 1}..${r0}`}, columns ${axisName(ca)} ${c0}..${c1 - 1}  (${viewName(a)}) · runs; rows not listed are empty`];
+    const cn = axisName(ca), rn = axisName(ra);
+    grid.forEach((line, i) => {
+      const parts: string[] = [];
+      for (let k = 0; k < line.length; ) {
+        let e = k;
+        while (e + 1 < line.length && line[e + 1] === line[k]) e++;
+        if (line[k] !== "minecraft:air") parts.push(`${cn}${c0 + k}${e > k ? `-${c0 + e}` : ""} ${charOf(line[k]!)}`);
+        k = e + 1;
+      }
+      if (parts.length) out.push(`${rn}${rows[i]}: ${parts.join(", ")}`);
+    });
+    out.push(legendLine());
+    for (const n of notes) out.push(`note: ${n}`);
+    return out.join("\n");
+  }
+  const solid = [...counts.values()].reduce((s, v) => s + v, 0);
+  const cellsN = rows.length * (c1 - c0);
+  if (cellsN > 400 && solid < cellsN * 0.1) notes.push('sparse layer: mode:"runs" lists it more briefly');
 
   const width = String(Math.max(...rows.map((r) => Math.abs(r)), 0)).length + (rows.some((r) => r < 0) ? 1 : 0);
   const pad = " ".repeat(width + 1);
@@ -83,9 +119,8 @@ export function viewSlice(doc: Document, registry: Registry | undefined, opts: S
   out.push(`${opts.axis}=${opts.at}  columns ${axisName(ca)}→ ${c0}..${c1 - 1}, rows ${axisName(ra)}${rowsDown ? "↓" : "↑"} ${rowsDown ? `${r0}..${r1 - 1}` : `${r1 - 1}..${r0}`}  (${viewName(a)})`);
   out.push(`${pad}${tens}`);
   out.push(`${pad}${units}`);
-  grid.forEach((line, i) => out.push(`${String(rows[i]).padStart(width)} ${line.map((s) => (s === "minecraft:air" ? "." : chars.map.get(s) ?? "?")).join("")}`));
-  const legend = [...chars.map].map(([s, ch]) => `${ch} ${shortState(s, registry)} (${counts.get(s)})`);
-  out.push(legend.length ? `legend: . air, ${legend.join(", ")}` : "legend: . air (layer is empty)");
+  grid.forEach((line, i) => out.push(`${String(rows[i]).padStart(width)} ${line.map(charOf).join("")}`));
+  out.push(legendLine());
   for (const n of notes) out.push(`note: ${n}`);
   return out.join("\n");
 }

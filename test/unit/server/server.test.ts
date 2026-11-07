@@ -63,10 +63,11 @@ describe("MCP server", () => {
     const client = await connect(fixtureContext());
     const tools = (await client.listTools()).tools.map((t) => t.name).sort();
     expect(tools).toEqual([
-      "array", "block_info", "checkpoint", "clear", "copy", "doc_info", "doc_list", "doc_new", "doc_open", "export", "extrude", "fill",
-      "history", "hollow", "instance_info", "knowledge_list", "knowledge_read", "mirror", "move", "ops_list", "paint", "palette_edit", "palette_list", "palette_load",
-      "palette_pick", "palette_save", "palette_sheet", "palette_show", "prefab_save", "prefab_search", "prefab_sheet", "procedure_list", "redo", "render", "replace", "restore",
-      "rotate", "run_procedure", "select", "set_blocks", "smooth", "stamp", "sweep", "undo", "view_slice",
+      "analyze", "array", "block_info", "checkpoint", "clear", "copy", "diff", "doc_info", "doc_list", "doc_new", "doc_open", "export",
+      "extrude", "fill", "history", "hollow", "instance_info", "knowledge_list", "knowledge_read", "mirror", "move", "ops_list", "paint", "palette_edit",
+      "palette_list", "palette_load", "palette_pick", "palette_save", "palette_sheet", "palette_show", "prefab_save", "prefab_search", "prefab_sheet", "procedure_list", "query_block", "query_column",
+      "query_region", "raycast", "redo", "render", "replace", "restore", "rotate", "run_procedure", "select", "set_blocks", "smooth", "stamp",
+      "sweep", "undo", "view_slice",
     ]);
     expect(client.getInstructions()).toMatch(/palette:<name>\.<role>/);
   });
@@ -181,6 +182,45 @@ describe("MCP server", () => {
     expect((await call("doc_list")).text).toMatch(/^hut · /);
     expect((await call("doc_open", { name: "hut" })).text).toMatch(/82 blocks[\s\S]*components: hut/);
     expect((await call("doc_open", { name: "nope" })).text).toMatch(/no document "nope"[\s\S]*have: hut/);
+  });
+
+  it("answers queries, analysis, diffs, raycasts and previews", async () => {
+    const ctx = await fixtureContext();
+    const session = new Session(workspace);
+    const client = await connect(Promise.resolve(ctx), session);
+    const call = async (name: string, args: Record<string, unknown> = {}) => {
+      const r = await client.callTool({ name, arguments: args });
+      return { text: textOf(r), error: !!r.isError, images: (r.content as Content).filter((c) => c.type === "image").length };
+    };
+    await call("doc_new", { name: "perceive", seed: 1, overwrite: true });
+    await call("fill", { box: { min: [0, 0, 0], max: [4, 0, 4] }, material: "andesite", as: "base" });
+    await call("checkpoint", { name: "a" });
+    const filled = await call("fill", { box: { min: [0, 1, 0], max: [4, 3, 4] }, material: "oak_planks", mode: "walls", preview: true });
+    expect(filled.images).toBe(1);
+    expect(filled.text).toMatch(/preview: render 512×512 · iso_se[\s\S]*highlighted 48 positions/);
+
+    expect((await call("query_block", { pos: [0, 0, 0] })).text).toBe("(0,0,0) andesite · in: base");
+    expect((await call("query_column", { x: 0, z: 0 })).text).toBe("column (0,0) bottom→top: y0 andesite, y1-3 oak_planks");
+    expect((await call("query_region", { sel: { min: [0, 0, 0], max: [4, 0, 4] } })).text).toMatch(/^region: 25 positions, 25 blocks \(100% solid\)[\s\S]*by family: andesite 25\ncomponents inside: base/);
+    expect((await call("analyze")).text).toMatch(/footprint: 5×5[\s\S]*storeys: 1 \(floor y=0; heights 4\)[\s\S]*roof: none/);
+    expect((await call("analyze", { component: "base" })).text).toMatch(/footprint: 5×5/);
+    expect((await call("analyze", { component: "nope" })).text).toMatch(/no component "nope" \(have: base\)/);
+
+    const diff = await call("diff", { since: "checkpoint:a", render: true });
+    expect(diff.text).toMatch(/^diff since checkpoint "a" \(1 op\): 48 positions changed[\s\S]*added: oak_planks 48/);
+    expect(diff.images).toBe(2);
+
+    const pic = await call("render", { views: ["top"], size: 256, region: { subtract: [{ min: [0, 0, 0], max: [4, 3, 4] }, { min: [3, 0, 3], max: [4, 3, 4] }] }, highlight: { since: "op:-1" }, style: "xray" });
+    expect(pic.text).toMatch(/id r\d+[\s\S]*\(selection\)[\s\S]*style xray/);
+    const id = /id (r\d+)/.exec(pic.text)![1];
+    const hit = await call("raycast", { view: id, px: 128, py: 128 });
+    // The middle of the plan looks down through the hollow walls onto the floor.
+    expect(hit.text).toBe(`${id} top (128,128) → (2,0,2) andesite, up face`);
+    expect((await call("raycast", { px: 5000, py: 5 })).text).toMatch(/outside render/);
+    expect((await call("render", { views: ["component:base", "front"], size: 256, cutaway: { plane: "x", at: 1, keep: "west" }, overlays: { components: true, storeys: true } })).text).toMatch(
+      /cutaway: kept west of x=1/,
+    );
+    expect((await call("view_slice", { axis: "y", at: 1, mode: "runs" })).text).toMatch(/z0: x0-4 O/);
   });
 
   it("exports to the workspace, the instance and a path, and imports the file back", async () => {

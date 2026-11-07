@@ -41,7 +41,7 @@ z↓   0123456789012345
 - **Views:** `iso_ne|iso_nw|iso_se|iso_sw` (3/4 isometric), `front|back|left|right|top` (orthographic elevations, resolved via `front`, `01`), `component:<id>` (auto-framed), or a custom camera `{ yaw, pitch, distance, target }`.
 - **Multi-view contact sheet:** `views: ["iso_ne","iso_sw","front","top"]` renders one image as a 2×2 grid. This is cheaper than four calls and makes comparison easier.
 - **Cutaway:** `{ maxY }`, `{ plane: "x", at, keep: "west" }`, or a component's interior.
-- **Subregions:** `region` takes any selection (`05`). Only blocks inside it are drawn, and only they hide faces, so a cut through solid material draws as a closed surface. The camera frames the region tightly, and axis ticks show the region's own coordinates. This was verified for boxes on 2026-11-07 (a cube cut from a 40×12×40 solid). Masks are not supported yet.
+- **Subregions:** `region` takes any selection (`05`). Only blocks inside it are drawn, and only they hide faces, so a cut through solid material draws as a closed surface. The camera frames the region tightly, and axis ticks show the region's own coordinates. This was verified for boxes on 2026-11-07 (a cube cut from a 40×12×40 solid). Masks work the same way: the tool layer resolves the selection and the renderer takes the mask.
 - **Highlight:** a selection or the last op's diff drawn as a tint or outline.
 - **Context volume** (in a sandbox, `11`; not yet implemented): `context: "ghost"` (default, desaturated and translucent) | `"normal"` | `"hide"`, so read-only surroundings are never mistaken for editable blocks.
 - **Overlays:** axis ticks every 4/8/16 blocks (adaptive), a compass, component labels (optional), and storey lines (optional).
@@ -88,6 +88,34 @@ The vocabulary is shared with knowledge packs (`07`), so the agent's style guida
 | Verify the last edit | op `preview: true` | ~350 |
 
 Each tool's description carries its cost hint.
+
+## Implementation status
+
+| Piece | Status |
+|-------|--------|
+| `query_block`, `query_column`, `query_region` | Done (`perception/query.ts`, `tools/query.ts`). `query_region` counts by family (palette index) and by role of the document's named palettes, and lists components fully or partly inside. It does not change `"last"`. |
+| `view_slice` | Done. `mode: "runs"` lists each non-empty row as runs (`x0-15 S, x20 G`) with a 256×256 cap; grid mode suggests it for large sparse layers. |
+| `render` styles | `textured`, `flat`, `depth` (flat colours darkened with distance along the view), `xray` (all shell faces, both sides, blended at 28%; highlighted blocks stay solid). |
+| `render` views | Named views, `component:<id>` (iso from the south-east, framed on the component box), custom `{yaw, pitch, distance?, target?}`. Views are orthographic, so `distance` is a zoom: the view frames a sphere of that radius around `target`. |
+| `render` region, cutaway | `region` takes any selection (resolved to a mask by the tool layer; an exact box takes the box path). Cutaways: `{maxY}` and `{plane, at, keep}` (the plane's own layer stays). A component-interior cutaway is not done. |
+| `render` highlight | A resolved mask (a selection, or `{since}` for a diff), tinted orange; highlighted air is drawn as wire cubes. The scene carries per-block flags; `CONTEXT` is reserved for sandbox ghosting (`11`), not drawn yet. |
+| `render` overlays | Component labels and storey floor lines (from `analyze`), both opt-in. |
+| `raycast` | Done. The cameras of the last 8 renders are kept per document (`perception/render/cameras.ts`, not saved); the render caption gives the id. Hits are voxel-level (the first non-air block in the drawn clip), with the face entered, and warn when the document changed since the render. |
+| Op `preview: true` | On `set_blocks`, `fill`, `clear`, `replace`: one 512² iso view of the changed box plus 2 blocks, changes highlighted. |
+| `analyze` | Done (`perception/analyze.ts`), see *Analysis methods* below. Checked against three fixture buildings in `test/helpers/buildings.ts` (gable house, two-storey hip roof, tower with battlements). Not done: z-fighting materials, round-footprint openings (openings are found on the footprint's bounding-box sides), dome/mansard roofs (reported as `other`). |
+| `diff` | Done (`perception/diff.ts`): `checkpoint:<name>` (or a bare name) and `op:-n`, in either journal direction; counts by family (added, removed, replaced, state-only changes) and up to 5 clustered regions. `render: true` adds before/after 384² images of the changed area, the before image from a read-only snapshot. |
+| Semantic and render-seeded selections | Not yet (wave 2: `face`, `storey`, `roof`, `room`, `interior`, `openings`, `top`, `changed`, `view_box`, `view_lasso`). |
+
+### Analysis methods
+
+- **Blocks are classed by id:** doors and fence gates (door), glass, panes and bars (window), stairs and slabs (roof material), decor (torches, flowers, carpets, signs, trapdoors and other non-colliding blocks; the registry's `shape: none` too), walls and fences (partial), everything else solid.
+- **Footprint:** the commonest per-layer bounding box of wall-like blocks, so roof overhangs don't count. Shape is rectangular when the walls cover ≥ 85% of its edge, round when the corners are empty.
+- **Walls:** layers where at least 3 of the 4 footprint sides are ≥ 50% covered (gable triangles cover only 2). Thickness is the median inward run at the first storey's mid-height.
+- **Storeys:** floors are layers with ≥ 60% of the footprint interior covered (a thick floor counts at its top layer). A floor with fewer than 3 layers above it before the next floor or the top of the walls is a roof deck, not a storey.
+- **Openings:** 4-connected gaps, glass and doors in each side's wall plane. Air two high from a storey floor counts as a doorway; anything wider than 5 or larger than 15 blocks is a wide gap.
+- **Roof:** the heightmap above the top storey (bottom slabs count half). Flat when the interior is level within one block, with a parapet or battlements from the raised rim. Otherwise the slope statistics pick gable or shed (one axis) or hip or pyramid (both). Pitch is measured along the middle of the roof.
+- **Rooms:** 6-connected air (and decor) not reachable from outside; pockets under 8 blocks are counted separately.
+- **Issues:** floating groups are not connected to the bottom layer, even diagonally (stair roofs step diagonally and hold in the game). Roof gaps are footprint columns with no roof block, or pits 2 or more below all four neighbours.
 
 ## Open questions
 

@@ -1,0 +1,33 @@
+{
+  "name": "Lamp post",
+  "tags": [
+    "street",
+    "light",
+    "small"
+  ],
+  "anchors": {
+    "base": [
+      0,
+      0,
+      0
+    ]
+  },
+  "roles": {
+    "post": [
+      "minecraft:stone_bricks"
+    ],
+    "light": [
+      "minecraft:lantern"
+    ]
+  },
+  "notes": "Street light: a wall-post with a hanging lantern on a short arm. Space every 6-8 blocks along a road.",
+  "front": "south",
+  "footprint": [
+    1,
+    2
+  ],
+  "height": 5,
+  "requires": [
+    "minecraft"
+  ]
+}

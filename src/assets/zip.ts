@@ -1,5 +1,5 @@
 import { inflateSync } from "fflate";
-import { BufferByteSource, SliceByteSource, type ByteSource } from "./bytes.js";
+import { BufferByteSource, FileByteSource, SliceByteSource, type ByteSource } from "./bytes.js";
 
 export interface ZipEntry {
   name: string;
@@ -7,6 +7,9 @@ export interface ZipEntry {
   compressedSize: number;
   size: number;
   localHeaderOffset: number;
+  /** Byte lengths from the central directory, used to read header + data in one I/O. */
+  nameBytes: number;
+  extraBytes: number;
 }
 
 const SIG_EOCD = 0x06054b50;
@@ -27,6 +30,16 @@ export class ZipArchive {
     private readonly src: ByteSource,
     readonly entries: Map<string, ZipEntry>,
   ) {}
+
+  /** Size (and mtime for files on disk): enough to detect a replaced or updated archive. */
+  get fingerprint(): string {
+    return this.src instanceof FileByteSource ? `${this.src.size}:${this.src.mtimeMs}` : `${this.src.size}`;
+  }
+
+  /** Rebuilds an archive from a previously indexed entry list (see the index cache in pack.ts). */
+  static fromEntries(src: ByteSource, label: string, entries: Iterable<ZipEntry>): ZipArchive {
+    return new ZipArchive(label, src, new Map([...entries].map((e) => [e.name, e])));
+  }
 
   static async open(src: ByteSource, label: string, filter?: EntryFilter): Promise<ZipArchive> {
     const { cdOffset, cdSize, count } = await findCentralDirectory(src, label);
@@ -65,7 +78,7 @@ export class ZipArchive {
       p += 46 + nameLen + extraLen + commentLen;
       if (name.endsWith("/")) continue; // directory entry
       if (filter && !filter(name)) continue;
-      entries.set(name, { name, method, compressedSize, size, localHeaderOffset });
+      entries.set(name, { name, method, compressedSize, size, localHeaderOffset, nameBytes: nameLen, extraBytes: extraLen });
     }
     return new ZipArchive(label, src, entries);
   }
@@ -77,8 +90,7 @@ export class ZipArchive {
   async read(name: string): Promise<Buffer> {
     const e = this.entries.get(name);
     if (!e) throw new Error(`${this.label}: no entry ${name}`);
-    const dataStart = await this.dataOffset(e);
-    const raw = await this.src.read(dataStart, e.compressedSize);
+    const raw = await this.readRaw(e);
     if (e.method === 0) return raw;
     if (e.method === 8) return Buffer.from(inflateSync(raw, { out: new Uint8Array(e.size) }));
     throw new Error(`${this.label}: unsupported compression method ${e.method} for ${name}`);
@@ -97,6 +109,21 @@ export class ZipArchive {
       return ZipArchive.open(new SliceByteSource(this.src, start, e.size), label, filter);
     }
     return ZipArchive.open(new BufferByteSource(await this.read(name)), label, filter);
+  }
+
+  /**
+   * Reads an entry's compressed bytes. Guesses the local header's extra-field length from the central
+   * directory so header and data usually arrive in a single read (I/O latency dominates on network
+   * and WSL mounts).
+   */
+  private async readRaw(e: ZipEntry): Promise<Buffer> {
+    const guess = 30 + e.nameBytes + e.extraBytes;
+    const len = Math.min(guess + e.compressedSize, this.src.size - e.localHeaderOffset);
+    const buf = await this.src.read(e.localHeaderOffset, len);
+    if (buf.readUInt32LE(0) !== SIG_LOCAL) throw new Error(`${this.label}: bad local header for ${e.name}`);
+    const start = 30 + buf.readUInt16LE(26) + buf.readUInt16LE(28);
+    if (start + e.compressedSize <= buf.length) return buf.subarray(start, start + e.compressedSize);
+    return this.src.read(e.localHeaderOffset + start, e.compressedSize);
   }
 
   private async dataOffset(e: ZipEntry): Promise<number> {

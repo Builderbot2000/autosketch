@@ -1,8 +1,12 @@
-import { readdir, readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { gunzipSync, gzipSync } from "node:zlib";
+import { mapLimit } from "../core/async.js";
 import { FileByteSource } from "./bytes.js";
-import { ZipArchive, type EntryFilter } from "./zip.js";
+import { defaultCacheDir } from "./cache.js";
 import type { InstanceInfo, LayerRole, LayerSpec } from "./locate.js";
+import { ZipArchive, type EntryFilter, type ZipEntry } from "./zip.js";
 
 /** One layer of the virtual filesystem: a jar, zip pack, folder pack, or a sub-folder of one. */
 export interface PackSource {
@@ -11,6 +15,8 @@ export interface PackSource {
   has(path: string): boolean;
   read(path: string): Promise<Buffer>;
   paths(): Iterable<string>;
+  /** Changes whenever the layer's contents may have changed (used for cache keys). */
+  fingerprint(): string;
 }
 
 type Scope = "assets" | "data" | undefined;
@@ -40,6 +46,9 @@ export class ZipPackSource implements PackSource {
       const p = name.slice(this.prefix.length);
       if (inScope(p, this.scope)) yield p;
     }
+  }
+  fingerprint(): string {
+    return `${this.archive.fingerprint}|${this.prefix}|${this.scope ?? ""}`;
   }
   /** A view of a sub-folder of the same archive (built-in packs, overlays). */
   sub(id: string, role: LayerRole, dir: string, scope?: Scope): ZipPackSource {
@@ -78,6 +87,12 @@ export class DirPackSource implements PackSource {
   *paths(): Iterable<string> {
     for (const p of this.files) if (inScope(p, this.scope)) yield p;
   }
+  fingerprint(): string {
+    // Folder packs are small; hashing the file list catches added/removed files (not edits in place).
+    const h = createHash("sha1");
+    for (const p of [...this.files].sort()) h.update(p + "\n");
+    return `dir|${this.files.size}|${h.digest("hex")}|${this.scope ?? ""}`;
+  }
   sub(id: string, role: LayerRole, dir: string, scope?: Scope): Promise<DirPackSource> {
     return DirPackSource.open(id, role, join(this.root, dir), scope);
   }
@@ -106,6 +121,13 @@ async function walk(abs: string, rel: string, out: Set<string>): Promise<void> {
  */
 export class PackStack {
   constructor(readonly layers: readonly PackSource[]) {}
+
+  /** Hash of layer ids and fingerprints, in order: a cache key for anything derived from the stack. */
+  fingerprint(): string {
+    const h = createHash("sha1");
+    for (const l of this.layers) h.update(`${l.id}\u0000${l.fingerprint()}\n`);
+    return h.digest("hex");
+  }
 
   resolve(path: string): PackSource | undefined {
     for (let i = this.layers.length - 1; i >= 0; i--) {
@@ -164,12 +186,42 @@ export function parseJsonLenient(buf: Buffer, label = "json"): unknown {
   try {
     return JSON.parse(text);
   } catch {
+    const cleaned = stripJsonComments(text).replace(/,\s*([}\]])/g, "$1");
     try {
-      return JSON.parse(stripJsonComments(text).replace(/,\s*([}\]])/g, "$1"));
+      return JSON.parse(cleaned);
     } catch (e) {
+      // Gson stops after the first complete value; some shipped files have trailing junk (extra braces).
+      const end = firstValueEnd(cleaned);
+      if (end > 0) {
+        try {
+          return JSON.parse(cleaned.slice(0, end));
+        } catch {
+          /* fall through */
+        }
+      }
       throw new Error(`invalid JSON in ${label}: ${(e as Error).message}`);
     }
   }
+}
+
+/** Index just past the first top-level object/array, or -1. */
+function firstValueEnd(s: string): number {
+  let depth = 0;
+  let inStr = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inStr) {
+      if (c === "\\") i++;
+      else if (c === '"') inStr = false;
+    } else if (c === '"') inStr = true;
+    else if (c === "{" || c === "[") depth++;
+    else if (c === "}" || c === "]") {
+      depth--;
+      if (depth === 0) return i + 1;
+      if (depth < 0) return -1;
+    }
+  }
+  return -1;
 }
 
 function stripJsonComments(s: string): string {
@@ -228,8 +280,19 @@ export interface OpenStackResult {
   stats: { layers: number; archives: number; nestedJars: number; entries: number; ms: number };
 }
 
-export async function openStack(info: InstanceInfo, opts: { concurrency?: number } = {}): Promise<OpenStackResult> {
+export interface OpenStackOptions {
+  concurrency?: number;
+  /**
+   * File for the jar index cache (central-directory listings keyed by path, size and mtime);
+   * `false` disables it. Defaults to <cache dir>/jar-index.json.gz.
+   */
+  indexCache?: string | false;
+}
+
+export async function openStack(info: InstanceInfo, opts: OpenStackOptions = {}): Promise<OpenStackResult> {
   const t0 = Date.now();
+  const cacheFile = opts.indexCache === false ? undefined : (opts.indexCache ?? join(defaultCacheDir(), "jar-index.json.gz"));
+  const index = cacheFile ? await JarIndexCache.load(cacheFile) : new JarIndexCache();
   const warnings = [...info.warnings];
   const formats = PACK_FORMATS[info.mcVersion];
   if (!formats) warnings.push(`unknown pack format for ${info.mcVersion}; pack overlays will be ignored`);
@@ -237,7 +300,7 @@ export async function openStack(info: InstanceInfo, opts: { concurrency?: number
   // Open every archive/dir layer concurrently, preserving order.
   const opened: (PackSource[] | null)[] = await mapLimit(info.layers, opts.concurrency ?? 16, async (spec) => {
     try {
-      return await openLayer(spec, warnings);
+      return await openLayer(spec, warnings, index);
     } catch (e) {
       warnings.push(`skipped layer ${spec.id}: ${(e as Error).message}`);
       return null;
@@ -257,6 +320,8 @@ export async function openStack(info: InstanceInfo, opts: { concurrency?: number
     }
     for (const s of srcs ?? []) layers.push(...(await withOverlays(s, formats, warnings)));
   }
+
+  if (cacheFile) await index.save(cacheFile, new Set(info.layers.flatMap((l) => (l.kind === "archive" ? [l.path] : []))));
 
   let entries = 0;
   for (const l of layers) for (const _ of l.paths()) entries++;
@@ -324,14 +389,18 @@ function topLevelPackDirs(archive: ZipArchive): string[] {
   return dirs;
 }
 
-async function openLayer(spec: LayerSpec, warnings: string[]): Promise<PackSource[]> {
+async function openLayer(spec: LayerSpec, warnings: string[], index: JarIndexCache): Promise<PackSource[]> {
   switch (spec.kind) {
     case "builtin":
       return []; // resolved after all jars are open
     case "dir":
       return [await DirPackSource.open(spec.id, spec.role, spec.path)];
     case "archive": {
-      const archive = await ZipArchive.open(await FileByteSource.open(spec.path), spec.id, JAR_FILTER);
+      const src = await FileByteSource.open(spec.path);
+      const fp = `${src.size}:${src.mtimeMs}`;
+      const hit = index.get(spec.path, fp);
+      const archive = hit ? ZipArchive.fromEntries(src, spec.id, hit) : await ZipArchive.open(src, spec.id, JAR_FILTER);
+      if (!hit) index.set(spec.path, fp, archive.entries.values());
       const main = new ZipPackSource(spec.id, spec.role, archive);
       if (spec.role !== "mod" && spec.role !== "loader") return [main];
       // Jar-in-jar: nested jars that carry assets/data sit just below their parent.
@@ -382,15 +451,56 @@ async function withOverlays(src: PackSource, formats: { resource: number; data: 
   return out;
 }
 
-async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
-  const out = new Array<R>(items.length);
-  let next = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (next < items.length) {
-      const i = next++;
-      out[i] = await fn(items[i]!);
+// ---------------------------------------------------------------------------------------------
+// Jar index cache
+// ---------------------------------------------------------------------------------------------
+
+type PackedEntry = [name: string, method: number, compressed: number, size: number, offset: number, nameBytes: number, extraBytes: number];
+
+/**
+ * Persists filtered central-directory listings so warm starts skip reading hundreds of jar
+ * directories (slow on network and WSL mounts). Entries are keyed by absolute path and validated
+ * by size + mtime.
+ */
+class JarIndexCache {
+  static readonly VERSION = 1;
+  private dirty = false;
+  constructor(private readonly archives = new Map<string, { fp: string; entries: PackedEntry[] }>()) {}
+
+  static async load(file: string): Promise<JarIndexCache> {
+    try {
+      const j = JSON.parse(gunzipSync(await readFile(file)).toString("utf8")) as { version: number; archives: Record<string, { fp: string; entries: PackedEntry[] }> };
+      if (j.version === JarIndexCache.VERSION) return new JarIndexCache(new Map(Object.entries(j.archives)));
+    } catch {
+      /* missing or stale */
     }
-  });
-  await Promise.all(workers);
-  return out;
+    return new JarIndexCache();
+  }
+
+  get(path: string, fp: string): ZipEntry[] | undefined {
+    const a = this.archives.get(path);
+    if (!a || a.fp !== fp) return undefined;
+    return a.entries.map(([name, method, compressedSize, size, localHeaderOffset, nameBytes, extraBytes]) => ({
+      name, method, compressedSize, size, localHeaderOffset, nameBytes, extraBytes,
+    }));
+  }
+
+  set(path: string, fp: string, entries: Iterable<ZipEntry>): void {
+    this.archives.set(path, {
+      fp,
+      entries: [...entries].map((e) => [e.name, e.method, e.compressedSize, e.size, e.localHeaderOffset, e.nameBytes, e.extraBytes]),
+    });
+    this.dirty = true;
+  }
+
+  /** Writes the cache if anything changed, dropping archives no longer in use. */
+  async save(file: string, keep: Set<string>): Promise<void> {
+    for (const k of this.archives.keys()) if (!keep.has(k)) (this.archives.delete(k), (this.dirty = true));
+    if (!this.dirty) return;
+    await mkdir(dirname(file), { recursive: true });
+    const tmp = `${file}.${process.pid}.tmp`;
+    await writeFile(tmp, gzipSync(JSON.stringify({ version: JarIndexCache.VERSION, archives: Object.fromEntries(this.archives) })));
+    await rename(tmp, file);
+    this.dirty = false;
+  }
 }

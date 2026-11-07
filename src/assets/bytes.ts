@@ -70,12 +70,13 @@ export class FileByteSource implements ByteSource {
   private constructor(
     readonly path: string,
     readonly size: number,
+    readonly mtimeMs: number,
   ) {}
 
   static async open(path: string): Promise<FileByteSource> {
     const h = await handlePool.get(path);
     const st = await h.stat();
-    return new FileByteSource(path, st.size);
+    return new FileByteSource(path, st.size, st.mtimeMs);
   }
 
   async read(pos: number, len: number): Promise<Buffer> {

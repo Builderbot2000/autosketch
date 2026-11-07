@@ -84,8 +84,10 @@ export class Raster {
   /**
    * Textured triangle. p: screen points; uv: texture coords 0..1. mode "opaque" alpha-tests and
    * writes depth; "blend" alpha-blends behind nearer opaque pixels without writing depth.
+   * `overlay` mixes a colour over the shaded result ([r, g, b, amount 0..1], for highlights);
+   * `alphaScale` scales the blended alpha (x-ray).
    */
-  triangle(p0: V3, p1: V3, p2: V3, uv: number[], img: Image, tint: RGB | undefined, shade: number, mode: "opaque" | "blend", flat?: RGB): void {
+  triangle(p0: V3, p1: V3, p2: V3, uv: number[], img: Image, tint: RGB | undefined, shade: number, mode: "opaque" | "blend", flat?: RGB, overlay?: [number, number, number, number], alphaScale = 1): void {
     const minX = Math.max(0, Math.floor(Math.min(p0[0], p1[0], p2[0])));
     const maxX = Math.min(this.width - 1, Math.ceil(Math.max(p0[0], p1[0], p2[0])));
     const minY = Math.max(0, Math.floor(Math.min(p0[1], p1[1], p2[1])));
@@ -128,6 +130,13 @@ export class Raster {
         r *= tr * shade;
         g *= tg * shade;
         b *= tb * shade;
+        if (overlay) {
+          const k = overlay[3];
+          r = r * (1 - k) + overlay[0] * k;
+          g = g * (1 - k) + overlay[1] * k;
+          b = b * (1 - k) + overlay[2] * k;
+        }
+        a *= alphaScale;
         const ci = di * 3;
         if (mode === "opaque") {
           this.color[ci] = r;

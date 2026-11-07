@@ -4,7 +4,8 @@ import { clear, fill, replace, setBlocks } from "../../ops/edit.js";
 import type { MaterialExpr } from "../../ops/material.js";
 import { checkSelectionName, resolveSelection, summarize, type SelExpr } from "../../ops/selection.js";
 import { formatEdit, formatSelection } from "../format.js";
-import { boxSchema, editWith, env, materialSchema, regionOf, selSchema, text, vec3, type ToolDeps } from "./shared.js";
+import { editWithPreview, previewSchema } from "./perception.js";
+import { boxSchema, env, materialSchema, regionOf, selSchema, text, vec3, type ToolDeps } from "./shared.js";
 
 /** Selections (05 L1). */
 export function registerSelectionTools({ tool, session }: ToolDeps): void {
@@ -60,11 +61,12 @@ export function registerEditTools({ tool, session }: ToolDeps): void {
       description: "Places individual blocks: the escape hatch for details (doors, lanterns, single stairs). Use fill for anything box-shaped. One undo step. Text.",
       inputSchema: {
         blocks: z.array(z.object({ pos: vec3, block: materialSchema })).min(1).describe('e.g. [{"pos":[3,1,0],"block":"oak_door[facing=south]"}]'),
+        preview: previewSchema,
       },
       readOnly: false,
     },
     (c, a) =>
-      editWith(session, (doc) => formatEdit(doc, setBlocks(doc, env(c), a.blocks.map((b) => ({ pos: b.pos as Vec3, block: b.block as MaterialExpr }))))),
+      editWithPreview(c, session, a.preview, (doc) => formatEdit(doc, setBlocks(doc, env(c), a.blocks.map((b) => ({ pos: b.pos as Vec3, block: b.block as MaterialExpr }))))),
   );
 
   tool(
@@ -83,11 +85,12 @@ export function registerEditTools({ tool, session }: ToolDeps): void {
         thickness: z.number().int().min(1).max(16).optional(),
         as: z.string().optional().describe("Component id to register for this box, e.g. \"keep\""),
         kind: z.string().optional().describe('Component kind, e.g. "tower", "wall", "floor"'),
+        preview: previewSchema,
       },
       readOnly: false,
     },
     (c, a) =>
-      editWith(session, (doc) => {
+      editWithPreview(c, session, a.preview, (doc) => {
         const { region, label, notes } = regionOf(c, doc, a);
         const r = fill(doc, env(c), region, a.material as MaterialExpr, {
           ...(a.mode ? { mode: a.mode } : {}),
@@ -105,11 +108,11 @@ export function registerEditTools({ tool, session }: ToolDeps): void {
     {
       title: "Clear",
       description: "Sets every block in a selection (sel) or box to air. One undo step. Text.",
-      inputSchema: { sel: selSchema.optional(), box: boxSchema.optional().describe("Shorthand for sel:{min,max}") },
+      inputSchema: { sel: selSchema.optional(), box: boxSchema.optional().describe("Shorthand for sel:{min,max}"), preview: previewSchema },
       readOnly: false,
     },
     (c, a) =>
-      editWith(session, (doc) => {
+      editWithPreview(c, session, a.preview, (doc) => {
         const { region, label, notes } = regionOf(c, doc, a);
         return formatEdit(doc, clear(doc, region, label), notes.map((n) => `note: ${n}`));
       }),
@@ -128,11 +131,12 @@ export function registerEditTools({ tool, session }: ToolDeps): void {
         sel: selSchema.optional().describe("Where to replace (default: the whole document)"),
         box: boxSchema.optional().describe("Shorthand for sel:{min,max}"),
         keep_states: z.boolean().optional(),
+        preview: previewSchema,
       },
       readOnly: false,
     },
     (c, a) =>
-      editWith(session, (doc) => {
+      editWithPreview(c, session, a.preview, (doc) => {
         if (!doc.localBounds()) throw new Error("The document is empty; nothing to replace.");
         const { region, label, notes } = regionOf(c, doc, a, "all");
         const r = replace(doc, env(c), region, a.from, a.to as MaterialExpr, { ...(a.keep_states ? { keepStates: true } : {}), ...(label ? { label } : {}) });

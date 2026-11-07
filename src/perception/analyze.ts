@@ -671,9 +671,11 @@ export function formatAnalysis(a: Analysis, registry?: Registry): string {
     lines.push(`storeys: ${a.storeys.length} (floor y=${a.storeys.map((s) => s.floorY).join(", ")}; heights ${a.storeys.map((s) => s.height).join(",")})`);
   if (a.walls) {
     const total = a.walls.material.reduce((s, [, c]) => s + c, 0);
-    const [top, topN] = a.walls.material[0] ?? ["?", 0];
+    const [top, topN] = a.walls.material[0] ?? ["", 0];
     const mix = total && topN / total < 0.85;
-    const mat = mix
+    const mat = !top
+      ? "unknown"
+      : mix
       ? `${shortState(top, registry)} mix (${a.walls.material.slice(0, 3).map(([m, c]) => `${shortState(m, registry)} ${Math.round((100 * c) / total)}%`).join(", ")})`
       : shortState(top, registry);
     lines.push(`walls: y ${a.walls.bottom}..${a.walls.top}, thickness ${a.walls.thickness}, material ${mat}`);

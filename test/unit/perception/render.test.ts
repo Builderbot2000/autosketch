@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { PNG } from "pngjs";
 import { Document } from "../../../src/document/document.js";
-import { fill, setBlocks } from "../../../src/ops/edit.js";
+import { clear, fill, setBlocks } from "../../../src/ops/edit.js";
 import { TextureLoader } from "../../../src/palette/textures.js";
 import { BlockBaker } from "../../../src/perception/render/bake.js";
 import { renderDocument } from "../../../src/perception/render/render.js";
+import { getRender, raycast } from "../../../src/perception/render/cameras.js";
+import { renderEditPreview } from "../../../src/perception/render/preview.js";
+import { Mask } from "../../../src/core/mask.js";
 import { solidPng } from "../../helpers/fixtures.js";
 import { memStack, VANILLA_PARENTS } from "../../helpers/stack.js";
 
@@ -115,5 +118,97 @@ describe("render", () => {
     const empty = await renderDocument(Document.create({ name: "e", dataVersion: 1 }), baker);
     expect(empty.caption).toMatch(/Nothing to draw/);
     await expect(renderDocument(doc, baker, { views: ["top", "top", "top", "top", "top"] })).rejects.toThrow(/at most 4 views/);
+  });
+});
+
+describe("render extras", () => {
+  const cube = () => {
+    const doc = Document.create({ name: "x", dataVersion: 3955, seed: 1 });
+    fill(doc, {}, { min: [0, 0, 0], max: [4, 4, 4] }, "test:red", { as: "cube" });
+    return doc;
+  };
+
+  it("tints highlighted blocks and outlines highlighted air", async () => {
+    const { baker } = await fixture();
+    const doc = cube();
+    clear(doc, { min: [0, 3, 0], max: [1, 4, 1] }); // a removed corner block
+    const hl = Mask.fromBox({ min: [0, 3, 0], max: [4, 4, 4] });
+    hl.add(9, 9, 9); // outside the document: ignored
+    const r = await renderDocument(doc, baker, { views: ["top"], size: 200, highlight: hl });
+    const c = pixel(r.png, 100, 100);
+    expect(c[1]).toBeGreaterThan(60); // red mixed with orange
+    expect(c[0]).toBeGreaterThan(180);
+    expect(r.caption).toMatch(/highlighted 16 positions in orange \(1 now air, outlined\)/);
+  });
+
+  it("draws depth and xray styles", async () => {
+    const { baker } = await fixture();
+    const doc = cube();
+    const flat = pixel((await renderDocument(doc, baker, { views: ["top"], size: 200, style: "flat" })).png, 100, 100);
+    const depth = pixel((await renderDocument(doc, baker, { views: ["top"], size: 200, style: "depth" })).png, 100, 100);
+    expect(depth[0]).toBeLessThanOrEqual(flat[0]);
+    // X-ray: the top face is translucent, so the background shows through (bluish, not pure red).
+    const xray = pixel((await renderDocument(doc, baker, { views: ["top"], size: 200, style: "xray" })).png, 100, 100);
+    expect(xray[2]).toBeGreaterThan(60);
+    const solid = pixel((await renderDocument(doc, baker, { views: ["top"], size: 200, style: "xray", highlight: Mask.fromBox({ min: [0, 0, 0], max: [4, 4, 4] }) })).png, 100, 100);
+    expect(solid[2]).toBeLessThan(40); // highlighted blocks stay solid
+  });
+
+  it("takes mask regions, plane cutaways, component views and custom cameras", async () => {
+    const { baker } = await fixture();
+    const doc = cube();
+    setBlocks(doc, {}, [{ pos: [10, 0, 10], block: "test:red" }]);
+    const m = Mask.fromBox({ min: [0, 0, 0], max: [4, 1, 4] });
+    m.delete(0, 0, 0);
+    const masked = await renderDocument(doc, baker, { views: ["top"], region: m });
+    expect(masked.caption).toMatch(/drew 15 blocks in \(0,0,0\)–\(3,0,3\) \(selection\)/);
+    const cut = await renderDocument(doc, baker, { views: ["front"], cutaway: { plane: "x", at: 1, keep: "west" } });
+    expect(cut.caption).toMatch(/drew 32 blocks in \(0,0,0\)–\(1,3,3\) \(cutaway: kept west of x=1\)/);
+    const east = await renderDocument(doc, baker, { views: ["front"], cutaway: { plane: "z", at: 2, keep: "south" } });
+    expect(east.caption).toMatch(/drew 33 blocks/);
+    await expect(renderDocument(doc, baker, { cutaway: { plane: "x", at: 1, keep: "up" } })).rejects.toThrow(/keeps "west" or "east"/);
+    const comp = await renderDocument(doc, baker, { views: ["component:cube", "top"], size: 400 });
+    expect(comp.caption).toMatch(/component:cube \d+\.\d px\/block · top/);
+    await expect(renderDocument(doc, baker, { views: ["component:nope"] })).rejects.toThrow(/no component "nope" \(have: cube\)/);
+    const near = await renderDocument(doc, baker, { views: [{ yaw: 0, pitch: 89, distance: 1, target: [10, 0, 10] }], size: 200 });
+    expect(near.caption).toMatch(/yaw 0 pitch 89 dist 1 \d+\.\d px\/block/);
+    // Zoomed onto the lone block: the centre pixel is red.
+    expect(pixel(near.png, 100, 100)[0]).toBeGreaterThan(150);
+  });
+
+  it("draws overlays and records cameras that raycast back to blocks", async () => {
+    const { baker } = await fixture();
+    const doc = cube();
+    const r = await renderDocument(doc, baker, { views: ["iso_se", "top"], size: 400, overlays: { components: true, storeys: true } });
+    expect(r.id).toMatch(/^r\d+$/);
+    expect(getRender(doc)!.id).toBe(r.id);
+    // Project known block centres through the stored cameras and cast back.
+    for (const view of r.views) {
+      for (const p of [[3, 3, 3], [0, 3, 0], [2, 3, 1]] as const) {
+        const c = view.cam;
+        const q = [p[0] + 0.5, p[1] + 1, p[2] + 0.5]; // middle of the top face
+        const sx = q[0]! * c.right[0] + q[1]! * c.right[1] + q[2]! * c.right[2];
+        const sy = q[0]! * c.up[0] + q[1]! * c.up[1] + q[2]! * c.up[2];
+        const px = Math.floor(view.ox + ((sx - c.cx) * c.scale + c.width / 2) / view.ss);
+        const py = Math.floor(view.oy + (-(sy - c.cy) * c.scale + c.height / 2) / view.ss);
+        const hit = raycast(doc, getRender(doc, r.id)!, px, py)!;
+        expect(hit.view.label).toBe(view.label);
+        expect(hit.pos).toEqual([...p]);
+        expect(hit.face).toBe("up");
+      }
+    }
+    // Off the build: nothing under the pixel.
+    expect(raycast(doc, getRender(doc)!, 2, 190)!.pos).toBeUndefined();
+    const thumb = await renderDocument(doc, baker, { views: ["iso_se"], size: 64, thumbnail: true });
+    expect(thumb.id).toBeUndefined();
+  });
+
+  it("renders an edit preview of the changed region", async () => {
+    const { baker } = await fixture();
+    const doc = cube();
+    const e = setBlocks(doc, {}, [{ pos: [1, 4, 1], block: "test:red" }]);
+    const p = (await renderEditPreview(doc, baker, e.seq))!;
+    expect(p.caption).toMatch(/render 512×512 · iso_se[\s\S]*drew \d+ blocks in \(0,2,0\)–\(3,4,3\)[\s\S]*highlighted 1 position in orange/);
+    expect(await renderEditPreview(doc, baker, 999)).toBeUndefined();
   });
 });

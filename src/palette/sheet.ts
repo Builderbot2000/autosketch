@@ -105,7 +105,13 @@ export function layoutSheet(index: PaletteIndex, spec: SheetSpec): SheetLayout {
       break;
     case "similar": {
       const hit = overviewItems(index).find((i) => i.cell.kind === "family" && (i.cell.id === arg || i.cell.similar?.includes(arg)));
-      if (!hit || hit.cell.kind !== "family") throw new Error(`"${arg}" is not on the overview`);
+      if (!hit || hit.cell.kind !== "family") {
+        const f = index.family(arg) ?? index.familyOfBlock(arg);
+        throw new Error(
+          f ? `"${arg}" is not an overview tile (its family ${f.id} is on category:${f.category}); similar: lists tiles with a cyan +n badge` : `no family "${arg}"${didYouMean(arg, index.families.keys())}`,
+        );
+      }
+      if (!hit.cell.similar?.length) throw new Error(`${hit.cell.id} has no similar materials folded into its tile (only tiles with a cyan +n badge do)`);
       items = [hit.cell.id, ...(hit.cell.similar ?? [])].map((id) => ({ cell: { kind: "family", id }, category: "", lab: [0, 0, 0] }));
       banded = false;
       break;
@@ -264,15 +270,33 @@ const idOf = (i: Item) => (i.cell.kind === "variant" ? i.cell.block : i.cell.id)
 
 function familyItems(index: PaletteIndex, id: string): Item[] {
   const f = index.family(id) ?? index.familyOfBlock(id);
-  if (!f) throw new Error(`no family "${id}"`);
+  if (!f) throw new Error(`no family "${id}"${didYouMean(id, index.families.keys())}`);
   const lab: Lab = [0, 0, 0];
   return [f.base, ...f.variants.map((v) => v.base)].map((block) => ({ cell: { kind: "variant", family: f.id, block }, category: "", lab }));
 }
 
 function seriesItems(index: PaletteIndex, id: string): Item[] {
-  const s = index.series.get(id);
-  if (!s) throw new Error(`no series "${id}"`);
+  // Accept a member block too ("minecraft:white_stained_glass" → "minecraft:*_stained_glass").
+  const s = index.series.get(id) ?? index.series.get(index.familyOfBlock(id)?.series ?? "");
+  if (!s) {
+    const listed = [...index.series.values()].filter((x) => x.members.some((m) => index.family(m)?.buildable)).map((x) => x.id);
+    throw new Error(`no series "${id}"${didYouMean(id, listed)}`);
+  }
   return s.members.map((m) => ({ cell: { kind: "family", id: m }, category: "", lab: [0, 0, 0] }));
+}
+
+/** " (did you mean: a, b?)" from the keys sharing the most name words with `query`, or "". */
+export function didYouMean(query: string, keys: Iterable<string>, max = 5): string {
+  const words = (s: string) => s.toLowerCase().replace(/^[^:]*:/, "").split(/[_*\s]+/).filter(Boolean);
+  const q = new Set(words(query));
+  if (!q.size) return "";
+  const scored: [number, string][] = [];
+  for (const k of keys) {
+    const n = words(k).filter((w) => q.has(w)).length;
+    if (n) scored.push([n, k]);
+  }
+  scored.sort((a, b) => b[0] - a[0] || a[1].length - b[1].length || (a[1] < b[1] ? -1 : 1));
+  return scored.length ? ` (did you mean: ${scored.slice(0, max).map((x) => x[1]).join(", ")}?)` : "";
 }
 
 /**

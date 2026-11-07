@@ -70,6 +70,11 @@ describe("MCP server", () => {
     expect(png.width).toBeGreaterThan(30);
     expect(textOf(sheet)).toMatch(/sheet overview/);
 
+    // An empty sheet answers in text instead of sending a blank image.
+    const empty = await client.callTool({ name: "palette_sheet", arguments: { sheet: "filter:text:nothingmatches" } });
+    expect((empty.content as Content).map((c) => c.type)).toEqual(["text"]);
+    expect(textOf(empty)).toMatch(/No materials match/);
+
     // Find the andesite cell from the same deterministic layout.
     const l = layoutSheet(ctx.palette, { sheet: "overview" });
     let ref = "";

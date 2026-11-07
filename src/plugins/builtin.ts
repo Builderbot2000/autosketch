@@ -37,4 +37,14 @@ const copycats: AutosketchPlugin = {
   classify: () => ({ buildable: false }),
 };
 
-export const BUILTIN_PLUGINS: readonly AutosketchPlugin[] = [chipped, rechiseled, chisel, framedblocks, copycats];
+/**
+ * Litematica (and its NeoForge stub) registers `*_fallback` blocks that stand in for unknown blocks
+ * in its schematic preview. They don't exist on a server, so they are never materials.
+ */
+const litematica: AutosketchPlugin = {
+  id: "litematica",
+  namespaces: ["litematica"],
+  classify: () => ({ buildable: false }),
+};
+
+export const BUILTIN_PLUGINS: readonly AutosketchPlugin[] = [chipped, rechiseled, chisel, framedblocks, copycats, litematica];

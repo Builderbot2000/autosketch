@@ -4,8 +4,8 @@ import { deflateSync } from "node:zlib";
 import { colorName, hexToRgb, labToRgb, rgbToLab } from "../../../src/palette/color.js";
 import { Image, repackPng } from "../../../src/palette/image.js";
 import { buildPaletteIndexData, PaletteIndex } from "../../../src/palette/index.js";
-import { describePalette, PaletteBook, pickPalette, resolveRole } from "../../../src/palette/pick.js";
-import { columnLabel, layoutSheet, parseCell, parseRange, SheetRenderer } from "../../../src/palette/sheet.js";
+import { chooseVariant, describePalette, PaletteBook, pickPalette, resolveRole } from "../../../src/palette/pick.js";
+import { columnLabel, didYouMean, layoutSheet, parseCell, parseRange, SheetRenderer } from "../../../src/palette/sheet.js";
 import { textureStats } from "../../../src/palette/textures.js";
 import { BUILTIN_PLUGINS } from "../../../src/plugins/builtin.js";
 import { solidPng } from "../../helpers/fixtures.js";
@@ -78,10 +78,12 @@ async function fixture() {
     partial("minecraft:oak_stairs"),
     { id: "minecraft:blue_ice" },
     { id: "mod:marble" }, // no shapes → not on the overview
+    { id: "litematica:stone_fallback" }, // Litematica preview stub → never a material
     ...DYES.map((d) => ({ id: `minecraft:${d}_wool` })),
   ]);
   const files: Record<string, Uint8Array> = {};
   for (const [n, c] of Object.entries(COLORS)) files[`assets/${n === "marble" ? "mod" : "minecraft"}/textures/block/${n}.png`] = solidPng(c);
+  files["assets/litematica/textures/block/stone_fallback.png"] = solidPng([90, 200, 90]);
   DYES.forEach((d, i) => (files[`assets/minecraft/textures/block/${d}_wool.png`] = solidPng([i * 15, 100, 200 - i * 10])));
   const stack = await memStack([["base", "base", files]]);
   const index = new PaletteIndex(await buildPaletteIndexData(stack, reg, { plugins: BUILTIN_PLUGINS }), reg);
@@ -99,6 +101,7 @@ describe("sheets", () => {
     expect(l.bands.map((b) => b.category)).toEqual(["stone", "wood", "colored"]);
     expect(layoutSheet(index, { sheet: "overview" })).toEqual(l);
     expect(layoutSheet(index, { sheet: "all" }).total).toBe(l.total + 2); // + marble, blue_ice
+    expect(index.family("litematica:stone_fallback")?.excludedBy).toBe("plugin:litematica");
     expect(() => layoutSheet(index, { sheet: "overview", page: 2 })).toThrow(/1 page/);
     expect(layoutSheet(index, { sheet: "filter:has:stairs mod:minecraft" }).total).toBe(3);
   });
@@ -114,6 +117,12 @@ describe("sheets", () => {
 
     const series = await r.render({ sheet: "series:minecraft:*_wool" });
     expect(series.caption).toMatch(/A1 white_wool/);
+    // A member block finds its series; unknown ids suggest close matches.
+    expect((await r.render({ sheet: "series:minecraft:red_wool" })).layout.total).toBe(16);
+    await expect(r.render({ sheet: "series:minecraft:wool" })).rejects.toThrow(/did you mean: minecraft:\*_wool/);
+    await expect(r.render({ sheet: "family:minecraft:andesit" })).rejects.toThrow(/no family/);
+    await expect(r.render({ sheet: "similar:minecraft:andesite" })).rejects.toThrow(/no similar materials folded/);
+    expect((await r.render({ sheet: "filter:text:nothingmatches" })).layout.total).toBe(0);
     const zoom = await r.render({ sheet: "overview", zoom: "A1:B1" });
     expect(zoom.caption).toMatch(/A1 \w+/);
   });
@@ -153,6 +162,17 @@ describe("palette_pick", () => {
     expect(() => book.resolveMaterial(index, "palette:test.roof", "wall")).toThrow(/no blocks available/);
     expect(() => book.resolveMaterial(index, "palette:nope.wall")).toThrow(/no palette "nope"/);
     expect(describePalette(index, palette)).toMatch(/palette:test/);
+  });
+
+  it("matches variant names without the namespace, preferring whole words", () => {
+    const fam = (base: string, variants: string[]) => ({ base, variants: variants.map((v) => ({ base: v })) }) as unknown as Parameters<typeof chooseVariant>[0];
+    const stone = fam("minecraft:stone", ["rechiseled:stone_big_tiles", "chipped:chiseled_stone_slabs"]);
+    expect(chooseVariant(stone, "chiseled")).toBe("chipped:chiseled_stone_slabs");
+    expect(chooseVariant(fam("minecraft:stone", ["rechiseled:stone_big_tiles"]), "chiseled")).toBe("minecraft:stone");
+    expect(chooseVariant(fam("minecraft:x", ["mod:bricks_small", "mod:brick"]), "brick")).toBe("mod:brick");
+    expect(chooseVariant(fam("minecraft:x", ["mod:bricks_small"]), "Brick")).toBe("mod:bricks_small");
+    expect(didYouMean("minecraft:white_stained_glass", ["minecraft:*_stained_glass", "minecraft:*_wool"])).toBe(" (did you mean: minecraft:*_stained_glass?)");
+    expect(didYouMean("zzz", ["minecraft:*_wool"])).toBe("");
   });
 
   it("rejects bad names and reports empty cells", async () => {

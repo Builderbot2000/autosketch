@@ -81,9 +81,16 @@ function cellMembers(index: PaletteIndex, cell: Cell, variant: string | undefine
   return [{ family: f.id, block, weight: 1 }];
 }
 
-function chooseVariant(f: Family, token: string | undefined): string {
-  if (!token) return f.base;
-  return f.variants.find((v) => v.base.includes(token))?.base ?? f.base;
+/**
+ * The variant whose block name (without namespace, so "chiseled" doesn't match every
+ * `rechiseled:` block) contains the token; whole-word matches win over substrings.
+ */
+export function chooseVariant(f: Family, token: string | undefined): string {
+  const t = token?.trim().toLowerCase();
+  if (!t) return f.base;
+  const name = (id: string) => id.slice(id.indexOf(":") + 1);
+  const word = (id: string) => name(id).split("_").includes(t);
+  return f.variants.find((v) => word(v.base))?.base ?? f.variants.find((v) => name(v.base).includes(t))?.base ?? f.base;
 }
 
 function mergeDuplicates(ms: RoleMember[]): RoleMember[] {

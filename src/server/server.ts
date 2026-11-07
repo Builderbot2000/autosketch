@@ -80,6 +80,8 @@ export function createServer(ctx: Promise<InstanceContext>): McpServer {
     async (c, args) => {
       const spec = { sheet: args.sheet, ...(args.page ? { page: args.page } : {}), ...(args.zoom ? { zoom: args.zoom } : {}) };
       const s = await c.sheets.render(spec);
+      if (s.layout.total === 0)
+        return text(`No materials match sheet "${args.sheet}". Loosen the filter (has:/cat:/mod:/text:), or look a block up with block_info.`);
       return {
         content: [
           { type: "image", data: s.png.toString("base64"), mimeType: "image/png" },

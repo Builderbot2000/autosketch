@@ -65,6 +65,7 @@ The agent has to understand (a) **what it can build with**: blocks, materials, p
 | 9 | Mod-compat plugins | Per-mod grouping, render hints and code-based actions | [design/09-mod-compat.md](design/09-mod-compat.md) |
 | 10 | Testing & evaluation | Unit/golden tests and the agent benchmark suite | [design/10-testing.md](design/10-testing.md) |
 | 11 | Scoped sessions | Isolated sandboxes (work + read-only context volume) for subagents, lock and wait, merge as one patch | [design/11-scoped-sessions.md](design/11-scoped-sessions.md) |
+| 12 | Observability | Event log, live localhost viewer (3D view, scope tree, locks, timeline), replay and time-lapse for the human; never read by agents | [design/12-observability.md](design/12-observability.md) |
 
 ## Dependency rules
 
@@ -73,6 +74,7 @@ The agent has to understand (a) **what it can build with**: blocks, materials, p
 - `palette/` depends on `assets/` and `plugins/`.
 - `ops/` depends on `document/`, `palette/` (material resolution), `library/` (prefabs) and `plugins/` (mod actions).
 - `perception/` depends on `document/` and `assets/` (models and textures). It never mutates.
+- `observe/` reads `document/` and `assets/` and never mutates. `document/` and `server/` publish to it only through the `EventSink` interface in `core/` (`12`).
 - `server/` is a thin adapter: tool schemas plus calls into the layers above. All logic lives below it, so the same API powers the MCP tools, scripts and tests.
 
 ## Tech stack
@@ -94,6 +96,7 @@ src/
   ops/         selections, primitives, brushes, anchors
   script/      QuickJS sandbox and API bindings
   perception/  render, slice, analysis, diff
+  observe/     event bus, session log, viewer HTTP server, snapshots
   library/     prefabs, palettes, knowledge packs
   formats/     schem, bp, structure-nbt
   plugins/     plugin API + built-in plugins (framed, chisel, copycats, …)

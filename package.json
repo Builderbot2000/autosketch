@@ -8,6 +8,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:golden": "vitest run test/golden",
+    "golden:update": "UPDATE_GOLDEN=1 vitest run test/golden",
+    "golden:instance": "tsx scripts/gen-golden-instance.ts",
     "test:local": "vitest run test/local",
     "dev": "tsx src/server/index.ts",
     "start": "node dist/server/index.js"

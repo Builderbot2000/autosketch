@@ -1,0 +1,7 @@
+{
+  "columns": 2,
+  "rows": 1,
+  "pages": 1,
+  "bands": [],
+  "cells": {"A1":"variant minecraft:stone_bricks","B1":"variant minecraft:cracked_stone_bricks"}
+}

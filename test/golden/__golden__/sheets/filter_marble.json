@@ -1,0 +1,7 @@
+{
+  "columns": 32,
+  "rows": 2,
+  "pages": 1,
+  "bands": [{"category":"stone","fromRow":1,"toRow":1},{"category":"wood","fromRow":2,"toRow":2}],
+  "cells": {"A1":"family golden:marble","B1":"family golden:marble_bricks","A2":"family golden:marble_pillar"}
+}

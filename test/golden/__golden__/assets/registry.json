@@ -1,0 +1,672 @@
+{
+  "warnings": [],
+  "blocks": [
+    {
+      "id": "golden:chiseled_marble",
+      "source": "mod:a_golden.jar",
+      "shape": "full",
+      "renderable": "exact",
+      "defaults": {},
+      "faces": {
+        "down": "golden:block/chiseled_marble",
+        "up": "golden:block/chiseled_marble",
+        "north": "golden:block/chiseled_marble",
+        "south": "golden:block/chiseled_marble",
+        "west": "golden:block/chiseled_marble",
+        "east": "golden:block/chiseled_marble"
+      },
+      "tags": []
+    },
+    {
+      "id": "golden:lamp",
+      "source": "mod:a_golden.jar",
+      "shape": "full",
+      "renderable": "exact",
+      "defaults": {"lit":"false"},
+      "faces": {
+        "down": "golden:block/lamp",
+        "up": "golden:block/lamp",
+        "north": "golden:block/lamp",
+        "south": "golden:block/lamp",
+        "west": "golden:block/lamp",
+        "east": "golden:block/lamp"
+      },
+      "tags": []
+    },
+    {
+      "id": "golden:marble",
+      "source": "mod:a_golden.jar",
+      "shape": "full",
+      "renderable": "exact",
+      "defaults": {},
+      "faces": {
+        "down": "golden:block/marble",
+        "up": "golden:block/marble",
+        "north": "golden:block/marble",
+        "south": "golden:block/marble",
+        "west": "golden:block/marble",
+        "east": "golden:block/marble"
+      },
+      "tags": ["golden:polished"]
+    },
+    {
+      "id": "golden:marble_brick_slab",
+      "source": "mod:a_golden.jar",
+      "shape": "partial",
+      "renderable": "exact",
+      "defaults": {"type":"bottom"},
+      "faces": {
+        "down": "golden:block/marble_bricks",
+        "up": "golden:block/marble_bricks",
+        "north": "golden:block/marble_bricks",
+        "south": "golden:block/marble_bricks",
+        "west": "golden:block/marble_bricks",
+        "east": "golden:block/marble_bricks"
+      },
+      "tags": []
+    },
+    {
+      "id": "golden:marble_brick_stairs",
+      "source": "mod:a_golden.jar",
+      "shape": "partial",
+      "renderable": "exact",
+      "defaults": {"facing":"north","half":"bottom","shape":"straight"},
+      "faces": {
+        "down": "golden:block/marble_bricks",
+        "up": "golden:block/marble_bricks",
+        "west": "golden:block/marble_bricks",
+        "east": "golden:block/marble_bricks",
+        "south": "golden:block/marble_bricks",
+        "north": "golden:block/marble_bricks"
+      },
+      "tags": []
+    },
+    {
+      "id": "golden:marble_brick_wall",
+      "source": "mod:a_golden.jar",
+      "shape": "partial",
+      "renderable": "exact",
+      "defaults": {"up":"true","north":"low","east":"low","south":"low","west":"low"},
+      "faces": {
+        "down": "golden:block/marble_bricks",
+        "up": "golden:block/marble_bricks",
+        "north": "golden:block/marble_bricks",
+        "south": "golden:block/marble_bricks",
+        "west": "golden:block/marble_bricks",
+        "east": "golden:block/marble_bricks"
+      },
+      "tags": ["minecraft:walls"]
+    },
+    {
+      "id": "golden:marble_bricks",
+      "source": "mod:a_golden.jar",
+      "shape": "full",
+      "renderable": "exact",
+      "defaults": {},
+      "faces": {
+        "down": "golden:block/marble_bricks",
+        "up": "golden:block/marble_bricks",
+        "north": "golden:block/marble_bricks",
+        "south": "golden:block/marble_bricks",
+        "west": "golden:block/marble_bricks",
+        "east": "golden:block/marble_bricks"
+      },
+      "tags": ["golden:polished"]
+    },
+    {
+      "id": "golden:marble_pillar",
+      "source": "mod:a_golden.jar",
+      "shape": "full",
+      "renderable": "exact",
+      "defaults": {"axis":"y"},
+      "faces": {
+        "down": "golden:block/marble_pillar_top",
+        "up": "golden:block/marble_pillar_top",
+        "north": "golden:block/marble_pillar",
+        "south": "golden:block/marble_pillar",
+        "west": "golden:block/marble_pillar",
+        "east": "golden:block/marble_pillar"
+      },
+      "tags": ["minecraft:logs"]
+    },
+    {
+      "id": "golden:rubble",
+      "source": "mod:a_golden.jar",
+      "shape": "full",
+      "renderable": "exact",
+      "defaults": {},
+      "faces": {
+        "down": "golden:block/rubble",
+        "up": "golden:block/rubble",
+        "north": "golden:block/rubble",
+        "south": "golden:block/rubble",
+        "west": "golden:block/rubble",
+        "east": "golden:block/rubble"
+      },
+      "tags": []
+    },
+    {
+      "id": "kubejs:crate",
+      "source": "generated:kubejs",
+      "shape": "full",
+      "renderable": "exact",
+      "defaults": {},
+      "faces": {
+        "down": "kubejs:block/crate",
+        "up": "kubejs:block/crate",
+        "north": "kubejs:block/crate",
+        "south": "kubejs:block/crate",
+        "west": "kubejs:block/crate",
+        "east": "kubejs:block/crate"
+      },
+      "tags": ["minecraft:logs"]
+    },
+    {
+      "id": "minecraft:black_wool",
+      "source": "minecraft:1.21.1.jar",
+      "shape": "full",
+      "renderable": "exact",
+      "defaults": {},
+      "faces": {
+        "down": "minecraft:block/black_wool",
+        "up": "minecraft:block/black_wool",
+        "north": "minecraft:block/black_wool",
+        "south": "minecraft:block/black_wool",
+        "west": "minecraft:block/black_wool",
+        "east": "minecraft:block/black_wool"
+      },
+      "tags": []
+    },
+    {
+      "id": "minecraft:blue_wool",
+      "source": "minecraft:1.21.1.jar",
+      "shape": "full",
+      "renderable": "exact",
+      "defaults": {},
+      "faces": {
+        "down": "minecraft:block/blue_wool",
+        "up": "minecraft:block/blue_wool",
+        "north": "minecraft:block/blue_wool",
+        "south": "minecraft:block/blue_wool",
+        "west": "minecraft:block/blue_wool",
+        "east": "minecraft:block/blue_wool"
+      },
+      "tags": []
+    },
+    {
+      "id": "minecraft:brown_wool",
+      "source": "minecraft:1.21.1.jar",
+      "shape": "full",
+      "renderable": "exact",
+      "defaults": {},
+      "faces": {
+        "down": "minecraft:block/brown_wool",
+        "up": "minecraft:block/brown_wool",
+        "north": "minecraft:block/brown_wool",
+        "south": "minecraft:block/brown_wool",
+        "west": "minecraft:block/brown_wool",
+        "east": "minecraft:block/brown_wool"
+      },
+      "tags": []
+    },
+    {
+      "id": "minecraft:chest",
+      "source": "minecraft:1.21.1.jar",
+      "shape": "none",
+      "renderable": "fallback",
+      "defaults": {"waterlogged":"false","type":"single","facing":"north"},
+      "faces": {},
+      "tags": []
+    },
+    {
+      "id": "minecraft:cracked_stone_bricks",
+      "source": "minecraft:1.21.1.jar",
+      "shape": "full",
+      "renderable": "exact",
+      "defaults": {},
+      "faces": {
+        "down": "minecraft:block/cracked_stone_bricks",
+        "up": "minecraft:block/cracked_stone_bricks",
+        "north": "minecraft:block/cracked_stone_bricks",
+        "south": "minecraft:block/cracked_stone_bricks",
+        "west": "minecraft:block/cracked_stone_bricks",
+        "east": "minecraft:block/cracked_stone_bricks"
+      },
+      "tags": []
+    },
+    {
+      "id": "minecraft:cyan_wool",
+      "source": "minecraft:1.21.1.jar",
+      "shape": "full",
+      "renderable": "exact",
+      "defaults": {},
+      "faces": {
+        "down": "minecraft:block/cyan_wool",
+        "up": "minecraft:block/cyan_wool",
+        "north": "minecraft:block/cyan_wool",
+        "south": "minecraft:block/cyan_wool",
+        "west": "minecraft:block/cyan_wool",
+        "east": "minecraft:block/cyan_wool"
+      },
+      "tags": []
+    },
+    {
+      "id": "minecraft:glass",
+      "source": "minecraft:1.21.1.jar",
+      "shape": "full",
+      "renderable": "exact",
+      "defaults": {},
+      "faces": {
+        "down": "minecraft:block/glass",
+        "up": "minecraft:block/glass",
+        "north": "minecraft:block/glass",
+        "south": "minecraft:block/glass",
+        "west": "minecraft:block/glass",
+        "east": "minecraft:block/glass"
+      },
+      "tags": []
+    },
+    {
+      "id": "minecraft:glowstone",
+      "source": "minecraft:1.21.1.jar",
+      "shape": "full",
+      "renderable": "exact",
+      "defaults": {},
+      "faces": {
+        "down": "minecraft:block/glowstone",
+        "up": "minecraft:block/glowstone",
+        "north": "minecraft:block/glowstone",
+        "south": "minecraft:block/glowstone",
+        "west": "minecraft:block/glowstone",
+        "east": "minecraft:block/glowstone"
+      },
+      "tags": []
+    },
+    {
+      "id": "minecraft:grass_block",
+      "source": "minecraft:1.21.1.jar",
+      "shape": "full",
+      "renderable": "exact",
+      "defaults": {"snowy":"false"},
+      "faces": {
+        "down": "minecraft:block/dirt",
+        "up": "minecraft:block/grass_block_top",
+        "north": "minecraft:block/grass_block_side",
+        "south": "minecraft:block/grass_block_side",
+        "west": "minecraft:block/grass_block_side",
+        "east": "minecraft:block/grass_block_side"
+      },
+      "tags": [],
+      "tinted": true
+    },
+    {
+      "id": "minecraft:gray_wool",
+      "source": "minecraft:1.21.1.jar",
+      "shape": "full",
+      "renderable": "exact",
+      "defaults": {},
+      "faces": {
+        "down": "minecraft:block/gray_wool",
+        "up": "minecraft:block/gray_wool",
+        "north": "minecraft:block/gray_wool",
+        "south": "minecraft:block/gray_wool",
+        "west": "minecraft:block/gray_wool",
+        "east": "minecraft:block/gray_wool"
+      },
+      "tags": []
+    },
+    {
+      "id": "minecraft:green_wool",
+      "source": "minecraft:1.21.1.jar",
+      "shape": "full",
+      "renderable": "exact",
+      "defaults": {},
+      "faces": {
+        "down": "minecraft:block/green_wool",
+        "up": "minecraft:block/green_wool",
+        "north": "minecraft:block/green_wool",
+        "south": "minecraft:block/green_wool",
+        "west": "minecraft:block/green_wool",
+        "east": "minecraft:block/green_wool"
+      },
+      "tags": []
+    },
+    {
+      "id": "minecraft:light_blue_wool",
+      "source": "minecraft:1.21.1.jar",
+      "shape": "full",
+      "renderable": "exact",
+      "defaults": {},
+      "faces": {
+        "down": "minecraft:block/light_blue_wool",
+        "up": "minecraft:block/light_blue_wool",
+        "north": "minecraft:block/light_blue_wool",
+        "south": "minecraft:block/light_blue_wool",
+        "west": "minecraft:block/light_blue_wool",
+        "east": "minecraft:block/light_blue_wool"
+      },
+      "tags": []
+    },
+    {
+      "id": "minecraft:light_gray_wool",
+      "source": "minecraft:1.21.1.jar",
+      "shape": "full",
+      "renderable": "exact",
+      "defaults": {},
+      "faces": {
+        "down": "minecraft:block/light_gray_wool",
+        "up": "minecraft:block/light_gray_wool",
+        "north": "minecraft:block/light_gray_wool",
+        "south": "minecraft:block/light_gray_wool",
+        "west": "minecraft:block/light_gray_wool",
+        "east": "minecraft:block/light_gray_wool"
+      },
+      "tags": []
+    },
+    {
+      "id": "minecraft:lime_wool",
+      "source": "minecraft:1.21.1.jar",
+      "shape": "full",
+      "renderable": "exact",
+      "defaults": {},
+      "faces": {
+        "down": "minecraft:block/lime_wool",
+        "up": "minecraft:block/lime_wool",
+        "north": "minecraft:block/lime_wool",
+        "south": "minecraft:block/lime_wool",
+        "west": "minecraft:block/lime_wool",
+        "east": "minecraft:block/lime_wool"
+      },
+      "tags": []
+    },
+    {
+      "id": "minecraft:magenta_wool",
+      "source": "minecraft:1.21.1.jar",
+      "shape": "full",
+      "renderable": "exact",
+      "defaults": {},
+      "faces": {
+        "down": "minecraft:block/magenta_wool",
+        "up": "minecraft:block/magenta_wool",
+        "north": "minecraft:block/magenta_wool",
+        "south": "minecraft:block/magenta_wool",
+        "west": "minecraft:block/magenta_wool",
+        "east": "minecraft:block/magenta_wool"
+      },
+      "tags": []
+    },
+    {
+      "id": "minecraft:oak_fence",
+      "source": "minecraft:1.21.1.jar",
+      "shape": "partial",
+      "renderable": "exact",
+      "defaults": {"west":"false","waterlogged":"false","south":"false","north":"false","east":"false"},
+      "faces": {
+        "down": "minecraft:block/oak_planks",
+        "up": "minecraft:block/oak_planks",
+        "north": "minecraft:block/oak_planks",
+        "south": "minecraft:block/oak_planks",
+        "west": "minecraft:block/oak_planks",
+        "east": "minecraft:block/oak_planks"
+      },
+      "tags": []
+    },
+    {
+      "id": "minecraft:oak_leaves",
+      "source": "minecraft:1.21.1.jar",
+      "shape": "full",
+      "renderable": "exact",
+      "defaults": {"waterlogged":"false","persistent":"false","distance":"7"},
+      "faces": {
+        "down": "minecraft:block/oak_leaves",
+        "up": "minecraft:block/oak_leaves",
+        "north": "minecraft:block/oak_leaves",
+        "south": "minecraft:block/oak_leaves",
+        "west": "minecraft:block/oak_leaves",
+        "east": "minecraft:block/oak_leaves"
+      },
+      "tags": [],
+      "tinted": true
+    },
+    {
+      "id": "minecraft:oak_log",
+      "source": "minecraft:1.21.1.jar",
+      "shape": "full",
+      "renderable": "exact",
+      "defaults": {"axis":"y"},
+      "faces": {
+        "down": "minecraft:block/oak_log_top",
+        "up": "minecraft:block/oak_log_top",
+        "north": "minecraft:block/oak_log",
+        "south": "minecraft:block/oak_log",
+        "west": "minecraft:block/oak_log",
+        "east": "minecraft:block/oak_log"
+      },
+      "tags": ["minecraft:logs","minecraft:oak_logs"]
+    },
+    {
+      "id": "minecraft:oak_planks",
+      "source": "minecraft:1.21.1.jar",
+      "shape": "full",
+      "renderable": "exact",
+      "defaults": {},
+      "faces": {
+        "down": "minecraft:block/oak_planks",
+        "up": "minecraft:block/oak_planks",
+        "north": "minecraft:block/oak_planks",
+        "south": "minecraft:block/oak_planks",
+        "west": "minecraft:block/oak_planks",
+        "east": "minecraft:block/oak_planks"
+      },
+      "tags": []
+    },
+    {
+      "id": "minecraft:oak_slab",
+      "source": "minecraft:1.21.1.jar",
+      "shape": "partial",
+      "renderable": "exact",
+      "defaults": {"waterlogged":"false","type":"bottom"},
+      "faces": {
+        "down": "minecraft:block/oak_planks",
+        "up": "minecraft:block/oak_planks",
+        "north": "minecraft:block/oak_planks",
+        "south": "minecraft:block/oak_planks",
+        "west": "minecraft:block/oak_planks",
+        "east": "minecraft:block/oak_planks"
+      },
+      "tags": []
+    },
+    {
+      "id": "minecraft:oak_stairs",
+      "source": "minecraft:1.21.1.jar",
+      "shape": "partial",
+      "renderable": "exact",
+      "defaults": {"waterlogged":"false","shape":"straight","half":"bottom","facing":"north"},
+      "faces": {
+        "down": "minecraft:block/oak_planks",
+        "up": "minecraft:block/oak_planks",
+        "west": "minecraft:block/oak_planks",
+        "east": "minecraft:block/oak_planks",
+        "south": "minecraft:block/oak_planks",
+        "north": "minecraft:block/oak_planks"
+      },
+      "tags": ["minecraft:stairs"]
+    },
+    {
+      "id": "minecraft:orange_wool",
+      "source": "minecraft:1.21.1.jar",
+      "shape": "full",
+      "renderable": "exact",
+      "defaults": {},
+      "faces": {
+        "down": "minecraft:block/orange_wool",
+        "up": "minecraft:block/orange_wool",
+        "north": "minecraft:block/orange_wool",
+        "south": "minecraft:block/orange_wool",
+        "west": "minecraft:block/orange_wool",
+        "east": "minecraft:block/orange_wool"
+      },
+      "tags": []
+    },
+    {
+      "id": "minecraft:pink_wool",
+      "source": "minecraft:1.21.1.jar",
+      "shape": "full",
+      "renderable": "exact",
+      "defaults": {},
+      "faces": {
+        "down": "minecraft:block/pink_wool",
+        "up": "minecraft:block/pink_wool",
+        "north": "minecraft:block/pink_wool",
+        "south": "minecraft:block/pink_wool",
+        "west": "minecraft:block/pink_wool",
+        "east": "minecraft:block/pink_wool"
+      },
+      "tags": []
+    },
+    {
+      "id": "minecraft:purple_wool",
+      "source": "minecraft:1.21.1.jar",
+      "shape": "full",
+      "renderable": "exact",
+      "defaults": {},
+      "faces": {
+        "down": "minecraft:block/purple_wool",
+        "up": "minecraft:block/purple_wool",
+        "north": "minecraft:block/purple_wool",
+        "south": "minecraft:block/purple_wool",
+        "west": "minecraft:block/purple_wool",
+        "east": "minecraft:block/purple_wool"
+      },
+      "tags": []
+    },
+    {
+      "id": "minecraft:red_wool",
+      "source": "minecraft:1.21.1.jar",
+      "shape": "full",
+      "renderable": "exact",
+      "defaults": {},
+      "faces": {
+        "down": "minecraft:block/red_wool",
+        "up": "minecraft:block/red_wool",
+        "north": "minecraft:block/red_wool",
+        "south": "minecraft:block/red_wool",
+        "west": "minecraft:block/red_wool",
+        "east": "minecraft:block/red_wool"
+      },
+      "tags": []
+    },
+    {
+      "id": "minecraft:stone",
+      "source": "minecraft:1.21.1.jar",
+      "shape": "full",
+      "renderable": "exact",
+      "defaults": {},
+      "faces": {
+        "down": "minecraft:block/stone",
+        "up": "minecraft:block/stone",
+        "north": "minecraft:block/stone",
+        "south": "minecraft:block/stone",
+        "west": "minecraft:block/stone",
+        "east": "minecraft:block/stone"
+      },
+      "tags": []
+    },
+    {
+      "id": "minecraft:stone_brick_slab",
+      "source": "minecraft:1.21.1.jar",
+      "shape": "partial",
+      "renderable": "exact",
+      "defaults": {"waterlogged":"false","type":"bottom"},
+      "faces": {
+        "down": "minecraft:block/stone_bricks",
+        "up": "minecraft:block/stone_bricks",
+        "north": "minecraft:block/stone_bricks",
+        "south": "minecraft:block/stone_bricks",
+        "west": "minecraft:block/stone_bricks",
+        "east": "minecraft:block/stone_bricks"
+      },
+      "tags": []
+    },
+    {
+      "id": "minecraft:stone_brick_stairs",
+      "source": "minecraft:1.21.1.jar",
+      "shape": "partial",
+      "renderable": "exact",
+      "defaults": {"waterlogged":"false","shape":"straight","half":"bottom","facing":"north"},
+      "faces": {
+        "down": "minecraft:block/stone_bricks",
+        "up": "minecraft:block/stone_bricks",
+        "west": "minecraft:block/stone_bricks",
+        "east": "minecraft:block/stone_bricks",
+        "south": "minecraft:block/stone_bricks",
+        "north": "minecraft:block/stone_bricks"
+      },
+      "tags": ["minecraft:stairs"]
+    },
+    {
+      "id": "minecraft:stone_brick_wall",
+      "source": "minecraft:1.21.1.jar",
+      "shape": "partial",
+      "renderable": "exact",
+      "defaults": {"west":"none","waterlogged":"false","up":"true","south":"none","north":"none","east":"none"},
+      "faces": {
+        "down": "minecraft:block/stone_bricks",
+        "up": "minecraft:block/stone_bricks",
+        "north": "minecraft:block/stone_bricks",
+        "south": "minecraft:block/stone_bricks",
+        "west": "minecraft:block/stone_bricks",
+        "east": "minecraft:block/stone_bricks"
+      },
+      "tags": ["minecraft:walls"]
+    },
+    {
+      "id": "minecraft:stone_bricks",
+      "source": "minecraft:1.21.1.jar",
+      "shape": "full",
+      "renderable": "exact",
+      "defaults": {},
+      "faces": {
+        "down": "minecraft:block/restyled_bricks",
+        "up": "minecraft:block/restyled_bricks",
+        "north": "minecraft:block/restyled_bricks",
+        "south": "minecraft:block/restyled_bricks",
+        "west": "minecraft:block/restyled_bricks",
+        "east": "minecraft:block/restyled_bricks"
+      },
+      "tags": []
+    },
+    {
+      "id": "minecraft:white_wool",
+      "source": "minecraft:1.21.1.jar",
+      "shape": "full",
+      "renderable": "exact",
+      "defaults": {},
+      "faces": {
+        "down": "minecraft:block/white_wool",
+        "up": "minecraft:block/white_wool",
+        "north": "minecraft:block/white_wool",
+        "south": "minecraft:block/white_wool",
+        "west": "minecraft:block/white_wool",
+        "east": "minecraft:block/white_wool"
+      },
+      "tags": []
+    },
+    {
+      "id": "minecraft:yellow_wool",
+      "source": "minecraft:1.21.1.jar",
+      "shape": "full",
+      "renderable": "exact",
+      "defaults": {},
+      "faces": {
+        "down": "minecraft:block/yellow_wool",
+        "up": "minecraft:block/yellow_wool",
+        "north": "minecraft:block/yellow_wool",
+        "south": "minecraft:block/yellow_wool",
+        "west": "minecraft:block/yellow_wool",
+        "east": "minecraft:block/yellow_wool"
+      },
+      "tags": []
+    }
+  ]
+}

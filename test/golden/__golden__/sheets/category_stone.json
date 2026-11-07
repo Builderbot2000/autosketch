@@ -1,0 +1,12 @@
+{
+  "columns": 32,
+  "rows": 1,
+  "pages": 1,
+  "bands": [{"category":"stone","fromRow":1,"toRow":1}],
+  "cells": {
+    "A1": "family golden:marble",
+    "B1": "family golden:marble_bricks",
+    "C1": "family minecraft:stone",
+    "D1": "family minecraft:stone_bricks"
+  }
+}

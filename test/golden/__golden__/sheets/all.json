@@ -1,0 +1,31 @@
+{
+  "columns": 32,
+  "rows": 8,
+  "pages": 1,
+  "bands": [
+    {"category":"stone","fromRow":1,"toRow":1},
+    {"category":"wood","fromRow":2,"toRow":2},
+    {"category":"colored","fromRow":3,"toRow":3},
+    {"category":"glass","fromRow":4,"toRow":4},
+    {"category":"earth","fromRow":5,"toRow":5},
+    {"category":"organic","fromRow":6,"toRow":6},
+    {"category":"light","fromRow":7,"toRow":7},
+    {"category":"decor","fromRow":8,"toRow":8}
+  ],
+  "cells": {
+    "A1": "family golden:marble",
+    "B1": "family golden:marble_bricks",
+    "C1": "family minecraft:stone",
+    "D1": "family minecraft:stone_bricks",
+    "A2": "family golden:marble_pillar",
+    "B2": "family minecraft:oak_planks",
+    "C2": "family minecraft:oak_log",
+    "A3": "series minecraft:*_wool",
+    "A4": "family minecraft:glass",
+    "A5": "family minecraft:grass_block",
+    "A6": "family minecraft:oak_leaves",
+    "A7": "family golden:lamp",
+    "B7": "family minecraft:glowstone",
+    "A8": "family golden:rubble"
+  }
+}

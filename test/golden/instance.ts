@@ -29,7 +29,7 @@ export interface Synthetic {
 export async function loadSynthetic(): Promise<Synthetic> {
   const root = await writeSyntheticInstance(await tempDir("autosketch-golden-"));
   const info = await locateInstance(root);
-  const { stack, warnings } = await openStack(info);
+  const { stack, warnings } = await openStack(info, { indexCache: false });
   const { registry } = await loadRegistry(stack, { mcVersion: info.mcVersion, cacheDir: false });
   const { index } = await loadPaletteIndex(stack, registry, { plugins: activePlugins(BUILTIN_PLUGINS, registry), cacheDir: false });
   const loader = new TextureLoader(stack);

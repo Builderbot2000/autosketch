@@ -8,6 +8,8 @@ Instead, a **plugin** for each such mod exposes:
 
 Plugins activate only when their mod's namespace is present in the instance.
 
+**Plugins are never required.** Palette ingestion detects variant mods, camo mods, duplicates and dye series generically (`03`, "Instance-agnostic by design"), so an unknown modpack works with zero configuration. A plugin is only for what data can't express: render hooks for code-drawn blocks, NBT-driven appearance (camo), and agent actions that replicate a mod's own tools.
+
 ## Plugin API
 
 ```ts

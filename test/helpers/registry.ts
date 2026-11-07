@@ -18,7 +18,7 @@ export function fakeRegistry(specs: (Partial<BlockInfo> & { id: string })[]): Re
       ...s,
     };
   });
-  return new Registry({ cacheVersion: 0, fingerprint: "test", mcVersion: "1.21.1", builtMs: 0, blocks, mods: {}, warnings: [] });
+  return new Registry({ cacheVersion: "test", fingerprint: "test", mcVersion: "1.21.1", builtMs: 0, blocks, mods: {}, warnings: [] });
 }
 
 export const partial = (id: string, extra: Partial<BlockInfo> = {}) => ({ id, shape: "partial" as const, ...extra });

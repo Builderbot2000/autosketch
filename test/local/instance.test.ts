@@ -3,6 +3,9 @@
  * since game and mod assets can't be redistributed as fixtures.
  *
  *   AUTOSKETCH_INSTANCE=/mnt/c/Users/<you>/curseforge/minecraft/Instances/Craftoria npm run test:local
+ *   AUTOSKETCH_INSTANCE=~/.minecraft AUTOSKETCH_VERSION=1.21.1 npm run test:local   # plain vanilla
+ *
+ * Nothing here is instance-specific: the same assertions must hold for any pack.
  */
 import { describe, expect, it } from "vitest";
 import { locateInstance } from "../../src/assets/locate.js";
@@ -17,7 +20,8 @@ const root = process.env.AUTOSKETCH_INSTANCE;
 
 describe.skipIf(!root)("real instance", () => {
   it("locates and opens the full pack stack", async () => {
-    const info = await locateInstance(root!);
+    const version = process.env.AUTOSKETCH_VERSION;
+    const info = await locateInstance(root!, version ? { version } : {});
     const { stack, warnings, stats } = await openStack(info);
     console.log(`${info.name} ${info.mcVersion} ${info.loader?.name ?? "vanilla"}:`, stats);
     if (warnings.length) console.log("warnings:\n  " + warnings.join("\n  "));
@@ -40,6 +44,11 @@ describe.skipIf(!root)("real instance", () => {
     expect(registry.get("minecraft:oak_stairs")?.defaults).toMatchObject({ facing: "north", half: "bottom" });
     expect(registry.get("minecraft:stone")?.shape).toBe("full");
     expect(registry.withTag("minecraft:logs").length).toBeGreaterThan(10);
+
+    // Plugins are optional refinements: without them the overview must still fit one page.
+    const bare = await loadPaletteIndex(stack, registry, { plugins: [] });
+    const bareSheet = await new SheetRenderer(bare.index, stack).render({ sheet: "overview" });
+    expect(bareSheet.layout.pages).toBe(1);
 
     const { index } = await loadPaletteIndex(stack, registry, { plugins: activePlugins(BUILTIN_PLUGINS, registry) });
     const sheet = await new SheetRenderer(index, stack).render({ sheet: "overview" });

@@ -14,12 +14,13 @@ import { textWidth } from "./font.js";
  */
 
 export type Cell =
-  | { kind: "family"; id: string }
+  /** `similar`: near-identical families folded into this tile to keep the overview on one page. */
+  | { kind: "family"; id: string; similar?: string[] }
   | { kind: "series"; id: string }
   | { kind: "variant"; family: string; block: string };
 
 export interface SheetSpec {
-  /** "overview" | "all" | "category:<c>" | "family:<id>" | "series:<id>" | "filter:<query>" */
+  /** "overview" | "all" | "category:<c>" | "family:<id>" | "series:<id>" | "similar:<id>" | "filter:<query>" */
   sheet: string;
   page?: number; // 1-based
   /** Cell range to enlarge, e.g. "C4:H9" (64px tiles). */
@@ -86,6 +87,10 @@ interface Item {
   cell: Cell;
   category: string;
   lab: Lab;
+  noise?: number;
+  /** Shape coverage key; only families with the same key can fold together. */
+  shapeKey?: string;
+  richness?: number;
 }
 
 export function layoutSheet(index: PaletteIndex, spec: SheetSpec): SheetLayout {
@@ -96,8 +101,15 @@ export function layoutSheet(index: PaletteIndex, spec: SheetSpec): SheetLayout {
   let banded = true;
   switch (kind) {
     case "overview":
-      items = materialItems(index, (f) => isArchitectural(f));
+      items = overviewItems(index);
       break;
+    case "similar": {
+      const hit = overviewItems(index).find((i) => i.cell.kind === "family" && (i.cell.id === arg || i.cell.similar?.includes(arg)));
+      if (!hit || hit.cell.kind !== "family") throw new Error(`"${arg}" is not on the overview`);
+      items = [hit.cell.id, ...(hit.cell.similar ?? [])].map((id) => ({ cell: { kind: "family", id }, category: "", lab: [0, 0, 0] }));
+      banded = false;
+      break;
+    }
     case "all":
       items = materialItems(index, () => true);
       break;
@@ -178,10 +190,77 @@ function materialItems(index: PaletteIndex, keep: (f: Family) => boolean): Item[
       seenSeries.add(f.series);
       // Series sort as neutral (multi-coloured) within their first member's category.
       items.push({ cell: { kind: "series", id: f.series }, category: f.category, lab: [s.lab[0], 0, 0] });
-    } else items.push({ cell: { kind: "family", id: f.id }, category: f.category, lab: s.lab });
+    } else
+      items.push({
+        cell: { kind: "family", id: f.id },
+        category: f.category,
+        lab: s.lab,
+        noise: s.noise,
+        shapeKey: ["stairs", "slab", "wall"].map((k) => (f.shapes[k as keyof Family["shapes"]] ? 1 : 0)).join(""),
+        richness: (f.namespace === "minecraft" ? 1000 : 0) + Object.keys(f.shapes).length * 10 + f.variants.length,
+      });
   }
   return items;
 }
+
+/** Rows a banded layout needs at `columns` columns. */
+function bandedRowCount(items: Item[], columns: number): number {
+  let rows = 0;
+  for (const cat of CATEGORY_ORDER) {
+    const n = items.filter((i) => i.category === cat).length;
+    rows += Math.ceil(n / columns);
+  }
+  return rows;
+}
+
+const overviewCache = new WeakMap<PaletteIndex, Item[]>();
+
+/**
+ * Overview items under a one-page budget. Any modpack can exceed a page (ATM10 adds 165 distinct
+ * woods), so when the architectural families don't fit at MAX_COLUMNS, near-identical families
+ * (same category and shape coverage, close colour and texture busyness) fold into one tile,
+ * tightening until they fit. Folded members stay reachable via the similar:<id> sheet.
+ */
+export function overviewItems(index: PaletteIndex): Item[] {
+  const cached = overviewCache.get(index);
+  if (cached) return cached;
+  const items = materialItems(index, (f) => isArchitectural(f));
+  let result = items;
+  for (let threshold = 3; bandedRowCount(result, MAX_COLUMNS) > ROWS_PER_PAGE && threshold <= 40; threshold += 1) {
+    result = foldSimilar(items, threshold);
+  }
+  overviewCache.set(index, result);
+  return result;
+}
+
+function foldSimilar(items: Item[], threshold: number): Item[] {
+  const out: Item[] = [];
+  const reps: Item[] = [];
+  const ordered = [...items].sort((a, b) => (b.richness ?? 0) - (a.richness ?? 0) || (idOf(a) < idOf(b) ? -1 : 1));
+  for (const it of ordered) {
+    if (it.cell.kind !== "family") {
+      out.push(it);
+      continue;
+    }
+    const rep = reps.find(
+      (r) =>
+        r.category === it.category &&
+        r.shapeKey === it.shapeKey &&
+        Math.hypot(r.lab[0] - it.lab[0], r.lab[1] - it.lab[1], r.lab[2] - it.lab[2]) < threshold &&
+        Math.abs((r.noise ?? 0) - (it.noise ?? 0)) < threshold / 2,
+    );
+    if (rep && rep.cell.kind === "family") {
+      rep.cell.similar = [...(rep.cell.similar ?? []), it.cell.id];
+    } else {
+      const copy: Item = { ...it, cell: { kind: "family", id: it.cell.id } };
+      reps.push(copy);
+      out.push(copy);
+    }
+  }
+  return out;
+}
+
+const idOf = (i: Item) => (i.cell.kind === "variant" ? i.cell.block : i.cell.id);
 
 function familyItems(index: PaletteIndex, id: string): Item[] {
   const f = index.family(id) ?? index.familyOfBlock(id);
@@ -369,6 +448,12 @@ export class SheetRenderer {
       img.fillRect(x + T - w - 2, y + T - 9, w + 2, 9, [0, 0, 0, 170]);
       img.text(label, x + T - w - 1, y + T - 8, [255, 255, 255, 255]);
     }
+    if (cell.kind === "family" && cell.similar?.length) {
+      const label = `+${Math.min(99, cell.similar.length)}`;
+      const w = textWidth(label);
+      img.fillRect(x, y + T - 9, w + 2, 9, [0, 0, 0, 170]);
+      img.text(label, x + 1, y + T - 8, [90, 230, 255, 255]);
+    }
     if (seriesColors) {
       const sw = Math.max(1, Math.floor(T / seriesColors.length));
       const h = Math.max(3, Math.round(T / 10));
@@ -393,9 +478,11 @@ export class SheetRenderer {
     lines.push("Badges: top-left pips = stairs(yellow) slab(blue) wall(red) fence(green); top-right magenta = extra shapes (roof pieces etc.); bottom-right number = variant count; colour strip = dye series.");
     if (s.sheet === "overview") {
       const all = this.index.buildable().length;
+      const folded = layout.cells.flat().reduce((n, c) => n + (c?.kind === "family" ? (c.similar?.length ?? 0) : 0), 0);
       lines.push(`Overview shows materials with stairs/slabs, variants or dye series; all ${all} buildable families are on category:<name> sheets.`);
+      if (folded) lines.push(`To fit one page, ${folded} near-identical materials are folded into similar tiles (cyan +n, bottom-left); open similar:<family id> to see them.`);
     }
-    if (s.zoom || s.sheet.startsWith("family:") || s.sheet.startsWith("series:")) lines.push(this.describeCells(layout));
+    if (s.zoom || s.sheet.startsWith("family:") || s.sheet.startsWith("series:") || s.sheet.startsWith("similar:")) lines.push(this.describeCells(layout));
     lines.push(`Pick with palette_pick({sheet:"${s.sheet}"${s.page > 1 ? `, page:${s.page}` : ""}, roles:{wall:"C4:F6", ...}}); enlarge with zoom:"C4:H9".`);
     return lines.join("\n");
   }
@@ -424,7 +511,7 @@ export class SheetRenderer {
           const f = this.index.family(cell.id);
           const st = this.index.stats(cell.id);
           const shapes = f ? Object.keys(f.shapes).filter((k) => ["stairs", "slab", "wall", "fence"].includes(k)) : [];
-          extra = [st ? colorName(st.lab) : "", shapes.length ? `[${shapes.join(",")}]` : "", f?.variants.length ? `+${f.variants.length}v` : ""].filter(Boolean).join(" ");
+          extra = [st ? colorName(st.lab) : "", shapes.length ? `[${shapes.join(",")}]` : "", f?.variants.length ? `+${f.variants.length}v` : "", cell.similar?.length ? `≈${cell.similar.length} similar` : ""].filter(Boolean).join(" ");
         } else {
           id = cell.id;
           extra = `series of ${this.index.series.get(cell.id)?.members.length ?? 0}`;

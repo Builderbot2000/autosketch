@@ -120,6 +120,29 @@ palette_pick({
 
 Target: a build session spends **under 3k tokens** on material selection in the common case.
 
+## Instance-agnostic by design
+
+Ingestion must work on any modpack with **no per-pack configuration**. Every grouping and classification rule is derived from data the instance already contains. Plugins (`09`) are optional refinements, not requirements:
+
+| Concern | Generic rule (no plugin needed) |
+|---------|---------------------------------|
+| Decorative-variant mods | **Detected:** a namespace whose tags are named after *another mod's* block and contain ≥75% of its own blocks, across ≥5 such tags (finds Chipped and Rechiseled automatically) |
+| Camo/frame mods | **Placeholder textures:** one texture skinning ≥15 unrelated blocks of its own mod, ≥70% of them partial shapes → excluded |
+| Visual duplicates | Families with identical base textures fold into one. Code-tinted blocks fold only into an untinted twin from another mod (reinforced copies); code-dyed sets within one mod stay apart |
+| Duplicate series | Series whose members all look identical (behaviour-only variants) fold into the first |
+| Extra dye colours | Any `<colour>_<rest>` family joins a series when a vanilla dye series `*_<rest>` exists (Dyenamics etc.) |
+| Category | Light level, glass/colour words, then **mining-tool tags** (`mineable/axe` wood, `/shovel` earth, `/hoe` organic, `/pickaxe` stone or metal), then generic English words. No pack-specific vocabulary |
+| Overview size | Widen to ≤40 columns. If it still overflows, fold near-identical families (same category and shape coverage, ΔE and noise under a threshold that tightens until it fits) into `+n` tiles, reachable via `similar:<id>` |
+| Caches | Keyed by stack fingerprint + a hash of the deriving source code, so they never go stale |
+
+**Verified on three instances, with and without plugins:**
+
+| Instance | Blocks | Buildable families | Overview | Plugins change |
+|----------|--------|--------------------|----------|----------------|
+| Craftoria (NeoForge 1.21.1, ~530 mods) | 30,945 | 2,981 | 804 tiles, 32×29, ≈1.4k tokens | ≤5 families |
+| ATM10 (NeoForge 1.21.1, ~480 mods) | 51,347 | 4,439 | 984 tiles, 34×32, ≈1.6k tokens | ≤5 families |
+| Vanilla 1.21.1 | 1,062 | 265 | 61 tiles | none |
+
 ## Implementation status (Craftoria, measured)
 
 | Stage | Result |

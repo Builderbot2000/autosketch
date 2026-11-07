@@ -159,6 +159,8 @@ export interface ModelFace {
   cullface?: Face;
   rotation?: number;
   tintindex?: number;
+  /** NeoForge per-face/element vertex colour (ARGB hex), set in model JSON. */
+  color?: string;
 }
 
 export interface ModelElement {
@@ -195,7 +197,8 @@ interface RawElement {
   to: [number, number, number];
   rotation?: ModelElement["rotation"];
   shade?: boolean;
-  faces?: Partial<Record<Face, { texture?: string; uv?: [number, number, number, number]; cullface?: Face; rotation?: number; tintindex?: number }>>;
+  faces?: Partial<Record<Face, { texture?: string; uv?: [number, number, number, number]; cullface?: Face; rotation?: number; tintindex?: number; neoforge_data?: { color?: string } }>>;
+  neoforge_data?: { color?: string };
 }
 
 const MAX_PARENT_DEPTH = 32;
@@ -340,6 +343,8 @@ function bakeElement(e: RawElement, vars: Record<string, string>, issues: Resolv
     if (rf.cullface) face.cullface = rf.cullface;
     if (rf.rotation) face.rotation = rf.rotation;
     if (rf.tintindex !== undefined) face.tintindex = rf.tintindex;
+    const color = rf.neoforge_data?.color ?? e.neoforge_data?.color;
+    if (color && !/^f*$/i.test(color)) face.color = color;
     faces[f] = face;
   }
   const out: ModelElement = { from: e.from, to: e.to, faces };

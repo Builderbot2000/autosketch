@@ -5,6 +5,7 @@ import { defaultCacheDir } from "../assets/cache.js";
 import type { PackStack } from "../assets/pack.js";
 import type { BlockInfo, Registry } from "../assets/registry.js";
 import { mapLimit } from "../core/async.js";
+import { codeHash } from "../core/codehash.js";
 import type { AutosketchPlugin, Category } from "../plugins/types.js";
 import type { Lab, RGB } from "./color.js";
 import { buildFamilies, type Family, type Series } from "./families.js";
@@ -19,7 +20,7 @@ export interface FamilyStats {
 }
 
 export interface PaletteIndexData {
-  cacheVersion: number;
+  cacheVersion: string;
   fingerprint: string;
   families: Family[];
   series: Series[];
@@ -27,7 +28,8 @@ export interface PaletteIndexData {
   looseCount: number;
 }
 
-const CACHE_VERSION = 4;
+/** Changes whenever the palette-building code changes, invalidating caches automatically. */
+const CACHE_VERSION = codeHash(import.meta.url, ["./index", "./families", "./textures", "./color", "../plugins/builtin"]);
 
 export const CATEGORY_ORDER: readonly Category[] = ["stone", "wood", "metal", "colored", "glass", "earth", "organic", "light", "decor"];
 

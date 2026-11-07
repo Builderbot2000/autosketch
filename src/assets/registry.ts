@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { mapLimit } from "../core/async.js";
+import { codeHash } from "../core/codehash.js";
 import { defaultCacheDir } from "./cache.js";
 import {
   blockstateProperties,
@@ -35,6 +36,8 @@ export interface BlockInfo {
   faceTextures: Partial<Record<Face, string>>;
   textures: string[];
   tinted: boolean;
+  /** Vertex colour from model JSON (NeoForge), when the block is coloured that way. */
+  vertexColor?: string;
   tags: string[];
   light?: number;
   transparent?: boolean;
@@ -45,7 +48,7 @@ export interface BlockInfo {
 }
 
 export interface RegistryData {
-  cacheVersion: number;
+  cacheVersion: string;
   fingerprint: string;
   mcVersion: string;
   builtMs: number;
@@ -55,8 +58,8 @@ export interface RegistryData {
   warnings: string[];
 }
 
-/** Bump when registry-building logic changes, to invalidate caches. */
-const CACHE_VERSION = 6;
+/** Changes whenever the registry-building code changes, invalidating caches automatically. */
+const CACHE_VERSION = codeHash(import.meta.url, ["./registry", "./models", "./pack"]);
 
 export class Registry {
   private readonly byId: Map<string, BlockInfo>;
@@ -280,6 +283,7 @@ async function buildBlock(
   const faceTextures: BlockInfo["faceTextures"] = {};
   const textures = new Set<string>();
   let tinted = false;
+  let vertexColor: string | undefined;
   for (const { model, x, y } of placed)
     for (const e of model.elements)
       for (const f of FACES) {
@@ -289,6 +293,7 @@ async function buildBlock(
         // Skip textures that don't exist as files (generated at runtime, e.g. XyCraft's cloud layer).
         if (stack.has(texturePath(face.texture))) faceTextures[rotateFace(f, x, y)] ??= face.texture;
         if (face.tintindex !== undefined && face.tintindex >= 0) tinted = true;
+        vertexColor ??= face.color;
       }
   if (textures.size === 0) for (const m of models) if (m.particle) textures.add(m.particle);
 
@@ -308,6 +313,7 @@ async function buildBlock(
     tags: [],
     source: layer.id,
   };
+  if (vertexColor) info.vertexColor = vertexColor;
   if (vanilla) {
     info.displayName = vanilla.name;
     info.exactProperties = true;

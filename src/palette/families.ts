@@ -49,6 +49,8 @@ export interface Family extends ShapeGroup {
 export interface Series {
   id: string; // "minecraft:*_wool"
   members: string[]; // family ids, in dye order
+  /** Other series that look identical (folded into this one). */
+  duplicates?: string[];
 }
 
 export interface FamilyResult {
@@ -125,7 +127,7 @@ export function buildFamilies(registry: Registry, plugins: readonly AutosketchPl
     parentOf.set(child, parent);
   };
 
-  const variantNs = new Set(plugins.flatMap((p) => p.variantTagNamespaces ?? []));
+  const variantNs = new Set([...plugins.flatMap((p) => p.variantTagNamespaces ?? []), ...detectVariantTagNamespaces(registry)]);
   if (variantNs.size) {
     const tagMembers = new Map<string, string[]>();
     for (const b of blocks)
@@ -211,6 +213,29 @@ export function buildFamilies(registry: Registry, plugins: readonly AutosketchPl
     fam.variants.push({ base: g.base, shapes: g.shapes });
     fam.aliases.push(...g.aliases);
   }
+  // 3b. Visual duplicates: families whose base uses identical textures fold into one. Tinted blocks
+  // only fold into an untinted twin from another mod (SecurityCraft's reinforced copies are tinted in
+  // code); tinted blocks sharing a texture within one mod stay apart (code-dyed sets like plastic bricks).
+  const groupsBySig = new Map<string, Family[]>();
+  for (const f of families.values()) {
+    const sig = lookSignature(info(f.base));
+    if (sig) (groupsBySig.get(sig) ?? groupsBySig.set(sig, []).get(sig)!).push(f);
+  }
+  const fold = (keep: Family, f: Family) => {
+    keep.aliases.push(f.base, ...f.aliases);
+    for (const [k, v] of Object.entries(f.shapes) as [ShapeKind, string][]) if (!keep.shapes[k]) keep.shapes[k] = v;
+    else keep.aliases.push(v);
+    keep.variants.push(...f.variants);
+    families.delete(f.id);
+  };
+  for (const group of groupsBySig.values()) {
+    if (group.length < 2) continue;
+    const plain = group.filter((f) => !isCodeColoured(info(f.base))).sort(preferFamily);
+    const keep = plain[0];
+    if (!keep) continue;
+    for (const f of plain.slice(1)) fold(keep, f);
+    for (const f of group) if (isCodeColoured(info(f.base)) && f.namespace !== keep.namespace) fold(keep, f);
+  }
   for (const f of families.values()) f.variants.sort((a, b) => (a.base < b.base ? -1 : 1));
 
   // 4. Extras: loose shaped blocks that reuse a family's main texture.
@@ -228,12 +253,14 @@ export function buildFamilies(registry: Registry, plugins: readonly AutosketchPl
   }
 
   // Classification.
+  const placeholders = detectPlaceholderTextures(registry);
   const pluginFor = new Map<string, AutosketchPlugin[]>();
   for (const p of plugins) for (const ns of p.namespaces) pluginFor.set(ns, [...(pluginFor.get(ns) ?? []), p]);
   for (const f of families.values()) {
     const b = info(f.base);
     f.category = categorize(b);
-    const why = exclusionReason(b);
+    const main = mainTexture(b);
+    const why = main && placeholders.has(main) ? "placeholder-texture" : exclusionReason(b);
     if (why) {
       f.buildable = false;
       f.excludedBy = why;
@@ -265,9 +292,118 @@ export function buildFamilies(registry: Registry, plugins: readonly AutosketchPl
     series.push({ id, members: members.map((m) => m.id) });
     for (const m of members) families.get(m.id)!.series = id;
   }
+  // Mods that add extra dye colours (Dyenamics: peach_wool, aquamarine_concrete…) join by suffix:
+  // any family "<colour>_<rest>" where a dye series "*_<rest>" exists.
+  const suffixes = [...new Set(series.map((x) => x.id.slice(x.id.indexOf("*") + 1)).filter((r) => r.startsWith("_")))];
+  const extra = new Map<string, string[]>();
+  for (const f of families.values()) {
+    if (f.series) continue;
+    const [ns, path] = split(f.base);
+    const rest = suffixes.find((r) => path.endsWith(r) && /^[a-z]+(_[a-z]+)?$/.test(path.slice(0, -r.length)));
+    if (!rest) continue;
+    const key = `${ns}:*${rest}`;
+    (extra.get(key) ?? extra.set(key, []).get(key)!).push(f.id);
+  }
+  for (const [id, members] of extra) {
+    const existing = series.find((x) => x.id === id);
+    if (!existing && members.length < 8) continue;
+    members.sort();
+    if (existing) existing.members.push(...members);
+    else series.push({ id, members });
+    for (const m of members) families.get(m)!.series = id;
+  }
   series.sort((a, b) => (a.id < b.id ? -1 : 1));
 
+  // Series that look identical (same textures for every member; e.g. EnderIO's fused glass in
+  // light-emitting / mob-blocking / … versions) fold into the first: duplicates leave default sheets.
+  const seriesBySig = new Map<string, Series>();
+  for (const x of [...series].sort((a, b) => a.id.length - b.id.length || (a.id < b.id ? -1 : 1))) {
+    const sig = x.members.map((m) => lookSignature(info(families.get(m)!.base)) ?? m).join(";");
+    const keep = seriesBySig.get(sig);
+    if (!keep) {
+      seriesBySig.set(sig, x);
+      continue;
+    }
+    (keep.duplicates ??= []).push(x.id);
+    for (const m of x.members) {
+      const f = families.get(m)!;
+      f.buildable = false;
+      f.excludedBy = `duplicate-of:${keep.id}`;
+    }
+  }
+
+  // Category: dye-series members are "colored" regardless of material words.
+  for (const f of families.values()) if (f.series && f.category !== "glass" && f.category !== "light") f.category = "colored";
+
   return { families: [...families.values()].sort((a, b) => (a.id < b.id ? -1 : 1)), series, looseCount };
+}
+
+/** Prefer vanilla, then richer families, then shorter ids, as the survivor of a duplicate fold. */
+function preferFamily(a: Family, b: Family): number {
+  const va = a.namespace === "minecraft" ? 0 : 1, vb = b.namespace === "minecraft" ? 0 : 1;
+  if (va !== vb) return va - vb;
+  const ra = Object.keys(a.shapes).length + a.variants.length, rb = Object.keys(b.shapes).length + b.variants.length;
+  if (ra !== rb) return rb - ra;
+  if (a.id.length !== b.id.length) return a.id.length - b.id.length;
+  return a.id < b.id ? -1 : 1;
+}
+
+/** A block's textures for duplicate detection (tint handled by the caller). */
+function lookSignature(b: BlockInfo): string | undefined {
+  const faces = ["up", "down", "north", "south", "east", "west"] as const;
+  const t = faces.map((f) => b.faceTextures[f] ?? "");
+  return t.some(Boolean) ? t.join("|") : undefined;
+}
+
+const isCodeColoured = (b: BlockInfo) => b.tinted || !!b.vertexColor;
+
+/**
+ * Namespaces whose tags group decorative variants by base block, detected from data: tags named
+ * after another mod's block (`chipped:andesite` ↔ minecraft:andesite) whose members are almost all
+ * the tagging mod's own blocks. Chipped, Rechiseled and similar mods are found without plugins.
+ */
+export function detectVariantTagNamespaces(registry: Registry, minTags = 5): string[] {
+  const paths = new Map<string, string>(); // path → a namespace that defines it
+  for (const b of registry.all()) {
+    const [ns, path] = split(b.id);
+    if (!paths.has(path) || ns === "minecraft") paths.set(path, ns);
+  }
+  const members = new Map<string, string[]>();
+  for (const b of registry.all())
+    for (const t of b.tags) (members.get(t) ?? members.set(t, []).get(t)!).push(b.id);
+  const score = new Map<string, number>();
+  for (const [tag, ids] of members) {
+    const [ns, name] = split(tag);
+    if (GENERIC_TAG_NS.has(ns) || name.includes("/") || ids.length < 4) continue;
+    const baseNs = paths.get(name) ?? paths.get(name.replace(/_block$/, "")) ?? paths.get(name.replace(/^waxed_/, ""));
+    if (!baseNs || baseNs === ns) continue;
+    const own = ids.filter((id) => id.startsWith(`${ns}:`)).length / ids.length;
+    if (own >= 0.75) score.set(ns, (score.get(ns) ?? 0) + 1);
+  }
+  return [...score].filter(([, n]) => n >= minTags).map(([ns]) => ns).sort();
+}
+
+const GENERIC_TAG_NS = new Set(["minecraft", "c", "forge", "neoforge", "fabric", "common"]);
+
+/**
+ * Textures used as the look of many unrelated blocks in their own mod, mostly partial shapes: the
+ * placeholder skin of camo/frame mods (FramedBlocks, Copycats…), whose real look comes from NBT.
+ */
+export function detectPlaceholderTextures(registry: Registry, minStems = 15): Set<string> {
+  const use = new Map<string, BlockInfo[]>();
+  for (const b of registry.all()) {
+    const t = mainTexture(b);
+    if (t) (use.get(t) ?? use.set(t, []).get(t)!).push(b);
+  }
+  const out = new Set<string>();
+  for (const [tex, blocks] of use) {
+    const ns = tex.slice(0, tex.indexOf(":"));
+    const own = blocks.filter((b) => b.namespace === ns);
+    const stems = new Set(own.map((b) => b.id.replace(/_(stairs|slab|wall|fence|fence_gate|door|trapdoor|button|pressure_plate|pane)$/, "")));
+    const partial = own.filter((b) => b.shape === "partial").length / Math.max(1, own.length);
+    if (stems.size >= minStems && partial >= 0.7) out.add(tex);
+  }
+  return out;
 }
 
 function split(id: string): [string, string] {
@@ -340,19 +476,26 @@ function seriesKey(id: string): { series: string; dye: number } | undefined {
 const hasTag = (b: BlockInfo, ...tags: string[]) => tags.some((t) => b.tags.includes(t));
 const token = (b: BlockInfo, re: RegExp) => re.test(b.id.slice(b.id.indexOf(":") + 1));
 
+/**
+ * Material category from data first: light level, glass/colour words, then the mining-tool tags that
+ * nearly every mod sets (axe → wood, shovel → earth, hoe → organic, pickaxe → stone or metal).
+ * Only generic English material words are used as fallbacks — no modpack-specific vocabulary.
+ */
 export function categorize(b: BlockInfo): Category {
   if ((b.light ?? 0) >= 10 || token(b, /(^|_)(lamp|lantern|glowstone|froglight|shroomlight|light)($|_)/)) return "light";
   if (hasTag(b, "c:glass_blocks", "minecraft:impermeable") || token(b, /glass/)) return "glass";
   if (token(b, /(^|_)(concrete|terracotta|wool|glazed)($|_)/)) return "colored";
-  if (hasTag(b, "minecraft:logs", "minecraft:planks") || token(b, /(^|_)(planks?|log|wood|stem|hyphae|bamboo|timber|beam)($|_)/)) return "wood";
-  if (hasTag(b, "minecraft:leaves", "minecraft:wool") || token(b, /(^|_)(leaves|moss|hay|wart|mushroom|coral|sponge|thatch|vine|kelp)($|_)/)) return "organic";
-  if (hasTag(b, "minecraft:dirt", "c:sands", "c:gravels", "minecraft:sand") || token(b, /(^|_)(dirt|grass|sand|gravel|clay|mud|podzol|mycelium|soil|snow|ice)($|_)/) && !token(b, /sandstone|brick/))
-    return "earth";
-  if (token(b, /(^|_)(iron|gold|copper|zinc|brass|steel|netherite|metal|aluminum|aluminium|bronze|tin|lead|silver|nickel|osmium|uranium|platinum|titanium|cobalt|sheet|casing|plating|plate|raw|crystal|gem|diamond|emerald|amethyst|lapis|ruby|sapphire|topaz|jade|fluix|certus|coal)($|_)/))
-    return "metal";
-  if (hasTag(b, "c:stones", "minecraft:base_stone_overworld", "minecraft:base_stone_nether", "c:cobblestones") ||
-      token(b, /(stone|brick|tile|andesite|diorite|granite|deepslate|basalt|tuff|calcite|marble|limestone|slate|sandstone|prismarine|quartz|purpur|obsidian|netherrack|cobble|rock|asurine|crimsite|ochrum|veridium|scoria|scorchia|dripstone|blackstone|paving|mosaic|pillar|polished|smooth|chalk|pietraforte|dungeon|kivi|slag|shale|gneiss|schist|travertine|dacite|rhyolite|cinder|ashlar|masonry|cut_)/))
-    return "stone";
+  if (hasTag(b, "minecraft:logs", "minecraft:planks", "minecraft:mineable/axe")) return "wood";
+  if (hasTag(b, "minecraft:leaves", "minecraft:wool", "minecraft:mineable/hoe")) return "organic";
+  if (hasTag(b, "minecraft:dirt", "c:sands", "c:gravels", "minecraft:sand", "minecraft:mineable/shovel")) return "earth";
+  const metalWords = /(^|_)(iron|gold|copper|zinc|brass|steel|netherite|metal|aluminum|aluminium|bronze|tin|lead|silver|nickel|osmium|uranium|platinum|titanium|cobalt|sheet|casing|plating|plate|raw|crystal|gem|diamond|emerald|amethyst|lapis|ruby|sapphire|coal)($|_)/;
+  if (hasTag(b, "minecraft:beacon_base_blocks") || b.tags.some((t) => t.startsWith("c:storage_blocks")) || token(b, metalWords)) return "metal";
+  if (hasTag(b, "minecraft:mineable/pickaxe", "c:stones", "minecraft:base_stone_overworld", "minecraft:base_stone_nether", "c:cobblestones")) return "stone";
+  // No tool tags: generic words only.
+  if (token(b, /(planks?|log|wood|stem|hyphae|bamboo|timber|beam)/)) return "wood";
+  if (token(b, /(leaves|moss|hay|wart|mushroom|coral|sponge|thatch|vine|kelp)/)) return "organic";
+  if (token(b, /(dirt|grass|sand|gravel|clay|mud|soil|snow|ice)/) && !token(b, /sandstone|brick/)) return "earth";
+  if (token(b, /(stone|brick|tile|rock|marble|slate|cobble|paving|pillar|polished|smooth|masonry)/)) return "stone";
   return "decor";
 }
 

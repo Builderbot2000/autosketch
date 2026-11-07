@@ -10,6 +10,8 @@ import {
   isFullCube,
   ModelResolver,
   parseBlockstate,
+  rotateFace,
+  texturePath,
   selectModels,
   type Face,
   type Props,
@@ -54,7 +56,7 @@ export interface RegistryData {
 }
 
 /** Bump when registry-building logic changes, to invalidate caches. */
-const CACHE_VERSION = 2;
+const CACHE_VERSION = 6;
 
 export class Registry {
   private readonly byId: Map<string, BlockInfo>;
@@ -272,19 +274,22 @@ async function buildBlock(
 
   const refs = selectModels(def, defaults);
   const models: ResolvedModel[] = await Promise.all(refs.map((r) => resolver.resolve(r.model)));
+  const placed = models.map((model, i) => ({ model, x: refs[i]!.x, y: refs[i]!.y }));
   const elements = models.flatMap((m) => m.elements);
 
   const faceTextures: BlockInfo["faceTextures"] = {};
   const textures = new Set<string>();
   let tinted = false;
-  for (const e of elements)
-    for (const f of FACES) {
-      const face = e.faces[f];
-      if (!face || face.texture === "#missing") continue;
-      textures.add(face.texture);
-      faceTextures[f] ??= face.texture;
-      if (face.tintindex !== undefined && face.tintindex >= 0) tinted = true;
-    }
+  for (const { model, x, y } of placed)
+    for (const e of model.elements)
+      for (const f of FACES) {
+        const face = e.faces[f];
+        if (!face || face.texture === "#missing") continue;
+        textures.add(face.texture);
+        // Skip textures that don't exist as files (generated at runtime, e.g. XyCraft's cloud layer).
+        if (stack.has(texturePath(face.texture))) faceTextures[rotateFace(f, x, y)] ??= face.texture;
+        if (face.tintindex !== undefined && face.tintindex >= 0) tinted = true;
+      }
   if (textures.size === 0) for (const m of models) if (m.particle) textures.add(m.particle);
 
   const issues = new Set(models.flatMap((m) => m.issues));
@@ -295,7 +300,7 @@ async function buildBlock(
     namespace,
     properties,
     defaults,
-    shape: elements.length === 0 ? "none" : isFullCube(models) ? "full" : "partial",
+    shape: elements.length === 0 ? "none" : isFullCube(placed) ? "full" : "partial",
     renderable,
     faceTextures,
     textures: [...textures],

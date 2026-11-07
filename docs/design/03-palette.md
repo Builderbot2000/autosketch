@@ -120,6 +120,25 @@ palette_pick({
 
 Target: a build session spends **under 3k tokens** on material selection in the common case.
 
+## Implementation status (Craftoria, measured)
+
+| Stage | Result |
+|-------|--------|
+| Registry | 30,945 blocks |
+| Families | 4,659 (3,080 buildable after exclusions: functional 530, directional 436, FramedBlocks 213, ores 179) |
+| Variant folding | Chipped and Rechiseled patterns grouped by their own tags (`chipped:<base>`, `rechiseled:<base>`); andesite = 1 family with 77 variants. 1,851 Rechiseled `_connecting` copies folded as aliases |
+| Extras | Macaw's Roofs and similar pieces attach to the family whose texture they reuse |
+| Series | 40 dye series (wool, concrete, plastic bricks…) |
+| Overview | 886 tiles (families with stairs/slabs, ≥5 variants, extras or a series) on **one** 32×32 sheet, 1079×1075 px ≈ 1.5k tokens, rendered in ~0.3 s |
+| Index build | ~0.7 s cold (texture stats for ~2.9k families); cached load ~20 ms |
+
+Rules learned from real data:
+- **Variant tags resolve through shapes and aliases.** `rechiseled:andesite_stairs` maps to andesite, and `chipped:waxed_copper_block` maps to copper. Tags with no base block (Chipped `borderless_bricks`) are headed by their first member.
+- **Wood forms** (`X_wood`, `stripped_X_log/wood`) are variants of `X_log`. **Numbered sets** (`zane_block_0…15`) become one family.
+- **Tints:** biome colormaps only for plant-like blocks. Dye-named tinted blocks use the dye colour, since mods often tint in code. Anything else is untinted.
+- **Model and texture fallbacks feed in from the registry:** custom-loader overrides (XyCraft connected textures) fall back to the lower pack's model, and face textures that don't exist as files (runtime-generated) are skipped.
+- `polished_`, `smooth_`, `cut_` and `_bricks` forms stay separate families, because they look distinct and matter for palettes.
+
 ## Open questions
 
 - Should tiles show weathered or mixed previews for roles with mixes? (Probably only in `palette_show`.)

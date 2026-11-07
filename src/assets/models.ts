@@ -1,4 +1,4 @@
-import type { PackStack } from "./pack.js";
+import { parseJsonLenient, type PackStack } from "./pack.js";
 
 /**
  * Blockstate → model resolution, following the vanilla resource format:
@@ -176,7 +176,7 @@ export interface ResolvedModel {
   ambientOcclusion: boolean;
   particle?: string;
   /** Why this model may not render faithfully. */
-  issues: ("missing" | "missing-parent" | "builtin-entity" | "custom-loader" | "missing-texture" | "cycle")[];
+  issues: ("missing" | "missing-parent" | "builtin-entity" | "custom-loader" | "loader-fallback" | "missing-texture" | "cycle")[];
   loader?: string;
 }
 
@@ -228,9 +228,29 @@ export class ModelResolver {
   }
 
   private async doResolve(id: string): Promise<ResolvedModel> {
+    const top = await this.resolveFrom(id, await this.loadRaw(id));
+    if (top.elements.length > 0 || !top.issues.includes("custom-loader")) return top;
+    // A pack replaced this model with a code-driven loader (e.g. connected textures) that has no JSON
+    // geometry. Fall back to the highest lower-priority copy of the same model that does.
+    const copies = await this.stack.readAll(modelPath(id)).catch(() => []);
+    for (let i = copies.length - 2; i >= 0; i--) {
+      let raw: RawModel;
+      try {
+        raw = parseJsonLenient(copies[i]!.data, modelPath(id)) as RawModel;
+      } catch {
+        continue;
+      }
+      const lower = await this.resolveFrom(id, raw);
+      if (lower.elements.length > 0) return { ...lower, issues: [...new Set([...lower.issues, "loader-fallback" as const])] };
+    }
+    return top;
+  }
+
+  private async resolveFrom(id: string, first: RawModel | undefined): Promise<ResolvedModel> {
     const issues: ResolvedModel["issues"] = [];
     const chain: RawModel[] = [];
     let cur: string | undefined = id;
+    let firstRaw = first;
     let builtinEntity = false;
     const seen = new Set<string>();
     while (cur) {
@@ -244,7 +264,8 @@ export class ModelResolver {
         break;
       }
       seen.add(cur);
-      const raw = await this.loadRaw(cur);
+      const raw: RawModel | undefined = chain.length === 0 ? firstRaw : await this.loadRaw(cur);
+      firstRaw = undefined;
       if (!raw) {
         issues.push(chain.length === 0 ? "missing" : "missing-parent");
         break;
@@ -339,15 +360,33 @@ export function modelBounds(models: ResolvedModel[]): { from: [number, number, n
   return from && to ? { from, to } : undefined;
 }
 
-/** True when some unrotated element covers the full block with all six faces. */
-export function isFullCube(models: ResolvedModel[]): boolean {
-  return models.some((m) =>
-    m.elements.some(
-      (e) =>
-        !e.rotation?.angle &&
-        e.from.every((v) => v <= 0) &&
-        e.to.every((v) => v >= 16) &&
-        FACES.every((f) => e.faces[f]),
-    ),
-  );
+const X_STEP: Record<Face, Face> = { up: "north", north: "down", down: "south", south: "up", east: "east", west: "west" };
+const Y_STEP: Record<Face, Face> = { north: "east", east: "south", south: "west", west: "north", up: "up", down: "down" };
+
+/** Where a model face ends up after a blockstate rotation (x first, then y; 90° steps). */
+export function rotateFace(face: Face, x = 0, y = 0): Face {
+  let f = face;
+  for (let i = 0; i < (((x / 90) % 4) + 4) % 4; i++) f = X_STEP[f];
+  for (let i = 0; i < (((y / 90) % 4) + 4) % 4; i++) f = Y_STEP[f];
+  return f;
+}
+
+export interface PlacedModel {
+  model: ResolvedModel;
+  x?: number;
+  y?: number;
+}
+
+/**
+ * True when unrotated full-size elements together cover all six faces, after blockstate rotation:
+ * one cube element, or one element per face as multipart blocks like mushroom blocks do.
+ */
+export function isFullCube(parts: PlacedModel[]): boolean {
+  const faces = new Set<Face>();
+  for (const { model, x, y } of parts)
+    for (const e of model.elements) {
+      if (e.rotation?.angle || !e.from.every((v) => v <= 0) || !e.to.every((v) => v >= 16)) continue;
+      for (const f of FACES) if (e.faces[f]) faces.add(rotateFace(f, x, y));
+    }
+  return faces.size === 6;
 }

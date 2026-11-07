@@ -6,6 +6,7 @@ import {
   ModelResolver,
   parseBlockstate,
   parseVariantKey,
+  rotateFace,
   selectModels,
 } from "../../../src/assets/models.js";
 import { memStack, VANILLA_PARENTS } from "../../helpers/stack.js";
@@ -51,6 +52,25 @@ describe("blockstates", () => {
   });
 });
 
+describe("rotateFace / multipart full cubes", () => {
+  it("rotates faces like blockstate x/y rotation", () => {
+    expect(rotateFace("north", 0, 90)).toBe("east");
+    expect(rotateFace("north", 270, 0)).toBe("up");
+    expect(rotateFace("north", 90, 0)).toBe("down");
+    expect(rotateFace("up", 90, 90)).toBe("east");
+  });
+
+  it("recognises one-face-per-part blocks (mushroom blocks) as full cubes", async () => {
+    const stack = await memStack([
+      ["b", "base", { "assets/minecraft/models/block/face.json": { textures: { t: "block/x" }, elements: [{ from: [0, 0, 0], to: [16, 16, 16], faces: { north: { texture: "#t" } } }] } }],
+    ]);
+    const model = await new ModelResolver(stack).resolve("block/face");
+    const parts = [{ model }, { model, y: 90 }, { model, y: 180 }, { model, y: 270 }, { model, x: 270 }, { model, x: 90 }];
+    expect(isFullCube(parts)).toBe(true);
+    expect(isFullCube(parts.slice(0, 5))).toBe(false);
+  });
+});
+
 describe("ModelResolver", () => {
   it("merges parent chains and resolves texture variables", async () => {
     const stack = await memStack([
@@ -62,7 +82,7 @@ describe("ModelResolver", () => {
     expect(m.elements[0]!.faces.up!.texture).toBe("minecraft:block/oak_log_top");
     expect(m.elements[0]!.faces.north!.texture).toBe("minecraft:block/oak_log");
     expect(m.particle).toBe("minecraft:block/oak_log");
-    expect(isFullCube([m])).toBe(true);
+    expect(isFullCube([{ model: m }])).toBe(true);
   });
 
   it("children override parent textures and resource packs override models", async () => {
@@ -132,6 +152,6 @@ describe("ModelResolver", () => {
 
   it("isFullCube rejects partial and rotated geometry", async () => {
     const stack = await memStack([["base", "base", { ...VANILLA_PARENTS, "assets/minecraft/models/block/s.json": { parent: "block/slab", textures: { top: "a", bottom: "a", side: "a" } } }]]);
-    expect(isFullCube([await new ModelResolver(stack).resolve("block/s")])).toBe(false);
+    expect(isFullCube([{ model: await new ModelResolver(stack).resolve("block/s") }])).toBe(false);
   });
 });

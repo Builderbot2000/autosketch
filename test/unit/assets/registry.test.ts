@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildRegistryData, guessDefault, loadBlockTags, loadRegistry, parseModsToml, Registry } from "../../../src/assets/registry.js";
-import { tempDir } from "../../helpers/fixtures.js";
+import { solidPng, tempDir } from "../../helpers/fixtures.js";
 import { memStack, VANILLA_PARENTS } from "../../helpers/stack.js";
 
 async function fixtureStack() {
@@ -22,6 +22,10 @@ async function fixtureStack() {
         "assets/minecraft/models/block/oak_slab.json": { parent: "block/slab", textures: { top: "block/oak_planks", bottom: "block/oak_planks", side: "block/oak_planks" } },
         "assets/minecraft/blockstates/chest.json": { variants: { "": { model: "block/chest" } } },
         "assets/minecraft/models/block/chest.json": { parent: "builtin/entity", textures: { particle: "block/oak_planks" } },
+        "assets/minecraft/textures/block/stone.png": solidPng([125, 125, 125]),
+        "assets/minecraft/textures/block/oak_log.png": solidPng([110, 85, 50]),
+        "assets/minecraft/textures/block/oak_log_top.png": solidPng([160, 130, 80]),
+        "assets/minecraft/textures/block/oak_planks.png": solidPng([160, 130, 80]),
         "data/minecraft/tags/block/logs.json": { values: ["#minecraft:oak_logs"] },
         "data/minecraft/tags/block/oak_logs.json": { values: ["minecraft:oak_log"] },
         "data/minecraft/tags/block/slabs.json": { values: ["oak_slab"] },
@@ -36,6 +40,7 @@ async function fixtureStack() {
           variants: { "axis=x,lit=false": { model: "cool:block/marble" }, "axis=y,lit=false": { model: "cool:block/marble" }, "axis=y,lit=true": { model: "cool:block/marble" } },
         },
         "assets/cool/models/block/marble.json": { parent: "minecraft:block/cube_all", textures: { all: "cool:block/marble" } },
+        "assets/cool/textures/block/marble.png": solidPng([235, 235, 230]),
         "data/minecraft/tags/block/logs.json": { values: [{ id: "cool:marble_pillar", required: false }] },
         "data/cool/tags/block/shiny.json": { values: ["minecraft:stone"] },
       },
@@ -46,6 +51,7 @@ async function fixtureStack() {
       {
         // Restyles stone; also ships a blockstate for a mod that isn't installed.
         "assets/minecraft/models/block/stone.json": { parent: "block/cube_all", textures: { all: "block/fancy_stone" } },
+        "assets/minecraft/textures/block/fancy_stone.png": solidPng([140, 130, 120], 4, [100, 95, 90]),
         "assets/absent/blockstates/ghost.json": { variants: { "": { model: "block/stone" } } },
         "data/cool/tags/block/shiny.json": { replace: true, values: ["minecraft:oak_log"] },
       },

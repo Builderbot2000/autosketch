@@ -72,9 +72,11 @@ describe("library tools", () => {
     expect(undo.text).toMatch(/undid 1: #\d+ stamp stoop/);
     expect((await call("doc_info")).text).not.toMatch(/andesite/);
 
-    const rot = await call("stamp", { prefab: "stoop", at: [0, 1, 0], rotate: 90 });
-    expect(rot.isError).toBe(true);
-    expect(rot.text).toMatch(/silo A/);
+    const rot = await call("stamp", { prefab: "stoop", at: [0, 1, 0], rotate: 90, as: "turned" });
+    expect(rot.isError).toBeFalsy();
+    expect(rot.text).toMatch(/^ok · stamp · 3 blocks changed/);
+    expect((await call("query_column", { x: 0, z: 0 })).text).toMatch(/y1 oak_planks, y2 oak_stairs\[facing=west/);
+    expect((await call("query_column", { x: 0, z: 1 })).text).toMatch(/y1 oak_planks/);
   });
 
   it("saves a palette from one document and loads it into another, reporting missing families", async () => {

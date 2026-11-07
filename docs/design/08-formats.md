@@ -88,6 +88,8 @@ export({
 
 `doc_open` and `prefab` loading accept every readable format. Imports keep unknown blocks, block entities and entities verbatim (`01`). A DataVersion mismatch produces a warning. Block upgrade (DFU-style renames between versions) is out of scope for v1 beyond a small rename table.
 
+**Rename table** (`formats/renames.ts`): when a file is older than the instance, block ids renamed in between are upgraded before canonicalisation: `sign`/`wall_sign` → `oak_sign`/`oak_wall_sign` and `stone_slab` → `smooth_stone_slab` (1.14, DataVersion 1952), `grass_path` → `dirt_path` and filled `cauldron[level]` → `water_cauldron` (1.17, 2724), `grass` → `short_grass` (1.20.3, 3698). The warning lists what was renamed. Property changes (wall sides, redstone) are not upgraded, and files newer than the instance are not downgraded. A file with no DataVersion is left alone.
+
 ## Implementation status
 
 | Piece | Status |
@@ -100,7 +102,7 @@ export({
 | Targets | `axiom` writes `.bp` to `<instance>/config/axiom/blueprints/`, or `.schem` to `schematics/` with `format:"schem"`. `create` writes to `<instance>/schematics/`. `path` writes to any file or folder. With no target, the export goes to `<workspace>/<doc>/exports/`, the only place exports may overwrite without `overwrite:true`. |
 | Litematica `.litematic` | Reads (versions up to 7, multi-region merged with regions as components) and writes one region. Round-trip and multi-region tests use synthetic fixtures. Not checked in game. |
 | MCEdit `.schematic` | Reads, including `AddBlocks` and `SchematicaMapping`, through a hand-written legacy ID table. Unknown ids stay visible as `legacy:id_<id>` blocks. Import tests use synthetic fixtures. Never written. |
-| Import | `doc_open({path})` creates a new workspace document named after the file. Block entities and entities are kept. A DataVersion mismatch produces a warning. |
+| Import | `doc_open({path})` creates a new workspace document named after the file. Block entities and entities are kept. A DataVersion mismatch produces a warning; an older file has its renamed block ids upgraded through the rename table first. |
 | Entities | Stored in the document with `Pos` in document coordinates. Exports translate them with the blocks and drop those outside the exported region. |
 
 ## Open questions

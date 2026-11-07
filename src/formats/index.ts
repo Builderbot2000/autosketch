@@ -15,6 +15,7 @@ import { decodeSponge, encodeSponge, type Decoded, type SpongeVersion } from "./
 import { decodeStructure, encodeStructure, splitToFit } from "./structure.js";
 import { decodeLitematic, encodeLitematic, type LitematicRegion } from "./litematic.js";
 import { decodeSchematic } from "./schematic.js";
+import { upgradeSnapshot } from "./renames.js";
 
 /**
  * Export and import (docs/design/08-formats.md). Export writes a normalised snapshot of the
@@ -265,24 +266,34 @@ export async function importFile(path: string, opts: { name: string; registry?: 
   const buf = await readFile(path);
   const format = detectFormat(buf, path);
   const warnings: string[] = [];
+  let renamed: string[] = [];
   let doc: Document;
   if (format === "native") {
     doc = decodeNative(buf, opts.palettes ? { palettes: opts.palettes } : {});
     doc.meta.source = path;
   } else {
-    const ro = opts.registry ? { registry: opts.registry } : {};
-    const lite = format === "litematic" ? decodeLitematic(buf, ro) : undefined;
+    // Decode verbatim, then rename (older files) and canonicalise in one pass (renames.ts).
+    const lite = format === "litematic" ? decodeLitematic(buf) : undefined;
     const dec: Decoded =
-      lite ?? (format === "schem" ? decodeSponge(buf, ro) : format === "nbt" ? decodeStructure(buf, ro) : format === "schematic" ? decodeSchematic(buf, ro) : decodeBlueprint(buf, ro));
+      lite ?? (format === "schem" ? decodeSponge(buf) : format === "nbt" ? decodeStructure(buf) : format === "schematic" ? decodeSchematic(buf) : decodeBlueprint(buf));
     warnings.push(...dec.warnings);
+    const up = upgradeSnapshot(dec.snapshot, opts.dataVersion, opts.registry);
+    warnings.push(...up.warnings);
+    renamed = up.renamed;
     doc = documentFromSnapshot(dec.snapshot, { name: opts.name, dataVersion: dec.snapshot.dataVersion, source: path, ...(opts.front ? { front: opts.front } : {}) });
     if (lite && lite.regions.length > 1) addRegionComponents(doc, lite.regions);
     if (opts.palettes) doc.palettes = opts.palettes;
   }
   doc.meta.name = opts.name;
   if (opts.front) doc.meta.front = opts.front;
-  if (opts.dataVersion && doc.meta.dataVersion && doc.meta.dataVersion !== opts.dataVersion)
-    warnings.push(`file DataVersion ${doc.meta.dataVersion} differs from this instance's ${opts.dataVersion}; blocks renamed between versions are not upgraded`);
+  if (opts.dataVersion && doc.meta.dataVersion && doc.meta.dataVersion !== opts.dataVersion) {
+    const older = doc.meta.dataVersion < opts.dataVersion;
+    warnings.push(
+      `file DataVersion ${doc.meta.dataVersion} differs from this instance's ${opts.dataVersion}; ` +
+        (renamed.length ? `renamed ${renamed.join(", ")}; ` : "") +
+        (older ? "other block changes between versions (properties) are not upgraded" : "blocks added after this instance's version may be unknown"),
+    );
+  }
   return { doc, format, warnings };
 }
 

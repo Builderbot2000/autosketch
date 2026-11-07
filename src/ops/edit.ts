@@ -90,7 +90,7 @@ function regionLabel(r: Region, label?: string): string {
   return formatBox(r);
 }
 
-function materialContext(doc: Document, env: OpEnv, tx: Transaction, box?: Box): MaterialContext {
+export function materialContext(doc: Document, env: OpEnv, tx: Transaction, box?: Box): MaterialContext {
   return {
     ...(env.registry ? { registry: env.registry } : {}),
     ...(env.index ? { index: env.index } : {}),

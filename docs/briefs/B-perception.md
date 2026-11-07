@@ -22,7 +22,7 @@ Let the agent understand what it has built with cheap text first: point queries,
 7. **Semantic selections:** `face`, `storey`, `roof`, `room`, `interior`, `openings`, `top`, `changed`. Implement the geometry in `perception/` and add thin cases to `ops/selection.ts`.
 8. **Render-seeded selections:** `view_box` and `view_lasso`, with `depth: "visible" | "through"`, built on the stored render cameras.
 
-**Raise before wave 2:** semantic selections make `ops/` depend on `perception/` (read-only), which the dependency rules in `ARCHITECTURE.md` do not list yet. Get the user's agreement and update the rules in the same merge.
+**Dependency direction** (decided, see `ARCHITECTURE.md`): `ops/selection.ts` may call into `perception/` read-only for these selections. `perception/` must never import `ops/`. Render options such as `region` and `highlight` take resolved masks (`core/mask.ts`); the tool layer resolves selections before calling the renderer.
 
 Leave `render({ context })` ghosting to silo F, but keep the style code open to a per-block "context" flag.
 

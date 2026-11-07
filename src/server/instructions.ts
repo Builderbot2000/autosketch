@@ -15,6 +15,7 @@ BUILDING:
 3. Every block argument takes a material: "stone_bricks", "oak_stairs[facing=east,half=top]", "a 70%, b 30%", "palette:<name>.<role>", {gradient}, {noise}, {pattern}. Mixes are deterministic per document seed.
 4. Check your work. view_slice({axis:"y", at}) (plan) or axis "z"/"x" (elevations) gives exact text grids: use it for positions. render() draws the real blocks: use it for the look (proportion, gaps, materials blending together, doors and openings) after each major step, and zoom with region or cutaway:{maxY} to inspect details. doc_info summarises the document.
 5. Each op is one undo step: undo/redo, checkpoint({name}) before risky multi-step work, restore({name}) to go back, history() to re-orient.
+6. Deliver with export: target:"axiom" writes .schem into the instance's schematics/ folder, target:"create" writes a structure .nbt there (checked against Create's size limit, with a material list for survival), no target writes to the document's exports/ folder. doc_open({path}) imports an existing .schem/.nbt to edit.
 Register important parts with fill(..., as:"keep") so later work can refer to them; doc_info lists components.
 Coordinates never move while you edit: building below 0 (e.g. a roof overhang at x=-1) just extends the bounds into negative numbers. Exports shift the build so its minimum corner is (0,0,0).
 

@@ -63,7 +63,7 @@ describe("MCP server", () => {
     const client = await connect(fixtureContext());
     const tools = (await client.listTools()).tools.map((t) => t.name).sort();
     expect(tools).toEqual([
-      "block_info", "checkpoint", "clear", "doc_info", "doc_list", "doc_new", "doc_open", "fill", "history", "instance_info",
+      "block_info", "checkpoint", "clear", "doc_info", "doc_list", "doc_new", "doc_open", "export", "fill", "history", "instance_info",
       "palette_pick", "palette_sheet", "palette_show", "redo", "render", "replace", "restore", "set_blocks", "undo", "view_slice",
     ]);
     expect(client.getInstructions()).toMatch(/palette:<name>\.<role>/);
@@ -173,5 +173,38 @@ describe("MCP server", () => {
     expect((await call("doc_list")).text).toMatch(/^hut · /);
     expect((await call("doc_open", { name: "hut" })).text).toMatch(/82 blocks[\s\S]*components: hut/);
     expect((await call("doc_open", { name: "nope" })).text).toMatch(/no document "nope"[\s\S]*have: hut/);
+  });
+
+  it("exports to the workspace, the instance and a path, and imports the file back", async () => {
+    const ctx = await fixtureContext();
+    ctx.info.root = join(workspace, "instance");
+    const session = new Session(workspace);
+    const client = await connect(Promise.resolve(ctx), session);
+    const call = async (name: string, args: Record<string, unknown> = {}) => {
+      const r = await client.callTool({ name, arguments: args });
+      return { text: textOf(r), error: !!r.isError };
+    };
+    expect((await call("export")).text).toMatch(/No document is open/);
+    await call("doc_new", { name: "shed", seed: 1 });
+    await call("fill", { box: { min: [0, 0, 0], max: [3, 2, 3] }, material: "andesite", mode: "hollow" });
+    await call("set_blocks", { blocks: [{ pos: [-1, 0, 1], block: "oak_planks" }] });
+
+    const ws = await call("export");
+    expect(ws.text).toMatch(new RegExp(`exported schem → ${join(workspace, "shed", "exports", "shed.schem").replace(/[.]/g, "\\.")}`));
+    expect(ws.text).toMatch(/size 5×3×4 \(x×y×z\) · 45 blocks · file \(0,0,0\) = document \(-1,0,0\)/);
+
+    const create = await call("export", { target: "create" });
+    expect(create.text).toMatch(/exported nbt → .*instance\/schematics\/shed\.nbt \(\d+ KB of 256 KB limit\)/);
+    expect(create.text).toMatch(/Schematic Table[\s\S]*materials: 45 items, 2 kinds\n  44 andesite\n  1 oak_planks/);
+    expect((await call("export", { target: "create" })).text).toMatch(/already exists; pass overwrite:true/);
+
+    const file = join(workspace, "out", "shed-v2.schem");
+    expect((await call("export", { target: "path", path: file, schem_version: 2 })).error).toBe(false);
+    const imp = await call("doc_open", { path: file });
+    expect(imp.text).toMatch(/imported .*shed-v2\.schem \(schem\)/);
+    expect(imp.text).toMatch(/45 blocks/);
+    expect(session.doc!.meta.name).toBe("shed-v2");
+    expect((await call("doc_open", { path: file })).text).toMatch(/"shed-v2" already exists/);
+    expect((await call("doc_open", {})).text).toMatch(/Give name/);
   });
 });

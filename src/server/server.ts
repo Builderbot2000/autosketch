@@ -12,8 +12,11 @@ import { renderDocument, VIEW_NAMES, type View } from "../perception/render/rend
 import { viewSlice } from "../perception/slice.js";
 import { TextureLoader, Tinter } from "../palette/textures.js";
 import type { InstanceContext } from "./context.js";
-import { formatEdit, formatHistory, formatInfo, shiftLine, sizeLine } from "./format.js";
+import { formatEdit, formatExport, formatHistory, formatInfo, shiftLine, sizeLine } from "./format.js";
 import { INSTRUCTIONS } from "./instructions.js";
+import { exportDocument, importFile } from "../formats/index.js";
+import { dataVersionFor } from "../core/version.js";
+import { basename } from "node:path";
 import { defaultWorkspace, Session } from "./session.js";
 
 export const SERVER_NAME = "autosketch";
@@ -290,13 +293,35 @@ function registerDocumentTools(tool: ToolFn, session: Session): void {
     "doc_open",
     {
       title: "Open document",
-      description: "Opens a saved document from the workspace and makes it current (the previous one is saved and closed). Undo history starts fresh. Text.",
-      inputSchema: { name: z.string() },
+      description:
+        "Opens a saved document by name and makes it current (the previous one is saved and closed). With path, imports a schematic file instead " +
+        "(.schem v1–v3, Create/structure .nbt, .autosketch) as a new workspace document named name (default: the file name). Unknown blocks and block-entity NBT are kept. " +
+        "Undo history starts fresh. Text.",
+      inputSchema: {
+        name: z.string().optional().describe("Workspace document name (required unless path is given)"),
+        path: z.string().optional().describe("Schematic file to import"),
+        front: z.enum(["north", "south", "east", "west"]).optional().describe("Front facade for an imported file (default south)"),
+        overwrite: z.boolean().optional().describe("Replace an existing workspace document of that name when importing"),
+      },
       readOnly: false,
     },
     async (c, a) => {
-      const doc = await session.open(a.name, c.book);
-      return text(formatInfo(doc, c.registry, session.path));
+      if (!a.path) {
+        if (!a.name) throw new Error("Give name (a workspace document) or path (a file to import).");
+        const doc = await session.open(a.name, c.book);
+        return text(formatInfo(doc, c.registry, session.path));
+      }
+      const name = a.name ?? basename(a.path).replace(/\.[^.]*$/, "").replace(/[^a-z0-9_-]+/gi, "_").replace(/^_+|_+$/g, "").slice(0, 64);
+      const dataVersion = dataVersionFor(c.info.mcVersion);
+      const imp = await importFile(a.path, {
+        name: name || "imported",
+        registry: c.registry,
+        palettes: c.book,
+        ...(dataVersion ? { dataVersion } : {}),
+        ...(a.front ? { front: a.front } : {}),
+      });
+      await session.adopt(imp.doc, a.overwrite ? { overwrite: true } : {});
+      return text([`imported ${a.path} (${imp.format})`, formatInfo(imp.doc, c.registry, session.path), ...imp.warnings.map((w) => `warning: ${w}`)].join("\n"));
     },
   );
 
@@ -466,6 +491,57 @@ function registerDocumentTools(tool: ToolFn, session: Session): void {
       inputSchema: { limit: z.number().int().min(1).max(200).optional() },
     },
     (_c, a) => text(formatHistory(session.require(), a.limit ?? 20)),
+  );
+
+  tool(
+    "export",
+    {
+      title: "Export",
+      description:
+        "Writes the document (or region) as a schematic file. The file's minimum corner is (0,0,0); the result gives the document-local offset. " +
+        "target axiom → .schem in the instance's schematics/ folder · create → structure .nbt in schematics/, checked against Create's size limit, with a material list · " +
+        "path → any file or folder (format from the extension) · omitted → the document's exports/ folder. Never overwrites outside exports/ without overwrite:true. " +
+        "split:true tiles an over-limit Create export and writes a placement guide. Text.",
+      inputSchema: {
+        target: z.enum(["axiom", "create", "path"]).optional(),
+        format: z.enum(["schem", "nbt", "native", "bp"]).optional().describe("Default: schem for axiom, nbt for create, from the extension for path"),
+        path: z.string().optional().describe("File or folder for target path"),
+        name: z.string().optional().describe("File name without extension (default: the document name)"),
+        region: boxSchema.optional(),
+        schem_version: z.union([z.literal(2), z.literal(3)]).optional().describe(".schem version (default 3)"),
+        include_air: z.boolean().optional().describe(".nbt: write explicit air so placing clears the space"),
+        split: z.boolean().optional(),
+        overwrite: z.boolean().optional(),
+      },
+      readOnly: false,
+    },
+    async (c, a) => {
+      const doc = session.require();
+      await session.flush();
+      const dataVersion = dataVersionFor(c.info.mcVersion);
+      const r = await exportDocument(
+        doc,
+        {
+          ...(a.target ? { target: a.target } : {}),
+          ...(a.format ? { format: a.format } : {}),
+          ...(a.path ? { path: a.path } : {}),
+          ...(a.name ? { name: a.name } : {}),
+          ...(a.region ? { region: box(a.region as PublicBox) } : {}),
+          ...(a.schem_version ? { schemVersion: a.schem_version } : {}),
+          ...(a.include_air ? { includeAir: true } : {}),
+          ...(a.split ? { split: true } : {}),
+          ...(a.overwrite ? { overwrite: true } : {}),
+        },
+        {
+          defaultDir: session.exportsDir!,
+          registry: c.registry,
+          plugins: c.plugins,
+          ...(c.info.root ? { instanceRoot: c.info.root } : {}),
+          ...(dataVersion ? { dataVersion } : {}),
+        },
+      );
+      return text(formatExport(r));
+    },
   );
 
   tool(

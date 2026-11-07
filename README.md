@@ -5,7 +5,7 @@ A local, FOSS MCP server that lets AI agents build Minecraft schematics with hig
 - Reads blocks and textures from **your own** Minecraft instance (vanilla or CurseForge, modded included). No game assets are shipped.
 - Exports to **Axiom** (`.bp` / `.schem`) and **Create** (`.nbt`) schematics.
 
-Status: early development. Material palettes, documents, basic editing (fill, replace, undo, checkpoints, text slices) and renders work; export to Axiom/Create is next. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Status: early development. Material palettes, documents, basic editing (fill, replace, undo, checkpoints, text slices), renders, and export/import of Sponge `.schem` (Axiom, WorldEdit) and structure `.nbt` (Create) work. Axiom `.bp` is waiting on a real blueprint to check its layout against. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Use with Claude Code
 

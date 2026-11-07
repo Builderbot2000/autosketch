@@ -76,6 +76,22 @@ export class Session {
     return doc;
   }
 
+  /** Makes an imported document current and saves it under its name in the workspace. */
+  async adopt(doc: Document, opts: { overwrite?: boolean } = {}): Promise<Document> {
+    checkName(doc.meta.name);
+    if (!opts.overwrite && (await exists(this.pathFor(doc.meta.name)))) throw new Error(`a document named "${doc.meta.name}" already exists; pass another name or overwrite:true`);
+    await this.close();
+    this.doc = doc;
+    this.savedRevision = -1;
+    await this.flush();
+    return doc;
+  }
+
+  /** The open document's exports/ folder. */
+  get exportsDir(): string | undefined {
+    return this.doc && join(this.workspace, this.doc.meta.name, "exports");
+  }
+
   async list(): Promise<{ name: string; modified: Date; bytes: number }[]> {
     let names: string[];
     try {

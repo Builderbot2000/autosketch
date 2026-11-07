@@ -55,7 +55,20 @@ export({
 
 `doc_open` and `prefab` loading accept every readable format. Imports keep unknown blocks, block entities and entities verbatim (`01`). A DataVersion mismatch produces a warning. Block upgrade (DFU-style renames between versions) is out of scope for v1 beyond a small rename table.
 
+## Implementation status
+
+| Piece | Status |
+|-------|--------|
+| Sponge `.schem` | Writes v3 (default) and v2. Reads v1–v3. Palette states are canonicalised on import. States the registry rejects or doesn't know are kept verbatim, with a warning. Checked against an independent NBT reader (nbtlib). |
+| Structure `.nbt` | Reads and writes. Air is omitted unless `include_air` is set. A file with several `palettes` imports its first palette, with a warning. |
+| Axiom `.bp` | Not built. Export and import both fail with a clear message that points to `.schem`. |
+| Create size limit | Read from `<instance>/config/create-server.toml` (then `defaultconfigs/`), defaulting to 256 KB. Over the limit, the export fails unless `split` is set. Split pieces come from halving the longest axis, are named `<name>_1…n`, and come with a `<name>_placement.txt` guide. |
+| Material list | Covers vanilla's systematic block → item cases: wall variants, crops, doors, beds and tall plants counted once, double slabs, candles, pickles, eggs, petals, snow layers, potted plants. Fluids, portals and technical blocks are listed as not printable. Plugins can answer for their own blocks through `items(state, nbt)` (`09`). |
+| Targets | `axiom` and `create` write to `<instance>/schematics/`. `path` writes to any file or folder. With no target, the export goes to `<workspace>/<doc>/exports/`, the only place exports may overwrite without `overwrite:true`. |
+| Import | `doc_open({path})` creates a new workspace document named after the file. Block entities and entities are kept. A DataVersion mismatch produces a warning. |
+| Entities | Stored in the document with `Pos` in document coordinates. Exports translate them with the blocks and drop those outside the exported region. |
+
 ## Open questions
 
-- Verify the Axiom `.bp` layout and whether Axiom reads `.schem` from `schematics/` or only from its own folder in 6.x.
-- Check the Craftoria server's actual `maxTotalSchematicSize` (the server config may differ from the client default).
+- Verify the Axiom `.bp` layout and whether Axiom reads `.schem` from `schematics/` or only from its own folder in 6.x. Craftoria's `config/axiom/blueprints/` was empty on 2026-11-07, so there is no fixture yet: save one blueprint from Axiom to unblock this.
+- Check the Craftoria server's actual `maxTotalSchematicSize`. The local `config/create-server.toml` says 256, but a server sets its own value per world (`serverconfig/`).

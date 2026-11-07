@@ -2,6 +2,8 @@ import type { Registry } from "../assets/registry.js";
 import { shortState } from "../core/blockstate.js";
 import { boxSize, formatBox, formatVec, type Vec3 } from "../core/region.js";
 import type { Document, EditResult } from "../document/document.js";
+import type { ExportResult } from "../formats/index.js";
+import { formatMaterialList } from "../formats/materials.js";
 
 /** Terse op results (docs/design/05-operations.md, "Op result contract"). */
 
@@ -69,5 +71,20 @@ export function formatHistory(doc: Document, limit: number): string {
     if (names && i < j.cursor + 1) lines.push(`  ◆ checkpoint ${names.join(", ")}`);
   });
   if (j.canRedo) lines.push("↷ = undone (redo brings it back; a new edit discards it)");
+  return lines.join("\n");
+}
+
+export function formatExport(r: ExportResult): string {
+  const kb = (b: number) => `${Math.max(1, Math.ceil(b / 1024))} KB`;
+  const files = r.files.filter((f) => !f.path.endsWith(".txt"));
+  const lines =
+    files.length === 1
+      ? [`exported ${r.format} → ${files[0]!.path} (${kb(files[0]!.bytes)}${r.limitKb ? ` of ${r.limitKb} KB limit` : ""})`]
+      : [`exported ${r.format} as ${files.length} pieces (each under ${r.limitKb} KB):`, ...files.map((f) => `  ${f.path} (${kb(f.bytes)}) at ${formatVec(f.at!)}`), `placement guide: ${r.files.find((f) => f.path.endsWith(".txt"))?.path}`];
+  const off = r.offset.some((v) => v !== 0) ? ` · file (0,0,0) = document ${formatVec(r.offset)}` : "";
+  lines.push(`size ${r.size.join("×")} (x×y×z) · ${n(r.blocks)} blocks${off}`);
+  lines.push(r.hint);
+  if (r.materials) lines.push(formatMaterialList(r.materials));
+  for (const w of r.warnings) lines.push(`warning: ${w}`);
   return lines.join("\n");
 }

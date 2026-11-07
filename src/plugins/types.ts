@@ -1,4 +1,5 @@
 import type { BlockInfo, Registry } from "../assets/registry.js";
+import type { Compound } from "prismarine-nbt";
 
 export type Category = "stone" | "wood" | "earth" | "organic" | "metal" | "colored" | "glass" | "light" | "decor";
 
@@ -17,6 +18,11 @@ export interface AutosketchPlugin {
   variantTagNamespaces?: string[];
   /** Overrides for palette classification. Return undefined to leave a block to the generic rules. */
   classify?(block: BlockInfo): { category?: Category; buildable?: boolean } | undefined;
+  /**
+   * Items needed to place a block in survival (08: Create material list), e.g. a framed block plus
+   * its camo item. Return undefined to leave the block to the vanilla rules.
+   */
+  items?(state: string, nbt: Compound | undefined): { item: string; count: number }[] | undefined;
   /** Markdown explaining the mod's building concepts (exposed as a knowledge resource). */
   docs?: string;
 }

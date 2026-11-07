@@ -1,5 +1,6 @@
 import type { BlockInfo, Registry } from "../assets/registry.js";
 import type { Compound } from "prismarine-nbt";
+import type { StateOverride } from "../core/rotate.js";
 
 export type Category = "stone" | "wood" | "earth" | "organic" | "metal" | "colored" | "glass" | "light" | "decor";
 
@@ -23,6 +24,11 @@ export interface AutosketchPlugin {
    * its camo item. Return undefined to leave the block to the vanilla rules.
    */
   items?(state: string, nbt: Compound | undefined): { item: string; count: number }[] | undefined;
+  /**
+   * State remapping override for rotate/mirror (01, Orientation). Called once per elementary step
+   * (a rotation or a mirror); return the transformed state, or undefined for the generic rules.
+   */
+  rotate?: StateOverride;
   /** Markdown explaining the mod's building concepts (exposed as a knowledge resource). */
   docs?: string;
 }

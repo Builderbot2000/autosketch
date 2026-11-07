@@ -1,0 +1,33 @@
+{
+  "name": "Park bench",
+  "tags": [
+    "furniture",
+    "street",
+    "small"
+  ],
+  "anchors": {
+    "base": [
+      0,
+      0,
+      0
+    ]
+  },
+  "roles": {
+    "seat": [
+      "minecraft:oak_planks"
+    ],
+    "arms": [
+      "minecraft:oak_planks"
+    ]
+  },
+  "notes": "3-wide bench facing south (sit on the stairs), with trapdoor arm rests.",
+  "front": "south",
+  "footprint": [
+    5,
+    1
+  ],
+  "height": 1,
+  "requires": [
+    "minecraft"
+  ]
+}

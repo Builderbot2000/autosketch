@@ -2,6 +2,7 @@ import { registerDocumentTools, registerHistoryTools } from "./document.js";
 import { registerEditTools, registerSelectionTools } from "./edit.js";
 import { registerExportTools } from "./export.js";
 import { registerBlockInfoTool, registerInstanceTools } from "./instance.js";
+import { registerLibraryTools } from "./library.js";
 import { registerPaletteTools } from "./palette.js";
 import { registerPerceptionTools } from "./perception.js";
 import type { ToolDeps } from "./shared.js";
@@ -21,4 +22,5 @@ export const TOOL_GROUPS: readonly ((deps: ToolDeps) => void)[] = [
   registerHistoryTools,
   registerExportTools,
   registerPerceptionTools,
+  registerLibraryTools,
 ];

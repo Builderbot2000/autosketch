@@ -1,0 +1,37 @@
+{
+  "name": "Village well",
+  "tags": [
+    "well",
+    "plaza",
+    "water",
+    "centrepiece"
+  ],
+  "anchors": {
+    "base": [
+      2,
+      0,
+      2
+    ]
+  },
+  "roles": {
+    "rim": [
+      "minecraft:cobblestone"
+    ],
+    "frame": [
+      "minecraft:spruce_planks"
+    ],
+    "roof": [
+      "minecraft:spruce_planks"
+    ]
+  },
+  "notes": "5×5 well with a little gabled roof; a plaza centrepiece.",
+  "front": "south",
+  "footprint": [
+    5,
+    5
+  ],
+  "height": 7,
+  "requires": [
+    "minecraft"
+  ]
+}

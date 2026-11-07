@@ -32,8 +32,37 @@ export type ToolFn = <S extends z.ZodRawShape>(
   run: (c: InstanceContext, args: z.infer<z.ZodObject<S>>) => Promise<Result> | Result,
 ) => unknown;
 
+/** One readable entry of a resource, as resources/list shows it. */
+export interface ResourceListing {
+  uri: string;
+  name: string;
+  title?: string;
+  description?: string;
+  mimeType?: string;
+}
+
+/** What reading a resource returns: text (markdown, JSON…), with an optional mime type. */
+export interface ResourceContent {
+  text: string;
+  mimeType?: string;
+}
+
+/**
+ * Registers one MCP resource (07: knowledge packs; 05: script API docs). A `uri` with `{var}`
+ * parts is an RFC 6570 template, and `list` enumerates its concrete entries for resources/list;
+ * a plain `uri` is one fixed resource. `read` gets the requested URI and the template variables.
+ * Resources don't wait on the Minecraft instance: they serve files and static text. Errors thrown
+ * by `read` reach the client as resource-read errors.
+ */
+export type ResourceFn = (
+  name: string,
+  config: { title: string; description: string; uri: string; mimeType?: string; list?: () => Promise<ResourceListing[]> | ResourceListing[] },
+  read: (uri: URL, vars: Record<string, string>) => Promise<ResourceContent> | ResourceContent,
+) => unknown;
+
 export interface ToolDeps {
   tool: ToolFn;
+  resource: ResourceFn;
   session: Session;
 }
 

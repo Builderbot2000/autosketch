@@ -1,7 +1,7 @@
 import { colorName } from "./color.js";
 import type { Family, ShapeGroup, ShapeKind } from "./families.js";
 import type { PaletteIndex } from "./index.js";
-import { columnLabel, layoutSheet, parseRange, type Cell, type SheetSpec } from "./sheet.js";
+import { columnLabel, layoutSheet, parseRange, type Cell, type SheetLayout, type SheetSpec } from "./sheet.js";
 
 /**
  * palette_pick: turns cell selections on a sheet into a named palette of roles
@@ -44,28 +44,34 @@ export function pickPalette(index: PaletteIndex, req: PickRequest): { palette: N
   const roles: Record<string, RoleMember[]> = {};
 
   for (const [role, raw] of Object.entries(req.roles)) {
-    const sel: RoleSelection = typeof raw === "string" || Array.isArray(raw) ? { cells: raw } : raw;
-    const refs = (Array.isArray(sel.cells) ? sel.cells : [sel.cells]).flatMap((r) => parseRange(r).map((p) => ({ ...p, ref: `${columnLabel(p.col)}${p.row}`, range: r })));
-    const members: RoleMember[] = [];
-    for (const { col, row, ref, range } of refs) {
-      const cell = layout.cells[row - layout.rowOffset]?.[col];
-      if (!cell) {
-        if (refs.length === 1) warnings.push(`${role}: ${ref} is empty`);
-        continue;
-      }
-      const w = sel.weights?.[ref] ?? sel.weights?.[range] ?? 1;
-      const picked = cellMembers(index, cell, sel.variant, warnings, role);
-      for (const m of picked) members.push({ ...m, weight: (w * m.weight) / picked.reduce((s, x) => s + x.weight, 0) });
-    }
+    const members = selectRole(index, layout, role, raw, warnings);
     if (members.length === 0) {
       warnings.push(`${role}: no materials selected`);
       continue;
     }
-    roles[role] = normalise(mergeDuplicates(members));
+    roles[role] = members;
   }
 
   const palette: NamedPalette = { name: req.name, roles, source: { sheet: req.sheet, page: req.page ?? 1 } };
   return { palette, summary: describePalette(index, palette), warnings };
+}
+
+/** The members a role selection picks on a laid-out sheet (merged and normalised), or [] when none. */
+function selectRole(index: PaletteIndex, layout: SheetLayout, role: string, raw: string | string[] | RoleSelection, warnings: string[]): RoleMember[] {
+  const sel: RoleSelection = typeof raw === "string" || Array.isArray(raw) ? { cells: raw } : raw;
+  const refs = (Array.isArray(sel.cells) ? sel.cells : [sel.cells]).flatMap((r) => parseRange(r).map((p) => ({ ...p, ref: `${columnLabel(p.col)}${p.row}`, range: r })));
+  const members: RoleMember[] = [];
+  for (const { col, row, ref, range } of refs) {
+    const cell = layout.cells[row - layout.rowOffset]?.[col];
+    if (!cell) {
+      if (refs.length === 1) warnings.push(`${role}: ${ref} is empty`);
+      continue;
+    }
+    const w = sel.weights?.[ref] ?? sel.weights?.[range] ?? 1;
+    const picked = cellMembers(index, cell, sel.variant, warnings, role);
+    for (const m of picked) members.push({ ...m, weight: (w * m.weight) / picked.reduce((s, x) => s + x.weight, 0) });
+  }
+  return members.length ? normalise(mergeDuplicates(members)) : [];
 }
 
 function cellMembers(index: PaletteIndex, cell: Cell, variant: string | undefined, warnings: string[], role: string): RoleMember[] {
@@ -106,6 +112,103 @@ function mergeDuplicates(ms: RoleMember[]): RoleMember[] {
 function normalise(ms: RoleMember[]): RoleMember[] {
   const total = ms.reduce((s, m) => s + m.weight, 0) || 1;
   return ms.map((m) => ({ ...m, weight: Math.round((m.weight / total) * 1000) / 1000 }));
+}
+
+// ---------------------------------------------------------------------------------------------
+// palette_edit (03): add or remove cells, reweight, swap or drop a role
+// ---------------------------------------------------------------------------------------------
+
+export interface PaletteEdit {
+  /** Sheet the cell refs refer to (default: the sheet the palette was picked from). */
+  sheet?: string;
+  page?: number;
+  /** Cells added to a role (created if new); weights are relative to the role's current total of 1. */
+  add?: Record<string, string | string[] | RoleSelection>;
+  /** Removed from a role: cell refs/ranges, block ids or family ids. */
+  remove?: Record<string, string | string[]>;
+  /** Replaces a role's members with these cells. */
+  swap?: Record<string, string | string[] | RoleSelection>;
+  /** New relative weights per role, keyed by block or family id (members not named keep theirs). */
+  weights?: Record<string, Record<string, number>>;
+  /** Roles to delete. */
+  drop?: string[];
+  /** Role renames {old: new}. */
+  rename?: Record<string, string>;
+}
+
+const CELL_REF = /^[A-Z]+\d+(:[A-Z]+\d+)?$/;
+
+/** Applies an edit to a copy of the palette. Unknown roles and ids are reported, not guessed. */
+export function editPalette(index: PaletteIndex, palette: NamedPalette, edit: PaletteEdit): { palette: NamedPalette; summary: string; warnings: string[] } {
+  const warnings: string[] = [];
+  const roles: Record<string, RoleMember[]> = structuredClone(palette.roles);
+  const spec: SheetSpec = edit.sheet ? { sheet: edit.sheet, page: edit.page ?? 1 } : { sheet: palette.source.sheet, page: edit.page ?? palette.source.page ?? 1 };
+  let layout: SheetLayout | undefined;
+  const lay = () => (layout ??= layoutSheet(index, spec));
+  const need = (role: string) => {
+    if (!roles[role]) throw new Error(`palette "${palette.name}" has no role "${role}" (roles: ${Object.keys(roles).join(", ") || "none"})`);
+    return roles[role]!;
+  };
+
+  for (const [from, to] of Object.entries(edit.rename ?? {})) {
+    const ms = need(from);
+    if (roles[to]) throw new Error(`can't rename "${from}" to "${to}": that role exists`);
+    delete roles[from];
+    roles[to] = ms;
+  }
+  for (const role of edit.drop ?? []) {
+    need(role);
+    delete roles[role];
+  }
+  for (const [role, raw] of Object.entries(edit.swap ?? {})) {
+    const ms = selectRole(index, lay(), role, raw, warnings);
+    if (!ms.length) warnings.push(`${role}: swap selected nothing; role unchanged`);
+    else roles[role] = ms;
+  }
+  for (const [role, raw] of Object.entries(edit.add ?? {})) {
+    const ms = selectRole(index, lay(), role, raw, warnings);
+    if (!ms.length) {
+      warnings.push(`${role}: nothing to add`);
+      continue;
+    }
+    const cur = roles[role] ?? [];
+    // New cells join at the weight one cell of the existing role would have.
+    const share = cur.length ? 1 / cur.length : 1;
+    roles[role] = normalise(mergeDuplicates([...cur, ...ms.map((m) => ({ ...m, weight: m.weight * share * ms.length }))]));
+  }
+  for (const [role, raw] of Object.entries(edit.remove ?? {})) {
+    const cur = need(role);
+    const drop = new Set<string>();
+    for (const item of Array.isArray(raw) ? raw : [raw]) {
+      const t = item.trim();
+      if (CELL_REF.test(t)) {
+        for (const m of selectRole(index, lay(), role, t, [])) drop.add(m.block);
+        continue;
+      }
+      const id = t.includes(":") ? t : `minecraft:${t}`;
+      const hit = cur.filter((m) => m.block === id || m.family === id);
+      if (!hit.length) warnings.push(`${role}: ${t} is not in the role`);
+      for (const m of hit) drop.add(m.block);
+    }
+    const kept = cur.filter((m) => !drop.has(m.block));
+    if (!kept.length) {
+      delete roles[role];
+      warnings.push(`${role}: every member removed; role deleted`);
+    } else roles[role] = normalise(kept);
+  }
+  for (const [role, ws] of Object.entries(edit.weights ?? {})) {
+    const cur = need(role);
+    const given = new Map(Object.entries(ws).map(([k, v]) => [k.includes(":") ? k : `minecraft:${k}`, v]));
+    for (const k of given.keys()) if (!cur.some((m) => m.block === k || m.family === k)) warnings.push(`${role}: ${k} is not in the role (weight ignored)`);
+    // Unnamed members keep their current share, measured in the same units as the given weights.
+    const named = cur.filter((m) => given.has(m.block) || given.has(m.family));
+    const unit = named.length ? named.reduce((s, m) => s + (given.get(m.block) ?? given.get(m.family)!), 0) / Math.max(1e-9, named.reduce((s, m) => s + m.weight, 0)) : 1;
+    for (const v of given.values()) if (!(v > 0)) throw new Error(`weights must be positive (${role})`);
+    roles[role] = normalise(cur.map((m) => ({ ...m, weight: given.get(m.block) ?? given.get(m.family) ?? m.weight * unit })));
+  }
+
+  const out: NamedPalette = { ...palette, roles };
+  return { palette: out, summary: describePalette(index, out), warnings };
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
@@ -462,7 +462,10 @@ type PackedEntry = [name: string, method: number, compressed: number, size: numb
  * directories (slow on network and WSL mounts). Entries are keyed by absolute path and validated
  * by size + mtime.
  */
-class JarIndexCache {
+let tmpCounter = 0;
+
+/** Exported for tests. */
+export class JarIndexCache {
   static readonly VERSION = 1;
   private dirty = false;
   constructor(private readonly archives = new Map<string, { fp: string; entries: PackedEntry[] }>()) {}
@@ -498,7 +501,8 @@ class JarIndexCache {
     for (const k of this.archives.keys()) if (!keep.has(k)) (this.archives.delete(k), (this.dirty = true));
     if (!this.dirty) return;
     await mkdir(dirname(file), { recursive: true });
-    const tmp = `${file}.${process.pid}.tmp`;
+    // Unique per write: two loads in one process may save at once, and must not share a temp file.
+    const tmp = `${file}.${process.pid}.${++tmpCounter}.${randomBytes(4).toString("hex")}.tmp`;
     await writeFile(tmp, gzipSync(JSON.stringify({ version: JarIndexCache.VERSION, archives: Object.fromEntries(this.archives) })));
     await rename(tmp, file);
     this.dirty = false;

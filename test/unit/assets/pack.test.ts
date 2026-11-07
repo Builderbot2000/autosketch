@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { BufferByteSource } from "../../../src/assets/bytes.js";
-import { findBuiltinPack, parseJsonLenient, PackStack, ZipPackSource } from "../../../src/assets/pack.js";
+import { findBuiltinPack, JarIndexCache, parseJsonLenient, PackStack, ZipPackSource } from "../../../src/assets/pack.js";
 import { ZipArchive } from "../../../src/assets/zip.js";
 import { makeZip, type FileTree } from "../../helpers/fixtures.js";
 
@@ -77,5 +80,24 @@ describe("parseJsonLenient", () => {
   });
   it("reports the file on failure", () => {
     expect(() => parseJsonLenient(Buffer.from("{nope"), "x.json")).toThrow(/x\.json/);
+  });
+});
+
+describe("JarIndexCache", () => {
+  it("survives two concurrent saves to the same file (unique temp names)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "autosketch-jarcache-"));
+    try {
+      const file = join(dir, "jar-index.json.gz");
+      const entry = { name: "a.txt", method: 0, compressedSize: 1, size: 1, localHeaderOffset: 0, nameBytes: 5, extraBytes: 0 };
+      const a = new JarIndexCache(), b = new JarIndexCache();
+      a.set("/a.jar", "fa", [entry]);
+      b.set("/b.jar", "fb", [entry]);
+      await Promise.all([a.save(file, new Set(["/a.jar"])), b.save(file, new Set(["/b.jar"]))]);
+      expect(readdirSync(dir)).toEqual(["jar-index.json.gz"]);
+      const back = await JarIndexCache.load(file);
+      expect(!!back.get("/a.jar", "fa") || !!back.get("/b.jar", "fb")).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

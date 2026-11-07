@@ -1,8 +1,10 @@
 import type { Compound } from "prismarine-nbt";
 import { AIR } from "../core/blockstate.js";
+import { NO_EVENTS, type EventSink } from "../core/events.js";
 import { boxVolume, type Box, type Vec3 } from "../core/region.js";
 import { PaletteBook } from "../palette/pick.js";
 import { checkComponentId, cloneComponents, type Component } from "./components.js";
+import { opEvent, stepEvent } from "./events.js";
 import { Journal, type JournalEntry } from "./journal.js";
 import { indexInSection, StateTable, VoxelStore } from "./voxels.js";
 
@@ -79,6 +81,8 @@ export class Document {
   lastSelection?: string | Record<string, unknown>;
   /** Bumped on every change; the session uses it for autosave. */
   revision = 0;
+  /** Observability sink (12): commits, undo, redo and checkpoints are published here. Never read back. */
+  events: EventSink = NO_EVENTS;
 
   constructor(
     public meta: DocMeta,
@@ -215,6 +219,7 @@ export class Document {
     };
     this.journal.push(entry);
     this.revision++;
+    if (this.events.enabled) this.events.emit(opEvent(this, entry));
 
     const shift = diff(this.origin, originBefore);
     const box = changedBox(positions);
@@ -232,6 +237,7 @@ export class Document {
     if (!this.journal.canUndo) return undefined;
     const e = this.journal.entries[--this.journal.cursor]!;
     this.apply(e, "before");
+    if (this.events.enabled) this.events.emit(stepEvent(this, "doc.undo", e));
     return { entry: e, ...shiftOf(e.originAfter, e.originBefore) };
   }
 
@@ -239,6 +245,7 @@ export class Document {
     if (!this.journal.canRedo) return undefined;
     const e = this.journal.entries[this.journal.cursor++]!;
     this.apply(e, "after");
+    if (this.events.enabled) this.events.emit(stepEvent(this, "doc.redo", e));
     return { entry: e, ...shiftOf(e.originBefore, e.originAfter) };
   }
 
@@ -264,6 +271,7 @@ export class Document {
   checkpoint(name: string): void {
     if (!/^[a-z0-9_.-]+$/i.test(name)) throw new Error(`checkpoint name must be letters, digits, _ . or - (got "${name}")`);
     this.journal.checkpoints.set(name, { name, seq: this.journal.headSeq, time: Date.now() });
+    if (this.events.enabled) this.events.emit({ kind: "doc.checkpoint", name, jseq: this.journal.headSeq });
   }
 
   /** Undoes or redoes to a checkpoint; returns how many ops were stepped over and the net shift. */

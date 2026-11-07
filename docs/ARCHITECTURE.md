@@ -46,7 +46,7 @@ The agent has to understand (a) **what it can build with**: blocks, materials, p
                          ┌───────────▼────────────┐
                          │  Formats (I/O)         │
                          │ .schem · .bp · .nbt ·  │
-                         │ .litematic (later)     │
+                         │ .litematic · .schematic│
                          └────────────────────────┘
 ```
 

@@ -13,6 +13,7 @@ import { documentFromSnapshot, snapshotBlockCount, snapshotOf, type Snapshot } f
 import { decodeBlueprint, encodeBlueprint, isBlueprint } from "./axiom.js";
 import { decodeSponge, encodeSponge, type Decoded, type SpongeVersion } from "./sponge.js";
 import { decodeStructure, encodeStructure, splitToFit } from "./structure.js";
+import { decodeLitematic, encodeLitematic, type LitematicRegion } from "./litematic.js";
 
 /**
  * Export and import (docs/design/08-formats.md). Export writes a normalised snapshot of the
@@ -20,10 +21,10 @@ import { decodeStructure, encodeStructure, splitToFit } from "./structure.js";
  * fresh document.
  */
 
-export type ExportFormat = "schem" | "bp" | "nbt" | "native";
+export type ExportFormat = "schem" | "bp" | "nbt" | "litematic" | "native";
 export type ExportTarget = "axiom" | "create" | "path";
 
-export const EXTENSIONS: Record<ExportFormat, string> = { schem: ".schem", bp: ".bp", nbt: ".nbt", native: ".autosketch" };
+export const EXTENSIONS: Record<ExportFormat, string> = { schem: ".schem", bp: ".bp", nbt: ".nbt", litematic: ".litematic", native: ".autosketch" };
 
 /** Create's default `maxTotalSchematicSize`, in KB. */
 export const CREATE_DEFAULT_LIMIT_KB = 256;
@@ -132,6 +133,8 @@ export async function exportDocument(doc: Document, req: ExportRequest, env: Exp
         return encodeSponge(s, { ...(req.schemVersion ? { version: req.schemVersion } : {}) });
       case "nbt":
         return encodeStructure(s, { ...(req.includeAir ? { includeAir: true } : {}) });
+      case "litematic":
+        return encodeLitematic(s);
       case "native":
         return req.region ? encodeNative(documentFromSnapshot(s, { name: s.name, dataVersion: s.dataVersion, front: s.front, source: doc.meta.name }, { seed: doc.meta.seed })) : encodeNative(doc);
       default:
@@ -180,7 +183,7 @@ function defaultFormat(target: ExportTarget | undefined, path: string | undefine
   if (target === "path" && path) {
     const ext = extname(path).toLowerCase();
     for (const [f, e] of Object.entries(EXTENSIONS)) if (e === ext) return f as ExportFormat;
-    if (ext) throw new Error(`can't tell the format from "${ext}"; pass format (schem, nbt or native)`);
+    if (ext) throw new Error(`can't tell the format from "${ext}"; pass format (schem, bp, nbt, litematic or native)`);
   }
   return "schem";
 }
@@ -193,6 +196,7 @@ function hintFor(target: ExportTarget | undefined, format: ExportFormat, names: 
   if (format === "bp") return "Copy into <instance>/config/axiom/blueprints/ to see it in Axiom's blueprint browser.";
   if (format === "nbt") return "Copy into the instance's schematics/ folder for Create, or a world's generated/<namespace>/structure/ folder for structure blocks.";
   if (format === "schem") return "Works with Axiom, WorldEdit and FAWE (schematics/ folder).";
+  if (format === "litematic") return "Copy into the instance's schematics/ folder and load it from Litematica's Load Schematics menu.";
   return "Open with doc_open({path}).";
 }
 
@@ -264,19 +268,32 @@ export async function importFile(path: string, opts: { name: string; registry?: 
   if (format === "native") {
     doc = decodeNative(buf, opts.palettes ? { palettes: opts.palettes } : {});
     doc.meta.source = path;
-  } else if (format === "schem" || format === "nbt" || format === "bp") {
+  } else if (format === "schem" || format === "nbt" || format === "bp" || format === "litematic") {
     const ro = opts.registry ? { registry: opts.registry } : {};
-    const dec: Decoded = format === "schem" ? decodeSponge(buf, ro) : format === "nbt" ? decodeStructure(buf, ro) : decodeBlueprint(buf, ro);
+    const lite = format === "litematic" ? decodeLitematic(buf, ro) : undefined;
+    const dec: Decoded = lite ?? (format === "schem" ? decodeSponge(buf, ro) : format === "nbt" ? decodeStructure(buf, ro) : decodeBlueprint(buf, ro));
     warnings.push(...dec.warnings);
     doc = documentFromSnapshot(dec.snapshot, { name: opts.name, dataVersion: dec.snapshot.dataVersion, source: path, ...(opts.front ? { front: opts.front } : {}) });
+    if (lite && lite.regions.length > 1) addRegionComponents(doc, lite.regions);
     if (opts.palettes) doc.palettes = opts.palettes;
   } else {
-    const why = { litematic: "Litematica files are planned, not supported yet", schematic: "legacy MCEdit .schematic files need a legacy ID map (not supported)" }[format];
-    throw new Error(`can't import ${basename(path)}: ${why}`);
+    throw new Error(`can't import ${basename(path)}: legacy MCEdit .schematic files need a legacy ID map (not supported)`);
   }
   doc.meta.name = opts.name;
   if (opts.front) doc.meta.front = opts.front;
   if (opts.dataVersion && doc.meta.dataVersion && doc.meta.dataVersion !== opts.dataVersion)
     warnings.push(`file DataVersion ${doc.meta.dataVersion} differs from this instance's ${opts.dataVersion}; blocks renamed between versions are not upgraded`);
   return { doc, format, warnings };
+}
+
+/** Registers each Litematica region as a component (no journal entry: the document is fresh). */
+function addRegionComponents(doc: Document, regions: LitematicRegion[]): void {
+  const used = new Set<string>();
+  for (const r of regions) {
+    const base = r.name.toLowerCase().replace(/[^a-z0-9_.-]+/g, "_").replace(/^[^a-z0-9_]+/, "") || "region";
+    let id = base;
+    for (let i = 2; used.has(id); i++) id = `${base}_${i}`;
+    used.add(id);
+    doc.components.set(id, { id, kind: "litematica_region", box: doc.boxToStore(r.box), anchors: {}, tags: [], notes: `Litematica region "${r.name}"` });
+  }
 }

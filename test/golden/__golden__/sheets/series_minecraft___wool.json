@@ -1,0 +1,24 @@
+{
+  "columns": 4,
+  "rows": 4,
+  "pages": 1,
+  "bands": [],
+  "cells": {
+    "A1": "family minecraft:white_wool",
+    "B1": "family minecraft:light_gray_wool",
+    "C1": "family minecraft:gray_wool",
+    "D1": "family minecraft:black_wool",
+    "A2": "family minecraft:brown_wool",
+    "B2": "family minecraft:red_wool",
+    "C2": "family minecraft:orange_wool",
+    "D2": "family minecraft:yellow_wool",
+    "A3": "family minecraft:lime_wool",
+    "B3": "family minecraft:green_wool",
+    "C3": "family minecraft:cyan_wool",
+    "D3": "family minecraft:light_blue_wool",
+    "A4": "family minecraft:blue_wool",
+    "B4": "family minecraft:purple_wool",
+    "C4": "family minecraft:magenta_wool",
+    "D4": "family minecraft:pink_wool"
+  }
+}

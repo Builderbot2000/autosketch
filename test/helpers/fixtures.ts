@@ -11,10 +11,13 @@ function toBytes(v: string | Uint8Array | object): Uint8Array {
   return new TextEncoder().encode(typeof v === "string" ? v : JSON.stringify(v));
 }
 
-/** Builds a zip in memory. `store: true` disables compression (as jar-in-jar entries often are). */
-export function makeZip(files: FileTree, opts: { store?: boolean } = {}): Uint8Array {
+/**
+ * Builds a zip in memory. `store: true` disables compression (as jar-in-jar entries often are);
+ * `mtime` fixes entry timestamps so the bytes are reproducible.
+ */
+export function makeZip(files: FileTree, opts: { store?: boolean; mtime?: Date } = {}): Uint8Array {
   const z: Zippable = {};
-  for (const [name, v] of Object.entries(files)) z[name] = [toBytes(v), { level: opts.store ? 0 : 6 }];
+  for (const [name, v] of Object.entries(files)) z[name] = [toBytes(v), { level: opts.store ? 0 : 6, ...(opts.mtime ? { mtime: opts.mtime } : {}) }];
   return zipSync(z);
 }
 

@@ -1,0 +1,7 @@
+{
+  "columns": 32,
+  "rows": 1,
+  "pages": 1,
+  "bands": [{"category":"colored","fromRow":1,"toRow":1}],
+  "cells": {"A1":"series minecraft:*_wool"}
+}

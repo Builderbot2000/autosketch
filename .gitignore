@@ -5,3 +5,4 @@ coverage/
 *.log
 .env
 test/eval/results/
+test/golden/__output__/

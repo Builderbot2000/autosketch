@@ -1,0 +1,43 @@
+{
+  "name": "autosketch",
+  "version": "1.0.0",
+  "description": "Local MCP server for agent-driven Minecraft schematic building, with visual and palette harnessing",
+  "main": "dist/server/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:local": "AUTOSKETCH_LOCAL=1 vitest run",
+    "dev": "tsx src/server/index.ts"
+  },
+  "keywords": [
+    "minecraft",
+    "schematic",
+    "mcp",
+    "axiom",
+    "create"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "fflate": "^0.8.3",
+    "pngjs": "^7.0.0",
+    "prismarine-nbt": "^2.8.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  },
+  "type": "module",
+  "bin": {
+    "autosketch": "dist/server/index.js"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

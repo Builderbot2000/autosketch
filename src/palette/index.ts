@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { DEFAULT_TINT_BIOME } from "../assets/biomes.js";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -102,7 +103,7 @@ export async function loadPaletteIndex(stack: PackStack, registry: Registry, opt
   const data = await buildPaletteIndexData(stack, registry, opts);
   if (file) {
     await mkdir(dirname(file), { recursive: true });
-    const tmp = `${file}.${process.pid}.tmp`;
+    const tmp = `${file}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`; // unique: parallel loads may save at once
     await writeFile(tmp, gzipSync(JSON.stringify(data)));
     await rename(tmp, file);
   }

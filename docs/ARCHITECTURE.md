@@ -75,7 +75,7 @@ The agent has to understand (a) **what it can build with**: blocks, materials, p
 - `ops/` depends on `document/`, `palette/` (material resolution), `library/` (prefabs) and `plugins/` (mod actions).
 - `perception/` depends on `document/` and `assets/` (models and textures). It never mutates.
 - `ops/` may use `perception/` read-only, for semantic selections (`storey`, `face`, `room`, …, from analysis) and render-seeded selections (`view_box`, `view_lasso`, from stored render cameras). The dependency is one way: `perception/` never imports `ops/`. It takes already-resolved masks (`core/mask.ts`), and callers resolve selections first.
-- `observe/` reads `document/` and `assets/` and never mutates. `document/` and `server/` publish to it only through the `EventSink` interface in `core/` (`12`).
+- `observe/` reads `document/`, `assets/` and `perception/` (time-lapse snapshots use the renderer) and never mutates. `document/` and `server/` publish to it only through the `EventSink` interface in `core/` (`12`). The one exception is the process entry point, `server/index.ts`, which starts the observer: it wires the layers together, so it may import any of them.
 - `server/` is a thin adapter: tool schemas plus calls into the layers above. All logic lives below it, so the same API powers the MCP tools, scripts and tests.
 
 ## Tech stack

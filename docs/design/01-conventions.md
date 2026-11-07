@@ -20,7 +20,7 @@ These contracts are shared by every tool, render label and file format. Changing
 
 - **Front.** Each document and prefab has a `front` facing. The default is `south` (+Z), so the default "front elevation" view looks north at the +Z face. The agent may change `front` per document. Facade names (`front`, `back`, `left`, `right`) resolve through it.
 - **Rotation** is in 90° steps, clockwise when viewed from above (matching Minecraft `Rotation.CLOCKWISE_90`), about a pivot. The default pivot is the selection's centre, rounded toward the minimum corner.
-- **Mirror** is across an axis plane: `x` flips east↔west, `z` flips north↔south.
+- **Mirror** is across an axis plane: `x` flips east↔west, `z` flips north↔south, `y` flips up↔down (remapping `half`, `attachment`, `face` and `facing=up|down`).
 - Rotating or mirroring block content **always remaps block states** (facing, axis, rotation, hinge, shape, half, attachment, multipart side flags) using the registry's state rotation tables plus plugin overrides (`09`).
 - **Stair semantics** are documented once and repeated in tool descriptions: `facing` = the direction you walk to climb the stair. A roof slope that descends toward the south uses `facing=north`.
 

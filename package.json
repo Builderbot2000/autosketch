@@ -45,6 +45,7 @@
   "files": [
     "dist",
     "data",
+    "library",
     "README.md",
     "LICENSE"
   ]

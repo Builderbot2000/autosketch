@@ -30,6 +30,7 @@ Persistence: follow the proposal in `11` (in memory for v1, abandoned on exit), 
 
 ## Done when
 
+- Refusals are thrown as errors carrying a `refusal: "<code>"` property, the convention silo G's event log reads (`call.refused`, `12`).
 - Unit tests cover every refusal code that `12` lists (`lock_overlap`, `nest_too_large`, `nest_too_small`, `nest_depth`, `outside_work_volume`, `scope_required`).
 - A fence built to a sandbox boundary connects to the context wall in the sandbox and to the real wall after merge.
 - Two parallel forks with overlapping context volumes merge in either order with the same result.

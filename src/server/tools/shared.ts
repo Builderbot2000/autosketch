@@ -2,7 +2,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { fromPublic, type Box, type PublicBox } from "../../core/region.js";
 import type { Document } from "../../document/document.js";
-import type { OpEnv, Region } from "../../ops/edit.js";
+import type { CommonOptions, OpEnv, Region } from "../../ops/edit.js";
 import { resolveSelection, type SelExpr } from "../../ops/selection.js";
 import { BlockBaker } from "../../perception/render/bake.js";
 import { TextureLoader, Tinter } from "../../palette/textures.js";
@@ -59,6 +59,21 @@ export const selSchema = z
       '{"shell":a,"thickness"?,"walls_only"?} {"layer":a,"y":n|"min"|"max"} {"surface":a} {"bbox":a} {"filter":a,"block"?:"oak_planks|#tag|*","air"?:bool} · ' +
       '{"rotate":a,"turns":n,"pivot"?:[x,y,z]} (clockwise from above) {"mirror":a,"axis":"x|y|z","about"?:n}. Nest freely.',
   );
+
+/** Arguments every op takes (05): raw skips auto-connection; as/kind register a component. */
+export const commonSchema = {
+  raw: z.boolean().optional().describe("Write states exactly as given: skip auto-connection of fences, walls, panes, stairs, redstone and chests (they and their neighbours are otherwise recomputed)"),
+  as: z.string().optional().describe('Register the affected bounding box as a component, e.g. "keep"'),
+  kind: z.string().optional().describe('Component kind, e.g. "tower", "wall", "floor"'),
+};
+
+export const common = (a: { raw?: boolean | undefined; as?: string | undefined; kind?: string | undefined }): CommonOptions => ({
+  ...(a.raw ? { raw: true } : {}),
+  ...(a.as ? { as: a.as } : {}),
+  ...(a.kind ? { kind: a.kind } : {}),
+});
+
+export const componentLine = (a: { as?: string | undefined }): string[] => (a.as ? [`component: ${a.as}`] : []);
 
 // ---- helpers -------------------------------------------------------------------------------------
 

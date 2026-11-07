@@ -29,6 +29,15 @@ export interface AutosketchPlugin {
    * (a rotation or a mirror); return the transformed state, or undefined for the generic rules.
    */
   rotate?: StateOverride;
+  /**
+   * Connecting blocks this plugin declares (05, Auto-connection): `handles` picks the states, and
+   * `update` derives the connection properties from neighbours (`at(dx,dy,dz)` reads a state
+   * relative to the block). Called after every non-raw op for written blocks and their neighbours.
+   */
+  connection?: {
+    handles(state: string): boolean;
+    update(state: string, at: (dx: number, dy: number, dz: number) => string): string;
+  };
   /** Markdown explaining the mod's building concepts (exposed as a knowledge resource). */
   docs?: string;
 }

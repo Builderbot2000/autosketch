@@ -365,6 +365,11 @@ export class Transaction {
     this.before = before;
   }
 
+  /** Visits each local position written so far in this op, once (auto-connection reads it, 05). */
+  forEachTouched(fn: (x: number, y: number, z: number) => void): void {
+    for (let i = 0; i < this.n; i++) fn(this.pos[i * 3]! - this.origin[0], this.pos[i * 3 + 1]! - this.origin[1], this.pos[i * 3 + 2]! - this.origin[2]);
+  }
+
   /** Clears a local position to air. */
   clear(x: number, y: number, z: number): void {
     this.set(x, y, z, 0);

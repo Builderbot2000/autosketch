@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { Vec3 } from "../../core/region.js";
 import { copy, mirror, move, rotate, type TransformOptions } from "../../ops/transform.js";
 import { formatEdit } from "../format.js";
-import { boxSchema, editWith, env, regionOf, selSchema, vec3, type ToolDeps } from "./shared.js";
+import { boxSchema, commonSchema, editWith, env, regionOf, selSchema, vec3, type ToolDeps } from "./shared.js";
 
 /** Transform ops (05 L2: move / copy / rotate / mirror, with block-state remapping from 01). */
 export function registerTransformTools({ tool, session }: ToolDeps): void {
@@ -10,9 +10,7 @@ export function registerTransformTools({ tool, session }: ToolDeps): void {
     sel: selSchema.optional(),
     box: boxSchema.optional().describe("Shorthand for sel:{min,max}"),
     skip_air: z.boolean().optional().describe("Carry only non-air blocks (default: air in the selection overwrites the destination too)"),
-    raw: z.boolean().optional().describe("Write states exactly as transformed; skip auto-connection of fences, walls, panes, stairs, redstone"),
-    as: z.string().optional().describe("Register the destination's bounding box as a component"),
-    kind: z.string().optional(),
+    ...commonSchema,
   };
   const opts = (a: { skip_air?: boolean | undefined; raw?: boolean | undefined; as?: string | undefined; kind?: string | undefined }, label?: string): TransformOptions => ({
     ...(a.skip_air ? { skipAir: true } : {}),

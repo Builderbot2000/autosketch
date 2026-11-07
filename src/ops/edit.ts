@@ -6,6 +6,7 @@ import type { Document, EditResult, Transaction } from "../document/document.js"
 import type { StateOverride } from "../core/rotate.js";
 import type { PaletteIndex } from "../palette/index.js";
 import type { AutosketchPlugin } from "../plugins/types.js";
+import { connectAfterEdit } from "./connect.js";
 import { compileMaterial, type MaterialContext, type MaterialExpr } from "./material.js";
 
 /**
@@ -32,9 +33,16 @@ export interface CommonOptions {
   kind?: string;
 }
 
-/** Runs an op body as one journal entry (05). */
-export function opEdit<T>(doc: Document, _env: OpEnv, op: string, summary: string, _opts: CommonOptions, body: (tx: Transaction) => T): EditResult & { value: T } {
-  return doc.edit(op, summary, body);
+/**
+ * Runs an op body as one journal entry (05). Unless `raw`, connection properties of the written
+ * blocks and their neighbours are then recomputed (05, Auto-connection) in the same entry.
+ */
+export function opEdit<T>(doc: Document, env: OpEnv, op: string, summary: string, opts: CommonOptions, body: (tx: Transaction) => T): EditResult & { value: T } {
+  return doc.edit(op, summary, (tx) => {
+    const v = body(tx);
+    if (!opts.raw) connectAfterEdit(doc, tx, env);
+    return v;
+  });
 }
 
 /** Registers `opts.as` for a local half-open box (04: ops register what they create). */

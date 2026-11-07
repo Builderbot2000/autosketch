@@ -4,7 +4,9 @@ import { loadRegistry, type Registry } from "../assets/registry.js";
 import { loadPaletteIndex, type PaletteIndex } from "../palette/index.js";
 import { PaletteBook } from "../palette/pick.js";
 import { SheetRenderer } from "../palette/sheet.js";
+import { defaultWorkspace } from "./session.js";
 import { BUILTIN_PLUGINS } from "../plugins/builtin.js";
+import { loadPluginDir, mergePlugins, pluginDir } from "../plugins/loader.js";
 import { activePlugins, type AutosketchPlugin } from "../plugins/types.js";
 
 /** Everything tools need about the user's Minecraft instance, loaded once per server. */
@@ -58,7 +60,11 @@ export async function loadInstanceContext(cfg: ServerConfig, log: (msg: string) 
   log(`instance ${info.name}: Minecraft ${info.mcVersion}${info.loader ? `, ${info.loader.name} ${info.loader.version}` : ""}, ${info.layers.length} layers`);
   const { stack, warnings } = await time("pack stack", () => openStack(info));
   const { registry } = await time("registry", () => loadRegistry(stack, { mcVersion: info.mcVersion, onProgress: log }));
-  const plugins = activePlugins(BUILTIN_PLUGINS, registry);
+  // Third-party plugins run with full trust (09); a missing folder is fine.
+  const extra = await time("plugins", () => loadPluginDir(pluginDir(cfg.workspace ?? defaultWorkspace())));
+  const merged = mergePlugins(BUILTIN_PLUGINS, extra.plugins);
+  const plugins = activePlugins(merged.plugins, registry);
+  if (extra.plugins.length) log(`third-party plugins: ${extra.plugins.map((p) => p.id).join(", ")} (full trust)`);
   const { index } = await time("palette", () => loadPaletteIndex(stack, registry, { plugins }));
   log(`ready: ${registry.size} blocks, ${index.buildable().length} buildable families`);
   return {
@@ -69,7 +75,7 @@ export async function loadInstanceContext(cfg: ServerConfig, log: (msg: string) 
     plugins,
     sheets: new SheetRenderer(index, stack),
     book: new PaletteBook(),
-    warnings: [...warnings, ...registry.data.warnings],
+    warnings: [...warnings, ...registry.data.warnings, ...extra.warnings, ...merged.warnings],
     timings,
   };
 }

@@ -104,7 +104,7 @@ export function bakerFor(c: InstanceContext): Promise<BlockBaker> {
       const loader = new TextureLoader(c.stack);
       const tinter = new Tinter(loader);
       await tinter.init();
-      return new BlockBaker(c.stack, loader, tinter, c.registry);
+      return new BlockBaker(c.stack, loader, tinter, c.registry, c.plugins);
     })();
     bakers.set(c, p);
   }

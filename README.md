@@ -14,3 +14,7 @@ npm install
 npm test                                        # unit + golden tests
 AUTOSKETCH_INSTANCE=/path/to/instance npm run test:local   # against a real instance
 ```
+
+## License
+
+[GNU AGPL v3.0 or later](LICENSE). You may use, modify and redistribute Autosketch, but any distributed or network-hosted version (including a hosted MCP service) must make its complete source available under the same license.

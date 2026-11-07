@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { Vec3 } from "../../core/region.js";
 import { clear, fill, replace, setBlocks } from "../../ops/edit.js";
 import type { MaterialExpr } from "../../ops/material.js";
-import { checkSelectionName, resolveSelection, summarize, type SelExpr } from "../../ops/selection.js";
+import { checkSelectionName, freezeNodes, resolveSelection, summarize, type SelExpr } from "../../ops/selection.js";
 import { formatEdit, formatSelection } from "../format.js";
 import { boxSchema, common, commonSchema, componentLine, editWith, env, materialSchema, regionOf, selSchema, text, vec3, type ToolDeps } from "./shared.js";
 
@@ -41,7 +41,7 @@ export function registerSelectionTools({ tool, session }: ToolDeps): void {
       if (a.sel !== undefined && a.name) checkSelectionName(a.name);
       const r = resolveSelection(expr, { doc, registry: c.registry, index: c.palette });
       if (a.sel !== undefined && a.name) {
-        doc.selections.set(a.name, a.sel as SelExpr);
+        doc.selections.set(a.name, freezeNodes(a.sel as SelExpr, { doc, registry: c.registry, index: c.palette }));
         doc.revision++;
         session.touch();
       }

@@ -5,6 +5,7 @@ import { defaultPivot, mirrorPos, rotatePos, type MirrorAxis } from "../core/rot
 import { boxVolume, formatBox, fromPublic, intersectBox, isEmptyBox, type Box, type PublicBox, type Vec3 } from "../core/region.js";
 import type { Document } from "../document/document.js";
 import type { PaletteIndex } from "../palette/index.js";
+import { hash01 } from "../core/rng.js";
 import { blockMatcher, MAX_OP_VOLUME } from "./edit.js";
 
 /**
@@ -22,6 +23,11 @@ import { blockMatcher, MAX_OP_VOLUME } from "./edit.js";
  *             {"offset":a,"by":[dx,dy,dz]} · {"shell":a,"thickness"?,"walls_only"?} · {"layer":a,"y":n|"min"|"max"}
  *             {"surface":a} · {"bbox":a} · {"filter":a,"block"?:"..","air"?:bool}
  *             {"rotate":a,"turns":n,"pivot"?:[x,y,z]} · {"mirror":a,"axis":"x|y|z","about"?:n}
+ *             {"grow":a,"by"?:n,"match"?:"solid|same|any"} · {"shrink":a,"by"?:n} (topological, along connected blocks)
+ *             {"edges":a} · {"slab":a,"axis","from","to"} · {"convex":a} · {"fill_holes":a}
+ *             {"checker":a,"size"?,"odd"?} · {"random":a,"ratio","seed"?} · {"every":a,"n","along"?,"offset"?}
+ *             {"freeze":a} (stored as resolved voxels, {"frozen":[[x,y,z,len],..]})
+ * More shapes {"hull":[[x,y,z],..]} (convex hull of points) · {"tube":{path:[[x,y,z],..],radius}}
  */
 
 export type SelExpr = string | { [k: string]: unknown };
@@ -237,6 +243,30 @@ const BUILDERS: Record<string, (e: Record<string, unknown>, b: BuildEnv) => Mask
     return m;
   },
 
+  hull: (e) => {
+    if (!Array.isArray(e.hull) || e.hull.length < 1) throw new Error('hull takes a list of [x,y,z] points, e.g. {"hull":[[0,0,0],[8,0,0],[4,6,4]]}');
+    const pts = e.hull.map((p, i) => vec(p, `hull[${i}]`));
+    return kdop(pts);
+  },
+
+  tube: (e) => {
+    const t = obj(e.tube, "tube");
+    if (!Array.isArray(t.path) || t.path.length < 1) throw new Error("tube.path needs at least one [x,y,z] point");
+    const path = t.path.map((p, i) => vec(p, `tube.path[${i}]`, false));
+    const r = num(t.radius ?? 0, "tube.radius", 0);
+    const rr = (r + 0.5) ** 2;
+    const lo = [0, 1, 2].map((a) => Math.floor(Math.min(...path.map((p) => p[a]!)) - r - 0.5)) as Vec3;
+    const hi = [0, 1, 2].map((a) => Math.ceil(Math.max(...path.map((p) => p[a]!)) + r + 0.5) + 1) as Vec3;
+    checkBox({ min: lo, max: hi }, "tube");
+    const segs = path.length === 1 ? [[path[0]!, path[0]!]] : path.slice(1).map((p, i) => [path[i]!, p]);
+    const m = new Mask();
+    for (const [a, c] of segs as [Vec3, Vec3][]) {
+      const sl = [0, 1, 2].map((k) => Math.floor(Math.min(a[k]!, c[k]!) - r - 0.5)) as Vec3, sh = [0, 1, 2].map((k) => Math.ceil(Math.max(a[k]!, c[k]!) + r + 0.5)) as Vec3;
+      for (let x = sl[0]; x <= sh[0]; x++) for (let y = sl[1]; y <= sh[1]; y++) for (let z = sl[2]; z <= sh[2]; z++) if (segDist3(x, y, z, a, c) <= rr + 1e-9) m.add(x, y, z);
+    }
+    return m;
+  },
+
   union: (e, b) => list(e.union, "union", 1).reduce<Mask>((acc, x) => acc.unionWith(b.ev(x)), new Mask()),
   intersect: (e, b) => {
     const [first, ...rest] = list(e.intersect, "intersect", 2);
@@ -262,6 +292,154 @@ const BUILDERS: Record<string, (e: Record<string, unknown>, b: BuildEnv) => Mask
   contract: (e, b) => morph(b.ev(e.contract), parseBy(e.by ?? 1, "contract.by"), "erode"),
 
   offset: (e, b) => b.ev(e.offset).translated(vec(e.by, "offset.by")),
+
+  grow: (e, b) => {
+    let m = b.ev(e.grow);
+    const n = int(e.by ?? 1, "grow.by", 0);
+    const match = (e.match ?? "solid") as string;
+    if (!["solid", "same", "any"].includes(match)) throw new Error('grow.match must be "solid" (connected blocks, default), "same" (same block as its selected neighbour) or "any"');
+    const doc = b.doc;
+    for (let i = 0; i < n; i++) {
+      const next = m.clone();
+      let added = 0;
+      m.forEach((x, y, z) => {
+        const here = match === "same" ? stateId(doc.getState(x, y, z)) : "";
+        for (const d of DIRS6) {
+          const q: Vec3 = [x + d[0], y + d[1], z + d[2]];
+          if (next.has(...q)) continue;
+          const st = doc.getState(...q);
+          if (match === "solid" && st === "minecraft:air") continue;
+          if (match === "same" && stateId(st) !== here) continue;
+          next.add(...q);
+          added++;
+        }
+      });
+      if (next.count() > MAX_OP_VOLUME) throw new Error("grown selection is too large");
+      m = next;
+      if (!added) break;
+    }
+    return m;
+  },
+
+  shrink: (e, b) => {
+    let m = b.ev(e.shrink);
+    const n = int(e.by ?? 1, "shrink.by", 0);
+    const doc = b.doc;
+    for (let i = 0; i < n; i++) {
+      const next = m.clone();
+      m.forEach((x, y, z) => {
+        if (DIRS6.some((d) => !m.has(x + d[0], y + d[1], z + d[2]) && doc.getState(x + d[0], y + d[1], z + d[2]) !== "minecraft:air")) next.delete(x, y, z);
+      });
+      m = next;
+    }
+    return m;
+  },
+
+  checker: (e, b) => {
+    const m = b.ev(e.checker);
+    const size = int(e.size ?? 1, "checker.size", 1);
+    const odd = e.odd === true ? 1 : 0;
+    const out = new Mask();
+    m.forEach((x, y, z) => ((Math.floor(x / size) + Math.floor(y / size) + Math.floor(z / size)) & 1) === odd && out.add(x, y, z));
+    return out;
+  },
+
+  random: (e, b) => {
+    const m = b.ev(e.random);
+    const ratio = num(e.ratio, "random.ratio", 0);
+    if (ratio > 1) throw new Error("random.ratio must be between 0 and 1");
+    const seed = e.seed !== undefined ? int(e.seed, "random.seed") : b.doc.meta.seed;
+    const out = new Mask();
+    m.forEach((x, y, z) => hash01(seed, RANDOM_SALT, x, y, z) < ratio && out.add(x, y, z));
+    return out;
+  },
+
+  every: (e, b) => {
+    const m = b.ev(e.every);
+    const n = int(e.n, "every.n", 1);
+    const along = (e.along ?? "x") as string;
+    if (!["x", "y", "z"].includes(along)) throw new Error('every.along must be "x", "y" or "z"');
+    const a = "xyz".indexOf(along);
+    const bb = m.bbox();
+    if (!bb) return m;
+    const offset = int(e.offset ?? 0, "every.offset", 0);
+    const out = new Mask();
+    m.forEach((x, y, z) => {
+      const p = [x, y, z][a]! - bb.min[a]!;
+      if (p % n === offset % n) out.add(x, y, z);
+    });
+    return out;
+  },
+
+  freeze: (e, b) => b.ev(e.freeze),
+
+  frozen: (e) => {
+    if (!Array.isArray(e.frozen)) throw new Error("frozen holds [x,y,z,length] runs (made by select with freeze)");
+    const m = new Mask();
+    for (const r of e.frozen as unknown[]) {
+      if (!Array.isArray(r) || r.length !== 4 || r.some((v) => !Number.isInteger(v))) throw new Error("frozen runs must be [x,y,z,length] integers");
+      const [x, y, z, len] = r as number[];
+      for (let i = 0; i < len!; i++) m.add(x! + i, y!, z!);
+    }
+    return m;
+  },
+
+  edges: (e, b) => {
+    const m = b.ev(e.edges);
+    const out = new Mask();
+    m.forEach((x, y, z) => {
+      let axes = 0;
+      if (!m.has(x + 1, y, z) || !m.has(x - 1, y, z)) axes++;
+      if (!m.has(x, y + 1, z) || !m.has(x, y - 1, z)) axes++;
+      if (!m.has(x, y, z + 1) || !m.has(x, y, z - 1)) axes++;
+      if (axes >= 2) out.add(x, y, z);
+    });
+    return out;
+  },
+
+  slab: (e, b) => {
+    const m = b.ev(e.slab);
+    const axis = (e.axis ?? "y") as string;
+    if (!["x", "y", "z"].includes(axis)) throw new Error('slab.axis must be "x", "y" or "z"');
+    const a = "xyz".indexOf(axis);
+    const from = int(e.from, "slab.from"), to = int(e.to ?? e.from, "slab.to");
+    const lo = Math.min(from, to), hi = Math.max(from, to);
+    const out = new Mask();
+    m.forEach((x, y, z) => {
+      const v = [x, y, z][a]!;
+      if (v >= lo && v <= hi) out.add(x, y, z);
+    });
+    return out;
+  },
+
+  convex: (e, b) => {
+    const m = b.ev(e.convex);
+    return m.isEmpty() ? m : kdop(m.positions()).unionWith(m);
+  },
+
+  fill_holes: (e, b) => {
+    const m = b.ev(e.fill_holes);
+    const bb = m.bbox();
+    if (!bb) return m;
+    const outer: Box = { min: [bb.min[0] - 1, bb.min[1] - 1, bb.min[2] - 1], max: [bb.max[0] + 1, bb.max[1] + 1, bb.max[2] + 1] };
+    checkBox(outer, "fill_holes");
+    // Flood the outside from the padded box's corner; whatever the flood can't reach is enclosed.
+    const outside = new Mask();
+    const stack: Vec3[] = [[...outer.min]];
+    outside.add(...outer.min);
+    while (stack.length) {
+      const [x, y, z] = stack.pop()!;
+      for (const d of DIRS6) {
+        const q: Vec3 = [x + d[0], y + d[1], z + d[2]];
+        if (!inside(outer, q) || outside.has(...q) || m.has(...q)) continue;
+        outside.add(...q);
+        stack.push(q);
+      }
+    }
+    const out = m.clone();
+    for (let y = bb.min[1]; y < bb.max[1]; y++) for (let z = bb.min[2]; z < bb.max[2]; z++) for (let x = bb.min[0]; x < bb.max[0]; x++) if (!outside.has(x, y, z)) out.add(x, y, z);
+    return out;
+  },
 
   rotate: (e, b) => {
     const m = b.ev(e.rotate);
@@ -524,6 +702,65 @@ function morph(m: Mask, by: By, mode: "dilate" | "erode"): Mask {
   }
   checkBox(cur.bbox() ?? { min: [0, 0, 0], max: [0, 0, 0] }, "expanded selection");
   return cur === m ? m.clone() : cur;
+}
+
+const RANDOM_SALT = 0x5e1ec7;
+
+/**
+ * Directions for the convex approximation: every primitive integer vector with components in
+ * -2..2 (98 of them). A position is inside when it lies within the points' extent along every
+ * direction, a k-DOP that hugs the true convex hull (slightly generous on faces at other angles).
+ */
+const KDOP_DIRS: Vec3[] = (() => {
+  const out: Vec3[] = [];
+  const gcd = (a: number, c: number): number => (c ? gcd(c, a % c) : Math.abs(a));
+  for (let x = -2; x <= 2; x++) for (let y = -2; y <= 2; y++) for (let z = -2; z <= 2; z++) if ((x || y || z) && gcd(gcd(x, y), z) === 1) out.push([x, y, z]);
+  return out;
+})();
+
+function kdop(pts: Vec3[]): Mask {
+  const lo: Vec3 = [Infinity, Infinity, Infinity], hi: Vec3 = [-Infinity, -Infinity, -Infinity];
+  for (const p of pts) for (let a = 0; a < 3; a++) [lo[a], hi[a]] = [Math.min(lo[a]!, p[a]!), Math.max(hi[a]!, p[a]! + 1)];
+  checkBox({ min: lo, max: hi }, "hull");
+  const max = KDOP_DIRS.map(() => -Infinity);
+  for (const p of pts) KDOP_DIRS.forEach((d, i) => (max[i] = Math.max(max[i]!, d[0] * p[0] + d[1] * p[1] + d[2] * p[2])));
+  const m = new Mask();
+  for (let x = lo[0]; x < hi[0]; x++)
+    for (let y = lo[1]; y < hi[1]; y++)
+      for (let z = lo[2]; z < hi[2]; z++) if (KDOP_DIRS.every((d, i) => d[0] * x + d[1] * y + d[2] * z <= max[i]!)) m.add(x, y, z);
+  return m;
+}
+
+function segDist3(x: number, y: number, z: number, a: Vec3, b: Vec3): number {
+  const d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+  const len = d[0]! ** 2 + d[1]! ** 2 + d[2]! ** 2;
+  const t = len ? Math.max(0, Math.min(1, ((x - a[0]) * d[0]! + (y - a[1]) * d[1]! + (z - a[2]) * d[2]!) / len)) : 0;
+  return (a[0] + t * d[0]! - x) ** 2 + (a[1] + t * d[1]! - y) ** 2 + (a[2] + t * d[2]! - z) ** 2;
+}
+
+/**
+ * Replaces every `freeze` node in an expression with its resolved voxels (`{"frozen": runs}`), so a
+ * stored selection keeps exactly what it covered now instead of re-evaluating (05, Naming).
+ */
+export function freezeNodes(expr: SelExpr, ctx: SelContext): SelExpr {
+  if (typeof expr === "string" || !expr || typeof expr !== "object") return expr;
+  if ("freeze" in expr) {
+    const runs: number[][] = [];
+    const m = resolveSelection(asExpr(expr.freeze), ctx).mask;
+    const pts = m.positions().sort((p, q) => p[1] - q[1] || p[2] - q[2] || p[0] - q[0]);
+    for (const p of pts) {
+      const last = runs[runs.length - 1];
+      if (last && last[1] === p[1] && last[2] === p[2] && last[0]! + last[3]! === p[0]) last[3]!++;
+      else runs.push([p[0], p[1], p[2], 1]);
+    }
+    return { frozen: runs };
+  }
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(expr)) {
+    if (Array.isArray(v)) out[k] = v.map((x) => (x && typeof x === "object" && !Array.isArray(x) ? freezeNodes(x as SelExpr, ctx) : x));
+    else out[k] = v && typeof v === "object" ? freezeNodes(v as SelExpr, ctx) : v;
+  }
+  return out;
 }
 
 function fmt(p: Vec3): string {

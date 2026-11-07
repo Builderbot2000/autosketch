@@ -20,6 +20,6 @@ BUILDING:
 Register important parts with fill(..., as:"keep") so later work can refer to them; doc_info lists components.
 Coordinates never move while you edit: building below 0 (e.g. a roof overhang at x=-1) just extends the bounds into negative numbers. Exports shift the build so its minimum corner is (0,0,0).
 
-COST: the overview is ~1.5k tokens; zoom/family/series sheets are ~0.1–0.5k; palette_pick/palette_show/block_info and all edit results are text (<300); view_slice is ~0.1–1.5k depending on size; render is ~350 tokens per 512px view (the default 4-view sheet at 768px is ~800). Pick from the overview you already have instead of re-requesting it.
+COST: the overview is ~1.5k tokens; zoom/family/series sheets are ~0.1–0.5k; palette_pick/palette_show/block_info and all edit results are text (<300); view_slice is ~0.1–1.5k depending on size; render is ~350 tokens per 512px view (the default 4-view sheet at 768px is ~800). query_block/query_column are <50, analyze ~200–400, diff ~100–300: prefer them to another render when the question is exact. Pick from the overview you already have instead of re-requesting it.
 
 CONVENTIONS: X = east(+)/west(-), Y = up, Z = south(+)/north(-). Boxes are inclusive {min,max}. The "front" of a build is south (+Z) unless changed. Stairs "facing" is the direction you walk to climb them.`;

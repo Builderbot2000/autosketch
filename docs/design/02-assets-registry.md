@@ -35,7 +35,7 @@ Layer order (lowest priority first), as implemented in `locate.ts`:
 
 **Pack overlays** (`pack.mcmeta` `overlays.entries`) are applied as higher-priority sub-folder layers, with assets matched against the resource pack format and data against the data pack format (1.21.1: 34 / 48).
 
-**Known approximation:** mod-to-mod order inside `mod_resources` follows the loader's dependency sort, which we don't reproduce. Conflicts over the same path between mods are rare. A future config option can pin the order.
+**Known approximation:** mod-to-mod order inside `mod_resources` follows the loader's dependency sort, which we don't reproduce. Conflicts over the same path between mods are rare. **Pinned mod order** (`modOrder`, `--mod-order a,b` or `AUTOSKETCH_MOD_ORDER`) fixes a conflict: each entry names a jar by file name, by its name before the version (`create` matches `create-1.21.1-6.0.4.jar`) or by a `*` glob. Pinned jars sit above the alphabetical rest in the order given, so the last entry wins. An entry matching nothing is warned about.
 
 Jars are indexed by central directory only (file list, no decompression). Only `assets/`, `data/`, `resourcepacks/`, top-level pack folders, `META-INF/jarjar/` and mod metadata are indexed. Entries are decompressed lazily. A small LRU of file handles avoids fd exhaustion.
 

@@ -27,7 +27,7 @@ export interface ServerConfig extends LocateOptions {
   workspace?: string;
 }
 
-/** Reads config from CLI args (--instance, --version, --base-jar) and env (AUTOSKETCH_*). */
+/** Reads config from CLI args (--instance, --version, --base-jar, --mod-order a,b) and env (AUTOSKETCH_*). */
 export function configFromEnv(argv = process.argv.slice(2), env = process.env): ServerConfig | undefined {
   const arg = (name: string) => {
     const i = argv.indexOf(`--${name}`);
@@ -40,6 +40,8 @@ export function configFromEnv(argv = process.argv.slice(2), env = process.env): 
   const baseJar = arg("base-jar") ?? env.AUTOSKETCH_BASE_JAR;
   if (version) cfg.version = version;
   if (baseJar) cfg.baseJar = baseJar;
+  const modOrder = arg("mod-order") ?? env.AUTOSKETCH_MOD_ORDER;
+  if (modOrder) cfg.modOrder = modOrder.split(",").map((s) => s.trim()).filter(Boolean);
   const workspace = arg("workspace") ?? env.AUTOSKETCH_WORKSPACE;
   if (workspace) cfg.workspace = workspace;
   return cfg;

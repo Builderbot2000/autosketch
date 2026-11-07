@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { join } from "node:path";
-import { locateInstance } from "../../../src/assets/locate.js";
+import { locateInstance, pinModOrder } from "../../../src/assets/locate.js";
 import { openStack } from "../../../src/assets/pack.js";
 import { makeZip, tempDir, writeTree } from "../../helpers/fixtures.js";
 
@@ -110,6 +110,25 @@ describe("locateInstance (vanilla / generic)", () => {
 
   it("rejects unrecognised folders", async () => {
     await expect(locateInstance(await tempDir())).rejects.toThrow(/could not recognise/);
+  });
+});
+
+describe("pinned mod order", () => {
+  const jars = ["a_mod.jar", "b_mod.jar", "create-1.21.1-6.0.4.jar", "createaddition-1.5.jar", "zeta-1.0.jar"];
+
+  it("moves pinned jars above the alphabetical rest, last entry highest", () => {
+    const warnings: string[] = [];
+    expect(pinModOrder(jars, ["zeta", "create", "a_mod.jar"], warnings)).toEqual(["b_mod.jar", "createaddition-1.5.jar", "zeta-1.0.jar", "create-1.21.1-6.0.4.jar", "a_mod.jar"]);
+    expect(warnings).toEqual([]);
+    expect(pinModOrder(jars, ["create*"])).toEqual(["a_mod.jar", "b_mod.jar", "zeta-1.0.jar", "create-1.21.1-6.0.4.jar", "createaddition-1.5.jar"]);
+    expect(pinModOrder(jars, undefined)).toBe(jars);
+    pinModOrder(jars, ["nothing"], warnings);
+    expect(warnings).toEqual(['modOrder entry "nothing" matches no jar in mods/']);
+  });
+
+  it("applies to the located layers", async () => {
+    const info = await locateInstance(await makeCurseForge(), { modOrder: ["a_mod"] });
+    expect(info.layers.filter((l) => l.role === "mod").map((l) => l.id)).toEqual(["mod:b_mod.jar", "mod:a_mod.jar"]);
   });
 });
 

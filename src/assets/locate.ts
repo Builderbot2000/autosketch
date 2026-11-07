@@ -32,6 +32,13 @@ export interface LocateOptions {
   version?: string;
   /** Explicit path to the client jar; overrides detection. */
   baseJar?: string;
+  /**
+   * Pinned mod order inside `mod_resources`, lowest priority first (02, Known approximation).
+   * Each entry names a mod jar: its file name, its name before the version (`create` matches
+   * `create-1.21.1-6.0.4.jar`), or a `*` glob. Pinned jars sit above the alphabetical rest, in the
+   * order given, so the last entry wins a conflict.
+   */
+  modOrder?: string[];
 }
 
 export async function locateInstance(rootIn: string, opts: LocateOptions = {}): Promise<InstanceInfo> {
@@ -80,7 +87,7 @@ async function locateCurseForge(root: string, opts: LocateOptions): Promise<Inst
     }
   }
 
-  const layers = await modpackLayers(root, baseJar, loaderJar, warnings);
+  const layers = await modpackLayers(root, baseJar, loaderJar, warnings, opts.modOrder);
   return { root, launcher: "curseforge", name: meta.name ?? basename(root), mcVersion, loader, layers, warnings };
 }
 
@@ -151,7 +158,7 @@ async function locatePrism(instDir: string, opts: LocateOptions): Promise<Instan
     break;
   }
 
-  const layers = await modpackLayers(gameDir, baseJar, loaderJar, warnings);
+  const layers = await modpackLayers(gameDir, baseJar, loaderJar, warnings, opts.modOrder);
   const version = mcVersion ?? (await jarVersion(baseJar)) ?? "unknown";
   return { root: gameDir, launcher: "prism", name, mcVersion: version, ...(loader ? { loader } : {}), layers, warnings };
 }
@@ -170,7 +177,7 @@ async function locateVanilla(root: string, opts: LocateOptions): Promise<Instanc
   const baseJar = opts.baseJar ?? join(root, "versions", version!, `${version}.jar`);
   if (!(await isFile(baseJar))) throw new Error(`base game jar not found at ${baseJar}`);
   const mcVersion = version ?? (await jarVersion(baseJar)) ?? "unknown";
-  const layers = await modpackLayers(root, baseJar, undefined, warnings);
+  const layers = await modpackLayers(root, baseJar, undefined, warnings, opts.modOrder);
   return { root, launcher: "vanilla", name: basename(root), mcVersion, layers, warnings };
 }
 
@@ -179,7 +186,7 @@ async function locateGeneric(root: string, opts: LocateOptions): Promise<Instanc
   const baseJar = resolve(opts.baseJar!);
   if (!(await isFile(baseJar))) throw new Error(`base game jar not found at ${baseJar}`);
   const mcVersion = opts.version ?? (await jarVersion(baseJar)) ?? "unknown";
-  const layers = await modpackLayers(root, baseJar, undefined, warnings);
+  const layers = await modpackLayers(root, baseJar, undefined, warnings, opts.modOrder);
   return { root, launcher: "generic", name: basename(root), mcVersion, layers, warnings };
 }
 
@@ -211,12 +218,13 @@ async function jarVersion(jar: string): Promise<string | undefined> {
  * Mod-to-mod order inside mod_resources follows the loader's mod sorting, which we can't reproduce
  * without running it; conflicts between mods over the same asset path are rare.
  */
-async function modpackLayers(root: string, baseJar: string, loaderJar: string | undefined, warnings: string[]): Promise<LayerSpec[]> {
+async function modpackLayers(root: string, baseJar: string, loaderJar: string | undefined, warnings: string[], modOrder?: string[]): Promise<LayerSpec[]> {
   const layers: LayerSpec[] = [{ kind: "archive", id: `minecraft:${basename(baseJar)}`, role: "base", path: baseJar }];
 
   const modGroup: LayerSpec[] = [];
   if (loaderJar) modGroup.push({ kind: "archive", id: `loader:${basename(loaderJar)}`, role: "loader", path: loaderJar });
-  for (const f of (await listDir(join(root, "mods"))).filter((f) => f.endsWith(".jar")).sort(localeless)) {
+  const jars = (await listDir(join(root, "mods"))).filter((f) => f.endsWith(".jar")).sort(localeless);
+  for (const f of pinModOrder(jars, modOrder, warnings)) {
     modGroup.push({ kind: "archive", id: `mod:${f}`, role: "mod", path: join(root, "mods", f) });
   }
   if (await isDir(join(root, "kubejs"))) {
@@ -257,6 +265,26 @@ async function modpackLayers(root: string, baseJar: string, loaderJar: string | 
   return layers;
 }
 
+/**
+ * Applies a pinned order (LocateOptions.modOrder) to alphabetically sorted mod jars: unpinned jars
+ * first, then each pinned entry's matches in the order given. Unmatched entries are warned about.
+ */
+export function pinModOrder(jars: string[], order: string[] | undefined, warnings: string[] = []): string[] {
+  if (!order?.length) return jars;
+  const pinned: string[] = [];
+  const taken = new Set<string>();
+  for (const entry of order) {
+    const e = entry.trim().toLowerCase();
+    if (!e) continue;
+    // A glob, else the exact file name, else the name before a version ("create" → "create-1.21.1-6.0.4.jar").
+    const re = e.includes("*") ? new RegExp(`^${e.split("*").map(escapeRe).join(".*")}$`) : new RegExp(`^${escapeRe(e)}(\\.jar|[-_+][0-9v].*)?$`);
+    const hits = jars.filter((j) => !taken.has(j) && re.test(j.toLowerCase()));
+    if (!hits.length) warnings.push(`modOrder entry "${entry}" matches no jar in mods/`);
+    for (const h of hits) (taken.add(h), pinned.push(h));
+  }
+  return [...jars.filter((j) => !taken.has(j)), ...pinned];
+}
+
 async function packsIn(dir: string, role: LayerRole, idPrefix: string): Promise<LayerSpec[]> {
   const out: LayerSpec[] = [];
   for (const f of (await listDir(dir)).sort(localeless)) {
@@ -285,6 +313,7 @@ export async function readSelectedPacks(optionsTxt: string): Promise<string[] | 
   }
 }
 
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const localeless = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 async function listDir(p: string): Promise<string[]> {

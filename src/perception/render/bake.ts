@@ -1,3 +1,6 @@
+import type { Compound } from "prismarine-nbt";
+import { fitUv } from "../../assets/builtin-models/geometry.js";
+import { builtinModel, type CodeModel, type CodeModelPart, type RenderContext, type RenderHook } from "../../assets/builtin-models/index.js";
 import type { PackStack } from "../../assets/pack.js";
 import type { Registry } from "../../assets/registry.js";
 import { FACES, parseBlockstate, rotateFace, selectModels, splitId, type BlockstateDef, type Face, type ModelElement, type ModelRef, type ResolvedModel, ModelResolver } from "../../assets/models.js";
@@ -59,8 +62,53 @@ export class BlockBaker {
     private readonly loader: TextureLoader,
     private readonly tinter: Tinter | undefined,
     private readonly registry?: Registry,
+    /** Plugin render hooks (09), tried in order before the block's own model. */
+    private readonly hooks: readonly { render?: RenderHook }[] = [],
   ) {
     this.resolver = new ModelResolver(stack);
+  }
+
+  /**
+   * Bakes the block at a position with its block-entity NBT, for blocks whose look depends on it
+   * (09: a plugin `render` hook, e.g. a framed block drawn with its camo). Without a hook that
+   * answers, this is `bake(state)`. Not cached: NBT varies per block.
+   */
+  async bakeAt(pos: [number, number, number], state: string, nbt: Compound | undefined): Promise<BakedBlock> {
+    const hooked = this.hooks.length ? await this.hookModel(pos, state, nbt).catch(() => undefined) : undefined;
+    if (!hooked) return this.bake(state);
+    const quads = hooked.overlay ? [...(await this.bake(state)).quads] : [];
+    await this.bakeCode(hooked, quads, this.tinter?.tintFor(parseState(state).id), undefined);
+    return this.finish(quads);
+  }
+
+  private async hookModel(pos: [number, number, number] | undefined, state: string, nbt: Compound | undefined): Promise<CodeModel | undefined> {
+    const ctx: RenderContext = { registry: this.registry, jsonModel: (s) => this.jsonModel(s) };
+    for (const h of this.hooks) {
+      const m = await h.render?.(pos, state, nbt, ctx);
+      if (m) return m;
+    }
+    return undefined;
+  }
+
+  /** A state's JSON model as code-model parts (for render hooks that reshape or re-skin it). */
+  private async jsonModel(state: string): Promise<CodeModelPart[]> {
+    const { id, props } = parseState(state);
+    const def = await this.def(id);
+    if (!def) return [];
+    return Promise.all(selectModels(def, props).map(async (ref) => ({ elements: (await this.resolver.resolve(ref.model)).elements, x: ref.x, y: ref.y })));
+  }
+
+  private async bakeCode(model: CodeModel, out: BakedQuad[], tint: RGB | undefined, fallbackTex: Texture | undefined): Promise<void> {
+    for (const part of model.parts) {
+      const ref: ModelRef = { model: "", x: part.x ?? 0, y: part.y ?? 0, uvlock: false, weight: 1 };
+      for (const el of part.elements) await this.bakeElement(el, ref, out, tint, fallbackTex);
+    }
+  }
+
+  private finish(quads: BakedQuad[]): BakedBlock {
+    const occludes = new Set<Face>();
+    for (const q of quads) if (q.cull && q.tex.opaque && coversFace(q)) occludes.add(q.cull);
+    return { quads, occludes, fallback: false, translucent: quads.some((q) => q.tex.translucent) };
   }
 
   bake(state: string): Promise<BakedBlock> {
@@ -107,28 +155,52 @@ export class BlockBaker {
   }
 
   private async doBake(state: string): Promise<BakedBlock> {
+    const hooked = this.hooks.length ? await this.hookModel(undefined, state, undefined).catch(() => undefined) : undefined;
     const { id, props } = parseState(state);
+    const tint = this.tinter?.tintFor(id);
+    if (hooked && !hooked.overlay) {
+      const quads: BakedQuad[] = [];
+      await this.bakeCode(hooked, quads, tint, undefined);
+      return this.finish(quads);
+    }
+    const base = await this.bakeJson(id, props, tint);
+    if (!hooked) return base;
+    const quads = [...base.quads];
+    await this.bakeCode(hooked, quads, tint, undefined);
+    return this.finish(quads);
+  }
+
+  /**
+   * The block's own model. Code-drawn blocks (no JSON geometry) use the hand-written models in
+   * assets/builtin-models (02); other geometry-less models fall back to a particle-texture cube.
+   */
+  private async bakeJson(id: string, props: Record<string, string>, tint: RGB | undefined): Promise<BakedBlock> {
     const def = await this.def(id);
     if (!def) return this.fallbackBlock();
     const refs = selectModels(def, props);
     if (refs.length === 0) return this.fallbackBlock();
     const quads: BakedQuad[] = [];
     let anyElements = false;
-    const tint = this.tinter?.tintFor(id);
+    const empty: ResolvedModel[] = [];
     for (const ref of refs) {
       const model = await this.resolver.resolve(ref.model);
       if (model.elements.length) anyElements = true;
       for (const el of model.elements) await this.bakeElement(el, ref, quads, tint);
-      if (!model.elements.length) await this.particleCube(model, quads, id, tint);
+      if (!model.elements.length) empty.push(model);
     }
+    const code = builtinModel(id, props);
+    if (code && (code.overlay || !anyElements)) {
+      const particle = empty[0]?.particle ?? (await this.resolver.resolve(refs[0]!.model)).particle;
+      const fallbackTex = particle ? await this.texture(particle) : undefined;
+      await this.bakeCode(code, quads, tint, fallbackTex);
+    } else for (const model of empty) await this.particleCube(model, quads, id, tint);
     if (!anyElements && quads.length === 0) return this.fallbackBlock();
-    const occludes = new Set<Face>();
-    for (const q of quads) if (q.cull && q.tex.opaque && coversFace(q)) occludes.add(q.cull);
-    return { quads, occludes, fallback: false, translucent: quads.some((q) => q.tex.translucent) };
+    return this.finish(quads);
   }
 
   /**
-   * Models without geometry are drawn by game code: fluids, chests, signs, beds. Approximate them
+   * Models without geometry are drawn by game code: fluids, and code-drawn blocks without a
+   * built-in model (chests, signs, beds… have one in assets/builtin-models). Approximate them
    * with a cube of the particle texture: fluids fill the block (surface at 14/16), tinted and
    * translucent; everything else is slightly inset.
    */
@@ -145,13 +217,14 @@ export class BlockBaker {
     }
   }
 
-  private async bakeElement(el: ModelElement, ref: ModelRef, out: BakedQuad[], tint: RGB | undefined): Promise<void> {
+  private async bakeElement(el: ModelElement, ref: ModelRef, out: BakedQuad[], tint: RGB | undefined, fallbackTex?: Texture): Promise<void> {
     for (const f of FACES) {
       const face = el.faces[f];
       if (!face) continue;
-      const tex = face.texture === "#missing" ? this.placeholderTexture() : ((await this.texture(face.texture)) ?? this.placeholderTexture());
+      const tex = face.texture === "#missing" ? this.placeholderTexture() : ((await this.texture(face.texture)) ?? fallbackTex ?? this.placeholderTexture());
       const faceTint = face.tintindex !== undefined && face.tintindex >= 0 ? tint : face.color ? argbToRgb(face.color) : undefined;
-      const q = quadFor(f, el.from, el.to, face.uv, tex, faceTint, el.shade !== false, face.rotation ?? 0);
+      const uv = fitUv(face, tex.img.width, tex.img.height).uv; // code-drawn faces: match the real texture's aspect
+      const q = quadFor(f, el.from, el.to, uv, tex, faceTint, el.shade !== false, face.rotation ?? 0);
       if (el.rotation?.angle) rotateElement(q.pos, el.rotation);
       if (ref.x || ref.y) {
         rotateBlock(q.pos, ref.x, ref.y);

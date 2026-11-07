@@ -63,9 +63,10 @@ describe("MCP server", () => {
     const client = await connect(fixtureContext());
     const tools = (await client.listTools()).tools.map((t) => t.name).sort();
     expect(tools).toEqual([
-      "block_info", "checkpoint", "clear", "doc_info", "doc_list", "doc_new", "doc_open", "export", "fill", "history", "instance_info",
-      "knowledge_list", "knowledge_read", "ops_list", "palette_edit", "palette_list", "palette_load", "palette_pick", "palette_save", "palette_sheet", "palette_show",
-      "prefab_save", "prefab_search", "prefab_sheet", "procedure_list", "redo", "render", "replace", "restore", "run_procedure", "select", "set_blocks", "stamp", "undo", "view_slice",
+      "array", "block_info", "checkpoint", "clear", "copy", "doc_info", "doc_list", "doc_new", "doc_open", "export", "extrude", "fill",
+      "history", "hollow", "instance_info", "knowledge_list", "knowledge_read", "mirror", "move", "ops_list", "paint", "palette_edit", "palette_list", "palette_load",
+      "palette_pick", "palette_save", "palette_sheet", "palette_show", "prefab_save", "prefab_search", "prefab_sheet", "procedure_list", "redo", "render", "replace", "restore",
+      "rotate", "run_procedure", "select", "set_blocks", "smooth", "stamp", "sweep", "undo", "view_slice",
     ]);
     expect(client.getInstructions()).toMatch(/palette:<name>\.<role>/);
   });
@@ -245,5 +246,25 @@ describe("MCP server", () => {
     expect((await call("fill", { sel: { connected: { seed: [0, 7, 0], match: "solid" } }, material: "andesite" })).text).toMatch(/selection is empty; connected: the seed/);
     expect((await call("select", { name: "ring", delete: true })).text).toBe('deleted selection "ring"');
     expect((await call("select", { sel: "all", name: "all" })).text).toMatch(/"all" is reserved/);
+  });
+
+  it("transforms and brushes through the tools, with as: on any op", async () => {
+    const session = new Session(workspace);
+    const client = await connect(fixtureContext(), session);
+    const call = async (name: string, args: Record<string, unknown> = {}) => {
+      const r = await client.callTool({ name, arguments: args });
+      return { text: textOf(r), error: !!r.isError };
+    };
+    await call("doc_new", { name: "xf", seed: 1, overwrite: true });
+    await call("set_blocks", { blocks: [{ pos: [0, 0, 0], block: "andesite_stairs[facing=north]" }], as: "step" });
+    expect((await call("rotate", { box: { min: [0, 0, 0], max: [0, 0, 0] }, turns: 1 })).text).toMatch(/^ok · rotate · 1 block changed/);
+    expect(session.require().getState(0, 0, 0)).toBe("minecraft:andesite_stairs[facing=east]");
+    expect((await call("move", { sel: { component: "step" }, by: [2, 0, 0] })).text).toMatch(/^ok · move · 2 blocks changed · box \(0,0,0\)–\(2,0,0\)/);
+    expect(session.require().componentLocal("step")!.box.min).toEqual([2, 0, 0]);
+    expect((await call("array", { box: { min: [2, 0, 0], max: [2, 0, 0] }, step: [0, 0, 2], count: 3, as: "row" })).text).toMatch(/2 blocks changed[\s\S]*component: row/);
+    expect((await call("mirror", { box: { min: [0, 0, 0], max: [4, 0, 4] }, axis: "x", raw: true })).text).toMatch(/^ok · mirror/);
+    expect(session.require().getState(2, 0, 4)).toBe("minecraft:andesite_stairs[facing=west]");
+    expect((await call("hollow", { box: { min: [0, 0, 0], max: [0, 0, 0] } })).text).toMatch(/nothing changed/);
+    expect((await call("clear", { box: { min: [0, 0, 0], max: [4, 0, 4] }, as: "lot" })).text).toMatch(/component: lot/);
   });
 });

@@ -5,6 +5,7 @@ import type { Mask } from "../core/mask.js";
 import type { Document, EditResult } from "../document/document.js";
 import type { Compound } from "prismarine-nbt";
 import type { z } from "zod";
+import type { StateOverride } from "../core/rotate.js";
 
 export type Category = "stone" | "wood" | "earth" | "organic" | "metal" | "colored" | "glass" | "light" | "decor";
 
@@ -80,6 +81,20 @@ export interface AutosketchPlugin {
   validateNbt?(state: string, nbt: Compound | undefined): string[];
   /** Agent actions, registered as "<id>.<name>" ops. */
   actions?: Record<string, PluginAction>;
+  /**
+   * State remapping override for rotate/mirror (01, Orientation). Called once per elementary step
+   * (a rotation or a mirror); return the transformed state, or undefined for the generic rules.
+   */
+  rotate?: StateOverride;
+  /**
+   * Connecting blocks this plugin declares (05, Auto-connection): `handles` picks the states, and
+   * `update` derives the connection properties from neighbours (`at(dx,dy,dz)` reads a state
+   * relative to the block). Called after every non-raw op for written blocks and their neighbours.
+   */
+  connection?: {
+    handles(state: string): boolean;
+    update(state: string, at: (dx: number, dy: number, dz: number) => string): string;
+  };
   /** Markdown explaining the mod's building concepts (exposed as a knowledge resource). */
   docs?: string;
 }

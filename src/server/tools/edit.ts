@@ -2,9 +2,9 @@ import { z } from "zod";
 import type { Vec3 } from "../../core/region.js";
 import { clear, fill, replace, setBlocks } from "../../ops/edit.js";
 import type { MaterialExpr } from "../../ops/material.js";
-import { checkSelectionName, resolveSelection, summarize, type SelExpr } from "../../ops/selection.js";
+import { checkSelectionName, freezeNodes, resolveSelection, summarize, type SelExpr } from "../../ops/selection.js";
 import { formatEdit, formatSelection } from "../format.js";
-import { boxSchema, editWith, env, materialSchema, regionOf, selSchema, text, vec3, type ToolDeps } from "./shared.js";
+import { boxSchema, common, commonSchema, componentLine, editWith, env, materialSchema, regionOf, selSchema, text, vec3, type ToolDeps } from "./shared.js";
 
 /** Selections (05 L1). */
 export function registerSelectionTools({ tool, session }: ToolDeps): void {
@@ -41,7 +41,7 @@ export function registerSelectionTools({ tool, session }: ToolDeps): void {
       if (a.sel !== undefined && a.name) checkSelectionName(a.name);
       const r = resolveSelection(expr, { doc, registry: c.registry, index: c.palette });
       if (a.sel !== undefined && a.name) {
-        doc.selections.set(a.name, a.sel as SelExpr);
+        doc.selections.set(a.name, freezeNodes(a.sel as SelExpr, { doc, registry: c.registry, index: c.palette }));
         doc.revision++;
         session.touch();
       }
@@ -60,11 +60,14 @@ export function registerEditTools({ tool, session }: ToolDeps): void {
       description: "Places individual blocks: the escape hatch for details (doors, lanterns, single stairs). Use fill for anything box-shaped. One undo step. Text.",
       inputSchema: {
         blocks: z.array(z.object({ pos: vec3, block: materialSchema })).min(1).describe('e.g. [{"pos":[3,1,0],"block":"oak_door[facing=south]"}]'),
+        ...commonSchema,
       },
       readOnly: false,
     },
     (c, a) =>
-      editWith(session, (doc) => formatEdit(doc, setBlocks(doc, env(c), a.blocks.map((b) => ({ pos: b.pos as Vec3, block: b.block as MaterialExpr }))))),
+      editWith(session, (doc) =>
+        formatEdit(doc, setBlocks(doc, env(c), a.blocks.map((b) => ({ pos: b.pos as Vec3, block: b.block as MaterialExpr })), undefined, common(a)), componentLine(a)),
+      ),
   );
 
   tool(
@@ -81,8 +84,7 @@ export function registerEditTools({ tool, session }: ToolDeps): void {
         material: materialSchema,
         mode: z.enum(["fill", "hollow", "outline", "walls"]).optional(),
         thickness: z.number().int().min(1).max(16).optional(),
-        as: z.string().optional().describe("Component id to register for this box, e.g. \"keep\""),
-        kind: z.string().optional().describe('Component kind, e.g. "tower", "wall", "floor"'),
+        ...commonSchema,
       },
       readOnly: false,
     },
@@ -92,11 +94,10 @@ export function registerEditTools({ tool, session }: ToolDeps): void {
         const r = fill(doc, env(c), region, a.material as MaterialExpr, {
           ...(a.mode ? { mode: a.mode } : {}),
           ...(a.thickness ? { thickness: a.thickness } : {}),
-          ...(a.as ? { as: a.as } : {}),
-          ...(a.kind ? { kind: a.kind } : {}),
+          ...common(a),
           ...(label ? { label } : {}),
         });
-        return formatEdit(doc, r, [...(a.as ? [`component: ${a.as}`] : []), ...notes.map((n) => `note: ${n}`)]);
+        return formatEdit(doc, r, [...componentLine(a), ...notes.map((n) => `note: ${n}`)]);
       }),
   );
 
@@ -105,13 +106,13 @@ export function registerEditTools({ tool, session }: ToolDeps): void {
     {
       title: "Clear",
       description: "Sets every block in a selection (sel) or box to air. One undo step. Text.",
-      inputSchema: { sel: selSchema.optional(), box: boxSchema.optional().describe("Shorthand for sel:{min,max}") },
+      inputSchema: { sel: selSchema.optional(), box: boxSchema.optional().describe("Shorthand for sel:{min,max}"), ...commonSchema },
       readOnly: false,
     },
     (c, a) =>
       editWith(session, (doc) => {
         const { region, label, notes } = regionOf(c, doc, a);
-        return formatEdit(doc, clear(doc, region, label), notes.map((n) => `note: ${n}`));
+        return formatEdit(doc, clear(doc, region, label, { ...common(a), env: env(c) }), [...componentLine(a), ...notes.map((n) => `note: ${n}`)]);
       }),
   );
 
@@ -128,6 +129,7 @@ export function registerEditTools({ tool, session }: ToolDeps): void {
         sel: selSchema.optional().describe("Where to replace (default: the whole document)"),
         box: boxSchema.optional().describe("Shorthand for sel:{min,max}"),
         keep_states: z.boolean().optional(),
+        ...commonSchema,
       },
       readOnly: false,
     },
@@ -135,8 +137,8 @@ export function registerEditTools({ tool, session }: ToolDeps): void {
       editWith(session, (doc) => {
         if (!doc.localBounds()) throw new Error("The document is empty; nothing to replace.");
         const { region, label, notes } = regionOf(c, doc, a, "all");
-        const r = replace(doc, env(c), region, a.from, a.to as MaterialExpr, { ...(a.keep_states ? { keepStates: true } : {}), ...(label ? { label } : {}) });
-        return formatEdit(doc, r, notes.map((n) => `note: ${n}`));
+        const r = replace(doc, env(c), region, a.from, a.to as MaterialExpr, { ...(a.keep_states ? { keepStates: true } : {}), ...(label ? { label } : {}), ...common(a) });
+        return formatEdit(doc, r, [...componentLine(a), ...notes.map((n) => `note: ${n}`)]);
       }),
   );
 }

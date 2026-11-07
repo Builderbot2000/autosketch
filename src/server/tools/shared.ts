@@ -2,7 +2,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { fromPublic, type Box, type PublicBox } from "../../core/region.js";
 import type { Document } from "../../document/document.js";
-import type { OpEnv, Region } from "../../ops/edit.js";
+import type { CommonOptions, OpEnv, Region } from "../../ops/edit.js";
 import { resolveSelection, type SelExpr } from "../../ops/selection.js";
 import { BlockBaker } from "../../perception/render/bake.js";
 import { TextureLoader, Tinter } from "../../palette/textures.js";
@@ -85,12 +85,31 @@ export const selSchema = z
       '{"sphere":{"center","radius"}} · {"ellipsoid":{"center","radii"}} · {"polygon":{"points":[[x,z],...],"y":[y0,y1]}} · {"plane":{"axis","at","within"?}} · ' +
       '{"connected":{"seed":[x,y,z],"match":"block|state|family|solid|air","connectivity":6|18|26,"within"?}} (flood fill) · {"similar":{"seed","by":"block|state|family","within"?}} · ' +
       '{"union":[a,b]} {"intersect":[a,b]} {"subtract":[a,b]} {"xor":[a,b]} {"invert":a,"within"?} · {"expand":a,"by":n|[dx,dy,dz]|{"up":n,...}} {"contract":a,"by":..} {"offset":a,"by":[dx,dy,dz]} · ' +
-      '{"shell":a,"thickness"?,"walls_only"?} {"layer":a,"y":n|"min"|"max"} {"surface":a} {"bbox":a} {"filter":a,"block"?:"oak_planks|#tag|*","air"?:bool}. Nest freely.',
+      '{"shell":a,"thickness"?,"walls_only"?} {"layer":a,"y":n|"min"|"max"} {"surface":a} {"bbox":a} {"filter":a,"block"?:"oak_planks|#tag|*","air"?:bool} · ' +
+      '{"rotate":a,"turns":n,"pivot"?:[x,y,z]} (clockwise from above) {"mirror":a,"axis":"x|y|z","about"?:n} · ' +
+      '{"grow":a,"by"?:n,"match"?:"solid|same|any"} {"shrink":a,"by"?:n} (along connected blocks) {"edges":a} {"slab":a,"axis","from","to"} {"convex":a} {"fill_holes":a} · ' +
+      '{"checker":a,"size"?} {"random":a,"ratio":0.3,"seed"?} {"every":a,"n":4,"along":"x"} {"freeze":a} (a stored selection keeps today\'s voxels) · ' +
+      '{"hull":[[x,y,z],...]} {"tube":{"path":[[x,y,z],...],"radius":r}}. Nest freely.',
   );
+
+/** Arguments every op takes (05): raw skips auto-connection; as/kind register a component. */
+export const commonSchema = {
+  raw: z.boolean().optional().describe("Write states exactly as given: skip auto-connection of fences, walls, panes, stairs, redstone and chests (they and their neighbours are otherwise recomputed)"),
+  as: z.string().optional().describe('Register the affected bounding box as a component, e.g. "keep"'),
+  kind: z.string().optional().describe('Component kind, e.g. "tower", "wall", "floor"'),
+};
+
+export const common = (a: { raw?: boolean | undefined; as?: string | undefined; kind?: string | undefined }): CommonOptions => ({
+  ...(a.raw ? { raw: true } : {}),
+  ...(a.as ? { as: a.as } : {}),
+  ...(a.kind ? { kind: a.kind } : {}),
+});
+
+export const componentLine = (a: { as?: string | undefined }): string[] => (a.as ? [`component: ${a.as}`] : []);
 
 // ---- helpers -------------------------------------------------------------------------------------
 
-export const env = (c: InstanceContext): OpEnv => ({ registry: c.registry, index: c.palette });
+export const env = (c: InstanceContext): OpEnv => ({ registry: c.registry, index: c.palette, plugins: c.plugins });
 export const box = (b: PublicBox): Box => fromPublic(b);
 
 /**

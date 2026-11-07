@@ -1,3 +1,6 @@
+import { createHash, randomBytes } from "node:crypto";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import type { PackStack } from "../assets/pack.js";
 import type { Category } from "../plugins/types.js";
 import { chroma, colorName, hue, type Lab, type RGB } from "./color.js";
@@ -7,6 +10,10 @@ import { CATEGORY_ORDER, isArchitectural, type PaletteIndex } from "./index.js";
 import { TextureLoader, Tinter } from "./textures.js";
 import { BADGES, drawCube } from "./tile.js";
 import { textWidth } from "./font.js";
+import { codeHash } from "../core/codehash.js";
+
+/** Invalidates cached sheets whenever the drawing code changes. */
+const SHEET_CODE = codeHash(import.meta.url, ["./sheet", "./tile", "./font", "./image", "./textures", "./color"]);
 
 /**
  * Tilemap sheets (docs/design/03-palette.md): deterministic grids of material tiles with
@@ -371,19 +378,67 @@ export class SheetRenderer {
   private readonly tinter: Tinter;
   private ready?: Promise<void>;
 
+  private readonly cacheDir?: string;
+  private readonly tintBiome: string;
+  private indexKey?: string;
+
+  /**
+   * `cacheDir`: keep rendered sheets as PNGs in `<cacheDir>/sheets/` (02, Cache), keyed by the
+   * stack fingerprint, the palette index, the sheet code hash, the tint biome and the spec.
+   * Off by default; the server turns it on.
+   */
   constructor(
     private readonly index: PaletteIndex,
     stack: PackStack,
-    opts: { tintBiome?: string } = {},
+    opts: { tintBiome?: string; cacheDir?: string } = {},
   ) {
     this.textures = new TextureLoader(stack);
     this.tinter = new Tinter(this.textures, opts.tintBiome);
+    this.tintBiome = opts.tintBiome ?? "plains";
+    if (opts.cacheDir) this.cacheDir = join(opts.cacheDir, "sheets");
   }
 
   async render(spec: SheetSpec): Promise<RenderedSheet> {
+    const layout = layoutSheet(this.index, spec);
+    const file = this.cacheDir && join(this.cacheDir, `${this.cacheKey(layout)}.png`);
+    if (file) {
+      try {
+        const png = await readFile(file);
+        const width = png.readUInt32BE(16), height = png.readUInt32BE(20); // IHDR
+        return { layout, png, caption: this.caption(layout, width, height), width, height };
+      } catch {
+        /* miss */
+      }
+    }
+    const r = await this.draw(layout);
+    if (file) {
+      try {
+        await mkdir(dirname(file), { recursive: true });
+        const tmp = `${file}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+        await writeFile(tmp, r.png);
+        await rename(tmp, file);
+      } catch {
+        /* a cache write failing never fails the render */
+      }
+    }
+    return r;
+  }
+
+  private cacheKey(layout: SheetLayout): string {
+    this.indexKey ??= createHash("sha1")
+      .update(SHEET_CODE)
+      .update(this.index.data.cacheVersion)
+      .update(this.index.data.fingerprint)
+      .update(JSON.stringify(this.index.data.families))
+      .update(JSON.stringify(this.index.data.series))
+      .digest("hex");
+    return createHash("sha1").update(this.indexKey).update(this.tintBiome).update(JSON.stringify(layout.spec)).digest("hex").slice(0, 24);
+  }
+
+  private async draw(layout: SheetLayout): Promise<RenderedSheet> {
     this.ready ??= this.tinter.init();
     await this.ready;
-    const layout = layoutSheet(this.index, spec);
+    const spec = layout.spec;
     const T = spec.zoom ? 64 : layout.columns <= 8 ? 48 : 32;
     const lm = 4 + textWidth(String(layout.rowOffset + layout.rows - 1)) + 4;
     const tm = 4 + 7 + 4;

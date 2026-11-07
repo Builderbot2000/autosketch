@@ -90,10 +90,22 @@ A block with no assets but present in a schematic is "unknown" (`01`).
 |------|-----|----------|
 | `jar-index.json.gz` | per jar: absolute path + size + mtime | Filtered central-directory listings. Unchanged jars skip re-indexing |
 | `registry-<fp>.json.gz` | stack fingerprint (layer ids and fingerprints, in order) + `CACHE_VERSION` | The full registry |
+| `palette-<fp>-<key>.json.gz` | stack fingerprint + plugin set + tint biome (when not plains) + palette code hash | Families, series and per-family texture averages (colour stats) (`03`) |
+| `sheets/<key>.png` | stack fingerprint + palette index (families, series) + sheet code hash + tint biome + sheet spec (sheet, page, zoom) | Rendered tilemap sheets. Turned on by the server; `SheetRenderer` leaves it off unless given `cacheDir` |
 
-Later: texture averages, palette families and rendered sheets, keyed by the same fingerprint.
+Texture averages are stored per family inside the palette file, since that is the only place they are used; per-block stats are an intermediate step of building it. Nothing prunes stale entries yet: files for an older stack or code version simply stop being read.
 
 **Warm start on Craftoria** (WSL, instance on `/mnt/c`) is about 3.5 s: locate about 0.7 s, stack about 2.8 s, registry about 0.2 s. What remains is filesystem latency through WSL's 9p bridge (stat/open on about 650 files, walking `kubejs/`), not parsing. A native Linux or Windows filesystem should be much faster.
+
+## Implementation status
+
+| Piece | Status |
+|-------|--------|
+| Locator | CurseForge, vanilla launcher, Prism / MultiMC (instance folder or its game folder), generic (with `baseJar`). Unit tests use synthetic layouts. |
+| Pack VFS | Built, with overlays, built-in packs, nested jars and the jar index cache. Pinned mod order (`modOrder`) built. |
+| Model resolution | Built. Tint biome configurable (`tintBiome`, default plains). Code-drawn fallbacks: silo E (`builtin-models/`). |
+| Registry | Built, cached. |
+| Caches | Jar index, registry, palette (families and texture averages), rendered sheets. No pruning. |
 
 ## Legal stance
 

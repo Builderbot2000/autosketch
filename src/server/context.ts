@@ -1,3 +1,4 @@
+import { defaultCacheDir } from "../assets/cache.js";
 import { biomeClimate } from "../assets/biomes.js";
 import { locateInstance, type InstanceInfo, type LocateOptions } from "../assets/locate.js";
 import { openStack, type PackStack } from "../assets/pack.js";
@@ -78,7 +79,7 @@ export async function loadInstanceContext(cfg: ServerConfig, log: (msg: string) 
     registry,
     palette: index,
     plugins,
-    sheets: new SheetRenderer(index, stack, tint),
+    sheets: new SheetRenderer(index, stack, { ...tint, cacheDir: defaultCacheDir() }),
     book: new PaletteBook(),
     warnings: [...warnings, ...registry.data.warnings],
     timings,

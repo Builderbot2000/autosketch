@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { PNG } from "pngjs";
 import { deflateSync } from "node:zlib";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { colorName, hexToRgb, labToRgb, rgbToLab } from "../../../src/palette/color.js";
 import { Image, repackPng } from "../../../src/palette/image.js";
 import { buildPaletteIndexData, PaletteIndex } from "../../../src/palette/index.js";
@@ -125,6 +128,24 @@ describe("sheets", () => {
     expect((await r.render({ sheet: "filter:text:nothingmatches" })).layout.total).toBe(0);
     const zoom = await r.render({ sheet: "overview", zoom: "A1:B1" });
     expect(zoom.caption).toMatch(/A1 \w+/);
+  });
+
+  it("caches rendered sheets on disk, keyed by spec and tint biome", async () => {
+    const { index, stack } = await fixture();
+    const cacheDir = mkdtempSync(join(tmpdir(), "autosketch-sheets-"));
+    try {
+      const first = await new SheetRenderer(index, stack, { cacheDir }).render({ sheet: "overview" });
+      expect(readdirSync(join(cacheDir, "sheets"))).toHaveLength(1);
+      // A new renderer (a restart) reads the PNG back instead of drawing.
+      const again = await new SheetRenderer(index, stack, { cacheDir }).render({ sheet: "overview" });
+      expect(again.png.equals(first.png)).toBe(true);
+      expect([again.width, again.height, again.caption]).toEqual([first.width, first.height, first.caption]);
+      await new SheetRenderer(index, stack, { cacheDir }).render({ sheet: "overview", zoom: "A1:B1" });
+      await new SheetRenderer(index, stack, { cacheDir, tintBiome: "jungle" }).render({ sheet: "overview" });
+      expect(readdirSync(join(cacheDir, "sheets")).filter((f) => f.endsWith(".png"))).toHaveLength(3);
+    } finally {
+      rmSync(cacheDir, { recursive: true, force: true });
+    }
   });
 });
 

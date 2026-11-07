@@ -2,7 +2,8 @@ import { z } from "zod";
 import type { Vec3 } from "../../core/region.js";
 import { copy, mirror, move, rotate, type TransformOptions } from "../../ops/transform.js";
 import { formatEdit } from "../format.js";
-import { boxSchema, commonSchema, editWith, env, regionOf, selSchema, vec3, type ToolDeps } from "./shared.js";
+import { boxSchema, commonSchema, env, regionOf, selSchema, vec3, type ToolDeps } from "./shared.js";
+import { editWithPreview, previewSchema } from "./perception.js";
 
 /** Transform ops (05 L2: move / copy / rotate / mirror, with block-state remapping from 01). */
 export function registerTransformTools({ tool, session }: ToolDeps): void {
@@ -11,6 +12,7 @@ export function registerTransformTools({ tool, session }: ToolDeps): void {
     box: boxSchema.optional().describe("Shorthand for sel:{min,max}"),
     skip_air: z.boolean().optional().describe("Carry only non-air blocks (default: air in the selection overwrites the destination too)"),
     ...commonSchema,
+    preview: previewSchema,
   };
   const opts = (a: { skip_air?: boolean | undefined; raw?: boolean | undefined; as?: string | undefined; kind?: string | undefined }, label?: string): TransformOptions => ({
     ...(a.skip_air ? { skipAir: true } : {}),
@@ -30,7 +32,7 @@ export function registerTransformTools({ tool, session }: ToolDeps): void {
       readOnly: false,
     },
     (c, a) =>
-      editWith(session, (doc) => {
+      editWithPreview(c, session, a.preview, (doc) => {
         const { region, label, notes } = regionOf(c, doc, a);
         return formatEdit(doc, move(doc, env(c), region, a.by as Vec3, opts(a, label)), notes.map((n) => `note: ${n}`));
       }),
@@ -52,7 +54,7 @@ export function registerTransformTools({ tool, session }: ToolDeps): void {
       readOnly: false,
     },
     (c, a) =>
-      editWith(session, (doc) => {
+      editWithPreview(c, session, a.preview, (doc) => {
         const { region, label, notes } = regionOf(c, doc, a);
         const r = copy(doc, env(c), region, a.by as Vec3, { ...opts(a, label), ...(a.turns ? { turns: a.turns } : {}), ...(a.mirror ? { mirror: a.mirror } : {}) });
         return formatEdit(doc, r, notes.map((n) => `note: ${n}`));
@@ -70,7 +72,7 @@ export function registerTransformTools({ tool, session }: ToolDeps): void {
       readOnly: false,
     },
     (c, a) =>
-      editWith(session, (doc) => {
+      editWithPreview(c, session, a.preview, (doc) => {
         const { region, label, notes } = regionOf(c, doc, a);
         const r = rotate(doc, env(c), region, a.turns, { ...opts(a, label), ...(a.pivot ? { pivot: a.pivot as Vec3 } : {}) });
         return formatEdit(doc, r, notes.map((n) => `note: ${n}`));
@@ -88,7 +90,7 @@ export function registerTransformTools({ tool, session }: ToolDeps): void {
       readOnly: false,
     },
     (c, a) =>
-      editWith(session, (doc) => {
+      editWithPreview(c, session, a.preview, (doc) => {
         const { region, label, notes } = regionOf(c, doc, a);
         const r = mirror(doc, env(c), region, a.axis, { ...opts(a, label), ...(a.about !== undefined ? { about: a.about } : {}) });
         return formatEdit(doc, r, notes.map((n) => `note: ${n}`));

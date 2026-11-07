@@ -307,4 +307,26 @@ describe("MCP server", () => {
     expect((await call("hollow", { box: { min: [0, 0, 0], max: [0, 0, 0] } })).text).toMatch(/nothing changed/);
     expect((await call("clear", { box: { min: [0, 0, 0], max: [4, 0, 4] }, as: "lot" })).text).toMatch(/component: lot/);
   });
+
+  it("returns a preview render from transform and brush tools when asked", async () => {
+    const session = new Session(workspace);
+    const client = await connect(fixtureContext(), session);
+    const call = async (name: string, args: Record<string, unknown> = {}) => {
+      const r = await client.callTool({ name, arguments: args });
+      return { text: textOf(r), error: !!r.isError, images: (r.content as Content).filter((c) => c.type === "image").length };
+    };
+    await call("doc_new", { name: "pv", seed: 1, overwrite: true });
+    await call("fill", { box: { min: [0, 0, 0], max: [2, 0, 2] }, material: "andesite" });
+    const moved = await call("move", { box: { min: [0, 0, 0], max: [2, 0, 2] }, by: [0, 1, 0], preview: true });
+    expect(moved.images).toBe(1);
+    expect(moved.text).toMatch(/^ok · move[\s\S]*preview: render 512×512[\s\S]*highlighted 18 positions/);
+    const arr = await call("array", { box: { min: [0, 1, 0], max: [2, 1, 2] }, step: [4, 0, 0], count: 2, preview: true });
+    expect(arr.images).toBe(1);
+    expect(arr.text).toMatch(/^ok · array[\s\S]*highlighted 9 positions/);
+    const swept = await call("sweep", { profile: [{ u: 0, v: 0, block: "oak_planks" }], path: [[0, 3, 0], [0, 3, -3]], preview: true });
+    expect(swept.images).toBe(1);
+    // Without preview: text only, as before.
+    const rot = await call("rotate", { box: { min: [0, 1, 0], max: [2, 1, 2] }, turns: 1 });
+    expect(rot.images).toBe(0);
+  });
 });

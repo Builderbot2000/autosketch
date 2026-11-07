@@ -161,9 +161,9 @@ Rules learned from real data:
 - **Tints:** biome colormaps only for plant-like blocks. Dye-named tinted blocks use the dye colour, since mods often tint in code. Anything else is untinted.
 - **Model and texture fallbacks feed in from the registry:** custom-loader overrides (XyCraft connected textures) fall back to the lower pack's model, and face textures that don't exist as files (runtime-generated) are skipped.
 - `polished_`, `smooth_`, `cut_` and `_bricks` forms stay separate families, because they look distinct and matter for palettes.
+- **Odd naming needs a plugin** (resolved): Create Deco's metal sets (`<metal>_sheet_metal`, `_hull`, `_bars`, `_mesh_fence`, `_door`) share no stem the suffix rules can use, so the `createdeco` plugin groups each set under its sheet metal through `families` hints, read by naming pattern from the registry (`09`). Its corner, cracked and mossy bricks become variants of their colour; long, short and tiled bricks stay separate by the rule above.
 
 ## Open questions
 
 - Should tiles show weathered or mixed previews for roles with mixes? (Probably only in `palette_show`.)
-- How should modded families with odd naming be grouped (e.g. `createdeco` sheet metals)? Plugins may need to supply these.
 - Should there be a "material availability" filter (survival-obtainable) for Create Schematicannon builds?

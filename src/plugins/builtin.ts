@@ -1,3 +1,4 @@
+import { create, createdeco } from "./create.js";
 import type { AutosketchPlugin } from "./types.js";
 
 /** Decorative-variant mods: their tags group every pattern under the base block. */
@@ -47,4 +48,4 @@ const litematica: AutosketchPlugin = {
   classify: () => ({ buildable: false }),
 };
 
-export const BUILTIN_PLUGINS: readonly AutosketchPlugin[] = [chipped, rechiseled, chisel, framedblocks, copycats, litematica];
+export const BUILTIN_PLUGINS: readonly AutosketchPlugin[] = [chipped, rechiseled, chisel, framedblocks, copycats, litematica, create, createdeco];

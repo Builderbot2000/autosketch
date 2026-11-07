@@ -29,7 +29,7 @@ export interface PaletteIndexData {
 }
 
 /** Changes whenever the palette-building code changes, invalidating caches automatically. */
-const CACHE_VERSION = codeHash(import.meta.url, ["./index", "./families", "./textures", "./color", "../plugins/builtin"]);
+const CACHE_VERSION = codeHash(import.meta.url, ["./index", "./families", "./textures", "./color", "../plugins/builtin", "../plugins/create"]);
 
 export const CATEGORY_ORDER: readonly Category[] = ["stone", "wood", "metal", "colored", "glass", "earth", "organic", "light", "decor"];
 
@@ -85,7 +85,7 @@ export interface PaletteOptions {
 export async function loadPaletteIndex(stack: PackStack, registry: Registry, opts: PaletteOptions = {}): Promise<{ index: PaletteIndex; cached: boolean }> {
   const fingerprint = registry.data.fingerprint;
   const cacheDir = opts.cacheDir === false ? undefined : (opts.cacheDir ?? defaultCacheDir());
-  const pluginKey = (opts.plugins ?? []).map((p) => p.id).join(",");
+  const pluginKey = (opts.plugins ?? []).map((p) => (p.cacheKey ? `${p.id}@${p.cacheKey}` : p.id)).join(",");
   const file = cacheDir && join(cacheDir, `palette-${fingerprint.slice(0, 16)}-${hashString(pluginKey)}.json.gz`);
   if (file) {
     try {

@@ -64,10 +64,16 @@ describe("MCP server", () => {
     const tools = (await client.listTools()).tools.map((t) => t.name).sort();
     expect(tools).toEqual([
       "block_info", "checkpoint", "clear", "doc_info", "doc_list", "doc_new", "doc_open", "export", "fill", "history", "instance_info",
-      "knowledge_list", "knowledge_read", "palette_edit", "palette_list", "palette_load", "palette_pick", "palette_save", "palette_sheet", "palette_show",
+      "knowledge_list", "knowledge_read", "ops_list", "palette_edit", "palette_list", "palette_load", "palette_pick", "palette_save", "palette_sheet", "palette_show",
       "prefab_save", "prefab_search", "prefab_sheet", "procedure_list", "redo", "render", "replace", "restore", "run_procedure", "select", "set_blocks", "stamp", "undo", "view_slice",
     ]);
     expect(client.getInstructions()).toMatch(/palette:<name>\.<role>/);
+  });
+
+  it("lists plugin ops (none without plugins)", async () => {
+    const client = await connect(fixtureContext());
+    const r = await client.callTool({ name: "ops_list", arguments: { namespace: "framedblocks" } });
+    expect(textOf(r)).toBe('No plugin ops for "framedblocks" (active plugins: none).');
   });
 
   it("serves a sheet image with caption, then picks and shows a palette", async () => {

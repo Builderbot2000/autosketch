@@ -115,6 +115,40 @@ export function buildFamilies(registry: Registry, plugins: readonly AutosketchPl
     if (g) groups.get(g)!.aliases.push(alias);
   }
 
+  // 2b. Plugin family hints (09 `families`): heads (even partial ones) and the shapes they claim.
+  const hinted = new Map<string, { category?: Category; buildable?: boolean; by: string }>();
+  const hintVariants: [string, string][] = [];
+  const detach = (id: string) => {
+    const g = groupOf.get(id);
+    if (g && g !== id) {
+      const shapes = groups.get(g)!.shapes;
+      for (const k of Object.keys(shapes) as ShapeKind[]) if (shapes[k] === id) delete shapes[k];
+    }
+    const i = loose.findIndex((b) => b.id === id);
+    if (i >= 0) loose.splice(i, 1);
+  };
+  const ensureGroup = (id: string): boolean => {
+    if (groups.has(id)) return true;
+    if (!ids.has(id) || aliasOf.has(id)) return false;
+    detach(id);
+    groups.set(id, { base: id, shapes: {}, aliases: [] });
+    groupOf.set(id, id);
+    return true;
+  };
+  for (const p of plugins) {
+    for (const h of p.families?.(registry) ?? []) {
+      if (!ensureGroup(h.base)) continue;
+      for (const [kind, id] of Object.entries(h.shapes ?? {})) {
+        if (!SHAPE_KINDS.includes(kind as ShapeKind) || !ids.has(id) || groups.has(id) || aliasOf.has(id)) continue;
+        detach(id);
+        groups.get(h.base)!.shapes[kind as ShapeKind] = id;
+        groupOf.set(id, h.base);
+      }
+      for (const v of h.variants ?? []) if (ensureGroup(v)) hintVariants.push([v, h.base]);
+      if (h.category || h.buildable !== undefined) hinted.set(h.base, { ...(h.category ? { category: h.category } : {}), ...(h.buildable !== undefined ? { buildable: h.buildable } : {}), by: p.id });
+    }
+  }
+
   // 3. Variants: parent group → child groups.
   const parentOf = new Map<string, string>();
   const attach = (child: string, parent: string) => {
@@ -126,6 +160,7 @@ export function buildFamilies(registry: Registry, plugins: readonly AutosketchPl
     }
     parentOf.set(child, parent);
   };
+  for (const [child, parent] of hintVariants) attach(child, parent); // plugin hints win over generic rules
 
   const variantNs = new Set([...plugins.flatMap((p) => p.variantTagNamespaces ?? []), ...detectVariantTagNamespaces(registry)]);
   if (variantNs.size) {
@@ -273,6 +308,13 @@ export function buildFamilies(registry: Registry, plugins: readonly AutosketchPl
         if (!c.buildable) f.excludedBy = `plugin:${p.id}`;
         else delete f.excludedBy;
       }
+    }
+    const h = hinted.get(f.id);
+    if (h?.category) f.category = h.category;
+    if (h?.buildable !== undefined) {
+      f.buildable = h.buildable;
+      if (!h.buildable) f.excludedBy = `plugin:${h.by}`;
+      else delete f.excludedBy;
     }
   }
 

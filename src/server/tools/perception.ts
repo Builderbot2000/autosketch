@@ -19,6 +19,13 @@ function maskOf(c: InstanceContext, doc: Document, expr: unknown): { mask: Mask;
   return { mask: r.mask, notes: r.notes };
 }
 
+/** Publishes `render.produced` for an image a tool returns (12, *Kinds*). Never affects the result. */
+function emitRender(session: Session, views: { label: string }[], width: number, height: number): void {
+  const events = session.events;
+  if (!events.enabled) return;
+  events.emit({ kind: "render.produced", view: views.map((v) => v.label).join(",") || "none", size: [width, height], source: "tool" });
+}
+
 /**
  * Wraps an edit tool so `preview: true` appends a small render of what the op changed (05 result
  * contract, 06 "Verify the last edit"). Used by the edit tools.
@@ -30,6 +37,7 @@ export async function withPreview(c: InstanceContext, session: Session, preview:
   if (!preview || !doc || res.isError || doc.journal.headSeq === before) return res;
   const r = await renderEditPreview(doc, await bakerFor(c), doc.journal.headSeq);
   if (!r) return res;
+  emitRender(session, r.views, r.width, r.height);
   return { ...res, content: [...res.content, { type: "image", data: r.png.toString("base64"), mimeType: "image/png" }, { type: "text", text: `preview: ${r.caption}` }] };
 }
 
@@ -64,9 +72,9 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
         "or {yaw, pitch, distance?, target?} (camera bearing from the build: 0 north, 90 east; pitch above horizon; distance = blocks framed around target). " +
         "Default: iso_se, iso_nw, front, top at 768px (~800 tokens). One view at 512px is ~350 tokens. region takes any selection: only it is drawn, framed tightly. " +
         "cutaway: {maxY} hides everything above y; {plane:\"x\"|\"y\"|\"z\", at, keep:\"west|east|down|up|north|south\"} keeps one side of a plane. " +
-        "highlight: a selection, or {since:\"op:-1\"|\"checkpoint:<name>\"} for a diff, tinted orange. style: textured | flat (mean colours) | depth (darker = farther) | xray (translucent shell). " +
+        "highlight: any selection, tinted orange; {changed:\"op:-1\"|\"checkpoint:<name>\"} shows a diff ({since:..} still works). style: textured | flat (mean colours) | depth (darker = farther) | xray (translucent shell). " +
         "overlays: {components, storeys} labels components and draws storey floor lines. Axis ticks label block coordinates; N marks north. " +
-        "The caption gives the render id for raycast. Image + caption.",
+        "The caption gives the render id for raycast and for view_box/view_lasso selections. Image + caption.",
       inputSchema: {
         views: z.array(viewSchema).min(1).max(4).optional(),
         region: selSchema.optional().describe("Draw only this selection (a box {min,max} or any selection)"),
@@ -106,6 +114,7 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
         ...(a.style ? { style: a.style } : {}),
         ...(a.overlays ? { overlays: a.overlays } : {}),
       });
+      emitRender(session, r.views, r.width, r.height);
       return image(r.png, [r.caption, ...notes.map((n) => `note: ${n}`)].join("\n"));
     },
   );
@@ -182,6 +191,8 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
       const opts = { views: ["iso_se"] as View[], size: 384, highlight: d.mask };
       const before = await renderDocument(snap, baker, { ...opts, region: clip(snap) });
       const after = await renderDocument(doc, baker, { ...opts, region: clip(doc) });
+      emitRender(session, before.views, before.width, before.height);
+      emitRender(session, after.views, after.width, after.height);
       return {
         content: [
           { type: "text", text: summary },

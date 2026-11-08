@@ -73,8 +73,13 @@ export function viewAt(rec: RenderRecord, px: number, py: number): ViewCamera | 
 
 /** World-space ray (origin on the view plane, unit direction) through the centre of an output pixel. */
 export function pixelRay(v: ViewCamera, px: number, py: number): { origin: Vec3; dir: Vec3 } {
+  return rayThrough(v, px + 0.5, py + 0.5);
+}
+
+/** World-space ray through a point of the output image (continuous pixel coordinates: pixel (3,4) spans 3..4 × 4..5). */
+export function rayThrough(v: ViewCamera, fx: number, fy: number): { origin: Vec3; dir: Vec3 } {
   const c = v.cam;
-  const rx = (px + 0.5 - v.ox) * v.ss, ry = (py + 0.5 - v.oy) * v.ss;
+  const rx = (fx - v.ox) * v.ss, ry = (fy - v.oy) * v.ss;
   const sx = (rx - c.width / 2) / c.scale + c.cx;
   const sy = -(ry - c.height / 2) / c.scale + c.cy;
   const origin: Vec3 = [c.right[0] * sx + c.up[0] * sy, c.right[1] * sx + c.up[1] * sy, c.right[2] * sx + c.up[2] * sy];

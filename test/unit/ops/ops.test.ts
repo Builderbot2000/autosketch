@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { fromPublic } from "../../../src/core/region.js";
 import { Document } from "../../../src/document/document.js";
 import { blockMatcher, clear, fill, replace, setBlocks } from "../../../src/ops/edit.js";
-import { compileMaterial, splitTopLevel, type MaterialExpr } from "../../../src/ops/material.js";
+import { compilePattern, splitTopLevel, type PatternExpr } from "../../../src/ops/pattern.js";
 import { viewSlice } from "../../../src/perception/slice.js";
 import { fakeRegistry, partial } from "../../helpers/registry.js";
 
@@ -32,10 +32,10 @@ function counts(doc: Document): Record<string, number> {
 }
 
 describe("materials", () => {
-  const sample = (expr: MaterialExpr, seed = 1, n = 2000) => {
+  const sample = (expr: PatternExpr, seed = 1, n = 2000) => {
     const ids: string[] = [];
     const table: string[] = [];
-    const m = compileMaterial(expr, { registry, seed, intern: (s) => (table.includes(s) ? table.indexOf(s) : table.push(s) - 1), box: box([0, 0, 0], [9, 9, 9]) });
+    const m = compilePattern(expr, { registry, seed, intern: (s) => (table.includes(s) ? table.indexOf(s) : table.push(s) - 1), box: box([0, 0, 0], [9, 9, 9]) });
     for (let i = 0; i < n; i++) ids.push(table[m(i % 10, Math.floor(i / 10) % 10, Math.floor(i / 100))]!);
     return ids;
   };
@@ -61,17 +61,18 @@ describe("materials", () => {
     const g = sample({ gradient: ["stone", "oak_planks"], axis: "y", range: [0, 9] }, 1, 1000);
     expect(g.slice(0, 10).every((s) => s === "minecraft:stone")).toBe(true); // y=0
     expect(g.slice(990).every((s) => s === "minecraft:oak_planks")).toBe(true); // y=9
-    const checker = sample({ pattern: "checker", blocks: ["stone", "glass"] }, 1, 4);
+    const checker = sample({ tile: "checker", blocks: ["stone", "glass"] }, 1, 4);
     expect(checker).toEqual(["minecraft:stone", "minecraft:glass", "minecraft:stone", "minecraft:glass"]);
-    const nested = sample({ noise: ["stone", { pattern: "stripes_x", blocks: ["glass", "oak_planks"] }], scale: 3 });
+    const nested = sample({ noise: ["stone", { tile: "stripes_x", blocks: ["glass", "oak_planks"] }], scale: 3 });
     expect(new Set(nested)).toEqual(new Set(["minecraft:stone", "minecraft:glass", "minecraft:oak_planks"]));
   });
 
   it("explains bad materials", () => {
     expect(() => sample("stoen")).toThrow(/unknown block "minecraft:stoen"/);
     expect(() => sample("oak_stairs[facing=up]")).toThrow(/valid: north\|south\|west\|east/);
-    expect(() => sample({ gradient: [] } as MaterialExpr)).toThrow(/non-empty list/);
-    expect(() => sample({ pattern: "dots", blocks: ["stone"] } as unknown as MaterialExpr)).toThrow(/unknown pattern/);
+    expect(() => sample({ gradient: [] } as PatternExpr)).toThrow(/non-empty list/);
+    expect(() => sample({ tile: "dots", blocks: ["stone"] } as unknown as PatternExpr)).toThrow(/unknown tile/);
+    expect(() => sample({ pattern: "checker", blocks: ["stone"] } as unknown as PatternExpr)).toThrow(/was renamed \{"tile"/);
     expect(() => sample("palette:x.wall")).toThrow(/need a loaded instance/);
   });
 });

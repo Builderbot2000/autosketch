@@ -5,8 +5,8 @@ import type { Document } from "../document/document.js";
 import { ANALYZE_MAX_VOLUME } from "./analyze.js";
 
 /**
- * Geometry of the semantic selections (docs/design/05-operations.md, *Semantic*): enclosed air,
- * interior and top surface. These are measurements, not architectural labels (06): no thresholds,
+ * Geometry of the morphological selections (docs/design/05-operations.md, *Morphological*): enclosed
+ * air, interior and heightmap. These are measurements, not architectural labels (06): no thresholds,
  * no storeys, roofs or openings. Read-only: every function returns a mask of document-local
  * positions. `ops/selection.ts` turns the JSON forms into calls here.
  */
@@ -100,7 +100,7 @@ export function enclosedMask(doc: Document, which: Vec3 | number, scope?: Mask):
   return { mask: new Mask(), note: `enclosed: ${fmt(which)} ${st === "minecraft:air" ? "is air connected to the outside" : `is ${st.replace(/^minecraft:/, "")}, not air`}; seed it with an enclosed air position` };
 }
 /** `top`: per (x, z) column of `scope`, its highest non-air block (a heightmap surface). */
-export function topMask(doc: Document, scope: Mask): Mask {
+export function heightmapMask(doc: Document, scope: Mask): Mask {
   const best = new Map<string, Vec3>();
   scope.forEach((x, y, z) => {
     if (doc.getState(x, y, z) === "minecraft:air") return;

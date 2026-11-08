@@ -11,7 +11,7 @@ import { blockMatcher, MAX_OP_VOLUME } from "./edit.js";
 import { diffSince } from "../perception/diff.js";
 import { getRender, renderIds } from "../perception/render/cameras.js";
 import { pickLasso, pickRect, type PickDepth } from "../perception/render/pick.js";
-import { enclosedMask, interiorMask, topMask } from "../perception/semantic.js";
+import { enclosedMask, interiorMask, heightmapMask } from "../perception/morphology.js";
 
 /**
  * Selections (docs/design/05-operations.md, L1): JSON expressions an agent sends with a tool call,
@@ -26,7 +26,7 @@ import { enclosedMask, interiorMask, topMask } from "../perception/semantic.js";
  *             {"kind":"tower"|"prefab:*"} · {"tagged":"ruined"} (component boxes, by registered metadata)
  * References  "<name>" (a named selection) · "last" (the most recent selection)
  * Booleans    {"union":[a,b,..]} · {"intersect":[a,b,..]} · {"subtract":[a,b,..]} · {"xor":[a,b]} · {"invert":a,"within"?:b}
- * Modifiers   {"expand":a,"by":n|[dx,dy,dz]|{up,down,north,south,east,west}} · {"contract":a,"by":..}
+ * Modifiers   {"dilate":a,"by":n|[dx,dy,dz]|{up,down,north,south,east,west}} · {"erode":a,"by":..}
  *             {"offset":a,"by":[dx,dy,dz]} · {"shell":a,"thickness"?,"walls_only"?} · {"layer":a,"y":n|"min"|"max"}
  *             {"surface":a} · {"bbox":a} · {"filter":a,"block"?:"..","air"?:bool}
  *             {"rotate":a,"turns":n,"pivot"?:[x,y,z]} · {"mirror":a,"axis":"x|y|z","about"?:n}
@@ -35,13 +35,16 @@ import { enclosedMask, interiorMask, topMask } from "../perception/semantic.js";
  *             {"checker":a,"size"?,"odd"?} · {"random":a,"ratio","seed"?} · {"every":a,"n","along"?,"offset"?}
  *             {"freeze":a} (stored as resolved voxels, {"frozen":[[x,y,z,len],..]})
  * More shapes {"hull":[[x,y,z],..]} (convex hull of points) · {"tube":{path:[[x,y,z],..],radius}}
- * Semantic    (measured geometry, no architectural labels, 06; in perception/semantic.ts; S = a scope
+ * Morphological (measured geometry, no architectural labels, 06; in perception/morphology.ts; S = a scope
  *             selection, a bare component id, or "all"/true for the whole build)
  *             {"enclosed":[x,y,z]|n,"of"?:S} (enclosed air; n as analyze lists them) · {"interior":S}
- *             {"top":S} · {"changed":"op:-n|checkpoint:<name>"}
+ *             {"heightmap":S} · {"changed":"op:-n|checkpoint:<name>"}
  * Render      {"view_box":{render?,rect:[x0,y0,x1,y1],depth?}} · {"view_lasso":{render?,points:[[px,py],..],depth?}}
  *             (render = id from a render caption, default the latest; depth "visible" (default) | "through")
  */
+
+/** Selection keys renamed to established terms (docs/design/01-conventions.md, *Terminology*). */
+const RENAMED: Record<string, string> = { expand: "dilate", contract: "erode", top: "heightmap" };
 
 export type SelExpr = string | { [k: string]: unknown };
 
@@ -99,7 +102,11 @@ function evaluate(e: SelExpr, ctx: SelContext, notes: string[], depth: number, n
   // Box shorthand {min, max}.
   if ("min" in e && "max" in e) return fromBoxChecked(publicBox(e, "box"));
   const op = Object.keys(e).find((k) => k in BUILDERS);
-  if (!op) throw new Error(`unknown selection ${JSON.stringify(e).slice(0, 80)}; expected one of: ${Object.keys(BUILDERS).join(", ")} (or {min,max})`);
+  if (!op) {
+    const old = Object.keys(e).find((k) => k in RENAMED);
+    if (old) throw new Error(`"${old}" was renamed "${RENAMED[old]}" (01, Terminology): use {"${RENAMED[old]}": ...}`);
+    throw new Error(`unknown selection ${JSON.stringify(e).slice(0, 80)}; expected one of: ${Object.keys(BUILDERS).join(", ")} (or {min,max})`);
+  }
   return BUILDERS[op]!(e, { ctx, notes, ev, doc });
 }
 
@@ -306,8 +313,8 @@ const BUILDERS: Record<string, (e: Record<string, unknown>, b: BuildEnv) => Mask
     return within.subtract(b.ev(e.invert));
   },
 
-  expand: (e, b) => morph(b.ev(e.expand), parseBy(e.by ?? 1, "expand.by"), "dilate"),
-  contract: (e, b) => morph(b.ev(e.contract), parseBy(e.by ?? 1, "contract.by"), "erode"),
+  dilate: (e, b) => morph(b.ev(e.dilate), parseBy(e.by ?? 1, "dilate.by"), "dilate"),
+  erode: (e, b) => morph(b.ev(e.erode), parseBy(e.by ?? 1, "erode.by"), "erode"),
 
   offset: (e, b) => b.ev(e.offset).translated(vec(e.by, "offset.by")),
 
@@ -516,7 +523,7 @@ const BUILDERS: Record<string, (e: Record<string, unknown>, b: BuildEnv) => Mask
     return bb ? fromBoxChecked(bb) : new Mask();
   },
 
-  // -- semantic (05, Semantic): thin cases over perception/semantic.ts ----------------------------
+  // -- morphological (05, Morphological): thin cases over perception/morphology.ts ----------------------------
 
   enclosed: (e, b) => {
     const which = typeof e.enclosed === "number" ? int(e.enclosed, "enclosed", 1) : vec(e.enclosed, "enclosed");
@@ -531,11 +538,11 @@ const BUILDERS: Record<string, (e: Record<string, unknown>, b: BuildEnv) => Mask
     return m;
   },
 
-  top: (e, b) => {
-    const scope = scopeOf(e.top, b);
-    if (scope) return topMask(b.doc, scope);
+  heightmap: (e, b) => {
+    const scope = scopeOf(e.heightmap, b);
+    if (scope) return heightmapMask(b.doc, scope);
     const lb = b.doc.localBounds();
-    return lb ? topMask(b.doc, fromBoxChecked(lb)) : new Mask();
+    return lb ? heightmapMask(b.doc, fromBoxChecked(lb)) : new Mask();
   },
 
   changed: (e, b) => {
@@ -588,7 +595,7 @@ const BUILDERS: Record<string, (e: Record<string, unknown>, b: BuildEnv) => Mask
 // -- helpers --------------------------------------------------------------------------------------
 
 /**
- * Scope of a semantic selection: undefined (the whole build) for absent, "all" or true; a bare
+ * Scope of a morphological selection: undefined (the whole build) for absent, "all" or true; a bare
  * string that names no stored selection but a component means that component; anything else is
  * a selection.
  */
@@ -888,8 +895,8 @@ function parseBy(x: unknown, what: string): By {
 }
 
 /**
- * Geometric expand/contract by a box kernel, one axis at a time. Expanding a box by n grows each
- * side by n; contracting shrinks it (and drops parts thinner than the kernel).
+ * Dilation/erosion by a box kernel, one axis at a time. Dilating a box by n grows each
+ * side by n; eroding shrinks it (and drops parts thinner than the kernel).
  */
 function morph(m: Mask, by: By, mode: "dilate" | "erode"): Mask {
   let cur = m;
@@ -908,7 +915,7 @@ function morph(m: Mask, by: By, mode: "dilate" | "erode"): Mask {
           n++;
         }
       });
-      if (n > MAX_OP_VOLUME * 4) throw new Error("expanded selection is too large");
+      if (n > MAX_OP_VOLUME * 4) throw new Error("dilated selection is too large");
     } else {
       // Contract by `pos` on the + side: keep p only if p+1..p+pos are in (and likewise below).
       cur.forEach((x, y, z) => {
@@ -924,7 +931,7 @@ function morph(m: Mask, by: By, mode: "dilate" | "erode"): Mask {
     }
     cur = next;
   }
-  checkBox(cur.bbox() ?? { min: [0, 0, 0], max: [0, 0, 0] }, "expanded selection");
+  checkBox(cur.bbox() ?? { min: [0, 0, 0], max: [0, 0, 0] }, "dilated selection");
   return cur === m ? m.clone() : cur;
 }
 

@@ -1,10 +1,10 @@
 import { z } from "zod";
 import type { Vec3 } from "../../core/region.js";
 import { clear, fill, replace, setBlocks } from "../../ops/edit.js";
-import type { MaterialExpr } from "../../ops/material.js";
+import type { PatternExpr } from "../../ops/pattern.js";
 import { checkSelectionName, freezeNodes, resolveSelection, summarize, type SelExpr } from "../../ops/selection.js";
 import { formatEdit, formatSelection } from "../format.js";
-import { boxSchema, common, commonSchema, componentLine, editWith, env, materialSchema, regionOf, selSchema, text, vec3, type ToolDeps } from "./shared.js";
+import { boxSchema, common, commonSchema, componentLine, editWith, env, patternSchema, regionOf, selSchema, text, vec3, type ToolDeps } from "./shared.js";
 import { editWithPreview, previewSchema } from "./perception.js";
 
 /** Selections (05 L1). */
@@ -62,7 +62,7 @@ export function registerEditTools({ tool, session }: ToolDeps): void {
       title: "Set blocks",
       description: "Places individual blocks: the escape hatch for details (doors, lanterns, single stairs). Use fill for anything box-shaped. One undo step. Text.",
       inputSchema: {
-        blocks: z.array(z.object({ pos: vec3, block: materialSchema })).min(1).describe('e.g. [{"pos":[3,1,0],"block":"oak_door[facing=south]"}]'),
+        blocks: z.array(z.object({ pos: vec3, block: patternSchema })).min(1).describe('e.g. [{"pos":[3,1,0],"block":"oak_door[facing=south]"}]'),
         ...commonSchema,
         preview: previewSchema,
       },
@@ -70,7 +70,7 @@ export function registerEditTools({ tool, session }: ToolDeps): void {
     },
     (c, a) =>
       editWithPreview(c, session, a.preview, (doc) =>
-        formatEdit(doc, setBlocks(doc, env(c), a.blocks.map((b) => ({ pos: b.pos as Vec3, block: b.block as MaterialExpr })), undefined, common(a)), componentLine(a)),
+        formatEdit(doc, setBlocks(doc, env(c), a.blocks.map((b) => ({ pos: b.pos as Vec3, block: b.block as PatternExpr })), undefined, common(a)), componentLine(a)),
       ),
   );
 
@@ -79,13 +79,13 @@ export function registerEditTools({ tool, session }: ToolDeps): void {
     {
       title: "Fill box",
       description:
-        "Fills a selection (sel) or box with a material. mode: fill (solid, default) · hollow (shell of the material, inside cleared to air) · outline (shell only, inside untouched) · " +
+        "Fills a selection (sel) or box with a pattern. mode: fill (solid, default) · hollow (shell of the pattern, inside cleared to air) · outline (shell only, inside untouched) · " +
         "walls (sides only, no floor or ceiling) — shells follow the selection's shape, so a cylinder makes a round shell. thickness sets the shell width. " +
         "as:\"name\" registers the box (a selection's bounding box) as a component. One undo step. Text.",
       inputSchema: {
         sel: selSchema.optional(),
         box: boxSchema.optional().describe("Shorthand for sel:{min,max}"),
-        material: materialSchema,
+        pattern: patternSchema,
         mode: z.enum(["fill", "hollow", "outline", "walls"]).optional(),
         thickness: z.number().int().min(1).max(16).optional(),
         ...commonSchema,
@@ -96,7 +96,7 @@ export function registerEditTools({ tool, session }: ToolDeps): void {
     (c, a) =>
       editWithPreview(c, session, a.preview, (doc) => {
         const { region, label, notes } = regionOf(c, doc, a);
-        const r = fill(doc, env(c), region, a.material as MaterialExpr, {
+        const r = fill(doc, env(c), region, a.pattern as PatternExpr, {
           ...(a.mode ? { mode: a.mode } : {}),
           ...(a.thickness ? { thickness: a.thickness } : {}),
           ...common(a),
@@ -126,11 +126,11 @@ export function registerEditTools({ tool, session }: ToolDeps): void {
     {
       title: "Replace blocks",
       description:
-        'Replaces matching blocks with a material inside a selection (default: the whole document). from: "oak_planks" (any state), "oak_stairs[half=top]" (those states), ' +
+        'Replaces matching blocks with a pattern inside a selection (default: the whole document). from: "oak_planks" (any state), "oak_stairs[half=top]" (those states), ' +
         '"#minecraft:logs" (a tag), "*" (any non-air), "air" (fill empty space). keep_states copies facing/half/axis… onto the new block (e.g. oak_stairs → spruce_stairs). One undo step. Text.',
       inputSchema: {
         from: z.string(),
-        to: materialSchema,
+        to: patternSchema,
         sel: selSchema.optional().describe("Where to replace (default: the whole document)"),
         box: boxSchema.optional().describe("Shorthand for sel:{min,max}"),
         keep_states: z.boolean().optional(),
@@ -143,7 +143,7 @@ export function registerEditTools({ tool, session }: ToolDeps): void {
       editWithPreview(c, session, a.preview, (doc) => {
         if (!doc.localBounds()) throw new Error("The document is empty; nothing to replace.");
         const { region, label, notes } = regionOf(c, doc, a, "all");
-        const r = replace(doc, env(c), region, a.from, a.to as MaterialExpr, { ...(a.keep_states ? { keepStates: true } : {}), ...(label ? { label } : {}), ...common(a) });
+        const r = replace(doc, env(c), region, a.from, a.to as PatternExpr, { ...(a.keep_states ? { keepStates: true } : {}), ...(label ? { label } : {}), ...common(a) });
         return formatEdit(doc, r, [...componentLine(a), ...notes.map((n) => `note: ${n}`)]);
       }),
   );

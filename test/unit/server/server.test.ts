@@ -152,11 +152,11 @@ describe("MCP server", () => {
       return { text: textOf(r), error: !!r.isError };
     };
 
-    expect((await call("fill", { box: { min: [0, 0, 0], max: [1, 1, 1] }, material: "andesite" })).text).toMatch(/No document is open/);
+    expect((await call("fill", { box: { min: [0, 0, 0], max: [1, 1, 1] }, pattern: "andesite" })).text).toMatch(/No document is open/);
     expect((await call("doc_new", { name: "hut", size: [5, 4, 5], seed: 3 })).text).toMatch(/created "hut"[\s\S]*doc 5×4×5/);
     expect((await call("doc_new", { name: "hut" })).text).toMatch(/already exists/);
 
-    const walls = await call("fill", { box: { min: [0, 0, 0], max: [4, 3, 4] }, material: "andesite", mode: "hollow", as: "hut" });
+    const walls = await call("fill", { box: { min: [0, 0, 0], max: [4, 3, 4] }, pattern: "andesite", mode: "hollow", as: "hut" });
     expect(walls.text).toMatch(/^ok · fill · 82 blocks changed · box \(0,0,0\)–\(4,3,4\)\ncomponent: hut/);
     expect((await call("checkpoint", { name: "shell" })).text).toMatch(/checkpoint "shell" at op #1/);
     await call("set_blocks", { blocks: [{ pos: [2, 1, 0], block: "andesite_stairs[facing=south]" }] });
@@ -197,9 +197,9 @@ describe("MCP server", () => {
       return { text: textOf(r), error: !!r.isError, images: (r.content as Content).filter((c) => c.type === "image").length };
     };
     await call("doc_new", { name: "perceive", seed: 1, overwrite: true });
-    await call("fill", { box: { min: [0, 0, 0], max: [4, 0, 4] }, material: "andesite", as: "base" });
+    await call("fill", { box: { min: [0, 0, 0], max: [4, 0, 4] }, pattern: "andesite", as: "base" });
     await call("checkpoint", { name: "a" });
-    const filled = await call("fill", { box: { min: [0, 1, 0], max: [4, 3, 4] }, material: "oak_planks", mode: "walls", preview: true });
+    const filled = await call("fill", { box: { min: [0, 1, 0], max: [4, 3, 4] }, pattern: "oak_planks", mode: "walls", preview: true });
     expect(filled.images).toBe(1);
     expect(filled.text).toMatch(/preview: render 512×512 · iso_se[\s\S]*highlighted 48 positions/);
 
@@ -238,7 +238,7 @@ describe("MCP server", () => {
     };
     expect((await call("export")).text).toMatch(/No document is open/);
     await call("doc_new", { name: "shed", seed: 1 });
-    await call("fill", { box: { min: [0, 0, 0], max: [3, 2, 3] }, material: "andesite", mode: "hollow" });
+    await call("fill", { box: { min: [0, 0, 0], max: [3, 2, 3] }, pattern: "andesite", mode: "hollow" });
     await call("set_blocks", { blocks: [{ pos: [-1, 0, 1], block: "oak_planks" }] });
 
     const ws = await call("export");
@@ -272,7 +272,7 @@ describe("MCP server", () => {
     const ring = { shell: { cylinder: { center: [5, 0, 5], radius: 3, height: 6 } }, walls_only: true };
     const s = await call("select", { sel: ring, name: "ring" });
     expect(s.text).toMatch(/^stored "ring" · \d+ blocks \(0 solid, \d+ air\) · bbox \(2,0,2\)–\(8,5,8\) = 7×6×7/);
-    const f = await call("fill", { sel: "ring", material: "andesite", as: "tower" });
+    const f = await call("fill", { sel: "ring", pattern: "andesite", as: "tower" });
     expect(f.text).toMatch(/ok · fill · \d+ blocks changed[\s\S]*component: tower/);
     expect((await call("history")).text).toMatch(/fill sel "ring" andesite as tower/);
     expect((await call("select", { name: "ring" })).text).toMatch(/\d+ solid, 0 air[\s\S]*top: andesite[\s\S]*components: tower/);
@@ -286,8 +286,8 @@ describe("MCP server", () => {
 
     expect((await call("select")).text).toMatch(/^ring: \{"shell"[\s\S]*last: /);
     expect((await call("doc_info")).text).toMatch(/selections: ring/);
-    expect((await call("fill", { sel: "ring", box: { min: [0, 0, 0], max: [0, 0, 0] }, material: "andesite" })).text).toBe("give sel or box, not both");
-    expect((await call("fill", { sel: { connected: { seed: [0, 7, 0], match: "solid" } }, material: "andesite" })).text).toMatch(/selection is empty; connected: the seed/);
+    expect((await call("fill", { sel: "ring", box: { min: [0, 0, 0], max: [0, 0, 0] }, pattern: "andesite" })).text).toBe("give sel or box, not both");
+    expect((await call("fill", { sel: { connected: { seed: [0, 7, 0], match: "solid" } }, pattern: "andesite" })).text).toMatch(/selection is empty; connected: the seed/);
     expect((await call("select", { name: "ring", delete: true })).text).toBe('deleted selection "ring"');
     expect((await call("select", { sel: "all", name: "all" })).text).toMatch(/"all" is reserved/);
   });
@@ -320,7 +320,7 @@ describe("MCP server", () => {
       return { text: textOf(r), error: !!r.isError, images: (r.content as Content).filter((c) => c.type === "image").length };
     };
     await call("doc_new", { name: "pv", seed: 1, overwrite: true });
-    await call("fill", { box: { min: [0, 0, 0], max: [2, 0, 2] }, material: "andesite" });
+    await call("fill", { box: { min: [0, 0, 0], max: [2, 0, 2] }, pattern: "andesite" });
     const moved = await call("move", { box: { min: [0, 0, 0], max: [2, 0, 2] }, by: [0, 1, 0], preview: true });
     expect(moved.images).toBe(1);
     expect(moved.text).toMatch(/^ok · move[\s\S]*preview: render 512×512[\s\S]*highlighted 18 positions/);

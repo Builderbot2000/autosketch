@@ -33,8 +33,8 @@ export function prelude(ops: readonly ScriptOp[]): string {
     union(...b) { return sel.union(this, ...b); }
     subtract(...b) { return sel.subtract(this, ...b); }
     intersect(...b) { return sel.intersect(this, ...b); }
-    expand(by) { return sel.expand(this, by); }
-    contract(by) { return sel.contract(this, by); }
+    dilate(by) { return sel.dilate(this, by); }
+    erode(by) { return sel.erode(this, by); }
     offset(dx, dy, dz) { return sel.offset(this, dx, dy, dz); }
     shell(t, o) { return sel.shell(this, t, o); }
     layer(y) { return sel.layer(this, y); }
@@ -68,8 +68,8 @@ export function prelude(ops: readonly ScriptOp[]): string {
     subtract: (...a) => S({ subtract: a.map(T) }),
     xor: (a, b) => S({ xor: [T(a), T(b)] }),
     invert: (a, within) => S({ invert: T(a), ...opt({ within }) }),
-    expand: (a, by) => S({ expand: T(a), by: by === undefined ? 1 : by }),
-    contract: (a, by) => S({ contract: T(a), by: by === undefined ? 1 : by }),
+    dilate: (a, by) => S({ dilate: T(a), by: by === undefined ? 1 : by }),
+    erode: (a, by) => S({ erode: T(a), by: by === undefined ? 1 : by }),
     offset: (a, dx, dy, dz) => S({ offset: T(a), by: Array.isArray(dx) ? dx : [dx, dy, dz] }),
     shell: (a, thickness, o) => S({ shell: T(a), ...opt({ thickness }), ...opt(o) }),
     layer: (a, y) => S({ layer: T(a), y }),

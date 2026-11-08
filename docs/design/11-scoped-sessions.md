@@ -42,7 +42,7 @@ Guidance for the skill (advisory, like all heuristics):
 
 - **Work volume:** the region the job may change. It should contain the **whole job**: everything one coherent building task touches. If two jobs would need to edit the same blocks, they are one job.
 - **Whole blocks only.** A volume never contains half of a multi-block structure (door, bed, tall plant, double chest, or a plugin-declared multi-block). When a selection cuts one, the fork extends the work volume to include all of it and reports the extension. Nothing straddles the boundary.
-- **Context volume:** the region the job must see in order to fit in, such as the neighbouring wall, the roofline it meets, or the ground it stands on. It is copied into the sandbox, and the subagent can read, query, slice and render it but not change it. By default it is the work volume expanded by a few blocks, but it can be any selection, including a distant reference.
+- **Context volume:** the region the job must see in order to fit in, such as the neighbouring wall, the roofline it meets, or the ground it stands on. It is copied into the sandbox, and the subagent can read, query, slice and render it but not change it. By default it is the work volume plus a few blocks of **padding** (the inpainting term), but it can be any selection, including a distant reference.
 - **Sandbox:** a separate document containing only those two volumes. Nothing else from the parent document is in it, so tools can't leak it.
 - Both volumes are **chosen by the delegating agent** to suit the job. The server never judges complexity. It only enforces the size limits that prevent over-nesting (see *Nesting*).
 
@@ -51,7 +51,7 @@ Guidance for the skill (advisory, like all heuristics):
 ### 1. Fork
 
 ```
-scope_fork({ work: sel, context?: sel | { expand: n }, brief, spec?, scope? })
+scope_fork({ work: sel, context?: sel | { padding: n }, brief, spec?, scope? })
   → scope id, local frame, lock, handoff text
 ```
 
@@ -83,14 +83,14 @@ scope_abandon({ scope })         → discard, release the lock
 
 ## Locks (parallel work)
 
-Parallel jobs use **lock and wait on work volumes**. Each document keeps the locks for the jobs forked from it.
+Parallel jobs take a **try-lock on the work volume**: a range lock over its blocks that is refused at once on overlap instead of blocking, so the parent decides whether to wait. Each document keeps the locks for the jobs forked from it.
 
 - A fork locks its **work volume** in the parent document. Context volumes are not locked.
 - No later fork may select a work volume that overlaps a held lock. The refusal names the lock and its job, so the parent can wait or pick another region.
 - Context volumes may overlap each other and may overlap other jobs' work volumes. Neighbouring jobs that share surroundings can therefore run at the same time.
 - The parent can still read and render locked regions. Its own edits that intersect a lock are refused until the lock is released.
 - **Merges can't conflict.** Work volumes are exclusive and context is read-only. Minecraft building jobs shouldn't run at the same place at the same time, so a job that needs more space should take a bigger work volume. As a sanity check, the merge verifies that the parent's blocks inside the work volume are unchanged since the fork. It fails loudly if they changed, which would mean a bug.
-- **Accepted trade-off: context can be stale.** If a context volume overlaps another job's active work volume, the sandbox shows that area as it was at fork time. The fork result lists any such overlaps, so the parent can either wait for that job to merge first or tell the subagent which area is still changing.
+- **Accepted trade-off: context can be stale.** A job runs under *snapshot isolation*: it reads its parent as of fork time and writes only what its lock covers. If a context volume overlaps another job's active work volume, the sandbox shows that area as it was at fork time. The fork result lists any such overlaps, so the parent can either wait for that job to merge first or tell the subagent which area is still changing.
 - `scope_list()` shows open scopes, their locks, their briefs and how long they've been open. That's how a parent recovers after losing context.
 
 ## Connection seams
@@ -175,7 +175,7 @@ Decisions made while building:
 - **Locks also guard undo and redo** in the parent: undoing an older edit inside a lock would break the merge check. **`restore` is all or nothing:** with a guard installed, `Document.restore` first runs the guard over every step (read from memory or disk with `journal.peek`, each in the origin it would see) and applies none if any is refused. The refusal names the step (`step 3 of 3 (undo of op #1 …)`), keeps that step's code (`lock_overlap`, `outside_work_volume`; `restore_refused` for a guard error without one) and says the document is unchanged.
 - **The merge diff** compares the sandbox with the parent inside the work volume (the check guarantees the parent is unchanged), rather than replaying the sandbox journal. Block entities are compared by value.
 - **The ratio limit for a fork from the base** uses the base document's bounds (declared size plus everything built), or the root's work volume when the base is linked to the world (`13`). An empty document with no declared size has no bounds, so every fork from it is too large.
-- **Default context** is the work volume grown by 3 blocks (a cube kernel). A nested job's context is clipped to its parent's volumes and the result says how much was dropped. A nested work volume outside the parent's is refused.
+- **Default context** is the work volume grown by 3 blocks (a cube kernel), i.e. `{ padding: 3 }`. The old `{ expand: n }` is refused with a message naming `padding` (`01`, *Terminology*). A nested job's context is clipped to its parent's volumes and the result says how much was dropped. A nested work volume outside the parent's is refused.
 - **Extra refusal codes** beyond those `12` lists: `nest_outside`, `scope_unknown`, `scope_children` (merge a job with open children), `scopes_open`, `component_reserved`, `merge_check`, `restore_refused`.
 - **Who merges.** The parent calls `scope_merge` with the subagent's report; the handoff tells the subagent not to merge itself. `scope_merge`, `scope_abandon` and `scope_list` name the job directly and don't take the wrapper's `scope`. For `scope_fork`, `scope` is the document to fork from.
 - **Sandbox documents** are named `<doc>-<id>`. `export` works from a sandbox and writes into the base document's `exports/` folder.

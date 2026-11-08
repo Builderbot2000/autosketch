@@ -29,9 +29,9 @@ export function registerScopeTools({ tool, session }: ToolDeps): void {
       inputSchema: {
         work: selSchema.describe("Work volume: the region the job may change (any selection, in this document's coordinates)"),
         context: z
-          .union([z.object({ expand: z.number().int().min(0).max(32) }).strict(), selSchema])
+          .union([z.object({ padding: z.number().int().min(0).max(32) }).strict(), selSchema])
           .optional()
-          .describe("Context volume: {expand:n} grows the work volume by n blocks (default 3), or any selection (e.g. a distant reference)"),
+          .describe("Context volume: {padding:n} is the work volume plus n blocks all round (default 3), or any selection (e.g. a distant reference)"),
         brief: z.string().min(1).max(4000).describe("The job: what to build and how it must fit in"),
         spec: z
           .object({
@@ -50,8 +50,10 @@ export function registerScopeTools({ tool, session }: ToolDeps): void {
       const doc = session.require();
       const ctx = { doc, registry: c.registry, index: c.palette };
       const work = resolveSelection(a.work as SelExpr, ctx).mask;
-      const cin = a.context as { expand?: unknown } | string | undefined;
-      const context = cin === undefined ? undefined : typeof cin === "object" && typeof cin.expand === "number" && Object.keys(cin).length === 1 ? { expand: cin.expand } : resolveSelection(cin as SelExpr, ctx).mask;
+      const cin = a.context as { padding?: unknown; expand?: unknown } | string | undefined;
+      const only = (k: string) => typeof cin === "object" && cin !== null && Object.keys(cin).length === 1 && k in cin;
+      if (only("expand")) throw new Error('context {"expand": n} was renamed {"padding": n} (01, Terminology)');
+      const context = cin === undefined ? undefined : only("padding") && typeof (cin as { padding?: unknown }).padding === "number" ? { padding: (cin as { padding: number }).padding } : resolveSelection(cin as SelExpr, ctx).mask;
       const f = session.scopes.fork(parent, { work, ...(context ? { context } : {}), brief: a.brief, ...(a.spec ? { spec: a.spec as ScopeSpec } : {}), env: env(c) });
       const s = f.scope;
       const cb = s.context.bbox();

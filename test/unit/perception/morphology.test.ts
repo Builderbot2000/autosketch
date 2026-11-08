@@ -7,7 +7,7 @@ import { resolveSelection, type SelExpr } from "../../../src/ops/selection.js";
 import { analyzeStructure } from "../../../src/perception/analyze.js";
 import { diffSince } from "../../../src/perception/diff.js";
 import { recordRender } from "../../../src/perception/render/cameras.js";
-import { enclosedAir } from "../../../src/perception/semantic.js";
+import { enclosedAir } from "../../../src/perception/morphology.js";
 import { gableHouse, twoStorey } from "../../helpers/buildings.js";
 
 const B = (min: Vec3, max: Vec3) => fromPublic({ min, max });
@@ -15,7 +15,7 @@ const sel = (doc: Document, e: SelExpr) => resolveSelection(e, { doc });
 const pts = (m: Mask) => m.positions().map((p) => p.join(",")).sort();
 const boxPts = (min: Vec3, max: Vec3) => pts(Mask.fromBox(B(min, max)));
 
-describe("semantic selections (05, Semantic)", () => {
+describe("morphological selections (05, Morphological)", () => {
   it("offers no architectural selections: face, storey, roof and openings are gone", () => {
     const { doc } = gableHouse();
     for (const e of [{ face: "front" }, { storey: 1 }, { roof: "all" }, { openings: "all" }, { room: 1 }]) expect(() => sel(doc, e)).toThrow();
@@ -53,13 +53,13 @@ describe("semantic selections (05, Semantic)", () => {
     expect(none.notes[0]).toMatch(/no enclosed air/);
   });
 
-  it("top: the highest block of each column", () => {
+  it("heightmap: the highest block of each column", () => {
     const { doc } = gableHouse();
-    const m = sel(doc, { top: "all" }).mask;
+    const m = sel(doc, { heightmap: "all" }).mask;
     expect(m.count()).toBe(11 * 9);
     expect(m.has(4, 9, 3)).toBe(true);
     expect(m.has(4, 5, -1)).toBe(true);
-    const box = sel(doc, { top: { min: [0, 0, 0], max: [8, 4, 6] } }).mask;
+    const box = sel(doc, { heightmap: { min: [0, 0, 0], max: [8, 4, 6] } }).mask;
     expect(box.count()).toBe(9 * 7);
     expect(box.has(4, 4, 0) && box.has(4, 0, 3)).toBe(true);
   });

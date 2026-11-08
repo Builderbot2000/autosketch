@@ -2,8 +2,8 @@ import { Mask, shellOf } from "../core/mask.js";
 import { formatBox, formatVec, unionBox, type Box, type Vec3 } from "../core/region.js";
 import { stateTransformer } from "../core/rotate.js";
 import type { Document, EditResult } from "../document/document.js";
-import { checkRegion, describeMaterial, materialContext, MAX_OP_VOLUME, opEdit, regionBox, registerAs, stateOverrides, type CommonOptions, type OpEnv, type Region } from "./edit.js";
-import { compileMaterial, type MaterialExpr } from "./material.js";
+import { checkRegion, describePattern, patternContext, MAX_OP_VOLUME, opEdit, regionBox, registerAs, stateOverrides, type CommonOptions, type OpEnv, type Region } from "./edit.js";
+import { compilePattern, type PatternExpr } from "./pattern.js";
 
 /**
  * Brushes (docs/design/05-operations.md, L2 "Edits & brushes"): hollow, paint, smooth / erode /
@@ -22,16 +22,16 @@ export interface BrushOptions extends CommonOptions {
   label?: string;
 }
 
-/** hollow: keeps a shell `thickness` thick (optionally rewritten in `material`) and clears the inside to air. */
-export function hollow(doc: Document, env: OpEnv, region: Region, thickness = 1, material?: MaterialExpr, opts: BrushOptions = {}): EditResult {
+/** hollow: keeps a shell `thickness` thick (optionally rewritten in `pattern`) and clears the inside to air. */
+export function hollow(doc: Document, env: OpEnv, region: Region, thickness = 1, pattern?: PatternExpr, opts: BrushOptions = {}): EditResult {
   checkRegion(region);
   const t = int(thickness, "thickness", 1);
   const m = toMask(region);
   const bb = regionBox(m);
-  return opEdit(doc, env, "hollow", `hollow ${label(region, opts.label)} t=${t}${material !== undefined ? ` ${describeMaterial(material)}` : ""}${suffix(opts)}`, opts, (tx) => {
+  return opEdit(doc, env, "hollow", `hollow ${label(region, opts.label)} t=${t}${pattern !== undefined ? ` ${describePattern(pattern)}` : ""}${suffix(opts)}`, opts, (tx) => {
     const shell = shellOf(m, t, false);
-    if (material !== undefined) {
-      const mat = compileMaterial(material, materialContext(doc, env, tx, bb));
+    if (pattern !== undefined) {
+      const mat = compilePattern(pattern, patternContext(doc, env, tx, bb));
       shell.forEach((x, y, z) => tx.set(x, y, z, mat(x, y, z)));
     }
     m.forEach((x, y, z) => !shell.has(x, y, z) && tx.clear(x, y, z));
@@ -40,7 +40,7 @@ export function hollow(doc: Document, env: OpEnv, region: Region, thickness = 1,
 }
 
 /** paint: rewrites only exposed blocks (non-air with an air face neighbour), e.g. moss or weathering. `dirs` limits which faces count. */
-export function paint(doc: Document, env: OpEnv, region: Region, material: MaterialExpr, opts: BrushOptions & { dirs?: string[] } = {}): EditResult {
+export function paint(doc: Document, env: OpEnv, region: Region, pattern: PatternExpr, opts: BrushOptions & { dirs?: string[] } = {}): EditResult {
   checkRegion(region);
   const dirs = (opts.dirs ?? Object.keys(NAMED_DIRS)).map((d) => {
     const v = NAMED_DIRS[d];
@@ -49,8 +49,8 @@ export function paint(doc: Document, env: OpEnv, region: Region, material: Mater
   });
   const m = toMask(region);
   const bb = regionBox(m);
-  return opEdit(doc, env, "paint", `paint ${label(region, opts.label)} ${describeMaterial(material)}${suffix(opts)}`, opts, (tx) => {
-    const mat = compileMaterial(material, materialContext(doc, env, tx, bb));
+  return opEdit(doc, env, "paint", `paint ${label(region, opts.label)} ${describePattern(pattern)}${suffix(opts)}`, opts, (tx) => {
+    const mat = compilePattern(pattern, patternContext(doc, env, tx, bb));
     const hits: Vec3[] = [];
     m.forEach((x, y, z) => {
       if (tx.getId(x, y, z) === 0) return;
@@ -67,11 +67,11 @@ export type MorphMode = "smooth" | "erode" | "dilate";
  * Morphological cleanup over the solid blocks inside a selection, from a snapshot (one pass per
  * iteration):
  * - erode: a block with ≥ `threshold` air face neighbours (default 3) becomes air;
- * - dilate: air with ≥ `threshold` solid face neighbours (default 3) takes `material`, or the most
+ * - dilate: air with ≥ `threshold` solid face neighbours (default 3) takes `pattern`, or the most
  *   common neighbouring block;
  * - smooth: majority over the 3×3×3 cube (solid when ≥ 14 of 27 are solid).
  */
-export function morph(doc: Document, env: OpEnv, region: Region, mode: MorphMode, opts: BrushOptions & { threshold?: number; iterations?: number; material?: MaterialExpr } = {}): EditResult {
+export function morph(doc: Document, env: OpEnv, region: Region, mode: MorphMode, opts: BrushOptions & { threshold?: number; iterations?: number; pattern?: PatternExpr } = {}): EditResult {
   checkRegion(region);
   if (!["smooth", "erode", "dilate"].includes(mode)) throw new Error('mode must be "smooth", "erode" or "dilate"');
   const threshold = int(opts.threshold ?? 3, "threshold", 1);
@@ -81,7 +81,7 @@ export function morph(doc: Document, env: OpEnv, region: Region, mode: MorphMode
   const m = toMask(region);
   const bb = regionBox(m);
   return opEdit(doc, env, mode, `${mode} ${label(region, opts.label)}${mode !== "smooth" ? ` t=${threshold}` : ""}${iterations > 1 ? ` ×${iterations}` : ""}${suffix(opts)}`, opts, (tx) => {
-    const mat = opts.material !== undefined ? compileMaterial(opts.material, materialContext(doc, env, tx, bb)) : undefined;
+    const mat = opts.pattern !== undefined ? compilePattern(opts.pattern, patternContext(doc, env, tx, bb)) : undefined;
     const pts = m.positions();
     for (let it = 0; it < iterations; it++) {
       const writes: [number, number, number, number][] = [];
@@ -169,7 +169,7 @@ export interface ProfileCell {
   u: number;
   /** Height offset (up). */
   v: number;
-  block: MaterialExpr;
+  block: PatternExpr;
 }
 
 /** How a sweep path is read: straight segments, a Catmull-Rom curve through the points, or one Bézier curve they control. */
@@ -252,8 +252,8 @@ export function sweep(doc: Document, env: OpEnv, profile: ProfileCell[], path: V
   const right: Vec3[] = [[1, 0, 0], [0, 0, 1], [-1, 0, 0], [0, 0, -1]];
   const turners = [0, 1, 2, 3].map((t) => stateTransformer({ turns: t }, { ...(env.registry ? { registry: env.registry } : {}), overrides: stateOverrides(env) }));
   return opEdit(doc, env, "sweep", `sweep ${profile.length}-cell profile along ${path.length} points${opts.curve && opts.curve !== "polyline" ? ` (${opts.curve})` : ""} ${formatVec(path[0]!)}→${formatVec(path[path.length - 1]!)}${suffix(opts)}`, opts, (tx) => {
-    const ctx = materialContext(doc, env, tx);
-    const mats = profile.map((c) => compileMaterial(c.block, ctx));
+    const ctx = patternContext(doc, env, tx);
+    const mats = profile.map((c) => compilePattern(c.block, ctx));
     let box: Box | undefined;
     for (const [p, h] of steps) {
       const r = right[h]!;

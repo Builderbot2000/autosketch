@@ -81,11 +81,11 @@ export const vec3 = z.tuple([z.number().int(), z.number().int(), z.number().int(
 export const boxSchema = z
   .object({ min: vec3, max: vec3 })
   .describe("Inclusive box {min:[x,y,z], max:[x,y,z]}; corners in any order. {min:[0,0,0],max:[0,0,0]} is one block.");
-export const materialSchema = z
+export const patternSchema = z
   .union([z.string(), z.record(z.string(), z.unknown())])
   .describe(
-    'Material: "stone_bricks", "oak_stairs[facing=east]", "stone_bricks 70%, mossy_stone_bricks 30%", "palette:<name>.<role>", ' +
-      '{"gradient":[...],"axis":"y","range":[0,12]}, {"noise":[...],"scale":6}, {"pattern":"checker|stripes_x|stripes_y|stripes_z","blocks":[...],"size":1}. Entries nest.',
+    'Pattern (a WorldEdit-style block mix): "stone_bricks", "oak_stairs[facing=east]", "stone_bricks 70%, mossy_stone_bricks 30%", "palette:<name>.<role>", ' +
+      '{"gradient":[...],"axis":"y","range":[0,12]}, {"noise":[...],"scale":6}, {"tile":"checker|stripes_x|stripes_y|stripes_z","blocks":[...],"size":1}. Entries nest.',
   );
 export const selSchema = z
   .union([z.string(), z.record(z.string(), z.unknown())])
@@ -94,14 +94,14 @@ export const selSchema = z
       '{"sphere":{"center","radius"}} · {"ellipsoid":{"center","radii"}} · {"polygon":{"points":[[x,z],...],"y":[y0,y1]}} · {"plane":{"axis","at","within"?}} · ' +
       '{"connected":{"seed":[x,y,z],"match":"block|state|family|solid|air|tag|role|colour|prop:<name>","connectivity":6|18|26,"within"?}} (flood fill) · {"similar":{"seed","by":<as match>,"within"?}} ' +
       '(by tag: "tag"? default the seed\'s most specific; role: "palette"?,"role"?; colour: "tolerance"? CIELAB ΔE, default 10) · {"kind":"tower"} {"tagged":"ruined"} (component boxes by kind or tag) · ' +
-      '{"union":[a,b]} {"intersect":[a,b]} {"subtract":[a,b]} {"xor":[a,b]} {"invert":a,"within"?} · {"expand":a,"by":n|[dx,dy,dz]|{"up":n,...}} {"contract":a,"by":..} {"offset":a,"by":[dx,dy,dz]} · ' +
+      '{"union":[a,b]} {"intersect":[a,b]} {"subtract":[a,b]} {"xor":[a,b]} {"invert":a,"within"?} · {"dilate":a,"by":n|[dx,dy,dz]|{"up":n,...}} {"erode":a,"by":..} {"offset":a,"by":[dx,dy,dz]} · ' +
       '{"shell":a,"thickness"?,"walls_only"?} {"layer":a,"y":n|"min"|"max"} {"surface":a} {"bbox":a} {"filter":a,"block"?:"oak_planks|#tag|*","air"?:bool} · ' +
       '{"rotate":a,"turns":n,"pivot"?:[x,y,z]} (clockwise from above) {"mirror":a,"axis":"x|y|z","about"?:n} · ' +
       '{"grow":a,"by"?:n,"match"?:"solid|same|any"} {"shrink":a,"by"?:n} (along connected blocks) {"edges":a} {"slab":a,"axis","from","to"} {"convex":a} {"fill_holes":a} · ' +
       '{"checker":a,"size"?} {"random":a,"ratio":0.3,"seed"?} {"every":a,"n":4,"along":"x"} {"freeze":a} (a stored selection keeps today\'s voxels) · ' +
       '{"hull":[[x,y,z],...]} {"tube":{"path":[[x,y,z],...],"radius":r}} · ' +
       'Measured (S = a selection, a component id, or "all"): {"enclosed":[x,y,z]|n,"of"?:S} (one enclosed air region, seeded or n-th largest as analyze lists them) ' +
-      '{"interior":S} (all enclosed air) {"top":S} (highest block per column) {"changed":"op:-1|checkpoint:<name>"} · ' +
+      '{"interior":S} (all enclosed air) {"heightmap":S} (highest block per column) {"changed":"op:-1|checkpoint:<name>"} · ' +
       'From a render: {"view_box":{"render"?:"r3","rect":[x0,y0,x1,y1],"depth"?:"visible|through"}} {"view_lasso":{"render"?,"points":[[px,py],...],"depth"?}} ' +
       '(image pixels; visible = surface seen, through = whole volume behind, air included; freeze picks you store, only 8 renders are kept). Nest freely.',
   );

@@ -144,17 +144,21 @@ describe("booleans and modifiers", () => {
     expect(sel(doc, { subtract: [a, b] }).mask.count()).toBe(12);
     expect(sel(doc, { xor: [a, b] }).mask.count()).toBe(24);
     expect(sel(doc, { invert: a, within: { min: [0, 0, 0], max: [4, 0, 4] } }).mask.count()).toBe(25 - 16);
-    expect(sel(doc, { expand: a, by: 1 }).mask.bbox()).toEqual(B([-1, -1, -1], [4, 1, 4]));
-    expect(sel(doc, { expand: a, by: { up: 2 } }).mask.bbox()).toEqual(B([0, 0, 0], [3, 2, 3]));
-    expect(sel(doc, { expand: a, by: [1, 0, 0] }).mask.bbox()).toEqual(B([-1, 0, 0], [4, 0, 3]));
-    expect(sel(doc, { contract: { min: [0, 0, 0], max: [4, 4, 4] }, by: 1 }).mask.bbox()).toEqual(B([1, 1, 1], [3, 3, 3]));
-    expect(sel(doc, { contract: { min: [0, 0, 0], max: [4, 4, 4] }, by: { up: 1, east: 2 } }).mask.bbox()).toEqual(B([0, 0, 0], [2, 3, 4]));
+    expect(sel(doc, { dilate: a, by: 1 }).mask.bbox()).toEqual(B([-1, -1, -1], [4, 1, 4]));
+    expect(sel(doc, { dilate: a, by: { up: 2 } }).mask.bbox()).toEqual(B([0, 0, 0], [3, 2, 3]));
+    expect(sel(doc, { dilate: a, by: [1, 0, 0] }).mask.bbox()).toEqual(B([-1, 0, 0], [4, 0, 3]));
+    expect(sel(doc, { erode: { min: [0, 0, 0], max: [4, 4, 4] }, by: 1 }).mask.bbox()).toEqual(B([1, 1, 1], [3, 3, 3]));
+    expect(sel(doc, { erode: { min: [0, 0, 0], max: [4, 4, 4] }, by: { up: 1, east: 2 } }).mask.bbox()).toEqual(B([0, 0, 0], [2, 3, 4]));
     expect(sel(doc, { offset: a, by: [10, 1, 0] }).mask.bbox()).toEqual(B([10, 1, 0], [13, 1, 3]));
     expect(sel(doc, { shell: { min: [0, 0, 0], max: [4, 3, 4] } }).mask.count()).toBe(100 - 18);
     expect(sel(doc, { layer: { min: [0, 2, 0], max: [1, 5, 1] }, y: "max" }).mask.bbox()).toEqual(B([0, 5, 0], [1, 5, 1]));
     expect(sel(doc, { layer: { min: [0, 2, 0], max: [1, 5, 1] } }).mask.bbox()).toEqual(B([0, 2, 0], [1, 2, 1]));
     expect(sel(doc, { bbox: { union: [{ min: [0, 0, 0], max: [0, 0, 0] }, { min: [3, 3, 3], max: [3, 3, 3] }] } }).mask.count()).toBe(64);
-    expect(() => sel(doc, { expand: a, by: { sideways: 1 } })).toThrow(/unknown direction "sideways"/);
+    expect(() => sel(doc, { dilate: a, by: { sideways: 1 } })).toThrow(/unknown direction "sideways"/);
+    // Renamed keys (01, Terminology) say what they became.
+    expect(() => sel(doc, { expand: a, by: 1 })).toThrow(/"expand" was renamed "dilate"/);
+    expect(() => sel(doc, { contract: a })).toThrow(/"contract" was renamed "erode"/);
+    expect(() => sel(doc, { top: "all" })).toThrow(/"top" was renamed "heightmap"/);
   });
 
   it("surface and filter read the document", () => {

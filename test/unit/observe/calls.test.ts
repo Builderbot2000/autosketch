@@ -55,9 +55,9 @@ async function connect(ctx: Promise<InstanceContext>, session: Session) {
 
 const CALLS: [string, Record<string, unknown>][] = [
   ["doc_new", { name: "tower", seed: 7 }],
-  ["fill", { box: { min: [0, 0, 0], max: [2, 3, 2] }, material: "andesite" }],
+  ["fill", { box: { min: [0, 0, 0], max: [2, 3, 2] }, pattern: "andesite" }],
   ["checkpoint", { name: "base" }],
-  ["fill", { box: { min: [0, 4, 0], max: [2, 4, 2] }, material: "no_such_block_xyz" }],
+  ["fill", { box: { min: [0, 4, 0], max: [2, 4, 2] }, pattern: "no_such_block_xyz" }],
   ["undo", {}],
   ["doc_info", {}],
 ];

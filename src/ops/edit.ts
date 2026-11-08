@@ -7,7 +7,7 @@ import type { StateOverride } from "../core/rotate.js";
 import type { PaletteIndex } from "../palette/index.js";
 import type { AutosketchPlugin } from "../plugins/types.js";
 import { connectAfterEdit } from "./connect.js";
-import { compileMaterial, type MaterialContext, type MaterialExpr } from "./material.js";
+import { compilePattern, type PatternContext, type PatternExpr } from "./pattern.js";
 
 /**
  * Basic edit operations (docs/design/05-operations.md, layers L0 and L2 over boxes). Each op is one
@@ -90,7 +90,7 @@ function regionLabel(r: Region, label?: string): string {
   return formatBox(r);
 }
 
-export function materialContext(doc: Document, env: OpEnv, tx: Transaction, box?: Box): MaterialContext {
+export function patternContext(doc: Document, env: OpEnv, tx: Transaction, box?: Box): PatternContext {
   return {
     ...(env.registry ? { registry: env.registry } : {}),
     ...(env.index ? { index: env.index } : {}),
@@ -109,20 +109,20 @@ function checkVolume(box: Box): void {
 
 export interface BlockPlacement {
   pos: Vec3;
-  block: MaterialExpr;
+  block: PatternExpr;
 }
 
 export function setBlocks(doc: Document, env: OpEnv, blocks: BlockPlacement[], summary?: string, opts: CommonOptions = {}): EditResult {
   if (blocks.length === 0) throw new Error("no blocks given");
   if (blocks.length > 100_000) throw new Error("set_blocks takes at most 100,000 blocks per call; use fill for regions");
   return opEdit(doc, env, "set_blocks", summary ?? `set_blocks ${blocks.length}${opts.as ? ` as ${opts.as}` : ""}`, opts, (tx) => {
-    const ctx = materialContext(doc, env, tx);
-    const cache = new Map<string, ReturnType<typeof compileMaterial>>();
+    const ctx = patternContext(doc, env, tx);
+    const cache = new Map<string, ReturnType<typeof compilePattern>>();
     for (const b of blocks) {
       if (!Array.isArray(b.pos) || b.pos.length !== 3 || b.pos.some((n) => !Number.isInteger(n))) throw new Error(`bad pos ${JSON.stringify(b.pos)} (expected [x,y,z] integers)`);
       const k = JSON.stringify(b.block);
       let m = cache.get(k);
-      if (!m) cache.set(k, (m = compileMaterial(b.block, ctx)));
+      if (!m) cache.set(k, (m = compilePattern(b.block, ctx)));
       tx.set(b.pos[0], b.pos[1], b.pos[2], m(...b.pos));
     }
     if (opts.as) {
@@ -152,19 +152,19 @@ export interface FillOptions extends CommonOptions {
 }
 
 /**
- * fill: writes a material over a box. Modes (Axiom-style): fill = every block; hollow = shell of
- * the material with the inside cleared to air; outline = shell only, inside untouched; walls =
+ * fill: writes a pattern over a box. Modes (Axiom-style): fill = every block; hollow = shell of
+ * the pattern with the inside cleared to air; outline = shell only, inside untouched; walls =
  * the four vertical sides only (floor and ceiling untouched).
  */
-export function fill(doc: Document, env: OpEnv, region: Region, material: MaterialExpr, opts: FillOptions = {}): EditResult {
+export function fill(doc: Document, env: OpEnv, region: Region, pattern: PatternExpr, opts: FillOptions = {}): EditResult {
   const mode = opts.mode ?? "fill";
   const t = Math.max(1, Math.floor(opts.thickness ?? 1));
-  const summary = `fill${mode === "fill" ? "" : ` ${mode}`} ${regionLabel(region, opts.label)} ${describeMaterial(material)}${opts.as ? ` as ${opts.as}` : ""}`;
+  const summary = `fill${mode === "fill" ? "" : ` ${mode}`} ${regionLabel(region, opts.label)} ${describePattern(pattern)}${opts.as ? ` as ${opts.as}` : ""}`;
   const box = asBox(region);
   if (box) {
     checkVolume(box);
     return opEdit(doc, env, "fill", summary, opts, (tx) => {
-      const m = compileMaterial(material, materialContext(doc, env, tx, box));
+      const m = compilePattern(pattern, patternContext(doc, env, tx, box));
       for (let y = box.min[1]; y < box.max[1]; y++)
         for (let z = box.min[2]; z < box.max[2]; z++)
           for (let x = box.min[0]; x < box.max[0]; x++) {
@@ -179,7 +179,7 @@ export function fill(doc: Document, env: OpEnv, region: Region, material: Materi
   const bb = mask.bbox();
   if (!bb) throw new Error("the selection is empty; nothing to fill");
   return opEdit(doc, env, "fill", summary, opts, (tx) => {
-    const m = compileMaterial(material, materialContext(doc, env, tx, bb));
+    const m = compilePattern(pattern, patternContext(doc, env, tx, bb));
     const write = mode === "fill" ? mask : shellOf(mask, t, mode === "walls");
     write.forEach((x, y, z) => tx.set(x, y, z, m(x, y, z)));
     if (mode === "hollow") mask.forEach((x, y, z) => !write.has(x, y, z) && tx.clear(x, y, z));
@@ -238,7 +238,7 @@ export interface ReplaceOptions extends CommonOptions {
   label?: string;
 }
 
-export function replace(doc: Document, env: OpEnv, region: Region, from: string, to: MaterialExpr, opts: ReplaceOptions = {}): EditResult {
+export function replace(doc: Document, env: OpEnv, region: Region, from: string, to: PatternExpr, opts: ReplaceOptions = {}): EditResult {
   const match = blockMatcher(from, env.registry);
   const asB = asBox(region);
   const mask = asB ? undefined : (region as Mask);
@@ -246,9 +246,9 @@ export function replace(doc: Document, env: OpEnv, region: Region, from: string,
   else checkMask(mask!);
   const box = asB ?? mask!.bbox();
   if (!box) throw new Error("the selection is empty; nothing to replace");
-  return opEdit(doc, env, "replace", `replace ${from} → ${describeMaterial(to)} in ${regionLabel(region, opts.label)}${opts.as ? ` as ${opts.as}` : ""}`, opts, (tx) => {
+  return opEdit(doc, env, "replace", `replace ${from} → ${describePattern(to)} in ${regionLabel(region, opts.label)}${opts.as ? ` as ${opts.as}` : ""}`, opts, (tx) => {
     registerAs(tx, opts, box);
-    const m = compileMaterial(to, materialContext(doc, env, tx, box));
+    const m = compilePattern(to, patternContext(doc, env, tx, box));
     const air = from.trim() === "minecraft:air" || from.trim() === "air";
     const visit = (x: number, y: number, z: number, cur: string) => {
       if (mask && !mask.has(x, y, z)) return;
@@ -277,7 +277,7 @@ function copyStates(from: string, to: string, registry?: Registry): string {
   return formatState(dst.id, out);
 }
 
-export function describeMaterial(m: MaterialExpr): string {
+export function describePattern(m: PatternExpr): string {
   const s = typeof m === "string" ? m : JSON.stringify(m);
   return s.length > 60 ? `${s.slice(0, 57)}…` : s;
 }

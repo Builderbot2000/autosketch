@@ -187,7 +187,7 @@ describe("scope fork (11)", () => {
     const p = scopes.fork("base", { work: M([8, 0, 8], [23, 7, 23]), brief: "keep", env }).scope;
     // The child's work must lie inside the parent's work volume.
     expect(refused(() => scopes.fork(p.id, { work: M([-1, 0, 0], [3, 3, 3]), brief: "x", env })).code).toBe("nest_outside");
-    const c = scopes.fork(p.id, { work: M([0, 0, 0], [3, 3, 3]), brief: "corner", env, context: { expand: 10 } });
+    const c = scopes.fork(p.id, { work: M([0, 0, 0], [3, 3, 3]), brief: "corner", env, context: { padding: 10 } });
     // Its context is clipped to the parent's volumes.
     expect(c.contextClipped).toBeGreaterThan(0);
     expect(c.scope.contextLocal.bbox()!.min).toEqual([-3, -3, -3]);

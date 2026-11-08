@@ -16,7 +16,7 @@ const HEADER = `// Autosketch script API (docs/design/05-operations.md, Scriptin
 type Vec3 = [number, number, number];
 type Box = { min: Vec3; max: Vec3 };
 /** A block, "a 70%, b 30%", "palette:<name>.<role>", or {gradient|noise|pattern}. */
-type Material = string | Record<string, unknown>;
+type Pattern = string | Record<string, unknown>;
 /** A selection: a Sel, a stored name, "all", "last", or a JSON tree as the tools take. */
 type SelLike = Sel | string | Record<string, unknown>;
 type Direction = "up" | "down" | "north" | "south" | "east" | "west";
@@ -34,17 +34,17 @@ interface PaletteInfo { name: string; roles: Record<string, { block: string; wei
 /** A selection expression; compiles to the same JSON tree the tools take (JSON.stringify shows it). */
 declare class Sel {
   readonly tree: string | Record<string, unknown>;
-  fill(material: Material, opts?: OpOpts & { mode?: "fill" | "hollow" | "outline" | "walls"; thickness?: number }): EditSummary;
+  fill(pattern: Pattern, opts?: OpOpts & { mode?: "fill" | "hollow" | "outline" | "walls"; thickness?: number }): EditSummary;
   clear(opts?: OpOpts): EditSummary;
-  replace(from: string, to: Material, opts?: OpOpts & { keep_states?: boolean }): EditSummary;
-  hollow(opts?: OpOpts & { thickness?: number; material?: Material }): EditSummary;
-  paint(material: Material, opts?: OpOpts & { dirs?: Direction[] }): EditSummary;
+  replace(from: string, to: Pattern, opts?: OpOpts & { keep_states?: boolean }): EditSummary;
+  hollow(opts?: OpOpts & { thickness?: number; pattern?: Pattern }): EditSummary;
+  paint(pattern: Pattern, opts?: OpOpts & { dirs?: Direction[] }): EditSummary;
   move(by: Vec3, opts?: OpOpts): EditSummary;
   copy(by: Vec3, opts?: OpOpts & { turns?: number; mirror?: "x" | "y" | "z" }): EditSummary;
   rotate(turns: number, opts?: OpOpts & { pivot?: Vec3 }): EditSummary;
   mirror(axis: "x" | "y" | "z", opts?: OpOpts & { about?: number }): EditSummary;
   union(...b: SelLike[]): Sel; subtract(...b: SelLike[]): Sel; intersect(...b: SelLike[]): Sel;
-  expand(by?: number | Vec3 | Partial<Record<Direction, number>>): Sel; contract(by?: number | Vec3 | Partial<Record<Direction, number>>): Sel;
+  dilate(by?: number | Vec3 | Partial<Record<Direction, number>>): Sel; erode(by?: number | Vec3 | Partial<Record<Direction, number>>): Sel;
   offset(dx: number | Vec3, dy?: number, dz?: number): Sel; shell(thickness?: number, opts?: { walls_only?: boolean }): Sel;
   layer(y: number | "min" | "max"): Sel; filter(f: string | { block?: string; air?: boolean }): Sel;
   every(n: number, opts?: { along?: "x" | "y" | "z"; offset?: number }): Sel; perimeter(): Sel;
@@ -63,7 +63,7 @@ declare const sel: {
   connected(seed: Vec3, opts?: { match?: Match; connectivity?: 6 | 18 | 26; within?: SelLike } & MatchOpts): Sel;
   similar(seed: Vec3, opts?: { by?: Match; within?: SelLike } & MatchOpts): Sel;
   union(...a: SelLike[]): Sel; intersect(...a: SelLike[]): Sel; subtract(...a: SelLike[]): Sel; xor(a: SelLike, b: SelLike): Sel; invert(a: SelLike, within?: SelLike): Sel;
-  expand(a: SelLike, by?: number | Vec3 | Partial<Record<Direction, number>>): Sel; contract(a: SelLike, by?: number | Vec3 | Partial<Record<Direction, number>>): Sel;
+  dilate(a: SelLike, by?: number | Vec3 | Partial<Record<Direction, number>>): Sel; erode(a: SelLike, by?: number | Vec3 | Partial<Record<Direction, number>>): Sel;
   offset(a: SelLike, dx: number | Vec3, dy?: number, dz?: number): Sel; shell(a: SelLike, thickness?: number, opts?: { walls_only?: boolean }): Sel;
   layer(a: SelLike, y: number | "min" | "max"): Sel; surface(a: SelLike, opts?: { dirs?: Direction[] }): Sel; bbox(a: SelLike): Sel;
   filter(a: SelLike, f: string | { block?: string; air?: boolean }): Sel; rotate(a: SelLike, turns: number, pivot?: Vec3): Sel; mirror(a: SelLike, axis: "x" | "y" | "z", about?: number): Sel;

@@ -3,7 +3,7 @@ import type { Document, EditResult } from "../document/document.js";
 import { componentAnchors, resolveAnchor, type AtSpec } from "../ops/anchors.js";
 import { array, extrude, hollow, morph, paint, sweep, type MorphMode, type PathCurve, type ProfileCell } from "../ops/brush.js";
 import { clear, fill, replace, setBlocks, type CommonOptions, type FillMode, type OpEnv, type Region } from "../ops/edit.js";
-import type { MaterialExpr } from "../ops/material.js";
+import type { PatternExpr } from "../ops/pattern.js";
 import { checkSelectionName, freezeNodes, resolveSelection, summarize, type SelExpr } from "../ops/selection.js";
 import { copy, mirror, move, rotate } from "../ops/transform.js";
 import { stampPrefab, type StampOptions } from "../ops/stamp.js";
@@ -54,7 +54,7 @@ function stampOp(h: ScriptHost, ref: unknown, x: unknown): EditSummary {
 export interface ScriptOp {
   /** Global name, or "<namespace>.<name>". */
   name: string;
-  /** TypeScript parameter list, e.g. "sel: SelLike, material: Material, opts?: OpOpts". */
+  /** TypeScript parameter list, e.g. "sel: SelLike, pattern: Pattern, opts?: OpOpts". */
   params: string;
   /** TypeScript return type. */
   returns: string;
@@ -107,46 +107,46 @@ export const SCRIPT_OPS: readonly ScriptOp[] = [
   // -- edits (L0/L2) --
   {
     name: "fill",
-    params: 'sel: SelLike, material: Material, opts?: OpOpts & { mode?: "fill" | "hollow" | "outline" | "walls"; thickness?: number }',
+    params: 'sel: SelLike, pattern: Pattern, opts?: OpOpts & { mode?: "fill" | "hollow" | "outline" | "walls"; thickness?: number }',
     returns: "EditSummary",
-    doc: "Fills a selection with a material (modes as the fill tool).",
-    run: (h, [s, m, x]) => summary(h, fill(h.doc, h.env, region(h, s), m as MaterialExpr, { ...common(o(x)), ...(o(x).mode ? { mode: o(x).mode as FillMode } : {}), ...(o(x).thickness ? { thickness: o(x).thickness as number } : {}) })),
+    doc: "Fills a selection with a pattern (modes as the fill tool).",
+    run: (h, [s, m, x]) => summary(h, fill(h.doc, h.env, region(h, s), m as PatternExpr, { ...common(o(x)), ...(o(x).mode ? { mode: o(x).mode as FillMode } : {}), ...(o(x).thickness ? { thickness: o(x).thickness as number } : {}) })),
   },
   { name: "clear", params: "sel: SelLike, opts?: OpOpts", returns: "EditSummary", doc: "Sets a selection to air.", run: (h, [s, x]) => summary(h, clear(h.doc, region(h, s), undefined, { ...common(o(x)), env: h.env })) },
   {
     name: "replace",
-    params: "sel: SelLike, from: string, to: Material, opts?: OpOpts & { keep_states?: boolean }",
+    params: "sel: SelLike, from: string, to: Pattern, opts?: OpOpts & { keep_states?: boolean }",
     returns: "EditSummary",
     doc: 'Replaces matching blocks ("oak_planks", "#minecraft:logs", "*", "air") inside a selection.',
-    run: (h, [s, f, t, x]) => summary(h, replace(h.doc, h.env, region(h, s), String(f), t as MaterialExpr, { ...common(o(x)), ...(o(x).keep_states ? { keepStates: true } : {}) })),
+    run: (h, [s, f, t, x]) => summary(h, replace(h.doc, h.env, region(h, s), String(f), t as PatternExpr, { ...common(o(x)), ...(o(x).keep_states ? { keepStates: true } : {}) })),
   },
   {
     name: "set_blocks",
-    params: "blocks: { pos: Vec3; block: Material }[], opts?: OpOpts",
+    params: "blocks: { pos: Vec3; block: Pattern }[], opts?: OpOpts",
     returns: "EditSummary",
     doc: "Places individual blocks.",
-    run: (h, [b, x]) => summary(h, setBlocks(h.doc, h.env, b as { pos: Vec3; block: MaterialExpr }[], undefined, common(o(x)))),
+    run: (h, [b, x]) => summary(h, setBlocks(h.doc, h.env, b as { pos: Vec3; block: PatternExpr }[], undefined, common(o(x)))),
   },
   {
     name: "hollow",
-    params: "sel: SelLike, opts?: OpOpts & { thickness?: number; material?: Material }",
+    params: "sel: SelLike, opts?: OpOpts & { thickness?: number; pattern?: Pattern }",
     returns: "EditSummary",
     doc: "Keeps a shell and clears the inside.",
-    run: (h, [s, x]) => summary(h, hollow(h.doc, h.env, region(h, s), (o(x).thickness as number) ?? 1, o(x).material as MaterialExpr | undefined, common(o(x)))),
+    run: (h, [s, x]) => summary(h, hollow(h.doc, h.env, region(h, s), (o(x).thickness as number) ?? 1, o(x).pattern as PatternExpr | undefined, common(o(x)))),
   },
   {
     name: "paint",
-    params: "sel: SelLike, material: Material, opts?: OpOpts & { dirs?: Direction[] }",
+    params: "sel: SelLike, pattern: Pattern, opts?: OpOpts & { dirs?: Direction[] }",
     returns: "EditSummary",
     doc: "Rewrites exposed blocks only.",
-    run: (h, [s, m, x]) => summary(h, paint(h.doc, h.env, region(h, s), m as MaterialExpr, { ...common(o(x)), ...(o(x).dirs ? { dirs: o(x).dirs as string[] } : {}) })),
+    run: (h, [s, m, x]) => summary(h, paint(h.doc, h.env, region(h, s), m as PatternExpr, { ...common(o(x)), ...(o(x).dirs ? { dirs: o(x).dirs as string[] } : {}) })),
   },
   {
     name: "smooth",
-    params: 'sel: SelLike, opts?: OpOpts & { mode?: "smooth" | "erode" | "dilate"; threshold?: number; iterations?: number; material?: Material }',
+    params: 'sel: SelLike, opts?: OpOpts & { mode?: "smooth" | "erode" | "dilate"; threshold?: number; iterations?: number; pattern?: Pattern }',
     returns: "EditSummary",
     doc: "Morphological cleanup.",
-    run: (h, [s, x]) => summary(h, morph(h.doc, h.env, region(h, s), ((o(x).mode as MorphMode) ?? "smooth"), { ...common(o(x)), ...(pick(o(x), ["threshold", "iterations", "material"]) as object) })),
+    run: (h, [s, x]) => summary(h, morph(h.doc, h.env, region(h, s), ((o(x).mode as MorphMode) ?? "smooth"), { ...common(o(x)), ...(pick(o(x), ["threshold", "iterations", "pattern"]) as object) })),
   },
   {
     name: "extrude",
@@ -157,7 +157,7 @@ export const SCRIPT_OPS: readonly ScriptOp[] = [
   },
   {
     name: "sweep",
-    params: 'profile: { u: number; v: number; block: Material }[], path: Vec3[], opts?: OpOpts & { curve?: "polyline" | "smooth" | "bezier" }',
+    params: 'profile: { u: number; v: number; block: Pattern }[], path: Vec3[], opts?: OpOpts & { curve?: "polyline" | "smooth" | "bezier" }',
     returns: "EditSummary",
     doc: "Places a cross-section along a path: a polyline, or a smooth (through the points) or bezier (controlled by them) curve (profile authored for travel north, u = east).",
     run: (h, [p, path, x]) => summary(h, sweep(h.doc, h.env, p as ProfileCell[], path as Vec3[], { ...common(o(x)), ...(o(x).curve ? { curve: o(x).curve as PathCurve } : {}) })),

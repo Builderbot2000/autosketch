@@ -1,5 +1,5 @@
 /**
- * Deterministic per-position randomness for material expressions (01: "same seed → same result").
+ * Deterministic per-position randomness for patterns (01: "same seed → same result").
  * A stateless hash of (seed, salt, x, y, z), so results don't depend on iteration order.
  */
 

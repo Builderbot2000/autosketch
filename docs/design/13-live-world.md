@@ -9,7 +9,7 @@ Two pieces make it work: a **companion mod** in the game, and a **world link** i
 - **The world is authoritative; the document is a cache.** The MCP keeps a local copy of the work and context volumes because every tool (selections, perception, scripts, scopes, the journal) runs on the in-memory document, and a block-by-block round trip to the game per query would be far too slow. The copy never wins a disagreement: whenever world and cache differ, the world's value replaces the cache's.
 - **The toolset doesn't change.** Tools keep acting on the document. The link sits beside it: it turns committed journal entries into patches for the world and brings world changes into the cache. No tool knows whether its document is linked.
 - **One scope model, from the world down.** The player-set volumes are a scope like any sandbox (`11`): the agent writes only inside the work volume, reads the context volume, and everything the link watches lies inside the two. Player edits outside both volumes are none of the link's business. Subagents fork from the root scope exactly as they fork from any base document.
-- **Never destroy a hand edit silently.** Every block the MCP sends carries the state it expects to replace (and, for blocks with a block entity, a hash of the NBT it expects). The mod only writes where the world still holds that state, and reports every block it skipped. Overwriting hand edits always needs an explicit request. This is the "strictly non-destructive" condition `12` set for writing into a live world.
+- **Never destroy a hand edit silently.** Every block the MCP sends carries the state it expects to replace (and, for blocks with a block entity, a hash of the NBT it expects). The mod only writes where the world still holds that state (a per-block **compare-and-set**, with the expected state as the **precondition**), and reports every block it skipped. Overwriting hand edits always needs an explicit request. This is the "strictly non-destructive" condition `12` set for writing into a live world.
 - **Server-side only, no new content.** The mod registers no blocks or items, so it runs in singleplayer (the game's built-in server) and on a dedicated server without clients installing anything.
 - **The same engine for both workflows.** An unlinked document is just a schematic, exactly as before. The link is an attachment, not a different kind of document.
 
@@ -20,7 +20,7 @@ Two pieces make it work: a **companion mod** in the game, and a **world link** i
 ┌──────────────────────────────┐                    ┌───────────────────────────┐
 │ tools ──► Document (cache) ──┼─ journal entry ──► │                           │
 │              ▲  journal      │    = patch          │  companion mod            │
-│              │               │  ◄── ack ───────── │   · guarded patch applier │
+│              │               │  ◄── ack ───────── │   · CAS patch applier     │
 │        world link            │                    │   · volume snapshots       │
 │   · patch sender             │  ◄── dirty ─────── │   · change tracker         │
 │   · sync (world → cache)     │  ── snapshot ────► │   · wand: volumes, focus   │
@@ -54,11 +54,11 @@ Every committed journal entry on the linked document becomes one patch. That cov
 
 **Patch contents:** an id, the dimension, and for each changed position: the world position, the **expected** state (the entry's before-state), the **expected NBT hash** when the before-block has a block entity, the new state, and block-entity NBT when the new block has any. States are full block-state strings with properties, exactly as the document holds them. Connection properties are already derived by the ops (`ops/connect.ts`), so the mod writes states as given.
 
-**Expected NBT hash.** A short hash of the block entity's NBT the cache holds, so the guard notices a hand edit that changed only a block's contents (a chest's items, a sign's text) without sending the whole expected NBT. Both sides hash the same canonical form: compound keys sorted recursively, binary NBT, then the hash *Wire format* names. The form leaves out position keys (`x`, `y`, `z`) and **volatile keys**: NBT that changes on its own while the game runs, such as a furnace's burn time, a hopper's cooldown or a Create machine's kinetic speed. Without that, a ticking block would look hand-edited forever. Volatile keys come from a list: a built-in default plus per-block entries plugins can add (`09`), and blocks can be marked "state only" so their NBT is never compared. The list lives on the MCP side and travels in `hello`, so the mod hashes the same way.
+**Expected NBT hash.** A short hash of the block entity's NBT the cache holds, so the precondition notices a hand edit that changed only a block's contents (a chest's items, a sign's text) without sending the whole expected NBT. Both sides hash the same canonical form: compound keys sorted recursively, binary NBT, then the hash *Wire format* names. The form leaves out position keys (`x`, `y`, `z`) and **volatile keys**: NBT that changes on its own while the game runs, such as a furnace's burn time, a hopper's cooldown or a Create machine's kinetic speed. Without that, a ticking block would look hand-edited forever. Volatile keys come from a list: a built-in default plus per-block entries plugins can add (`09`), and blocks can be marked "state only" so their NBT is never compared. The list lives on the MCP side and travels in `hello`, so the mod hashes the same way.
 
 **The mod applies a patch by these rules:**
 
-- **Guard:** for each position, compare the world's current state with the expected one and, when the patch carries an expected NBT hash, the hash of the world's block entity with it. If both match, write the new state. If not, skip it and record the world's actual state and, when it has one, its block-entity NBT.
+- **Precondition (compare-and-set):** for each position, compare the world's current state with the expected one and, when the patch carries an expected NBT hash, the hash of the world's block entity with it. If both match, write the new state. If not, skip it and record the world's actual state and, when it has one, its block-entity NBT.
 - **No side effects:** write without neighbour updates, physics or drops (the way Axiom and WorldEdit paste). Sand doesn't fall, water doesn't flow, redstone doesn't fire, and breaking a block never drops items. Old block entities are removed; new ones get the patch's NBT.
 - **Tick budget:** split large patches across ticks under a configurable per-tick block budget, so a big stamp doesn't freeze the game. Patches apply strictly in id order. A patch in progress is visible part-way, which is accepted.
 - **Unknown blocks:** a state the game doesn't know (a cache built from the wrong instance, a missing mod) is rejected for that position, never written as air.
@@ -73,7 +73,7 @@ Every committed journal entry on the linked document becomes one patch. That cov
 - **Journaled.** A sync is one journal entry, op name `world_sync`, holding whatever changed. `history`, `diff` and the `{"changed": …}` selection show what the world changed relative to the cache, which is mostly the player's hand edits.
 - **Pushes nothing.** Sync only writes the cache, so it is always safe to run. Its entry is never itself sent as a patch.
 - **Metadata survives.** Saved selections, anchors, palettes and checkpoints are kept. Selections stored as expressions re-resolve against the new blocks. Components keep their regions, and the sync result reports how many blocks changed inside each component it touched, rather than silently rewriting it.
-- **Automatic.** The MCP can't see user prompts, only tool calls, so "sync at the start of each turn" is implemented as: the mod tracks every block change inside the work or context volume that isn't one of its own patch writes (including Axiom edits, pistons, explosions, fluids), and reports the volumes dirty. Changes outside both volumes are ignored and never reported. Before running the next tool call on the linked document, the MCP syncs if the volumes are dirty. Dirty notices may carry the changed positions, so small hand edits sync without a snapshot. Contents-only changes (a chest's items) don't change block states, so the tracker doesn't see them; the NBT hash in the patch guard catches them when the agent next writes that block, and the next section-hash comparison catches them otherwise.
+- **Automatic.** The MCP can't see user prompts, only tool calls, so "sync at the start of each turn" is implemented as: the mod tracks every block change inside the work or context volume that isn't one of its own patch writes (including Axiom edits, pistons, explosions, fluids), and reports the volumes dirty. Changes outside both volumes are ignored and never reported. Before running the next tool call on the linked document, the MCP syncs if the volumes are dirty. Dirty notices may carry the changed positions, so small hand edits sync without a snapshot. Contents-only changes (a chest's items) don't change block states, so the tracker doesn't see them; the NBT hash in the patch precondition catches them when the agent next writes that block, and the next section-hash comparison catches them otherwise.
 - **Section hashes instead of full snapshots.** Both sides can hash the volumes per 16×16×16 chunk section: every position's canonical state and NBT hash, in a fixed order. When the MCP needs to know how far the cache has drifted (on reconnect, or after an "everything" dirty notice), it asks for the section hashes, compares them with its own, and snapshots only the sections that differ. A full snapshot of every section remains for linking, relinking and newly added context, when there is no cache to compare.
 - **Manual.** `world_sync` is also a tool the agent (or the player through the agent) can call at any time.
 
@@ -81,10 +81,10 @@ Every committed journal entry on the linked document becomes one patch. That cov
 
 The world has no undo history of its own, so the journal provides it.
 
-- **Undo and redo** produce journal entries like any op, and so become guarded patches. Expected states are the cache's current states, so a block the player changed after the last sync is skipped and reported.
+- **Undo and redo** produce journal entries like any op, and so become conditional patches. Expected states are the cache's current states, so a block the player changed after the last sync is skipped and reported.
 - **Sync barrier.** Undo and redo stop at a `world_sync` entry that changed blocks: going past it would push the pre-sync cache into the world and erase the player's hand edits. The refusal says so. `overwriteHandEdits: true` crosses the barrier.
-- **Restore to a checkpoint** pushes the difference between the cache and the checkpoint to the world as one guarded patch. If the path back crosses a sync barrier, it is refused the same way unless `overwriteHandEdits: true` is passed. It stays all or nothing in the cache, as in `11` (*Locks also guard undo and redo*): every step is checked before any is applied.
-- **`overwriteHandEdits: true`** also turns off the patch guard for that one patch, so the world is forced to the target state. The agent passes it only when the player has asked to discard their hand edits. The result reports how many hand-edited blocks were overwritten.
+- **Restore to a checkpoint** pushes the difference between the cache and the checkpoint to the world as one conditional patch. If the path back crosses a sync barrier, it is refused the same way unless `overwriteHandEdits: true` is passed. It stays all or nothing in the cache, as in `11` (*Locks also guard undo and redo*): every step is checked before any is applied.
+- **`overwriteHandEdits: true`** also turns off the patch precondition for that one patch, so the world is forced to the target state. The agent passes it only when the player has asked to discard their hand edits. The result reports how many hand-edited blocks were overwritten.
 - The barrier is enforced through `Document.guard` (`11`, *Implementation status*), so tools, scripts and history all obey it the same way they obey locks.
 
 Together these are the two directions:
@@ -105,9 +105,9 @@ world (the save)
          └─ nested sandbox   (up to scope.maxDepth)
 ```
 
-- **Sandboxes are unchanged** (`11`): unlinked sub-documents, so subagents draft privately and nothing reaches the world until merge. Their volumes must lie inside the root's volumes, as for any nested fork. The merge is one journal entry on the root, and therefore one guarded patch. The ratio limit for a fork from the root measures against the root's work volume.
+- **Sandboxes are unchanged** (`11`): unlinked sub-documents, so subagents draft privately and nothing reaches the world until merge. Their volumes must lie inside the root's volumes, as for any nested fork. The merge is one journal entry on the root, and therefore one conditional patch. The ratio limit for a fork from the root measures against the root's work volume.
 - **The root's volumes aren't a lock**, because the player who set them is not bound by locks. Agents' locks inside the root work as in `11`.
-- **The player is a writer who ignores locks.** A hand edit inside a locked work volume reaches the root through a sync, which is allowed: the world is authoritative. That breaks the merge's "parent unchanged since fork" check, so with a link the check is relaxed for positions changed by `world_sync` entries: the merge still applies, and those positions go out through the patch guard, which skips them if the world still holds the hand edit. The merge report lists them.
+- **The player is a writer who ignores locks.** A hand edit inside a locked work volume reaches the root through a sync, which is allowed: the world is authoritative. That breaks the merge's "parent unchanged since fork" check, so with a link the check is relaxed for positions changed by `world_sync` entries: the merge still applies, and those positions go out through the patch precondition, which skips them if the world still holds the hand edit. The merge report lists them.
 
 ## Connection
 
@@ -173,7 +173,7 @@ The player can ask the agent for something without leaving the game: stand in th
 | M2 | Server-side only: no registered blocks, items or other registry content; clients join without it. |
 | M3 | Work and context volumes: wand item marked with `custom_data` with work/context/focus modes (swap-hands key cycles), `/autosketch wand|mode|pos1|pos2|show|clear|status|notices`, `/autosketch context add|grow|clear`, a cap on context size, op level 2. |
 | M4 | Sends both volumes to the MCP on change; keeps their chunks loaded with a ticket while linked. |
-| M5 | Guarded patch applier: per-position expected-state and expected-NBT-hash check (volatile keys excluded), skip and report state and NBT on mismatch, reject unknown states. |
+| M5 | Conditional patch applier (per-block compare-and-set): per-position expected-state and expected-NBT-hash check (volatile keys excluded), skip and report state and NBT on mismatch, reject unknown states. |
 | M6 | Writes without neighbour updates, physics or drops; replaces block entities with the patch's NBT. |
 | M7 | Applies patches in order under a configurable per-tick block budget. |
 | M8 | Snapshots of the work and context volumes, whole or by chunk section: states and block-entity NBT. Per-section hashes on request. |
@@ -193,9 +193,9 @@ The player can ask the agent for something without leaving the game: stand in th
 | W4 | Ack handling: skipped and rejected positions written back into the cache as a `world_sync` entry, and summarized in a tool result. |
 | W5 | `world_sync` tool and automatic sync before a tool call when the volumes are dirty; section-hash comparison so only differing sections are snapshotted; journaled, pushes nothing, keeps metadata, reports component drift. |
 | W6 | Sync barrier for undo, redo and restore through `Document.guard`; `overwriteHandEdits` to cross it and to force one patch. |
-| W7 | Scope merges as one guarded patch; merge check relaxed for positions changed by syncs, listed in the report. |
+| W7 | Scope merges as one conditional patch; merge check relaxed for positions changed by syncs, listed in the report. |
 | W8 | Events for the viewer (`12`): `world.link`, `world.patch` (with ack counts), `world.sync`. |
-| W9 | A fake in-game host implementing the protocol in TypeScript, for unit tests of the guard, sync, barrier, merge and reconnect paths without a running game. |
+| W9 | A fake in-game host implementing the protocol in TypeScript, for unit tests of the precondition, sync, barrier, merge and reconnect paths without a running game. |
 | W10 | Canonical NBT hashing and section hashing identical to the mod's, with the volatile-key list (built-in default plus plugin entries) sent in `hello`. |
 | W11 | In-game requests: declared as a Claude Code channel; allowlist (`world.promptPlayers`); context converted to local coordinates and saved as the `focus` and `target` selections; one channel event per request, opening with the handoff facts; `prompt.result` back to the mod; activity stream from the event feed (coalesced, rate-limited) and the `world_reply` tool, sent as `chat`; request streams closed by `done` or idle time. |
 

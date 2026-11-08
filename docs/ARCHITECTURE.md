@@ -64,9 +64,9 @@ The agent has to understand (a) **what it can build with**: blocks, materials, p
 | 8 | Formats & export | Axiom `.schem`/`.bp`, Create `.nbt`, export targets | [design/08-formats.md](design/08-formats.md) |
 | 9 | Mod-compat plugins | Per-mod grouping, render hints and code-based actions | [design/09-mod-compat.md](design/09-mod-compat.md) |
 | 10 | Testing & evaluation | Unit/golden tests and the agent benchmark suite | [design/10-testing.md](design/10-testing.md) |
-| 11 | Scoped sessions | Isolated sandboxes (work + read-only context volume) for subagents, lock and wait, merge as one patch | [design/11-scoped-sessions.md](design/11-scoped-sessions.md) |
+| 11 | Scoped sessions | Isolated sandboxes (work + read-only context volume) for subagents, try-locks on work volumes, merge as one patch | [design/11-scoped-sessions.md](design/11-scoped-sessions.md) |
 | 12 | Observability | Event log, live localhost viewer (3D view, scope tree, locks, timeline), replay and time-lapse for the human; never read by agents | [design/12-observability.md](design/12-observability.md) |
-| 13 | Live world link | Companion mod plus world link: the player sets a work and context volume in-game, which makes the linked document the root scope (`11`); agent edits reach the world as guarded patches, hand edits sync back; the world is authoritative; the player can prompt the agent from the game | [design/13-live-world.md](design/13-live-world.md) |
+| 13 | Live world link | Companion mod plus world link: the player sets a work and context volume in-game, which makes the linked document the root scope (`11`); agent edits reach the world as conditional patches, hand edits sync back; the world is authoritative; the player can prompt the agent from the game | [design/13-live-world.md](design/13-live-world.md) |
 
 ## Dependency rules
 
@@ -75,7 +75,7 @@ The agent has to understand (a) **what it can build with**: blocks, materials, p
 - `palette/` depends on `assets/` and `plugins/`.
 - `ops/` depends on `document/`, `palette/` (material resolution), `library/` (prefabs) and `plugins/` (mod actions).
 - `perception/` depends on `document/` and `assets/` (models and textures). It never mutates.
-- `ops/` may use `perception/` read-only, for semantic selections (`enclosed`, `interior`, `top`, `changed`: measured geometry, no labels) and render-seeded selections (`view_box`, `view_lasso`, from stored render cameras). The dependency is one way: `perception/` never imports `ops/`. It takes already-resolved masks (`core/mask.ts`), and callers resolve selections first.
+- `ops/` may use `perception/` read-only, for morphological selections (`enclosed`, `interior`, `heightmap`, `changed`: measured geometry, no labels) and render-seeded selections (`view_box`, `view_lasso`, from stored render cameras). The dependency is one way: `perception/` never imports `ops/`. It takes already-resolved masks (`core/mask.ts`), and callers resolve selections first.
 - `observe/` reads `document/`, `assets/` and `perception/` (time-lapse snapshots use the renderer) and never mutates. `document/` and `server/` publish to it only through the `EventSink` interface in `core/` (`12`). The one exception is the process entry point, `server/index.ts`, which starts the observer: it wires the layers together, so it may import any of them.
 - `world/` (the live world link, `13`) reads and writes `document/`, consumes the journal's events through `EventSink`, and uses `scope/`'s volume rules for the root scope (one way: `scope/` never imports `world/`); no tool or op imports it. `server/index.ts` wires it in, like `observe/`. The companion mod (`mod/`, Java) shares nothing with `src/` but the protocol.
 - `server/` is a thin adapter: tool schemas plus calls into the layers above. All logic lives below it, so the same API powers the MCP tools, scripts and tests.

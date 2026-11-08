@@ -6,7 +6,7 @@
 
 ## Goal
 
-Link the base document to the world as the root scope (the player's work and context volumes), turn every committed journal entry on it into one guarded patch, then fold each ack back into the cache. No tool or op knows the link exists.
+Link the base document to the world as the root scope (the player's work and context volumes), turn every committed journal entry on it into one conditional patch, then fold each ack back into the cache. No tool or op knows the link exists.
 
 ## Deliverables, in merge order
 

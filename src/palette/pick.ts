@@ -241,7 +241,7 @@ export function resolveRole(index: PaletteIndex, palette: NamedPalette, role: st
 }
 
 /** "a 60%, b 40%" (conventions in docs/design/01-conventions.md). */
-export function materialExpression(r: Resolved): string {
+export function patternExpression(r: Resolved): string {
   if (r.entries.length === 0) throw new Error(`no blocks available${r.skipped.length ? ` (missing shape in: ${r.skipped.join(", ")})` : ""}`);
   if (r.entries.length === 1) return r.entries[0]!.block;
   const pct = r.entries.map((e) => Math.max(1, Math.round(e.weight * 100)));
@@ -270,7 +270,7 @@ export function describePalette(index: PaletteIndex, palette: NamedPalette): str
     const shapes = `shapes: ${common.length ? common.join(",") : "none common"}${partial.length ? `; some have ${partial.join(",")}` : ""}`;
     lines.push(`  ${role}: ${items}${more} — ${shapes}`);
   }
-  lines.push(`Use as material "palette:${palette.name}.<role>"; shaped ops pick each family's matching shape.`);
+  lines.push(`Use as a pattern "palette:${palette.name}.<role>"; shaped ops pick each family's matching shape.`);
   return lines.join("\n");
 }
 
@@ -298,7 +298,7 @@ export class PaletteBook {
     return b;
   }
 
-  /** Resolves "palette:<name>.<role>" to a material expression for a shape. */
+  /** Resolves "palette:<name>.<role>" to a pattern for a shape. */
   resolveMaterial(index: PaletteIndex, ref: string, shape: ShapeKind | "full" = "full"): { expression: string; warnings: string[] } {
     const m = /^palette:([^.]+)\.(.+)$/.exec(ref);
     if (!m) throw new Error(`not a palette reference: "${ref}" (expected palette:<name>.<role>)`);
@@ -306,6 +306,6 @@ export class PaletteBook {
     if (!p) throw new Error(`no palette "${m[1]}" (have: ${this.list().map((x) => x.name).join(", ") || "none"})`);
     const r = resolveRole(index, p, m[2]!, shape);
     const warnings = r.skipped.length ? [`${ref}: no ${shape} for ${r.skipped.join(", ")}; skipped`] : [];
-    return { expression: materialExpression(r), warnings };
+    return { expression: patternExpression(r), warnings };
   }
 }

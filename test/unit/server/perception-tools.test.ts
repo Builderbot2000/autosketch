@@ -41,7 +41,7 @@ describe("perception tools over MCP", () => {
     const call = (name: string, args: Record<string, unknown>) => client.callTool({ name, arguments: args });
 
     await call("doc_new", { name: "t", seed: 1 });
-    await call("fill", { box: { min: [0, 0, 0], max: [3, 3, 3] }, material: "andesite" });
+    await call("fill", { box: { min: [0, 0, 0], max: [3, 3, 3] }, pattern: "andesite" });
     const r = await call("render", { views: ["top"], size: 256, style: "flat", highlight: { changed: "op:-1" } });
     expect(r.isError).toBeFalsy();
     expect(seen.filter((e) => e.kind === "render.produced")).toEqual([{ kind: "render.produced", view: "top", size: [256, 256], source: "tool" }]);

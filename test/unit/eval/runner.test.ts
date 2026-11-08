@@ -24,13 +24,13 @@ const door = (x: number, z: number) => [
 ];
 const HUT: Step[] = [
   { tool: "doc_new", args: { name: "hut" } },
-  { tool: "fill", args: { sel: { min: [0, 0, 0], max: [4, 0, 4] }, material: "cobblestone" } },
-  { tool: "fill", args: { sel: { min: [0, 1, 0], max: [4, 3, 4] }, material: "oak_planks", mode: "walls" } },
+  { tool: "fill", args: { sel: { min: [0, 0, 0], max: [4, 0, 4] }, pattern: "cobblestone" } },
+  { tool: "fill", args: { sel: { min: [0, 1, 0], max: [4, 3, 4] }, pattern: "oak_planks", mode: "walls" } },
   { parallel: [
     { tool: "set_blocks", args: { blocks: door(2, 4) } },
     { tool: "set_blocks", args: { blocks: [[2, 2, 0], [0, 2, 2], [4, 2, 2]].map((pos) => ({ pos, block: "glass_pane" })) } },
   ] },
-  { tool: "fill", args: { sel: { min: [0, 4, 0], max: [4, 4, 4] }, material: "oak_planks" } },
+  { tool: "fill", args: { sel: { min: [0, 4, 0], max: [4, 4, 4] }, pattern: "oak_planks" } },
   { tool: "analyze", args: {} },
   { tool: "render", args: { views: ["iso_se"], size: 256 } },
   { text: "Built a 5×5 oak hut." },
@@ -101,10 +101,10 @@ describe("eval runner with a scripted driver (10, tier 3)", () => {
   it("starts from the seed document and checks it was preserved", async () => {
     const steps: Step[] = [
       { tool: "doc_open", args: { name: "porch" } },
-      { tool: "fill", args: { sel: { min: [2, 0, 7], max: [6, 0, 9] }, material: "oak_planks" } },
-      { tool: "fill", args: { sel: { min: [2, 1, 9], max: [2, 3, 9] }, material: "oak_planks" } },
-      { tool: "fill", args: { sel: { min: [6, 1, 9], max: [6, 3, 9] }, material: "oak_planks" } },
-      { tool: "fill", args: { sel: { min: [2, 4, 7], max: [6, 4, 9] }, material: "oak_planks" } },
+      { tool: "fill", args: { sel: { min: [2, 0, 7], max: [6, 0, 9] }, pattern: "oak_planks" } },
+      { tool: "fill", args: { sel: { min: [2, 1, 9], max: [2, 3, 9] }, pattern: "oak_planks" } },
+      { tool: "fill", args: { sel: { min: [6, 1, 9], max: [6, 3, 9] }, pattern: "oak_planks" } },
+      { tool: "fill", args: { sel: { min: [2, 4, 7], max: [6, 4, 9] }, pattern: "oak_planks" } },
       { text: "Added a porch." },
     ];
     const r = await runCase(promptById("m-porch")!, ablationByName("full")!, "main", opts(() => steps), tools);

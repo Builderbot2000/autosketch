@@ -59,7 +59,7 @@ describe("library tools", () => {
     expect(sheet.text).toMatch(/A1 stoop 2×1×2/);
 
     await call("doc_new", { name: "dst" });
-    await call("fill", { box: { min: [0, 0, 0], max: [4, 0, 4] }, material: "granite", as: "court" });
+    await call("fill", { box: { min: [0, 0, 0], max: [4, 0, 4] }, pattern: "granite", as: "court" });
     await call("palette_pick", { name: "castle", sheet: "family:minecraft:andesite", roles: { trim: "A1" } });
     const st = await call("stamp", { prefab: "A1", at: "court.top", palette_remap: { wood: "palette:castle.trim" } });
     expect(st.isError).toBeFalsy();

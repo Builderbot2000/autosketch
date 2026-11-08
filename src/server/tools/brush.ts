@@ -1,9 +1,9 @@
 import { z } from "zod";
 import type { Vec3 } from "../../core/region.js";
 import { array, extrude, hollow, morph, paint, sweep, type PathCurve, type ProfileCell } from "../../ops/brush.js";
-import type { MaterialExpr } from "../../ops/material.js";
+import type { PatternExpr } from "../../ops/pattern.js";
 import { formatEdit } from "../format.js";
-import { boxSchema, common, commonSchema, componentLine, env, materialSchema, regionOf, selSchema, vec3, type ToolDeps } from "./shared.js";
+import { boxSchema, common, commonSchema, componentLine, env, patternSchema, regionOf, selSchema, vec3, type ToolDeps } from "./shared.js";
 import { editWithPreview, previewSchema } from "./perception.js";
 
 const dirEnum = z.enum(["up", "down", "north", "south", "east", "west"]);
@@ -17,14 +17,14 @@ export function registerBrushTools({ tool, session }: ToolDeps): void {
     "hollow",
     {
       title: "Hollow",
-      description: "Keeps the outer shell (thickness, default 1) of a selection and clears the inside to air; material rewrites the shell too. Follows the selection's shape. One undo step. Text.",
-      inputSchema: { ...where, thickness: z.number().int().min(1).max(16).optional(), material: materialSchema.optional() },
+      description: "Keeps the outer shell (thickness, default 1) of a selection and clears the inside to air; pattern rewrites the shell too. Follows the selection's shape. One undo step. Text.",
+      inputSchema: { ...where, thickness: z.number().int().min(1).max(16).optional(), pattern: patternSchema.optional() },
       readOnly: false,
     },
     (c, a) =>
       editWithPreview(c, session, a.preview, (doc) => {
         const { region, label, notes } = regionOf(c, doc, a);
-        return formatEdit(doc, hollow(doc, env(c), region, a.thickness ?? 1, a.material as MaterialExpr | undefined, { ...common(a), ...(label ? { label } : {}) }), notesOf(a, notes));
+        return formatEdit(doc, hollow(doc, env(c), region, a.thickness ?? 1, a.pattern as PatternExpr | undefined, { ...common(a), ...(label ? { label } : {}) }), notesOf(a, notes));
       }),
   );
 
@@ -32,14 +32,14 @@ export function registerBrushTools({ tool, session }: ToolDeps): void {
     "paint",
     {
       title: "Paint surface",
-      description: 'Rewrites only exposed blocks (those touching air) in a selection with a material, e.g. "mossy_cobblestone 30%, cobblestone" for weathering. dirs limits which open faces count (["up"] = top surfaces). One undo step. Text.',
-      inputSchema: { ...where, material: materialSchema, dirs: z.array(dirEnum).optional() },
+      description: 'Rewrites only exposed blocks (those touching air) in a selection with a pattern, e.g. "mossy_cobblestone 30%, cobblestone" for weathering. dirs limits which open faces count (["up"] = top surfaces). One undo step. Text.',
+      inputSchema: { ...where, pattern: patternSchema, dirs: z.array(dirEnum).optional() },
       readOnly: false,
     },
     (c, a) =>
       editWithPreview(c, session, a.preview, (doc) => {
         const { region, label, notes } = regionOf(c, doc, a);
-        return formatEdit(doc, paint(doc, env(c), region, a.material as MaterialExpr, { ...common(a), ...(label ? { label } : {}), ...(a.dirs ? { dirs: a.dirs } : {}) }), notesOf(a, notes));
+        return formatEdit(doc, paint(doc, env(c), region, a.pattern as PatternExpr, { ...common(a), ...(label ? { label } : {}), ...(a.dirs ? { dirs: a.dirs } : {}) }), notesOf(a, notes));
       }),
   );
 
@@ -49,13 +49,13 @@ export function registerBrushTools({ tool, session }: ToolDeps): void {
       title: "Smooth / erode / dilate",
       description:
         "Morphological cleanup of terrain and organic shapes inside a selection. mode smooth (default: 3×3×3 majority) · erode (removes blocks with ≥ threshold air faces, default 3) · " +
-        "dilate (fills air with ≥ threshold solid faces, using material or the most common neighbour). iterations repeats. One undo step. Text.",
+        "dilate (fills air with ≥ threshold solid faces, using pattern or the most common neighbour). iterations repeats. One undo step. Text.",
       inputSchema: {
         ...where,
         mode: z.enum(["smooth", "erode", "dilate"]).optional(),
         threshold: z.number().int().min(1).max(6).optional(),
         iterations: z.number().int().min(1).max(16).optional(),
-        material: materialSchema.optional(),
+        pattern: patternSchema.optional(),
       },
       readOnly: false,
     },
@@ -67,7 +67,7 @@ export function registerBrushTools({ tool, session }: ToolDeps): void {
           ...(label ? { label } : {}),
           ...(a.threshold ? { threshold: a.threshold } : {}),
           ...(a.iterations ? { iterations: a.iterations } : {}),
-          ...(a.material !== undefined ? { material: a.material as MaterialExpr } : {}),
+          ...(a.pattern !== undefined ? { pattern: a.pattern as PatternExpr } : {}),
         });
         return formatEdit(doc, r, notesOf(a, notes));
       }),
@@ -98,7 +98,7 @@ export function registerBrushTools({ tool, session }: ToolDeps): void {
         "so a stair in the profile turns with the path, which follows its main horizontal direction. curve: polyline (default, straight segments) · smooth (a Catmull-Rom curve through every point) · " +
         "bezier (the points are one Bézier curve's control points; it passes through the first and last). One undo step. Text.",
       inputSchema: {
-        profile: z.array(z.object({ u: z.number().int(), v: z.number().int(), block: materialSchema })).min(1),
+        profile: z.array(z.object({ u: z.number().int(), v: z.number().int(), block: patternSchema })).min(1),
         path: z.array(vec3).min(2).describe("Path points [[x,y,z],...]"),
         curve: z.enum(["polyline", "smooth", "bezier"]).optional(),
         ...commonSchema,

@@ -72,8 +72,8 @@ export interface Scope {
 export interface ForkInput {
   /** Work volume, resolved in the parent's frame. */
   work: Mask;
-  /** Context volume (parent frame), or the work volume grown by `expand` blocks (default 3). */
-  context?: Mask | { expand: number };
+  /** Context volume (parent frame), or the work volume plus `padding` blocks (default 3). */
+  context?: Mask | { padding: number };
   brief: string;
   spec?: ScopeSpec;
   env?: ConnectEnv;
@@ -116,7 +116,7 @@ export function refusal(code: string, message: string): Error & { refusal: strin
   return Object.assign(new Error(message), { refusal: code });
 }
 
-const DEFAULT_EXPAND = 3;
+const DEFAULT_PADDING = 3;
 
 /** Neighbour offsets whose connection properties can depend on each other (as in ops/connect.ts). */
 const AROUND: Vec3[] = [
@@ -222,7 +222,7 @@ export class ScopeManager {
     }
 
     // Context: the selection or the grown work volume, whole blocks, minus the work volume.
-    let context = input.context instanceof Mask ? input.context.clone() : dilate(work, input.context?.expand ?? DEFAULT_EXPAND);
+    let context = input.context instanceof Mask ? input.context.clone() : dilate(work, input.context?.padding ?? DEFAULT_PADDING);
     context = extendWholeBlocks(parent, context, plugins).mask.subtract(work);
     let contextClipped = 0;
     if (ps) {
@@ -573,7 +573,7 @@ function translateSpec(spec: ScopeSpec, offset: Vec3): ScopeSpec {
 
 /** Grows a mask by `r` blocks in every direction (a cube kernel, separable). */
 export function dilate(m: Mask, r: number): Mask {
-  if (!Number.isInteger(r) || r < 0 || r > 64) throw new Error(`context expand must be an integer 0..64 (got ${r})`);
+  if (!Number.isInteger(r) || r < 0 || r > 64) throw new Error(`context padding must be an integer 0..64 (got ${r})`);
   let cur = m;
   for (let a = 0; a < 3; a++) {
     const next = cur.clone();

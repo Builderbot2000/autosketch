@@ -129,7 +129,7 @@ describe("script sandbox (05 Scripting)", () => {
 
   it("generates a .d.ts from the op registry", () => {
     const d = scriptApiDts([{ name: "framed.camo", params: "sel: SelLike", returns: "EditSummary", doc: "Camo.", run: () => null }]);
-    expect(d).toMatch(/declare function fill\(sel: SelLike, material: Material/);
+    expect(d).toMatch(/declare function fill\(sel: SelLike, pattern: Pattern/);
     expect(d).toMatch(/declare function sweep\(profile:/);
     expect(d).not.toMatch(/declare function (roof|tower|window|door|staircase|arch|column|wall_run)\(/);
     expect(d).toMatch(/declare const sel: \{/);

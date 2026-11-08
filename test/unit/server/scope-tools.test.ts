@@ -48,7 +48,7 @@ describe("scope tools over MCP (11)", () => {
   it("forks, requires scope on edits while open, works in the sandbox, and merges as one undo step", async () => {
     const { session, seen, call } = await start();
     await call("doc_new", { name: "castle", size: [32, 16, 32], seed: 1 });
-    await call("fill", { box: { min: [0, 0, 0], max: [31, 0, 31] }, material: "andesite" });
+    await call("fill", { box: { min: [0, 0, 0], max: [31, 0, 31] }, pattern: "andesite" });
     const f = await call("scope_fork", { work: { min: [8, 1, 8], max: [15, 8, 15] }, brief: "Build the keep", spec: { levels: { floor2: 5 } } });
     expect(f.isError).toBeFalsy();
     const ft = textOf(f);
@@ -57,20 +57,20 @@ describe("scope tools over MCP (11)", () => {
     expect(ft).toContain("floor2 4");
 
     // Every document tool takes scope; an edit without it is refused while the job is open.
-    const bare = await call("fill", { box: { min: [0, 1, 0], max: [0, 1, 0] }, material: "diorite" });
+    const bare = await call("fill", { box: { min: [0, 1, 0], max: [0, 1, 0] }, pattern: "diorite" });
     expect(bare.isError).toBe(true);
     expect(textOf(bare)).toMatch(/must name its target: scope:"<id>".*scope:"base"/);
     expect(seen.find((e) => e.kind === "call.refused")).toMatchObject({ tool: "fill", code: "scope_required" });
     // Reads without scope go to the base document.
     expect(textOf(await call("query_block", { pos: [8, 0, 8] }))).toMatch(/andesite/);
-    expect((await call("fill", { box: { min: [0, 1, 0], max: [0, 1, 0] }, material: "diorite", scope: "base" })).isError).toBeFalsy();
-    expect(textOf(await call("fill", { box: { min: [0, 1, 0], max: [0, 1, 0] }, material: "diorite", scope: "s9" }))).toMatch(/no open scope "s9"/);
+    expect((await call("fill", { box: { min: [0, 1, 0], max: [0, 1, 0] }, pattern: "diorite", scope: "base" })).isError).toBeFalsy();
+    expect(textOf(await call("fill", { box: { min: [0, 1, 0], max: [0, 1, 0] }, pattern: "diorite", scope: "s9" }))).toMatch(/no open scope "s9"/);
 
     // In the sandbox: local frame, writes outside the work volume refused, perception marks context.
-    const out = await call("fill", { box: { min: [0, 0, 0], max: [8, 0, 0] }, material: "diorite", scope: "s1" });
+    const out = await call("fill", { box: { min: [0, 0, 0], max: [8, 0, 0] }, pattern: "diorite", scope: "s1" });
     expect(textOf(out)).toMatch(/outside the work volume of scope s1/);
     expect(seen.filter((e) => e.kind === "call.refused").map((e) => (e as { code: string }).code)).toEqual(["scope_required", "scope_unknown", "outside_work_volume"]);
-    expect((await call("fill", { box: { min: [0, 0, 0], max: [7, 3, 7] }, material: "diorite", mode: "walls", scope: "s1" })).isError).toBeFalsy();
+    expect((await call("fill", { box: { min: [0, 0, 0], max: [7, 3, 7] }, pattern: "diorite", mode: "walls", scope: "s1" })).isError).toBeFalsy();
     expect(textOf(await call("query_block", { pos: [0, -1, 0], scope: "s1" }))).toMatch(/andesite/);
     const slice = textOf(await call("view_slice", { axis: "y", at: -1, scope: "s1" }));
     expect(slice).toMatch(/\| ctx$/m);
@@ -101,6 +101,7 @@ describe("scope tools over MCP (11)", () => {
     const { session, seen, call } = await start();
     await call("doc_new", { name: "c2", size: [16, 16, 16], seed: 1 });
     expect(textOf(await call("scope_fork", { work: { min: [0, 0, 0], max: [3, 3, 3] }, brief: "x" }))).toMatch(/^Small enough to do directly\./);
+    expect(textOf(await call("scope_fork", { work: { min: [0, 0, 0], max: [7, 7, 7] }, context: { expand: 2 }, brief: "x" }))).toMatch(/was renamed \{"padding": n\}/);
     expect(textOf(await call("scope_fork", { work: { min: [0, 0, 0], max: [15, 9, 15] }, brief: "x" }))).toMatch(/^This is most of your own job/);
     await call("scope_fork", { work: { min: [0, 0, 0], max: [7, 7, 7] }, brief: "a" });
     expect(textOf(await call("scope_fork", { work: { min: [4, 0, 0], max: [11, 7, 7] }, brief: "b", scope: "base" }))).toMatch(/overlaps the lock held by job s1/);

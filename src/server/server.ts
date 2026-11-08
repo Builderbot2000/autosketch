@@ -5,7 +5,7 @@ import { INSTRUCTIONS } from "./instructions.js";
 import { noteError, observeCall } from "./observe-call.js";
 import { defaultWorkspace, Session } from "./session.js";
 import { TOOL_GROUPS } from "./tools/index.js";
-import { fail, type ResourceFn, type Result, type ToolFn } from "./tools/shared.js";
+import { fail, scopeSchema, type ResourceFn, type Result, type ToolFn } from "./tools/shared.js";
 
 export const SERVER_NAME = "autosketch";
 export const SERVER_VERSION = "0.1.0";
@@ -26,12 +26,16 @@ export function createServer(ctx: Promise<InstanceContext>, opts: ServerOptions 
 
   const tool: ToolFn = <S extends z.ZodRawShape>(
     name: string,
-    config: { title: string; description: string; inputSchema: S; readOnly?: boolean },
+    config: { title: string; description: string; inputSchema: S; readOnly?: boolean; doc?: boolean },
     run: (c: InstanceContext, args: z.infer<z.ZodObject<S>>) => Promise<Result> | Result,
-  ) =>
-    server.registerTool(
+  ) => {
+    // Document tools take `scope` (11, Addressing); mutating ones must name it while scopes are open.
+    const scoped = config.doc !== false;
+    const inputSchema = scoped ? { ...config.inputSchema, scope: scopeSchema } : config.inputSchema;
+    const mutating = scoped && config.readOnly === false;
+    return server.registerTool(
       name,
-      { title: config.title, description: config.description, inputSchema: config.inputSchema, annotations: { readOnlyHint: config.readOnly ?? true, openWorldHint: false } },
+      { title: config.title, description: config.description, inputSchema, annotations: { readOnlyHint: config.readOnly ?? true, openWorldHint: false } },
       observeCall(() => session.events, name, async (args: z.infer<z.ZodObject<S>>) => {
         let c: InstanceContext;
         try {
@@ -40,12 +44,14 @@ export function createServer(ctx: Promise<InstanceContext>, opts: ServerOptions 
           return fail(`The Minecraft instance failed to load: ${(e as Error).message}`);
         }
         try {
-          return await run(c, args);
+          const scope = scoped ? ((args as { scope?: string }).scope ?? undefined) : undefined;
+          return await session.inScope(scope, mutating, () => run(c, args));
         } catch (e) {
           return noteError(fail((e as Error).message), e);
         }
       }) as never,
     );
+  };
 
   const resource = resourceRegistrar(server);
 

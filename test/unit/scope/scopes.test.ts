@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { refusalCode, type ObserveEvent } from "../../../src/core/events.js";
+import { Settings } from "../../../src/core/settings.js";
 import { Mask } from "../../../src/core/mask.js";
 import { fromPublic, type Vec3 } from "../../../src/core/region.js";
 import { Document } from "../../../src/document/document.js";
@@ -8,6 +9,7 @@ import type { AutosketchPlugin } from "../../../src/plugins/types.js";
 import { runScript } from "../../../src/script/run.js";
 import { extendWholeBlocks } from "../../../src/scope/multiblock.js";
 import { ScopeManager, seamShell } from "../../../src/scope/scopes.js";
+import { DEFAULT_SCOPE_LIMITS, scopeLimits } from "../../../src/scope/settings.js";
 import { vanillaRegistry } from "../../helpers/vanilla.js";
 
 const registry = vanillaRegistry({ "minecraft:oak_fence": ["minecraft:fences", "minecraft:wooden_fences"] });
@@ -270,6 +272,16 @@ describe("whole-block extension (11)", () => {
     expect(f.extension.positions()).toEqual([[8, 1, 3]]);
     expect(f.scope.workLocal.has(8, 1, 3)).toBe(true);
     expect(f.handoff).toContain("blocks (not the whole box)");
+  });
+});
+
+describe("scope settings", () => {
+  it("reads the three limits from server settings, with the defaults from 11", () => {
+    expect(scopeLimits(Settings.from([], {}))).toEqual(DEFAULT_SCOPE_LIMITS);
+    expect(DEFAULT_SCOPE_LIMITS).toEqual({ maxWorkRatio: 0.5, minWorkBlocks: 512, maxDepth: 3 });
+    const s = Settings.from(["--set", "scope.maxDepth=2", "--set=scope.maxWorkRatio=0.25"], { AUTOSKETCH_SCOPE_MIN_WORK_BLOCKS: "64" });
+    expect(scopeLimits(s)).toEqual({ maxWorkRatio: 0.25, minWorkBlocks: 64, maxDepth: 2 });
+    expect(() => scopeLimits(Settings.from(["--set", "scope.maxWorkRatio=2"], {}))).toThrow(/scope.maxWorkRatio/);
   });
 });
 

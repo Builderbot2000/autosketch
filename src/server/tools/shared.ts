@@ -25,10 +25,15 @@ export const image = (png: Buffer, caption: string): Result => ({
   ],
 });
 
-/** Registers one MCP tool. Errors thrown by `run` become error results; the instance is awaited first. */
+/**
+ * Registers one MCP tool. Errors thrown by `run` become error results; the instance is awaited first.
+ * Document tools (the default) also take an optional `scope` (11, *Addressing*), added by the
+ * wrapper: `session.require()` then returns the addressed document. `doc: false` marks a tool that
+ * addresses no document (instance, palettes, library listings, doc_new…).
+ */
 export type ToolFn = <S extends z.ZodRawShape>(
   name: string,
-  config: { title: string; description: string; inputSchema: S; readOnly?: boolean },
+  config: { title: string; description: string; inputSchema: S; readOnly?: boolean; doc?: boolean },
   run: (c: InstanceContext, args: z.infer<z.ZodObject<S>>) => Promise<Result> | Result,
 ) => unknown;
 
@@ -68,6 +73,10 @@ export interface ToolDeps {
 
 // ---- schemas -------------------------------------------------------------------------------------
 
+export const scopeSchema = z
+  .string()
+  .optional()
+  .describe('Scoped job to address: a scope id from scope_fork, or "base". Required on edits while any scoped job is open; omitted otherwise.');
 export const vec3 = z.tuple([z.number().int(), z.number().int(), z.number().int()]);
 export const boxSchema = z
   .object({ min: vec3, max: vec3 })
@@ -140,7 +149,7 @@ export function regionOf(
   return { region: r.mask, ...(typeof expr === "string" && expr !== "all" ? { label: `sel "${expr}"` } : {}), notes: r.notes };
 }
 
-/** Runs an edit on the open document and schedules the autosave. */
+/** Runs an edit on the addressed document and schedules the autosave. */
 export function editWith(session: Session, run: (doc: Document) => string): Result {
   const doc = session.require();
   const out = run(doc);

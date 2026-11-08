@@ -11,6 +11,7 @@ export function registerDocumentTools({ tool, session }: ToolDeps): void {
   tool(
     "doc_new",
     {
+      doc: false,
       title: "New document",
       description:
         "Starts a new schematic document and makes it current (the previous one is saved and closed). Optional size declares the build volume up front; " +
@@ -41,6 +42,7 @@ export function registerDocumentTools({ tool, session }: ToolDeps): void {
   tool(
     "doc_open",
     {
+      doc: false,
       title: "Open document",
       description:
         "Opens a saved document by name and makes it current (the previous one is saved and closed). With path, imports a schematic file instead " +
@@ -77,7 +79,7 @@ export function registerDocumentTools({ tool, session }: ToolDeps): void {
 
   tool(
     "doc_list",
-    { title: "List documents", description: "Lists documents saved in the workspace, newest first. Text.", inputSchema: {} },
+    { doc: false, title: "List documents", description: "Lists documents saved in the workspace, newest first. Text.", inputSchema: {} },
     async () => {
       const docs = await session.list();
       if (!docs.length) return text(`No documents in ${session.workspace} yet. Start one with doc_new.`);

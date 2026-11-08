@@ -66,7 +66,7 @@ describe("MCP server", () => {
       "analyze", "anchor", "arch", "array", "block_info", "checkpoint", "clear", "column", "copy", "diff", "doc_info", "doc_list", "doc_new", "doc_open", "door", "export",
       "extrude", "fill", "history", "hollow", "instance_info", "knowledge_list", "knowledge_read", "mirror", "move", "op_run", "ops_list", "paint", "palette_edit",
       "palette_list", "palette_load", "palette_pick", "palette_save", "palette_sheet", "palette_show", "prefab_save", "prefab_search", "prefab_sheet", "procedure_list", "query_block", "query_column",
-      "query_region", "raycast", "redo", "render", "replace", "restore", "roof", "rotate", "run_procedure", "run_script", "select", "set_blocks", "smooth", "staircase", "stamp",
+      "query_region", "raycast", "redo", "render", "replace", "restore", "roof", "rotate", "run_procedure", "run_script", "scope_abandon", "scope_fork", "scope_list", "scope_merge", "select", "set_blocks", "smooth", "staircase", "stamp",
       "sweep", "tower", "undo", "view_slice", "wall_run", "window",
     ]);
     expect(client.getInstructions()).toMatch(/palette:<name>\.<role>/);

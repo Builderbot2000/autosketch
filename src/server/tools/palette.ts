@@ -19,6 +19,7 @@ export function registerPaletteTools({ tool, session }: ToolDeps): void {
   tool(
     "palette_sheet",
     {
+      doc: false,
       title: "Palette sheet",
       description:
         "Shows building materials as a tilemap image with chessboard cell ids, plus a short caption. Default: the one-page overview (~1.5k tokens). " +
@@ -52,6 +53,7 @@ export function registerPaletteTools({ tool, session }: ToolDeps): void {
   tool(
     "palette_pick",
     {
+      doc: false,
       title: "Pick palette",
       description:
         "Saves a named palette by assigning cell ranges of a sheet to roles. A range becomes a weighted mix; a dye-series tile adds all its colours. " +
@@ -77,6 +79,7 @@ export function registerPaletteTools({ tool, session }: ToolDeps): void {
   tool(
     "palette_show",
     {
+      doc: false,
       title: "Show palette",
       description: "Describes a saved palette (roles, blocks, colours, available shapes), or lists saved palettes when no name is given. Text.",
       inputSchema: { name: z.string().optional() },
@@ -98,6 +101,7 @@ export function registerPaletteTools({ tool, session }: ToolDeps): void {
   tool(
     "palette_edit",
     {
+      doc: false,
       title: "Edit palette",
       description:
         "Changes a saved palette: add cells to a role, remove cells/blocks/families, swap a role's cells, reweight members, drop or rename roles. " +
@@ -128,6 +132,7 @@ export function registerPaletteTools({ tool, session }: ToolDeps): void {
   tool(
     "palette_list",
     {
+      doc: false,
       title: "List palettes",
       description: "Palettes in this session and saved in the library (name, roles, tags). palette_load brings a library palette in. Text.",
       inputSchema: { tags: z.array(z.string()).optional().describe("Library palettes with all these tags") },
@@ -146,6 +151,7 @@ export function registerPaletteTools({ tool, session }: ToolDeps): void {
   tool(
     "palette_save",
     {
+      doc: false,
       title: "Save palette to library",
       description: "Saves a session palette to the user library (palettes/<name>.json) with tags, so other documents can palette_load it. Text.",
       inputSchema: {
@@ -173,6 +179,7 @@ export function registerPaletteTools({ tool, session }: ToolDeps): void {
   tool(
     "palette_load",
     {
+      doc: false,
       title: "Load palette from library",
       description:
         "Brings a library palette into this session. Families missing from this instance are reported with the nearest-colour family suggested, and left out unless substitute:true. Text, <300 tokens.",

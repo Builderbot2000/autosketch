@@ -66,6 +66,7 @@ export function registerLibraryTools({ tool, resource, session }: ToolDeps): voi
   tool(
     "prefab_sheet",
     {
+      doc: false,
       title: "Prefab sheet",
       description:
         "Shows library prefabs as a tilemap of thumbnails with chessboard cell ids (≤24 per page, ~0.8k tokens) plus a caption with each cell's name and size. " +
@@ -93,6 +94,7 @@ export function registerLibraryTools({ tool, resource, session }: ToolDeps): voi
   tool(
     "prefab_search",
     {
+      doc: false,
       title: "Search prefabs",
       description: "Text search over library prefabs by words, tags and footprint. At most 10 results: id, size (x×z×height), tags, anchors, roles. Text, <300 tokens.",
       inputSchema: {
@@ -222,6 +224,7 @@ export function registerLibraryTools({ tool, resource, session }: ToolDeps): voi
   tool(
     "procedure_list",
     {
+      doc: false,
       title: "List procedures",
       description: "Saved scripts in the library (procedures/*.js) with their parameters from the header comment. Text.",
       inputSchema: { query: z.string().optional() },
@@ -248,6 +251,7 @@ export function registerLibraryTools({ tool, resource, session }: ToolDeps): voi
   tool(
     "knowledge_list",
     {
+      doc: false,
       title: "List knowledge packs",
       description: "Style, heuristic and technique packs in the library: names and one-line summaries only (cheap). Advice to weigh, not rules. Text.",
       inputSchema: {
@@ -261,6 +265,7 @@ export function registerLibraryTools({ tool, resource, session }: ToolDeps): voi
   tool(
     "knowledge_read",
     {
+      doc: false,
       title: "Read knowledge pack",
       description: "Full text of one knowledge pack (markdown, usually 0.3–1k tokens). Also available as the MCP resource autosketch://knowledge/<name>.",
       inputSchema: { name: z.string().describe('e.g. "heuristics/roofs" or "roofs"') },

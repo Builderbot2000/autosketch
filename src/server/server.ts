@@ -13,6 +13,12 @@ export const SERVER_VERSION = "0.1.0";
 export interface ServerOptions {
   /** Document session; defaults to one over the default workspace (~/autosketch). */
   session?: Session;
+  /**
+   * Tools to leave out of the tool list (setting `server.hideTools`), for eval ablations (10).
+   * The instructions gain one line naming them. Names that match no tool are passed to `log`.
+   */
+  hideTools?: Iterable<string>;
+  log?: (msg: string) => void;
 }
 
 /**
@@ -21,15 +27,20 @@ export interface ServerOptions {
  * Tool definitions live in tools/, one module per feature area.
  */
 export function createServer(ctx: Promise<InstanceContext>, opts: ServerOptions = {}): McpServer {
-  const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION }, { instructions: INSTRUCTIONS });
+  const hidden = new Set(opts.hideTools ?? []);
+  const instructions = hidden.size ? `${INSTRUCTIONS}\n\nNot available in this session: ${[...hidden].sort().join(", ")}.` : INSTRUCTIONS;
+  const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION }, { instructions });
   const session = opts.session ?? new Session(defaultWorkspace());
+  const seen = new Set<string>();
 
   const tool: ToolFn = <S extends z.ZodRawShape>(
     name: string,
     config: { title: string; description: string; inputSchema: S; readOnly?: boolean },
     run: (c: InstanceContext, args: z.infer<z.ZodObject<S>>) => Promise<Result> | Result,
-  ) =>
-    server.registerTool(
+  ) => {
+    seen.add(name);
+    if (hidden.has(name)) return undefined;
+    return server.registerTool(
       name,
       { title: config.title, description: config.description, inputSchema: config.inputSchema, annotations: { readOnlyHint: config.readOnly ?? true, openWorldHint: false } },
       observeCall(() => session.events, name, async (args: z.infer<z.ZodObject<S>>) => {
@@ -46,10 +57,13 @@ export function createServer(ctx: Promise<InstanceContext>, opts: ServerOptions 
         }
       }) as never,
     );
+  };
 
   const resource = resourceRegistrar(server);
 
   for (const register of TOOL_GROUPS) register({ tool, resource, session });
+  const unknown = [...hidden].filter((n) => !seen.has(n));
+  if (unknown.length) opts.log?.(`server.hideTools: no tool named ${unknown.join(", ")}`);
   return server;
 }
 

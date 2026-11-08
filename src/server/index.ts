@@ -4,7 +4,8 @@
  *
  *   autosketch --instance "/path/to/instance" [--version 1.21.1] [--base-jar client.jar] [--workspace ~/autosketch]
  *   (or AUTOSKETCH_INSTANCE / AUTOSKETCH_VERSION / AUTOSKETCH_BASE_JAR / AUTOSKETCH_WORKSPACE)
- *   settings: --set observe.log=false (or AUTOSKETCH_OBSERVE_LOG=false), see core/settings.ts
+ *   settings: --set observe.log=false (or AUTOSKETCH_OBSERVE_LOG=false), see core/settings.ts;
+ *   --set server.hideTools=analyze,render hides tools (eval ablations, docs/design/10)
  *
  * stdout carries the protocol; all logging goes to stderr.
  */
@@ -13,6 +14,7 @@ import { Settings } from "../core/settings.js";
 import { startObserve, type Observer } from "../observe/index.js";
 import { configFromEnv, loadInstanceContext } from "./context.js";
 import { createServer, SERVER_VERSION } from "./server.js";
+import { SERVER_HIDE_TOOLS } from "./settings.js";
 import { defaultWorkspace, Session } from "./session.js";
 import { bakerFor } from "./tools/shared.js";
 
@@ -31,14 +33,17 @@ async function main(): Promise<void> {
   // Observability (12): the process entry point is the one place that wires observe/ in; the
   // session, documents and tool wrapper only see the EventSink.
   let observer: Observer;
+  let hideTools: string[];
   try {
-    observer = startObserve({ workspace, settings: Settings.from(), version: SERVER_VERSION, getDoc: () => session.doc, getBaker: async () => bakerFor(await ctx), log });
+    const settings = Settings.from();
+    hideTools = settings.get(SERVER_HIDE_TOOLS);
+    observer = startObserve({ workspace, settings, version: SERVER_VERSION, getDoc: () => session.doc, getBaker: async () => bakerFor(await ctx), log });
   } catch (e) {
     log((e as Error).message);
     process.exit(2);
   }
   session.events = observer.sink("base");
-  const server = createServer(ctx, { session });
+  const server = createServer(ctx, { session, hideTools, log });
   const transport = new StdioServerTransport();
   // Save the open document before exiting, so a closed client never loses the last op.
   let closing = false;

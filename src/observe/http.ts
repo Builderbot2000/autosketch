@@ -180,7 +180,8 @@ export class ObserveHttp {
   }
 
   private events(url: URL, req: IncomingMessage, res: ServerResponse): void {
-    const since = Number(url.searchParams.get("since") ?? 0) || 0;
+    // EventSource sends Last-Event-ID when it reconnects; it wins over the original `since`.
+    const since = Math.max(Number(url.searchParams.get("since") ?? 0) || 0, Number(req.headers["last-event-id"] ?? 0) || 0);
     res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
     const first = this.ring[0]?.seq ?? this.opts.bus.lastSeq + 1;
     let out = "retry: 2000\n\n";

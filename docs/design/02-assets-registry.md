@@ -91,9 +91,11 @@ A block with no assets but present in a schematic is "unknown" (`01`).
 | `jar-index.json.gz` | per jar: absolute path + size + mtime | Filtered central-directory listings. Unchanged jars skip re-indexing |
 | `registry-<fp>.json.gz` | stack fingerprint (layer ids and fingerprints, in order) + `CACHE_VERSION` | The full registry |
 | `palette-<fp>-<key>.json.gz` | stack fingerprint + plugin set + tint biome (when not plains) + palette code hash | Families, series and per-family texture averages (colour stats) (`03`) |
-| `sheets/<key>.png` | stack fingerprint + palette index (families, series) + sheet code hash + tint biome + sheet spec (sheet, page, zoom) | Rendered tilemap sheets. Turned on by the server; `SheetRenderer` leaves it off unless given `cacheDir` |
+| `sheets/<group>-<spec>.png` | group: stack fingerprint + palette index (families, series) + sheet code hash + tint biome; spec: sheet, page, zoom | Rendered tilemap sheets. Turned on by the server; `SheetRenderer` leaves it off unless given `cacheDir` |
 
-Texture averages are stored per family inside the palette file, since that is the only place they are used; per-block stats are an intermediate step of building it. Nothing prunes stale entries yet: files for an older stack or code version simply stop being read.
+Texture averages are stored per family inside the palette file, since that is the only place they are used; per-block stats are an intermediate step of building it.
+
+**Pruning** (`pruneCache` in `assets/cache.ts`). Files for an older stack, plugin set or code version stop being read, so each cache prunes its own files when it loads: `loadRegistry` keeps the current `registry-*` file and the 2 most recently modified others, `loadPaletteIndex` the current `palette-*` file and 4 others (one file per plugin set and non-default tint biome, so more are in normal use), and a `SheetRenderer` on its first render keeps the current sheet group and 2 others, a group's files going together (sheets named with the earlier single hash count as one group each). Recency is the newest mtime in a group. Keeping recent others leaves room for a second instance or settings set sharing the cache. Leftover `.tmp` files from interrupted saves of those caches are removed after an hour. Only plain files directly in the cache folder whose names match that cache's pattern are considered (no recursion, no symlinks), so nothing else is touched. A file removed while another process wants it is just a cache miss. `jar-index.json.gz` is one file updated in place, and prefab thumbnails (`prefab-thumbs/`, `07`) are not pruned.
 
 **Warm start on Craftoria** (WSL, instance on `/mnt/c`) is about 3.5 s: locate about 0.7 s, stack about 2.8 s, registry about 0.2 s. What remains is filesystem latency through WSL's 9p bridge (stat/open on about 650 files, walking `kubejs/`), not parsing. A native Linux or Windows filesystem should be much faster.
 
@@ -105,7 +107,7 @@ Texture averages are stored per family inside the palette file, since that is th
 | Pack VFS | Built, with overlays, built-in packs, nested jars and the jar index cache. Pinned mod order (`modOrder`) built. `modOrder` and `tintBiome` are settings (`assets/settings.ts`, on the general settings module, `12` *Settings*), with the older flags and variables as aliases. |
 | Model resolution | Built. Tint biome configurable (`tintBiome`, default plains). Code-drawn fallbacks: silo E (`builtin-models/`). |
 | Registry | Built, cached. |
-| Caches | Jar index, registry, palette (families and texture averages), rendered sheets. No pruning. |
+| Caches | Jar index, registry, palette (families and texture averages), rendered sheets. Registry, palette and sheet files are pruned at load (current key plus the most recent others, by mtime; see *Pruning*). Prefab thumbnails are not pruned. |
 
 ## Legal stance
 

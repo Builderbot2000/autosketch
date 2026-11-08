@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { pruneCache } from "../assets/cache.js";
 import type { PackStack } from "../assets/pack.js";
 import type { Category } from "../plugins/types.js";
 import { chroma, colorName, hue, type Lab, type RGB } from "./color.js";
@@ -381,6 +382,7 @@ export class SheetRenderer {
   private readonly cacheDir?: string;
   private readonly tintBiome: string;
   private indexKey?: string;
+  private pruned?: Promise<string[]>;
 
   /**
    * `cacheDir`: keep rendered sheets as PNGs in `<cacheDir>/sheets/` (02, Cache), keyed by the
@@ -401,6 +403,11 @@ export class SheetRenderer {
   async render(spec: SheetSpec): Promise<RenderedSheet> {
     const layout = layoutSheet(this.index, spec);
     const file = this.cacheDir && join(this.cacheDir, `${this.cacheKey(layout)}.png`);
+    if (this.cacheDir) {
+      // Once per renderer: sheets of older palette indexes, code or tint biomes (02, Cache).
+      this.pruned ??= pruneCache(this.cacheDir, { match: /^([0-9a-f]{16})-[0-9a-f]+\.png$|^([0-9a-f]{24})\.png$/, current: this.groupKey() });
+      await this.pruned;
+    }
     if (file) {
       try {
         const png = await readFile(file);
@@ -424,15 +431,22 @@ export class SheetRenderer {
     return r;
   }
 
+  /** `<group>-<spec>`: the group (index, code, tint) lets pruning drop a stale index's sheets together. */
   private cacheKey(layout: SheetLayout): string {
+    return `${this.groupKey()}-${createHash("sha1").update(JSON.stringify(layout.spec)).digest("hex").slice(0, 16)}`;
+  }
+
+  private groupKey(): string {
     this.indexKey ??= createHash("sha1")
       .update(SHEET_CODE)
       .update(this.index.data.cacheVersion)
       .update(this.index.data.fingerprint)
       .update(JSON.stringify(this.index.data.families))
       .update(JSON.stringify(this.index.data.series))
-      .digest("hex");
-    return createHash("sha1").update(this.indexKey).update(this.tintBiome).update(JSON.stringify(layout.spec)).digest("hex").slice(0, 24);
+      .update(this.tintBiome)
+      .digest("hex")
+      .slice(0, 16);
+    return this.indexKey;
   }
 
   private async draw(layout: SheetLayout): Promise<RenderedSheet> {

@@ -7,8 +7,10 @@ import { arch, column, door, roof, staircase, tower, wallRun, window, type GenRe
 import type { MaterialExpr } from "../ops/material.js";
 import { checkSelectionName, freezeNodes, resolveSelection, summarize, type SelExpr } from "../ops/selection.js";
 import { copy, mirror, move, rotate } from "../ops/transform.js";
+import { stampPrefab, type StampOptions } from "../ops/stamp.js";
 import { regionSummary } from "../perception/query.js";
 import { MAX_ARRAY_ALONG, arrayAlong } from "./along.js";
+import type { PreloadedPrefabs } from "./prefabs.js";
 
 /**
  * The script op registry (docs/design/05-operations.md, Scripting L4): every function a script can
@@ -27,6 +29,27 @@ export interface ScriptHost {
   env: OpEnv;
   /** Ops that changed something, for the run's diff summary. */
   edits: number;
+  /** Prefabs loaded before the run, for `stamp` (see `prefabs.ts`). */
+  prefabs?: PreloadedPrefabs;
+}
+
+function stampOp(h: ScriptHost, ref: unknown, x: unknown): EditSummary {
+  if (typeof ref !== "string" || !ref) throw new Error('stamp takes a prefab name, e.g. stamp("hut", { at: [0, 0, 0] })');
+  const got = h.prefabs?.get(ref);
+  if (!got) throw new Error(`prefab "${ref}" wasn't loaded before the run: write its name as a string literal in stamp("…"), or list it in run_script's prefabs`);
+  if (got instanceof Error) throw got;
+  const a = o(x);
+  if (a.at === undefined) throw new Error("stamp needs at");
+  const opts: StampOptions = {
+    at: a.at as AtSpec,
+    ...(typeof a.anchor === "string" ? { anchor: a.anchor } : {}),
+    ...(a.palette_remap ? { remap: a.palette_remap as Record<string, string> } : {}),
+    ...(a.include_air ? { includeAir: true } : {}),
+    ...(typeof a.as === "string" ? { as: a.as } : {}),
+    ...(a.rotate !== undefined ? { rotate: a.rotate as number } : {}),
+    ...(a.mirror !== undefined ? { mirror: a.mirror as "x" | "z" } : {}),
+  };
+  return summary(h, stampPrefab(h.doc, h.env, got.prefab, got.loaded, opts));
 }
 
 export interface ScriptOp {
@@ -179,6 +202,13 @@ export const SCRIPT_OPS: readonly ScriptOp[] = [
   { name: "window", params: "opts: WindowOpts", returns: "EditSummary", doc: "Window in a component face (as the window tool).", run: (h, [x]) => summary(h, window(h.doc, h.env, o(x) as never)) },
   { name: "door", params: "opts: DoorOpts", returns: "EditSummary", doc: "Door in a component face (as the door tool).", run: (h, [x]) => summary(h, door(h.doc, h.env, o(x) as never)) },
   { name: "column", params: "material: Material, opts: ColumnOpts", returns: "EditSummary", doc: "Column (as the column tool).", run: (h, [m, x]) => summary(h, column(h.doc, h.env, m as MaterialExpr, o(x) as never)) },
+  {
+    name: "stamp",
+    params: "prefab: string, opts: StampOpts",
+    returns: "EditSummary",
+    doc: "Places a library prefab (as the stamp tool). The run loads prefabs first: write the name as a string literal, or list computed names in run_script's prefabs.",
+    run: (h, [p, x]) => stampOp(h, p, x),
+  },
 
   // -- reads --
   { name: "anchor", params: "at: At", returns: "Vec3", doc: "Resolves an at: form to a position.", run: (h, [a]) => resolveAnchor(h.doc, a as AtSpec, h.env).pos },

@@ -2,6 +2,7 @@ import { getQuickJS, type QuickJSWASMModule } from "quickjs-emscripten";
 import type { Document, EditResult } from "../document/document.js";
 import type { OpEnv } from "../ops/edit.js";
 import { SCRIPT_OPS, type ScriptHost, type ScriptOp } from "./ops.js";
+import { preloadPrefabs, stampLiterals, type PrefabSource } from "./prefabs.js";
 import { prelude } from "./prelude.js";
 
 /**
@@ -30,6 +31,13 @@ export interface RunOptions {
   seed?: number;
   /** Extra ops, e.g. plugin actions (see `ops.ts`). */
   ops?: readonly ScriptOp[];
+  /**
+   * Where `stamp` finds prefabs. They are loaded before the run (outside its time limit): every
+   * string literal passed to stamp() plus `preload`. Without a source, stamp throws.
+   */
+  prefabs?: PrefabSource;
+  /** Prefab names to load besides the literals, for names the script computes. */
+  preload?: readonly string[];
 }
 
 export interface ScriptRun {
@@ -66,10 +74,11 @@ export function scriptOps(extra: readonly ScriptOp[] = []): ScriptOp[] {
 
 export async function runScript(doc: Document, env: OpEnv, opts: RunOptions): Promise<ScriptRun> {
   const QJS = await quickjs();
+  const prefabs = opts.prefabs ? await preloadPrefabs(opts.prefabs, [...stampLiterals(opts.source), ...(opts.preload ?? [])]) : undefined;
   const timeoutMs = opts.timeoutMs ?? SCRIPT_DEFAULTS.timeoutMs;
   const ops = scriptOps(opts.ops);
   const byName = new Map(ops.map((o) => [o.name, o]));
-  const host: ScriptHost = { doc, env, edits: 0 };
+  const host: ScriptHost = { doc, env, edits: 0, ...(prefabs ? { prefabs } : {}) };
   let log = "";
   let logFull = false;
   const seed = opts.seed ?? doc.meta.seed;

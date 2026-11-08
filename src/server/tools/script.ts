@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { z } from "zod";
+import { loadPrefab } from "../../library/prefabs.js";
 import { scriptApiDts } from "../../script/dts.js";
 import { pluginScriptOps } from "../../script/plugins.js";
 import type { ScriptOp } from "../../script/ops.js";
@@ -7,6 +8,7 @@ import { runScript, ScriptError, type ScriptRun } from "../../script/run.js";
 import type { InstanceContext } from "../context.js";
 import { formatEdit } from "../format.js";
 import type { Session } from "../session.js";
+import { libraryFor } from "./library.js";
 import { env, fail, text, type Result, type ToolDeps } from "./shared.js";
 
 /** Scripting (05 L4): run_script and the API reference resource. */
@@ -19,11 +21,13 @@ export function extraScriptOps(c: InstanceContext): readonly ScriptOp[] {
 }
 
 /** Runs a script on the open document and formats the result (shared with run_procedure). */
-export async function runScriptTool(c: InstanceContext, session: Session, source: string, args: Record<string, unknown> | undefined, name: string, limits: { timeoutMs?: number } = {}): Promise<Result> {
+export async function runScriptTool(c: InstanceContext, session: Session, source: string, args: Record<string, unknown> | undefined, name: string, limits: { timeoutMs?: number } = {}, preload: readonly string[] = []): Promise<Result> {
   const doc = session.require();
+  const lib = libraryFor(c, session);
+  const prefabs = { resolve: (ref: string) => lib.resolve(ref), load: (p: Parameters<typeof loadPrefab>[0]) => loadPrefab(p, c.registry) };
   let run: ScriptRun;
   try {
-    run = await runScript(doc, env(c), { source, ...(args ? { args } : {}), name, ops: extraScriptOps(c), ...limits });
+    run = await runScript(doc, env(c), { source, ...(args ? { args } : {}), name, ops: extraScriptOps(c), prefabs, ...(preload.length ? { preload } : {}), ...limits });
   } catch (e) {
     if (e instanceof ScriptError) return fail([e.message, e.log ? `log:\n${e.log.trimEnd()}` : undefined].filter(Boolean).join("\n"));
     throw e;
@@ -46,16 +50,17 @@ export function registerScriptTools({ tool, resource, session }: ToolDeps): void
       description:
         "Runs JavaScript in a sandbox (QuickJS: no files, network or Node; 64 MB, 10 s) against the open document, for anything repetitive. The source is a function body: " +
         "args holds the arguments, return gives the result. API: sel.* builders (same trees as the tools), every op and generator (fill, replace, array, roof, tower, window…), " +
-        `component(), anchor(), palette(), query() (read-only), select(), positions(), log(), seeded rand(), and plugin ops as <plugin>.<op>({…same args as op_run}). Full reference: resource ${SCRIPT_API_URI}. ` +
+        `component(), anchor(), palette(), query() (read-only), select(), positions(), log(), seeded rand(), stamp("prefab", {at,…}) (string-literal names load before the run; list computed ones in prefabs), and plugin ops as <plugin>.<op>({…same args as op_run}). Full reference: resource ${SCRIPT_API_URI}. ` +
         "The whole run is one undo step; on an error or limit nothing changes. Returns the diff summary, the return value and the log. Text, <300 tokens.",
       inputSchema: {
         source: z.string().max(200_000),
         args: z.record(z.string(), z.unknown()).optional(),
         timeout_ms: z.number().int().min(100).max(60_000).optional().describe("Time limit (default 10000)"),
+        prefabs: z.array(z.string()).max(64).optional().describe("Prefab names to load before the run, for stamp() calls whose name isn't a string literal"),
       },
       readOnly: false,
     },
-    (c, a) => runScriptTool(c, session, a.source, a.args, "script", a.timeout_ms ? { timeoutMs: a.timeout_ms } : {}),
+    (c, a) => runScriptTool(c, session, a.source, a.args, "script", a.timeout_ms ? { timeoutMs: a.timeout_ms } : {}, a.prefabs ?? []),
   );
 
   resource(

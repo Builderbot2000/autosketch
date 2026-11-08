@@ -14,6 +14,7 @@ import { renderDocument } from "../../perception/render/render.js";
 import type { InstanceContext } from "../context.js";
 import { formatEdit } from "../format.js";
 import type { Session } from "../session.js";
+import { runProcedureFile } from "./script.js";
 import { bakerFor, boxSchema, editWith, env, image, regionOf, selSchema, text, vec3, type ToolDeps } from "./shared.js";
 
 /** Library roots for this server: AUTOSKETCH_LIBRARY or <workspace>/library, the starter library, and the instance's Axiom blueprints. */
@@ -111,8 +112,8 @@ export function registerLibraryTools({ tool, resource, session }: ToolDeps): voi
   );
 
   const atSchema = z
-    .union([vec3, z.string(), z.object({ anchor: z.string(), offset: vec3.optional() })])
-    .describe('[x,y,z], "component.anchor" (named anchors, or min/max/center/bottom/top), or {anchor:"gate.top", offset:[0,0,3]}');
+    .union([vec3, z.string(), z.object({ anchor: z.string(), offset: vec3.optional() }), z.object({ face: z.string(), u: z.union([z.number(), z.string()]).optional(), v: z.union([z.number(), z.string()]).optional(), offset: vec3.optional() })])
+    .describe('[x,y,z], "component.anchor" (named anchors, or min/max/center/bottom/top/front/back/left/right/storey:n), {anchor:"gate.top", offset:[0,0,3]}, or {face:"keep.front", u:0.5, v:"storey:2"}');
 
   tool(
     "stamp",
@@ -232,7 +233,7 @@ export function registerLibraryTools({ tool, resource, session }: ToolDeps): voi
     "run_procedure",
     {
       title: "Run procedure",
-      description: "Runs a saved procedure with arguments as one undo step. Not available yet: it needs the script sandbox. Text.",
+      description: "Runs a saved procedure (a script, see run_script) with arguments (its args) in the sandbox as one undo step; on an error nothing changes. Text, <300 tokens.",
       inputSchema: { name: z.string(), args: z.record(z.string(), z.unknown()).optional() },
       readOnly: false,
     },
@@ -240,8 +241,7 @@ export function registerLibraryTools({ tool, resource, session }: ToolDeps): voi
       const all = await listProcedures(rootsFor(session, c));
       const p = all.find((x) => x.name === a.name);
       if (!p) throw new Error(`no procedure "${a.name}"${all.length ? ` (have: ${all.map((x) => x.name).join(", ")})` : ""}`);
-      // TODO(silo C): run p.file in the QuickJS sandbox as one journal entry once it merges.
-      throw new Error(`run_procedure needs the script sandbox (silo C), which is not available yet. "${p.name}" is stored at ${p.file}; build its steps with the edit tools for now.`);
+      return runProcedureFile(c, session, p.file, p.name, a.args);
     },
   );
 

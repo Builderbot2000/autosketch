@@ -343,7 +343,7 @@ function inBox(b: WireBox, p: Vec3): boolean {
   return p[0] >= b.min[0] && p[0] <= b.max[0] && p[1] >= b.min[1] && p[1] <= b.max[1] && p[2] >= b.min[2] && p[2] <= b.max[2];
 }
 
-export function encodeSnapshotBody(palette: readonly string[], regions: readonly SnapshotRegion[], blockEntities: readonly { pos: Vec3; nbt: Compound }[]): Uint8Array {
+export function encodeSnapshotBody(palette: readonly string[], regions: readonly SnapshotRegion[]): Uint8Array {
   const remap = new Int32Array(palette.length).fill(-1);
   const used: string[] = [];
   let total = 0;
@@ -362,21 +362,24 @@ export function encodeSnapshotBody(palette: readonly string[], regions: readonly
   const w = new ByteWriter(Math.max(1024, total + 64));
   writeTable(w, used);
   for (const reg of regions) for (const s of reg.states) w.varint(remap[s]!);
-  const ords: [number, Compound][] = blockEntities.map((be) => {
-    let base = 0;
-    for (const reg of regions) {
-      if (inBox(reg.box, be.pos)) return [base + indexIn(boxGrid(reg.box), be.pos), be.nbt];
-      base += boxVolume(reg.box);
-    }
-    throw new Error(`snapshot block entity at ${be.pos.join(",")} lies in no region`);
-  });
-  ords.sort((a, b) => a[0] - b[0]);
-  for (let i = 1; i < ords.length; i++) if (ords[i]![0] === ords[i - 1]![0]) throw new Error("snapshot lists two block entities at one position");
+  const ords: [number, Compound][] = [];
+  let base = 0;
+  for (const reg of regions) {
+    const g = boxGrid(reg.box);
+    const local: [number, Compound][] = reg.blockEntities.map((be) => {
+      if (!inBox(reg.box, be.pos)) throw new Error(`snapshot block entity at ${be.pos.join(",")} lies outside its region`);
+      return [base + indexIn(g, be.pos), be.nbt];
+    });
+    local.sort((a, b) => a[0] - b[0]);
+    for (let i = 1; i < local.length; i++) if (local[i]![0] === local[i - 1]![0]) throw new Error("snapshot region lists two block entities at one position");
+    ords.push(...local);
+    base += reg.states.length;
+  }
   writeNbtList(w, ords);
   return w.finish();
 }
 
-export function decodeSnapshotBody(body: Uint8Array, boxes: readonly WireBox[]): Pick<SnapshotResult, "palette" | "regions" | "blockEntities"> {
+export function decodeSnapshotBody(body: Uint8Array, boxes: readonly WireBox[]): Pick<SnapshotResult, "palette" | "regions"> {
   const r = new ByteReader(body);
   const palette = readTable(r);
   let total = 0;
@@ -389,17 +392,14 @@ export function decodeSnapshotBody(body: Uint8Array, boxes: readonly WireBox[]):
       if (s >= palette.length) throw new Error(`snapshot: state index ${s} outside the palette of ${palette.length}`);
       states[i] = s;
     }
-    return { box, states };
+    return { box, states, blockEntities: [] };
   });
-  const blockEntities = readNbtList(r, total, "snapshot").map(([ord, nbt]) => {
-    let base = 0;
-    for (const reg of regions) {
-      const vol = reg.states.length;
-      if (ord < base + vol) return { pos: posAt(boxGrid(reg.box), ord - base), nbt };
-      base += vol;
-    }
-    throw new Error("unreachable");
-  });
+  let reg = 0, base = 0;
+  for (const [ord, nbt] of readNbtList(r, total, "snapshot")) {
+    while (ord >= base + regions[reg]!.states.length) base += regions[reg++]!.states.length;
+    const region = regions[reg]!;
+    region.blockEntities.push({ pos: posAt(boxGrid(region.box), ord - base), nbt });
+  }
   done(r, "snapshot");
-  return { palette, regions, blockEntities };
+  return { palette, regions };
 }

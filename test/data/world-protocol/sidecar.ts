@@ -54,7 +54,7 @@ export function sidecarOf(description: string, sender: Sender, m: Message, frame
       if (!m.everything) out.body = { palette: palette(m.blocks.map((b) => b.state)), blocks: worldBlocks(m.blocks) };
       break;
     case "snapshot.result":
-      out.body = { palette: m.palette, regions: m.regions.map((r) => Array.from(r.states)), blockEntities: m.blockEntities.map((b) => ({ pos: b.pos, nbt: toSnbt(b.nbt) })) };
+      out.body = { palette: m.palette, regions: m.regions.map((r) => ({ states: Array.from(r.states), blockEntities: r.blockEntities.map((b) => ({ pos: b.pos, nbt: toSnbt(b.nbt) })) })) };
       break;
   }
   return out;
@@ -85,8 +85,12 @@ export function messageOf(s: Sidecar): Message {
       if (h.everything) return { type: "dirty", everything: true };
       return { type: "dirty", everything: false, blocks: (b.blocks as any[]).map((x) => clean({ pos: x.pos, state: x.state, nbt: nbt(x.nbt) })) };
     case "snapshot.result": {
-      const regions = (h.regions as SnapshotResult["regions"][number]["box"][]).map((box, i) => ({ box, states: Uint32Array.from(b.regions[i] as number[]) }));
-      return { type: "snapshot.result", id: h.id as number, dimension: h.dimension as string, palette: b.palette, regions, blockEntities: (b.blockEntities as any[]).map((x) => ({ pos: x.pos, nbt: parseSnbt(x.nbt) })) };
+      const regions = (h.regions as SnapshotResult["regions"][number]["box"][]).map((box, i) => ({
+        box,
+        states: Uint32Array.from(b.regions[i].states as number[]),
+        blockEntities: (b.regions[i].blockEntities as any[]).map((x) => ({ pos: x.pos, nbt: parseSnbt(x.nbt) })),
+      }));
+      return { type: "snapshot.result", id: h.id as number, dimension: h.dimension as string, palette: b.palette, regions };
     }
     case "hashes.result":
       return { type: "hashes.result", id: h.id as number, sections: (h.sections as [number, number, number, string][]).map(([x, y, z, hash]) => ({ section: [x, y, z], hash })) };

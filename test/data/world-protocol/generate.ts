@@ -92,30 +92,33 @@ vector("snapshot-boxes", "mcp", "Full snapshot of the work and context boxes (li
 vector("snapshot-sections", "mcp", "Snapshot of the sections whose hashes differ", { type: "snapshot", id: 7, dimension: OW, sections: [[6, 4, -13], [7, 5, -12]] });
 
 // ── snapshot results ───────────────────────────────────────────────────────────────────────────
-vector("snapshot-result-empty", "mod", "Snapshot result with no regions", { type: "snapshot.result", id: 8, dimension: OW, palette: [], regions: [], blockEntities: [] });
+vector("snapshot-result-empty", "mod", "Snapshot result with no regions", { type: "snapshot.result", id: 8, dimension: OW, palette: [], regions: [] });
 vector("snapshot-result-one", "mod", "One one-block region holding stone", {
   type: "snapshot.result",
   id: 9,
   dimension: OW,
   palette: ["minecraft:stone"],
-  regions: [{ box: { min: [5, -60, 7], max: [5, -60, 7] }, states: Uint32Array.of(0) }],
-  blockEntities: [],
+  regions: [{ box: { min: [5, -60, 7], max: [5, -60, 7] }, states: Uint32Array.of(0), blockEntities: [] }],
 });
 {
   // Two regions: a 3×2×2 box and a 2×1×1 box. States listed x fastest, then z, then y.
   const pal = [AIR, "minecraft:stone_bricks", STAIRS, "minecraft:chest[facing=north,type=single,waterlogged=false]", "minecraft:oak_sign[rotation=8,waterlogged=false]"];
-  vector("snapshot-result-mixed", "mod", "Two regions with a mixed palette and two block entities (a chest and a sign with an emoji, exercising modified UTF-8)", {
+  vector("snapshot-result-mixed", "mod", "Three regions with a mixed palette and block entities (a chest and a sign with an emoji, exercising modified UTF-8); the third region overlaps the first, so the chest appears in both", {
     type: "snapshot.result",
     id: 10,
     dimension: OW,
     palette: pal,
     regions: [
-      { box: { min: [-2, 70, 3], max: [0, 71, 4] }, states: Uint32Array.of(1, 1, 1, 1, 3, 1, 0, 0, 2, 0, 0, 4) },
-      { box: { min: [40, 64, 40], max: [41, 64, 40] }, states: Uint32Array.of(2, 0) },
-    ],
-    blockEntities: [
-      { pos: [0, 71, 4], nbt: SIGN },
-      { pos: [-1, 70, 4], nbt: CHEST },
+      {
+        box: { min: [-2, 70, 3], max: [0, 71, 4] },
+        states: Uint32Array.of(1, 1, 1, 1, 3, 1, 0, 0, 2, 0, 0, 4),
+        blockEntities: [
+          { pos: [0, 71, 4], nbt: SIGN },
+          { pos: [-1, 70, 4], nbt: CHEST },
+        ],
+      },
+      { box: { min: [40, 64, 40], max: [41, 64, 40] }, states: Uint32Array.of(2, 0), blockEntities: [] },
+      { box: { min: [-1, 70, 4], max: [-1, 70, 4] }, states: Uint32Array.of(3), blockEntities: [{ pos: [-1, 70, 4], nbt: CHEST }] },
     ],
   });
 }

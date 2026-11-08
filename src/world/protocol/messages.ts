@@ -114,6 +114,8 @@ export interface SnapshotRegion {
   box: WireBox;
   /** Palette index per position of the box, x fastest, then z, then y. */
   states: Uint32Array;
+  /** Block entities inside the box (a position in two overlapping regions appears in both). */
+  blockEntities: { pos: Vec3; nbt: Compound }[];
 }
 
 export interface SnapshotResult {
@@ -122,7 +124,6 @@ export interface SnapshotResult {
   dimension: string;
   palette: string[];
   regions: SnapshotRegion[];
-  blockEntities: { pos: Vec3; nbt: Compound }[];
 }
 
 export interface PatchBlock {

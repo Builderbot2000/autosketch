@@ -67,7 +67,7 @@ function split(m: Message): { header: Record<string, unknown>; body: Uint8Array 
       if ("boxes" in m) return { header: { type: m.type, id: m.id, dimension: m.dimension, boxes: m.boxes.map(box) }, body: none };
       return { header: { type: m.type, id: m.id, dimension: m.dimension, sections: m.sections.map((s) => [s[0], s[1], s[2]]) }, body: none };
     case "snapshot.result":
-      return { header: { type: m.type, id: m.id, dimension: m.dimension, regions: m.regions.map((r) => box(r.box)) }, body: encodeSnapshotBody(m.palette, m.regions, m.blockEntities) };
+      return { header: { type: m.type, id: m.id, dimension: m.dimension, regions: m.regions.map((r) => box(r.box)) }, body: encodeSnapshotBody(m.palette, m.regions) };
     case "patch": {
       const e = encodePatchBody(m.blocks);
       return { header: { type: m.type, id: m.id, link: m.link, dimension: m.dimension, ...(m.force ? { force: true } : {}), ...grid(e.grid), count: m.blocks.length }, body: e.body };

@@ -363,7 +363,7 @@ The MCP relinks (fresh journal, full snapshot) when `dimension` or `work` differ
 | `dimension` | string | |
 | `regions` | Box[] | The boxes read, in request order (for `sections`, each section's box) |
 
-The body holds every position of every region, air included, as states, plus the NBT of every block entity in them.
+The body holds every position of every region, air included, as states, plus the NBT of every block entity in them. Regions may overlap (a context box overlapping the work volume); a position in two regions appears in both, with its NBT in both.
 
 **`patch`**, MCP → mod, with a body
 
@@ -510,10 +510,10 @@ Both sides compute it the same way: the mod over the world, the MCP over its cac
 `test/data/world-protocol/` holds one complete frame per file (`<name>.bin`, length prefix included) with a sidecar `<name>.json`:
 
 - `description`, `sender` (`"mcp"` or `"mod"`), and `header`, the frame's JSON header exactly.
-- `body`, for messages with a body: the decoded content in encoded order. Patches list `blocks` with world `pos`, `expected`, `expectedNbtHash`, `state` and `nbt`; acks list `skipped`, `rejected` (with `reason`) and `normalized`; dirty notices list `blocks`; snapshot results list each region's palette indices and `blockEntities`. The `palette` (and `reasons`) tables are given too, in their encoded order. NBT is written as SNBT (the game's `TagParser.parseTag` reads it).
+- `body`, for messages with a body: the decoded content in encoded order. Patches list `blocks` with world `pos`, `expected`, `expectedNbtHash`, `state` and `nbt`; acks list `skipped`, `rejected` (with `reason`) and `normalized`; dirty notices list `blocks`; snapshot results list each region's `states` (palette indices) and `blockEntities`. The `palette` (and `reasons`) tables are given too, in their encoded order. NBT is written as SNBT (the game's `TagParser.parseTag` reads it).
 - `generated`, instead of `body`, for `patch-large`: the rule that produces its blocks.
 
-There is a vector per message kind: `hello` both ways, `error`, `volumes` (with and without a work volume), `hashes` and its result, `snapshot` by boxes and by sections, `snapshot.result` (empty, one block, mixed palette with block entities), `patch` (empty, one block, mixed palette given out of order, block entities with expected NBT hashes, forced, large), `patch.ack` (all applied, mixed, forced, stale), `dirty` (positions, everything), `prompt` (full and minimal), `prompt.result` (delivered, refused), `notice` and `chat` (activity, reply). Hash vectors: `hash-nbt.json` (compounds with their volatile lists, canonical bytes in hex and hash: empty, unordered keys, nested, every tag type, modified UTF-8, furnace with and without volatile keys, a nested path and `*`, state only) and `hash-sections.json` (sections with their boxes and blocks and expected hash: full, a single position, negative coordinates with partial overlapping boxes, block entities with volatile and state-only types).
+There is a vector per message kind: `hello` both ways, `error`, `volumes` (with and without a work volume), `hashes` and its result, `snapshot` by boxes and by sections, `snapshot.result` (empty, one block, mixed palette with block entities and overlapping regions), `patch` (empty, one block, mixed palette given out of order, block entities with expected NBT hashes, forced, large), `patch.ack` (all applied, mixed, forced, stale), `dirty` (positions, everything), `prompt` (full and minimal), `prompt.result` (delivered, refused), `notice` and `chat` (activity, reply). Hash vectors: `hash-nbt.json` (compounds with their volatile lists, canonical bytes in hex and hash: empty, unordered keys, nested, every tag type, modified UTF-8, furnace with and without volatile keys, a nested path and `*`, state only) and `hash-sections.json` (sections with their boxes and blocks and expected hash: full, a single position, negative coordinates with partial overlapping boxes, block entities with volatile and state-only types).
 
 An implementation passes when it decodes every vector to its sidecar, re-encodes the sidecar to the same bytes (headers compared as JSON), and reproduces every hash. The vectors are synthetic, and they are frozen: a change to them is a protocol change.
 
@@ -604,7 +604,7 @@ Work is split into silos in `docs/briefs/world/`. Suggested order: protocol, has
 
 | Part | Silo | Status |
 |---|---|---|
-| Wire format, golden vectors, codec, hashing (W10), fake host (W9) | L | Protocol done, fake host in progress. *Wire format* above; vectors and hash vectors in `test/data/world-protocol/` (regenerate with `npx tsx test/data/world-protocol/generate.ts` only for a protocol change); codec, frame reader, hashing and pairing file in `src/world/protocol/`. A one-million-block patch encodes in about 0.1 s to 3.0 MB. The volatile-key default is the small starting list; growing it stays open (*Volatile keys*). |
+| Wire format, golden vectors, codec, hashing (W10), fake host (W9) | L | Done. *Wire format* above; vectors and hash vectors in `test/data/world-protocol/` (regenerate with `npx tsx test/data/world-protocol/generate.ts` only for a protocol change); codec, frame reader, hashing and pairing file in `src/world/protocol/`; fake host in `test/support/fake-host.ts` (handshake, compare-and-set with NBT hashes, normalized list, dirty notices, section hashes, snapshots, prompts, and hooks for player edits, ticks, volume changes, dropped connections and restarts; no tick budget or chunk loading). A one-million-block patch encodes in about 0.1 s to 3.0 MB. The volatile-key default is the small starting list; growing it stays open (*Volatile keys*). |
 
 ## Open questions
 

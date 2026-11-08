@@ -203,10 +203,9 @@ function randomMessage(r: () => number): [Message, Sender] {
       const palette = [...STATES];
       const regions = boxes.map((b) => {
         const vol = (b.max[0] - b.min[0] + 1) * (b.max[1] - b.min[1] + 1) * (b.max[2] - b.min[2] + 1);
-        return { box: b, states: Uint32Array.from({ length: vol }, () => Math.floor(r() * palette.length)) };
+        return { box: b, states: Uint32Array.from({ length: vol }, () => Math.floor(r() * palette.length)), blockEntities: r() < 0.7 ? [{ pos: b.max, nbt: randomNbt(r) }] : [] };
       });
-      const blockEntities = boxes.length && r() < 0.7 ? [{ pos: boxes[0]!.min, nbt: randomNbt(r) }] : [];
-      return [{ type: "snapshot.result", id: 3, dimension: "minecraft:overworld", palette, regions, blockEntities }, "mod"];
+      return [{ type: "snapshot.result", id: 3, dimension: "minecraft:overworld", palette, regions }, "mod"];
     }
   }
 }

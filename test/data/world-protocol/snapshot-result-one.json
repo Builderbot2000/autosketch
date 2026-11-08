@@ -17,8 +17,10 @@
       "minecraft:stone"
     ],
     "regions": [
-      [0]
-    ],
-    "blockEntities": []
+      {
+        "states": [0],
+        "blockEntities": []
+      }
+    ]
   }
 }

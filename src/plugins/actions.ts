@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { AutosketchPlugin, PluginAction } from "./types.js";
 
 /**
- * Plugin actions as ops named "<plugin id>.<name>" (09 `actions`; 05: discoverable through
+ * Plugin actions as ops named "<opNamespace or plugin id>.<name>" (09 `actions`; 05: discoverable through
  * `ops_list({ namespace })`).
  */
 
@@ -16,8 +16,9 @@ export interface ListedAction {
 export function listActions(plugins: readonly AutosketchPlugin[], namespace?: string): ListedAction[] {
   const out: ListedAction[] = [];
   for (const p of plugins) {
-    if (namespace && p.id !== namespace && !p.namespaces.includes(namespace)) continue;
-    for (const [name, action] of Object.entries(p.actions ?? {})) out.push({ op: `${p.id}.${name}`, plugin: p, action });
+    const prefix = p.opNamespace ?? p.id;
+    if (namespace && p.id !== namespace && prefix !== namespace && !p.namespaces.includes(namespace)) continue;
+    for (const [name, action] of Object.entries(p.actions ?? {})) out.push({ op: `${prefix}.${name}`, plugin: p, action });
   }
   return out.sort((a, b) => (a.op < b.op ? -1 : 1));
 }

@@ -90,6 +90,7 @@ export function checkPlugin(p: unknown): string | undefined {
   for (const f of FUNCTION_FIELDS) if (o[f] !== undefined && typeof o[f] !== "function") return `${f} must be a function`;
   if (o.variantTagNamespaces !== undefined && !(Array.isArray(o.variantTagNamespaces) && o.variantTagNamespaces.every((n) => typeof n === "string"))) return "variantTagNamespaces must be a string array";
   if (o.docs !== undefined && typeof o.docs !== "string") return "docs must be a string";
+  if (o.opNamespace !== undefined && (typeof o.opNamespace !== "string" || !/^[a-z0-9_-]+$/.test(o.opNamespace))) return "opNamespace must be a lowercase string of [a-z0-9_-]";
   if (o.actions !== undefined) {
     if (!o.actions || typeof o.actions !== "object") return "actions must be an object";
     for (const [name, a] of Object.entries(o.actions as Record<string, unknown>)) {

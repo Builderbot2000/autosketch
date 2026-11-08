@@ -64,7 +64,7 @@ describe("MCP server", () => {
     const tools = (await client.listTools()).tools.map((t) => t.name).sort();
     expect(tools).toEqual([
       "analyze", "array", "block_info", "checkpoint", "clear", "copy", "diff", "doc_info", "doc_list", "doc_new", "doc_open", "export",
-      "extrude", "fill", "history", "hollow", "instance_info", "knowledge_list", "knowledge_read", "mirror", "move", "ops_list", "paint", "palette_edit",
+      "extrude", "fill", "history", "hollow", "instance_info", "knowledge_list", "knowledge_read", "mirror", "move", "op_run", "ops_list", "paint", "palette_edit",
       "palette_list", "palette_load", "palette_pick", "palette_save", "palette_sheet", "palette_show", "prefab_save", "prefab_search", "prefab_sheet", "procedure_list", "query_block", "query_column",
       "query_region", "raycast", "redo", "render", "replace", "restore", "rotate", "run_procedure", "select", "set_blocks", "smooth", "stamp",
       "sweep", "undo", "view_slice",

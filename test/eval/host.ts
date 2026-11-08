@@ -7,7 +7,7 @@ import type { Document } from "../../src/document/document.js";
 import { renderDocument } from "../../src/perception/render/render.js";
 import { configFromEnv, loadInstanceContext, type InstanceContext } from "../../src/server/context.js";
 import { bakerFor } from "../../src/server/tools/shared.js";
-import { readEvents } from "./join.js";
+import { readWorkspaceEvents } from "../../src/observe/reader.js";
 import type { ServerHost, StdioServerSpec } from "./runner.js";
 
 /**
@@ -65,7 +65,7 @@ export class StdioHost implements ServerHost {
   /** The SDK closes the server's stdin at the end of a run; wait (≤ 10 s) until every opened document is saved and closed in the log. */
   async settle(workspace: string): Promise<void> {
     for (let i = 0; i < 50; i++) {
-      const { events } = await readEvents(workspace);
+      const { events } = await readWorkspaceEvents(workspace);
       const opens = events.filter((e) => e.kind === "session.open").length;
       if (opens && events.filter((e) => e.kind === "session.close").length >= opens) return;
       if (!events.length && i > 10) return; // nothing was ever opened

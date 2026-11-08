@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { fromPublic, type Vec3 } from "../../../src/core/region.js";
 import { Document } from "../../../src/document/document.js";
-import { array, extrude, hollow, line, morph, paint, sweep } from "../../../src/ops/brush.js";
+import { array, extrude, hollow, line, morph, paint, pathSteps, sweep } from "../../../src/ops/brush.js";
 import { fill, setBlocks } from "../../../src/ops/edit.js";
 import { vanillaRegistry } from "../../helpers/vanilla.js";
 
@@ -91,6 +91,25 @@ describe("brushes (05 L2)", () => {
     expect(at(doc, 2, 0, -3)).toBe("stone");
     expect(at(doc, 2, 0, -2)).toMatch(/^oak_stairs\[facing=east/);
     expect(line([0, 0, 0], [2, 1, 4])).toEqual([[0, 0, 0], [1, 0, 1], [1, 1, 2], [2, 1, 3], [2, 1, 4]]);
+  });
+
+  it("sweeps along smooth and Bézier curves without gaps, turning with the curve", () => {
+    const doc = newDoc();
+    const r = sweep(doc, env, [{ u: 0, v: 0, block: "stone" }, { u: 1, v: 0, block: "oak_stairs[facing=north]" }], [[0, 0, 0], [4, 0, -4], [8, 0, 0]], { curve: "smooth" });
+    const steps = pathSteps([[0, 0, 0], [4, 0, -4], [8, 0, 0]], "smooth");
+    expect(steps[0]![0]).toEqual([0, 0, 0]);
+    expect(steps[steps.length - 1]![0]).toEqual([8, 0, 0]);
+    expect(steps.some(([p]) => p.join() === "4,0,-4")).toBe(true); // smooth passes through every point
+    for (let i = 1; i < steps.length; i++) {
+      const [a, b] = [steps[i - 1]![0], steps[i]![0]];
+      expect(Math.max(...a.map((v, k) => Math.abs(v - b[k]!)))).toBe(1); // 26-connected, no gaps
+    }
+    // Heading follows the curve's main direction: the descending east leg ends heading south-east → east or south, never north.
+    expect(steps[steps.length - 1]![1]).not.toBe(0);
+    const bz = pathSteps([[0, 0, 0], [4, 0, -8], [8, 0, 0]], "bezier");
+    expect(bz.some(([p]) => p.join() === "4,0,-8")).toBe(false); // bezier is only pulled toward control points
+    expect(bz[bz.length - 1]![0]).toEqual([8, 0, 0]);
+    expect(() => pathSteps([[0, 0, 0], [1, 0, 0]], "spline" as never)).toThrow(/unknown curve/);
   });
 
   it("arrays a selection with a step and count, carrying block entities", () => {

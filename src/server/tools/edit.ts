@@ -80,7 +80,7 @@ export function registerEditTools({ tool, session }: ToolDeps): void {
       title: "Fill box",
       description:
         "Fills a selection (sel) or box with a material. mode: fill (solid, default) · hollow (shell of the material, inside cleared to air) · outline (shell only, inside untouched) · " +
-        "walls (sides only, no floor or ceiling) — shells follow the selection's shape, so a cylinder makes a round tower. thickness sets the shell width. " +
+        "walls (sides only, no floor or ceiling) — shells follow the selection's shape, so a cylinder makes a round shell. thickness sets the shell width. " +
         "as:\"name\" registers the box (a selection's bounding box) as a component. One undo step. Text.",
       inputSchema: {
         sel: selSchema.optional(),

@@ -9,7 +9,7 @@ import { registerPluginTools } from "./plugins.js";
 import { registerTransformTools } from "./transform.js";
 import { registerBrushTools } from "./brush.js";
 import { registerQueryTools } from "./query.js";
-import { registerGeneratorTools } from "./generators.js";
+import { registerAnchorTools } from "./anchor.js";
 import { registerScriptTools } from "./script.js";
 import { registerScopeTools } from "./scope.js";
 import type { ToolDeps } from "./shared.js";
@@ -28,7 +28,7 @@ export const TOOL_GROUPS: readonly ((deps: ToolDeps) => void)[] = [
   registerEditTools,
   registerTransformTools,
   registerBrushTools,
-  registerGeneratorTools,
+  registerAnchorTools,
   registerScriptTools,
   registerHistoryTools,
   registerExportTools,

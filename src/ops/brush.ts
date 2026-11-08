@@ -172,29 +172,86 @@ export interface ProfileCell {
   block: MaterialExpr;
 }
 
+/** How a sweep path is read: straight segments, a Catmull-Rom curve through the points, or one Bézier curve they control. */
+export type PathCurve = "polyline" | "smooth" | "bezier";
+
+type P3 = [number, number, number];
+
+/** Samples a curve through (smooth) or controlled by (bezier) the points, densely enough for blocks. */
+export function curvePoints(pts: Vec3[], curve: "smooth" | "bezier"): P3[] {
+  const len = pts.slice(1).reduce((s, p, i) => s + Math.hypot(p[0] - pts[i]![0], p[1] - pts[i]![1], p[2] - pts[i]![2]), 0);
+  const out: P3[] = [];
+  if (curve === "bezier") {
+    const n = Math.max(2, Math.ceil(len * 4));
+    for (let k = 0; k <= n; k++) {
+      // de Casteljau
+      const t = k / n;
+      let q: P3[] = pts.map((p) => [p[0], p[1], p[2]]);
+      while (q.length > 1) q = q.slice(1).map((b, i) => [0, 1, 2].map((a) => q[i]![a]! * (1 - t) + b[a]! * t) as P3);
+      out.push(q[0]!);
+    }
+    return out;
+  }
+  // Catmull-Rom (uniform), end points repeated so the curve starts and ends on them.
+  const P = (i: number) => pts[Math.max(0, Math.min(pts.length - 1, i))]!;
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const p0 = P(i - 1), p1 = P(i), p2 = P(i + 1), p3 = P(i + 2);
+    const n = Math.max(2, Math.ceil(Math.hypot(p2[0] - p1[0], p2[1] - p1[1], p2[2] - p1[2]) * 4));
+    for (let k = i === 0 ? 0 : 1; k <= n; k++) {
+      const t = k / n, t2 = t * t, t3 = t2 * t;
+      out.push([0, 1, 2].map((a) => 0.5 * (2 * p1[a]! + (-p0[a]! + p2[a]!) * t + (2 * p0[a]! - 5 * p1[a]! + 4 * p2[a]! - p3[a]!) * t2 + (-p0[a]! + 3 * p1[a]! - 3 * p2[a]! + p3[a]!) * t3)) as P3);
+    }
+  }
+  return out;
+}
+
+/** Heading of a move (0 = north, 1 = east, 2 = south, 3 = west) by its main horizontal direction. */
+function headingOf(a: Vec3, b: Vec3): number {
+  const dx = b[0] - a[0], dz = b[2] - a[2];
+  return Math.abs(dx) >= Math.abs(dz) ? (dx >= 0 ? (dx === 0 && dz === 0 ? 0 : 1) : 3) : dz > 0 ? 2 : 0;
+}
+
 /**
- * sweep: places a 2D cross-section along a 3D polyline (cornices, walls, roads, bridges). The
- * profile is authored for travel toward north (u = east, v = up); on each segment it turns with
- * the segment's main horizontal direction, and its block states turn with it (stairs, logs…).
+ * The path as blocks in walking order, each with its heading. A curve is sampled, rounded to
+ * blocks and joined by 3D lines (no gaps); its heading looks a few blocks either side, so a
+ * profile follows the curve rather than each stair-step of the rasterised line.
  */
-export function sweep(doc: Document, env: OpEnv, profile: ProfileCell[], path: Vec3[], opts: BrushOptions = {}): EditResult {
+export function pathSteps(path: Vec3[], curve: PathCurve = "polyline"): [Vec3, number][] {
+  const steps: [Vec3, number][] = [];
+  const push = (a: Vec3, b: Vec3, h: number) => {
+    for (const p of line(a, b)) if (!steps.length || steps[steps.length - 1]![0].join() !== p.join()) steps.push([p, h]);
+  };
+  if (curve === "polyline") {
+    for (let i = 0; i + 1 < path.length; i++) push(path[i]!, path[i + 1]!, headingOf(path[i]!, path[i + 1]!));
+    return steps;
+  }
+  if (curve !== "smooth" && curve !== "bezier") throw new Error(`unknown curve "${String(curve)}" (polyline, smooth, bezier)`);
+  const blocks: Vec3[] = [];
+  for (const q of curvePoints(path, curve)) {
+    const b: Vec3 = [Math.round(q[0]), Math.round(q[1]), Math.round(q[2])];
+    if (!blocks.length || blocks[blocks.length - 1]!.join() !== b.join()) blocks.push(b);
+  }
+  if (blocks.length === 1) blocks.push(blocks[0]!);
+  for (let i = 0; i + 1 < blocks.length; i++) push(blocks[i]!, blocks[i + 1]!, headingOf(blocks[Math.max(0, i - 2)]!, blocks[Math.min(blocks.length - 1, i + 3)]!));
+  return steps;
+}
+
+/**
+ * sweep: places a 2D cross-section along a 3D path (polyline, or a smooth/Bézier curve). The
+ * profile is authored for travel toward north (u = east, v = up); along the path it turns with
+ * the main horizontal direction of travel, and its block states turn with it (stairs, logs…).
+ */
+export function sweep(doc: Document, env: OpEnv, profile: ProfileCell[], path: Vec3[], opts: BrushOptions & { curve?: PathCurve } = {}): EditResult {
   if (!Array.isArray(profile) || profile.length === 0) throw new Error("profile needs at least one {u, v, block} cell");
   if (profile.length > 4096) throw new Error("profile may have at most 4096 cells");
   for (const c of profile) if (!Number.isInteger(c.u) || !Number.isInteger(c.v)) throw new Error(`profile cells need integer u and v (got ${JSON.stringify(c)})`);
   if (!Array.isArray(path) || path.length < 2) throw new Error("path needs at least two [x,y,z] points");
   for (const p of path) if (!Array.isArray(p) || p.length !== 3 || p.some((v) => !Number.isInteger(v))) throw new Error(`path points must be [x,y,z] integers (got ${JSON.stringify(p)})`);
-  // Rasterise the path, recording each step's heading (0 = north, 1 = east, 2 = south, 3 = west).
-  const steps: [Vec3, number][] = [];
-  for (let i = 0; i + 1 < path.length; i++) {
-    const a = path[i]!, b = path[i + 1]!;
-    const dx = b[0] - a[0], dz = b[2] - a[2];
-    const heading = Math.abs(dx) >= Math.abs(dz) ? (dx >= 0 ? (dx === 0 && dz === 0 ? 0 : 1) : 3) : dz > 0 ? 2 : 0;
-    for (const p of line(a, b)) if (!steps.length || steps[steps.length - 1]![0].join() !== p.join()) steps.push([p, heading]);
-  }
+  const steps = pathSteps(path, opts.curve ?? "polyline");
   if (steps.length * profile.length > 2_000_000) throw new Error("sweep would place over 2,000,000 blocks; shorten the path or the profile");
   const right: Vec3[] = [[1, 0, 0], [0, 0, 1], [-1, 0, 0], [0, 0, -1]];
   const turners = [0, 1, 2, 3].map((t) => stateTransformer({ turns: t }, { ...(env.registry ? { registry: env.registry } : {}), overrides: stateOverrides(env) }));
-  return opEdit(doc, env, "sweep", `sweep ${profile.length}-cell profile along ${path.length} points ${formatVec(path[0]!)}→${formatVec(path[path.length - 1]!)}${suffix(opts)}`, opts, (tx) => {
+  return opEdit(doc, env, "sweep", `sweep ${profile.length}-cell profile along ${path.length} points${opts.curve && opts.curve !== "polyline" ? ` (${opts.curve})` : ""} ${formatVec(path[0]!)}→${formatVec(path[path.length - 1]!)}${suffix(opts)}`, opts, (tx) => {
     const ctx = materialContext(doc, env, tx);
     const mats = profile.map((c) => compileMaterial(c.block, ctx));
     let box: Box | undefined;

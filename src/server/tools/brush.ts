@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Vec3 } from "../../core/region.js";
-import { array, extrude, hollow, morph, paint, sweep, type ProfileCell } from "../../ops/brush.js";
+import { array, extrude, hollow, morph, paint, sweep, type PathCurve, type ProfileCell } from "../../ops/brush.js";
 import type { MaterialExpr } from "../../ops/material.js";
 import { formatEdit } from "../format.js";
 import { boxSchema, common, commonSchema, componentLine, env, materialSchema, regionOf, selSchema, vec3, type ToolDeps } from "./shared.js";
@@ -94,17 +94,19 @@ export function registerBrushTools({ tool, session }: ToolDeps): void {
     {
       title: "Sweep profile",
       description:
-        "Places a 2D cross-section along a polyline path (cornices, walls, roads, bridges). profile cells {u, v, block}: u = blocks to the right of travel, v = up; authored for travel toward north, " +
-        "so a stair in the profile turns with each segment. Segments follow their main horizontal direction. One undo step. Text.",
+        "Places a 2D cross-section along a path. profile cells {u, v, block}: u = blocks to the right of travel, v = up; authored for travel toward north, " +
+        "so a stair in the profile turns with the path, which follows its main horizontal direction. curve: polyline (default, straight segments) · smooth (a Catmull-Rom curve through every point) · " +
+        "bezier (the points are one Bézier curve's control points; it passes through the first and last). One undo step. Text.",
       inputSchema: {
         profile: z.array(z.object({ u: z.number().int(), v: z.number().int(), block: materialSchema })).min(1),
-        path: z.array(vec3).min(2).describe("Polyline points [[x,y,z],...]"),
+        path: z.array(vec3).min(2).describe("Path points [[x,y,z],...]"),
+        curve: z.enum(["polyline", "smooth", "bezier"]).optional(),
         ...commonSchema,
         preview: previewSchema,
       },
       readOnly: false,
     },
-    (c, a) => editWithPreview(c, session, a.preview, (doc) => formatEdit(doc, sweep(doc, env(c), a.profile as ProfileCell[], a.path as Vec3[], common(a)), componentLine(a))),
+    (c, a) => editWithPreview(c, session, a.preview, (doc) => formatEdit(doc, sweep(doc, env(c), a.profile as ProfileCell[], a.path as Vec3[], { ...common(a), ...(a.curve ? { curve: a.curve as PathCurve } : {}) }), componentLine(a))),
   );
 
   tool(
@@ -112,7 +114,7 @@ export function registerBrushTools({ tool, session }: ToolDeps): void {
     {
       title: "Array",
       description:
-        "Repeats a selection count times in total (the original plus count-1 copies), each shifted by step [dx,dy,dz]: window bays, columns, crenellations. Air in the selection is copied unless skip_air. One undo step. Text.",
+        "Repeats a selection count times in total (the original plus count-1 copies), each shifted by step [dx,dy,dz]. Air in the selection is copied unless skip_air. One undo step. Text.",
       inputSchema: { ...where, step: vec3, count: z.number().int().min(2).max(1024), skip_air: z.boolean().optional() },
       readOnly: false,
     },

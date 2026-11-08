@@ -9,22 +9,21 @@ import type { OpEnv } from "./edit.js";
  *   [x, y, z]                                  a document-local position
  *   "tower_ne.top"                             a component anchor (named or implicit)
  *   { anchor: "gatehouse.door", offset: [0, 0, 3] }
- *   { face: "keep.front", u: 0.5, v: "storey:2" }   a point on a component's face
+ *   { face: "keep.front", u: 0.5, v: 3 }      a point on a component's face
  *
  * Implicit anchors of every component: `min`, `max` (its corner blocks), `center`, `bottom` (centre
  * of the lowest layer), `top` (centre, one above the box), the face centres `front`, `back`,
  * `left`, `right` (on the box's outer layer, at mid-height; resolved through the document's
- * front, `01`), and `storey:n` (box centre at the y of the component's named `storey:n` anchor).
- * Named anchors win over implicit ones. A bare component id means its `base` anchor, else `bottom`.
+ * front, `01`). Named anchors (any name the caller sets) win over implicit ones. A bare component id means its `base` anchor, else `bottom`.
  *
  * Face coordinates: `u` runs across the face from the viewer's left to right (standing outside,
  * looking at it), `v` from the bottom up; on `top`/`bottom` faces u runs east and v south. A number
  * in 0..1 is a fraction of the face (0 = first block, 1 = last), a larger number a block offset from
  * the start, a negative one counts back from the far end (-1 = last block), and a numeric string
- * ("1") is always a block offset. `v: "storey:n"` is storey n's standing level.
+ * ("1") is always a block offset.
  *
- * Storey levels come only from the component's named anchors (`storey:n` or `storey_n`, whose y is
- * the level); they are never inferred. Every resolution returns a description that echoes the
+ * Nothing here names a building part: anchors are geometry (box corners, centres, faces) plus
+ * whatever names the caller gives. Every resolution returns a description that echoes the
  * absolute coordinates.
  */
 
@@ -92,7 +91,7 @@ export function resolveAnchor(doc: Document, at: AtSpec, env: AnchorEnv = {}): R
     const f = at as FaceAt;
     const face = resolveFace(doc, f.face);
     const iu = faceIndex(f.u ?? 0.5, face.width, "u");
-    const iv = typeof f.v === "string" && /^storey[:_]/.test(f.v) ? storeyLevel(doc, face.component, storeyNumber(f.v)) - face.origin[1] : faceIndex(f.v ?? 0.5, face.height, "v");
+    const iv = faceIndex(f.v ?? 0.5, face.height, "v");
     const p = facePoint(face, iu, iv);
     const pos = addOffset(p, f.offset);
     return { pos, desc: `${f.face}(u ${JSON.stringify(f.u ?? 0.5)}, v ${JSON.stringify(f.v ?? 0.5)})${f.offset ? ` + ${formatVec(f.offset)}` : ""} = ${formatVec(pos)}` };
@@ -139,11 +138,7 @@ function namedAnchor(doc: Document, ref: string, env: AnchorEnv): Vec3 {
   if (c.anchors[name]) return [...c.anchors[name]!];
   const implicit = implicitAnchors(doc, c.box);
   if (implicit[name]) return implicit[name]!;
-  if (/^storey[:_]\d+$/.test(name)) {
-    const y = storeyLevel(doc, comp, storeyNumber(name));
-    return [implicit.center![0], y, implicit.center![2]];
-  }
-  throw new Error(`component "${comp}" has no anchor "${name}" (named: ${Object.keys(c.anchors).join(", ") || "none"}; implicit: ${Object.keys(implicit).join(", ")}, storey:n)`);
+  throw new Error(`component "${comp}" has no anchor "${name}" (named: ${Object.keys(c.anchors).join(", ") || "none"}; implicit: ${Object.keys(implicit).join(", ")})`);
 }
 
 /**
@@ -195,7 +190,7 @@ export function facePoint(f: Face, iu: number, iv: number): Vec3 {
 /** A u or v coordinate as a block index on a face `len` blocks long (see the module doc). */
 export function faceIndex(x: number | string, len: number, what: string): number {
   if (typeof x === "string") {
-    if (!/^-?\d+$/.test(x.trim())) throw new Error(`${what} must be a number, a block offset string such as "2"${what === "v" ? ', or "storey:n"' : ""} (got "${x}")`);
+    if (!/^-?\d+$/.test(x.trim())) throw new Error(`${what} must be a number, a block offset string such as "2" (got "${x}")`);
     const n = Number(x);
     return n < 0 ? len + n : n;
   }
@@ -203,24 +198,6 @@ export function faceIndex(x: number | string, len: number, what: string): number
   if (x >= 0 && x <= 1) return Math.round(x * (len - 1));
   if (!Number.isInteger(x)) throw new Error(`${what} must be a fraction 0..1 or a whole block offset (got ${x})`);
   return x < 0 ? len + x : x;
-}
-
-function storeyNumber(s: string): number {
-  const m = /^storey[:_](\d+)$/.exec(s);
-  if (!m || Number(m[1]) < 1) throw new Error(`storeys are numbered from 1: "storey:1", "storey:2"… (got "${s}")`);
-  return Number(m[1]);
-}
-
-/**
- * The standing level of storey `n` of a component: the y of its named anchor `storey:n` (or
- * `storey_n`). Storeys are never inferred from the voxels (06: no architectural labels).
- */
-export function storeyLevel(doc: Document, comp: string, n: number): number {
-  const c = doc.componentLocal(comp);
-  if (!c) throw new Error(noComponent(doc, comp));
-  const named = c.anchors[`storey:${n}`] ?? c.anchors[`storey_${n}`];
-  if (named) return named[1];
-  throw new Error(`component "${comp}" has no anchor "storey:${n}"; storey levels are not inferred, so name one with the anchor tool (its y is the standing level)`);
 }
 
 function addOffset(p: Vec3, o: Vec3 | undefined): Vec3 {

@@ -102,18 +102,19 @@ describe("script sandbox (05 Scripting)", () => {
     expect(a.result.changed).toBe(0);
   });
 
-  it("sel.* compiles to the JSON trees the tools use, and generators run in scripts", async () => {
+  it("sel.* compiles to the JSON trees the tools use, and shape ops run in scripts", async () => {
     const doc = newDoc();
     const r = await runScript(doc, env, {
       source: `const s = sel.subtract(sel.box([0,0,0],[4,0,4]), sel.cylinder([2,0,2], 1, 1));
-        roof(sel.box([10,0,0],[12,0,2]), "oak_planks", { style: "hip", as: "hut_roof" });
-        tower("stone_bricks", { at: [20, 0, 0], radius: 2, height: 3, roof: false });
+        sel.polygon([[10,0],[14,0],[12,3]], 0, 2).fill("oak_planks", { as: "prism" });
+        sweep([{ u: 0, v: 0, block: "stone_bricks" }], [[20,0,0],[24,0,2],[28,0,0]], { curve: "smooth", as: "path" });
         return s;`,
     });
     expect(JSON.parse(r.value!)).toEqual({ subtract: [{ min: [0, 0, 0], max: [4, 0, 4] }, { cylinder: { center: [2, 0, 2], radius: 1, height: 1 } }] });
-    expect(r.added.sort()).toEqual(["hut_roof", "tower"]);
+    expect(r.added.sort()).toEqual(["path", "prism"]);
     expect(r.edits).toBe(2);
-    expect(at(doc, 11, 2, 1)).toBe("oak_planks");
+    expect(at(doc, 12, 2, 1)).toBe("oak_planks");
+    expect(at(doc, 24, 0, 2)).toBe("stone_bricks");
     doc.undo();
     expect(doc.blockCount()).toBe(0);
   });
@@ -129,7 +130,8 @@ describe("script sandbox (05 Scripting)", () => {
   it("generates a .d.ts from the op registry", () => {
     const d = scriptApiDts([{ name: "framed.camo", params: "sel: SelLike", returns: "EditSummary", doc: "Camo.", run: () => null }]);
     expect(d).toMatch(/declare function fill\(sel: SelLike, material: Material/);
-    expect(d).toMatch(/declare function roof\(over: SelLike/);
+    expect(d).toMatch(/declare function sweep\(profile:/);
+    expect(d).not.toMatch(/declare function (roof|tower|window|door|staircase|arch|column|wall_run)\(/);
     expect(d).toMatch(/declare const sel: \{/);
     expect(d).toMatch(/declare function rand\(\): number;/);
     expect(d).toMatch(/declare namespace framed \{\n.*\n {2}function camo\(sel: SelLike\): EditSummary;/);

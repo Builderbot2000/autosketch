@@ -60,19 +60,18 @@ describe("anchors (05)", () => {
     expect(resolveFace(doc, "keep.front")).toMatchObject({ dir: "east", origin: [8, 0, 6], u: [0, 0, -1] });
   });
 
-  it("resolves storey:n from named anchors only", () => {
+  it("has no architectural vocabulary: names are the caller's, nothing is inferred", () => {
     const doc = keepDoc();
     doc.edit("t", "t", (tx) => tx.setComponent({ id: "keep", box: B([0, 0, 0], [8, 5, 6]), anchors: { "storey:2": [0, 4, 0] } }));
-    expect(resolveAnchor(doc, { face: "keep.front", u: 0.5, v: "storey:2" }).pos).toEqual([4, 4, 6]);
-    expect(resolveAnchor(doc, "keep.storey:2").pos).toEqual([0, 4, 0]); // the named anchor itself
-    expect(resolveAnchor(doc, { anchor: "keep.storey_2", offset: [0, 0, 0] }).pos).toEqual([4, 4, 3]); // implicit: box centre at that y
+    expect(resolveAnchor(doc, "keep.storey:2").pos).toEqual([0, 4, 0]); // just a named anchor
+    expect(() => resolveAnchor(doc, "keep.storey_2")).toThrow(/no anchor "storey_2"/);
+    expect(() => resolveAnchor(doc, { face: "keep.front", u: 0.5, v: "storey:2" })).toThrow(/v must be a number/);
 
-    // Storeys are never inferred from the voxels, even in an obvious two-floor shell.
+    // An obvious two-floor shell still has only geometric anchors.
     const h = Document.create({ name: "h", dataVersion: 3955, seed: 1 });
     fill(h, env, B([0, 0, 0], [8, 9, 8]), "stone_bricks", { mode: "walls", as: "house" });
     fill(h, env, B([0, 4, 0], [8, 4, 8]), "oak_planks");
-    expect(() => resolveAnchor(h, { face: "house.front", u: 0.5, v: "storey:2" }, env)).toThrow(/no anchor "storey:2"; storey levels are not inferred/);
-    expect(() => resolveAnchor(h, "house.storey:1", env)).toThrow(/not inferred/);
+    expect(() => resolveAnchor(h, "house.storey:1", env)).toThrow(/no anchor "storey:1"/);
   });
 
 });

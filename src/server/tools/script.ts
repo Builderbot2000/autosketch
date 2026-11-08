@@ -49,7 +49,7 @@ export function registerScriptTools({ tool, resource, session }: ToolDeps): void
       title: "Run script",
       description:
         "Runs JavaScript in a sandbox (QuickJS: no files, network or Node; 64 MB, 10 s) against the open document, for anything repetitive. The source is a function body: " +
-        "args holds the arguments, return gives the result. API: sel.* builders (same trees as the tools), every op and generator (fill, replace, array, roof, tower, window…), " +
+        "args holds the arguments, return gives the result. API: sel.* builders (same trees as the tools), every op (fill, replace, sweep, array, stamp…), " +
         `component(), anchor(), palette(), query() (read-only), select(), positions(), log(), seeded rand(), stamp("prefab", {at,…}) (string-literal names load before the run; list computed ones in prefabs), and plugin ops as <plugin>.<op>({…same args as op_run}). Full reference: resource ${SCRIPT_API_URI}. ` +
         "The whole run is one undo step; on an error or limit nothing changes. Returns the diff summary, the return value and the log. Text, <300 tokens.",
       inputSchema: {

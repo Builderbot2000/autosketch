@@ -87,7 +87,7 @@ export function registerLibraryTools({ tool, resource, session }: ToolDeps): voi
 
   const atSchema = z
     .union([vec3, z.string(), z.object({ anchor: z.string(), offset: vec3.optional() }), z.object({ face: z.string(), u: z.union([z.number(), z.string()]).optional(), v: z.union([z.number(), z.string()]).optional(), offset: vec3.optional() })])
-    .describe('[x,y,z], "component.anchor" (named anchors, or min/max/center/bottom/top/front/back/left/right/storey:n), {anchor:"gate.top", offset:[0,0,3]}, or {face:"keep.front", u:0.5, v:"storey:2"}');
+    .describe('[x,y,z], "component.anchor" (named anchors, or min/max/center/bottom/top/front/back/left/right), {anchor:"gate.top", offset:[0,0,3]}, or {face:"keep.front", u:0.5, v:3}');
 
   tool(
     "stamp",
@@ -225,7 +225,7 @@ export function registerLibraryTools({ tool, resource, session }: ToolDeps): voi
     {
       doc: false,
       title: "List knowledge packs",
-      description: "Style, heuristic and technique packs in the library: names and one-line summaries only (cheap). Advice to weigh, not rules. Text.",
+      description: "Style, heuristic, technique and skill packs in the library: names and one-line summaries only (cheap). Advice to weigh, not rules. Text.",
       inputSchema: {
         kind: z.string().optional().describe("style | heuristic | technique"),
         tags: z.array(z.string()).optional(),

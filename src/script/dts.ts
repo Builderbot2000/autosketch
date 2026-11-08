@@ -20,21 +20,11 @@ type Material = string | Record<string, unknown>;
 /** A selection: a Sel, a stored name, "all", "last", or a JSON tree as the tools take. */
 type SelLike = Sel | string | Record<string, unknown>;
 type Direction = "up" | "down" | "north" | "south" | "east" | "west";
-/** [x,y,z] · "comp.anchor" · {anchor, offset} · {face:"comp.front", u, v} (v may be "storey:n"). */
+/** [x,y,z] · "comp.anchor" · {anchor, offset} · {face:"comp.front", u, v}. */
 type At = Vec3 | string | { anchor: string; offset?: Vec3 } | { face: string; u?: number | string; v?: number | string; offset?: Vec3 };
 /** raw skips auto-connection; as/kind register the affected box as a component. */
 type OpOpts = { raw?: boolean; as?: string; kind?: string };
-type GenOpts = { as?: string; kind?: string; raw?: boolean };
-type RoofStyle = "gable" | "hip" | "pyramid" | "shed" | "mansard" | "dome" | "flat";
-type RoofOpts = GenOpts & { style?: RoofStyle; pitch?: number; overhang?: number; axis?: "x" | "z"; high?: "north" | "south" | "east" | "west"; break?: number; base?: number; stairs?: Material; slab?: Material; gables?: boolean | Material };
-type ArchOpts = GenOpts & { at: At; width: number; height?: number; axis?: "x" | "z"; style?: "round" | "pointed" | "segmental" | "flat"; ring?: number; depth?: number; jambs?: boolean; clear?: boolean };
-type StaircaseOpts = GenOpts & { from: At; dir?: "north" | "south" | "east" | "west"; height?: number; to?: At; width?: number; stairs?: Material; support?: "solid" | "none"; shape?: "straight" | "spiral"; radius?: number; turn?: "cw" | "ccw"; steps_per_turn?: number };
-type WallRunOpts = GenOpts & { path: At[]; height: number; thickness?: number; crenellation?: boolean | { every?: number; height?: number; material?: Material }; buttresses?: { every: number; depth?: number; side?: "left" | "right" | "both"; material?: Material }; cap?: Material; curve?: "polyline" | "smooth" | "bezier" };
 type StampOpts = { at: At; anchor?: string; palette_remap?: Record<string, string>; include_air?: boolean; as?: string; rotate?: 0 | 90 | 180 | 270; mirror?: "x" | "z" };
-type TowerOpts = GenOpts & { at: At; shape?: "round" | "square" | number | [number, number][]; radius?: number; height: number; thickness?: number; floors?: { every: number; material?: Material }; roof?: false | RoofStyle | { style?: RoofStyle; material?: Material; pitch?: number; overhang?: number; stairs?: Material; slab?: Material } };
-type WindowOpts = GenOpts & { on: string; u?: number | string; v?: number | string; w?: number; h?: number; style?: "plain" | "arched" | "cross"; glass?: Material; frame?: Material; sill?: Material; depth?: number };
-type DoorOpts = GenOpts & { on: string; u?: number | string; v?: number | string; block?: string; w?: 1 | 2; h?: number; frame?: Material; depth?: number };
-type ColumnOpts = GenOpts & { at: At; height: number; radius?: number; base?: Material; capital?: Material };
 interface EditSummary { op: string; changed: number; box?: Box; warnings: string[]; component?: string; notes?: string[] }
 interface SelectionInfo { count: number; solid: number; bbox?: Box; components: string[] }
 interface RegionInfo { volume: number; solid: number; bbox?: Box; families: [string, number][]; inside: string[]; touching: string[] }

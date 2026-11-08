@@ -1,9 +1,8 @@
 import { toPublic, type Vec3 } from "../core/region.js";
 import type { Document, EditResult } from "../document/document.js";
 import { componentAnchors, resolveAnchor, type AtSpec } from "../ops/anchors.js";
-import { array, extrude, hollow, morph, paint, sweep, type MorphMode, type ProfileCell } from "../ops/brush.js";
+import { array, extrude, hollow, morph, paint, sweep, type MorphMode, type PathCurve, type ProfileCell } from "../ops/brush.js";
 import { clear, fill, replace, setBlocks, type CommonOptions, type FillMode, type OpEnv, type Region } from "../ops/edit.js";
-import { arch, column, door, roof, staircase, tower, wallRun, window, type GenResult } from "../ops/generators/index.js";
 import type { MaterialExpr } from "../ops/material.js";
 import { checkSelectionName, freezeNodes, resolveSelection, summarize, type SelExpr } from "../ops/selection.js";
 import { copy, mirror, move, rotate } from "../ops/transform.js";
@@ -77,7 +76,7 @@ export interface EditSummary {
   notes?: string[];
 }
 
-function summary(h: ScriptHost, r: EditResult & Partial<Pick<GenResult, "component" | "notes">>): EditSummary {
+function summary(h: ScriptHost, r: EditResult & { component?: string; notes?: string[] }): EditSummary {
   if (r.changed) h.edits++;
   return {
     op: r.op,
@@ -158,10 +157,10 @@ export const SCRIPT_OPS: readonly ScriptOp[] = [
   },
   {
     name: "sweep",
-    params: "profile: { u: number; v: number; block: Material }[], path: Vec3[], opts?: OpOpts",
+    params: 'profile: { u: number; v: number; block: Material }[], path: Vec3[], opts?: OpOpts & { curve?: "polyline" | "smooth" | "bezier" }',
     returns: "EditSummary",
-    doc: "Places a cross-section along a polyline (profile authored for travel north, u = east).",
-    run: (h, [p, path, x]) => summary(h, sweep(h.doc, h.env, p as ProfileCell[], path as Vec3[], common(o(x)))),
+    doc: "Places a cross-section along a path: a polyline, or a smooth (through the points) or bezier (controlled by them) curve (profile authored for travel north, u = east).",
+    run: (h, [p, path, x]) => summary(h, sweep(h.doc, h.env, p as ProfileCell[], path as Vec3[], { ...common(o(x)), ...(o(x).curve ? { curve: o(x).curve as PathCurve } : {}) })),
   },
   {
     name: "array",
@@ -193,15 +192,6 @@ export const SCRIPT_OPS: readonly ScriptOp[] = [
   { name: "rotate", params: "sel: SelLike, turns: number, opts?: OpOpts & { pivot?: Vec3 }", returns: "EditSummary", doc: "Rotates in place, clockwise from above.", run: (h, [s, t, x]) => summary(h, rotate(h.doc, h.env, region(h, s), t as number, { ...common(o(x)), ...(o(x).pivot ? { pivot: o(x).pivot as Vec3 } : {}) })) },
   { name: "mirror", params: 'sel: SelLike, axis: "x" | "y" | "z", opts?: OpOpts & { about?: number }', returns: "EditSummary", doc: "Mirrors across a plane.", run: (h, [s, a, x]) => summary(h, mirror(h.doc, h.env, region(h, s), a as "x", { ...common(o(x)), ...(o(x).about !== undefined ? { about: o(x).about as number } : {}) })) },
 
-  // -- generators (L3) --
-  { name: "roof", params: "over: SelLike, material: Material, opts?: RoofOpts", returns: "EditSummary", doc: "Roof over a footprint (as the roof tool).", run: (h, [s, m, x]) => summary(h, roof(h.doc, h.env, region(h, s), m as MaterialExpr, o(x) as never)) },
-  { name: "arch", params: "material: Material, opts: ArchOpts", returns: "EditSummary", doc: "Arch (as the arch tool).", run: (h, [m, x]) => summary(h, arch(h.doc, h.env, m as MaterialExpr, o(x) as never)) },
-  { name: "staircase", params: "material: Material, opts: StaircaseOpts", returns: "EditSummary", doc: "Straight staircase (as the staircase tool).", run: (h, [m, x]) => summary(h, staircase(h.doc, h.env, m as MaterialExpr, o(x) as never)) },
-  { name: "wall_run", params: "material: Material, opts: WallRunOpts", returns: "EditSummary", doc: "Wall along a path (as the wall_run tool).", run: (h, [m, x]) => summary(h, wallRun(h.doc, h.env, m as MaterialExpr, o(x) as never)) },
-  { name: "tower", params: "material: Material, opts: TowerOpts", returns: "EditSummary", doc: "Tower with a roof (as the tower tool).", run: (h, [m, x]) => summary(h, tower(h.doc, h.env, m as MaterialExpr, o(x) as never)) },
-  { name: "window", params: "opts: WindowOpts", returns: "EditSummary", doc: "Window in a component face (as the window tool).", run: (h, [x]) => summary(h, window(h.doc, h.env, o(x) as never)) },
-  { name: "door", params: "opts: DoorOpts", returns: "EditSummary", doc: "Door in a component face (as the door tool).", run: (h, [x]) => summary(h, door(h.doc, h.env, o(x) as never)) },
-  { name: "column", params: "material: Material, opts: ColumnOpts", returns: "EditSummary", doc: "Column (as the column tool).", run: (h, [m, x]) => summary(h, column(h.doc, h.env, m as MaterialExpr, o(x) as never)) },
   {
     name: "stamp",
     params: "prefab: string, opts: StampOpts",

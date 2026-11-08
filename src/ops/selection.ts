@@ -7,6 +7,11 @@ import type { Document } from "../document/document.js";
 import type { PaletteIndex } from "../palette/index.js";
 import { hash01 } from "../core/rng.js";
 import { blockMatcher, MAX_OP_VOLUME } from "./edit.js";
+import { analyzeStructure, type Analysis, type Facade, type Opening, type Side } from "../perception/analyze.js";
+import { diffSince } from "../perception/diff.js";
+import { getRender, renderIds } from "../perception/render/cameras.js";
+import { pickLasso, pickRect, type PickDepth } from "../perception/render/pick.js";
+import { faceMask, interiorMask, openingsMask, roofMask, roomMask, storeyMask, topMask } from "../perception/semantic.js";
 
 /**
  * Selections (docs/design/05-operations.md, L1): JSON expressions an agent sends with a tool call,
@@ -28,6 +33,13 @@ import { blockMatcher, MAX_OP_VOLUME } from "./edit.js";
  *             {"checker":a,"size"?,"odd"?} · {"random":a,"ratio","seed"?} · {"every":a,"n","along"?,"offset"?}
  *             {"freeze":a} (stored as resolved voxels, {"frozen":[[x,y,z,len],..]})
  * More shapes {"hull":[[x,y,z],..]} (convex hull of points) · {"tube":{path:[[x,y,z],..],radius}}
+ * Semantic    (from analysis, 06; geometry in perception/semantic.ts; S = a scope selection, a bare
+ *             component id, or "all"/true for the whole build)
+ *             {"face":"front|back|left|right|north|..","of"?:S,"depth"?:n} · {"storey":n,"of"?:S} (-1 = top)
+ *             {"roof":S} · {"openings":S,"facade"?,"kind"?:"window|door|gap","storey"?} · {"room":[x,y,z]|n,"of"?:S}
+ *             {"interior":S} · {"top":S} · {"changed":"op:-n|checkpoint:<name>"}
+ * Render      {"view_box":{render?,rect:[x0,y0,x1,y1],depth?}} · {"view_lasso":{render?,points:[[px,py],..],depth?}}
+ *             (render = id from a render caption, default the latest; depth "visible" (default) | "through")
  */
 
 export type SelExpr = string | { [k: string]: unknown };
@@ -498,6 +510,91 @@ const BUILDERS: Record<string, (e: Record<string, unknown>, b: BuildEnv) => Mask
     return bb ? fromBoxChecked(bb) : new Mask();
   },
 
+  // -- semantic (05, Semantic): thin cases over perception/semantic.ts ----------------------------
+
+  face: (e, b) => {
+    if (typeof e.face !== "string") throw new Error('face takes a facade name, e.g. {"face":"front","of":"keep"}');
+    const r = faceMask(analysisOf(scopeOf(e.of, b), b), e.face, e.depth === undefined ? 1 : int(e.depth, "face.depth", 1));
+    if (r.note) b.notes.push(r.note);
+    return r.mask;
+  },
+
+  storey: (e, b) => storeyMask(analysisOf(scopeOf(e.of, b), b), int(e.storey, "storey")),
+
+  roof: (e, b) => {
+    const scope = scopeOf(e.roof, b);
+    const r = roofMask(b.doc, analysisOf(scope, b), scope);
+    if (r.note) b.notes.push(r.note);
+    return r.mask;
+  },
+
+  openings: (e, b) => {
+    const a = analysisOf(scopeOf(e.openings, b), b);
+    const f: { facade?: Facade; side?: Side; kind?: Opening["kind"]; storey?: number } = {};
+    if (e.facade !== undefined) {
+      const name = String(e.facade);
+      if (["front", "back", "left", "right"].includes(name)) f.facade = name as Facade;
+      else if (["north", "south", "east", "west"].includes(name)) f.side = name as Side;
+      else throw new Error("openings.facade must be front, back, left, right, north, south, east or west");
+    }
+    if (e.kind !== undefined) {
+      if (!["window", "door", "gap"].includes(e.kind as string)) throw new Error('openings.kind must be "window", "door" or "gap"');
+      f.kind = e.kind as Opening["kind"];
+    }
+    if (e.storey !== undefined) f.storey = int(e.storey, "openings.storey", 0);
+    const r = openingsMask(a, f);
+    if (!r.count) b.notes.push(a.walls ? "openings: none match" : "openings: no walls were found, so there are no wall openings");
+    return r.mask;
+  },
+
+  room: (e, b) => {
+    const which = typeof e.room === "number" ? int(e.room, "room", 1) : vec(e.room, "room");
+    const r = roomMask(b.doc, which, scopeOf(e.of, b), b.ctx.registry);
+    if (r.note) b.notes.push(r.note);
+    return r.mask;
+  },
+
+  interior: (e, b) => {
+    const m = interiorMask(b.doc, scopeOf(e.interior, b), b.ctx.registry);
+    if (m.isEmpty()) b.notes.push("interior: no enclosed air (every air position connects to the outside)");
+    return m;
+  },
+
+  top: (e, b) => {
+    const scope = scopeOf(e.top, b);
+    if (scope) return topMask(b.doc, scope);
+    const lb = b.doc.localBounds();
+    return lb ? topMask(b.doc, fromBoxChecked(lb)) : new Mask();
+  },
+
+  changed: (e, b) => {
+    if (typeof e.changed !== "string") throw new Error('changed takes "op:-n" or "checkpoint:<name>", e.g. {"changed":"op:-1"}');
+    return diffSince(b.doc, e.changed).mask;
+  },
+
+  // -- render-seeded (05, Picking): perception/render/pick.ts --------------------------------------
+
+  view_box: (e, b) => {
+    const v = obj(e.view_box, "view_box");
+    const rect = v.rect;
+    if (!Array.isArray(rect) || rect.length !== 4 || rect.some((n) => !Number.isInteger(n))) throw new Error("view_box.rect must be [x0,y0,x1,y1] pixel integers (inclusive)");
+    const r = pickRect(b.doc, renderOf(v.render, b), rect as [number, number, number, number], depthOf(v.depth, "view_box"));
+    b.notes.push(...r.notes);
+    return r.mask;
+  },
+
+  view_lasso: (e, b) => {
+    const v = obj(e.view_lasso, "view_lasso");
+    if (!Array.isArray(v.points) || v.points.length < 3) throw new Error("view_lasso.points needs at least 3 [px,py] points");
+    const pts = v.points.map((p, i) => {
+      if (!Array.isArray(p) || p.length !== 2 || p.some((n) => typeof n !== "number" || !Number.isFinite(n))) throw new Error(`view_lasso.points[${i}] must be [px,py]`);
+      return p as [number, number];
+    });
+    const r = pickLasso(b.doc, renderOf(v.render, b), pts, depthOf(v.depth, "view_lasso"));
+    b.notes.push(...r.notes);
+    return r.mask;
+  },
+
   filter: (e, b) => {
     const m = b.ev(e.filter);
     const doc = b.doc;
@@ -518,6 +615,42 @@ const BUILDERS: Record<string, (e: Record<string, unknown>, b: BuildEnv) => Mask
 };
 
 // -- helpers --------------------------------------------------------------------------------------
+
+/**
+ * Scope of a semantic selection: undefined (the whole build) for absent, "all" or true; a bare
+ * string that names no stored selection but a component means that component; anything else is
+ * a selection.
+ */
+function scopeOf(x: unknown, b: BuildEnv): Mask | undefined {
+  if (x === undefined || x === "all" || x === true) return undefined;
+  if (typeof x === "string" && x !== "last" && !b.doc.selections.has(x)) {
+    const c = b.doc.componentLocal(x);
+    if (c) return fromBoxChecked(c.box);
+  }
+  return b.ev(x);
+}
+
+function analysisOf(scope: Mask | undefined, b: BuildEnv): Analysis {
+  if (scope?.isEmpty()) throw new Error("the scope of this semantic selection is empty");
+  return analyzeStructure(b.doc, {
+    ...(scope ? { region: scope.isBox() ?? scope } : {}),
+    ...(b.ctx.registry ? { registry: b.ctx.registry } : {}),
+    ...(b.ctx.index ? { index: b.ctx.index } : {}),
+  });
+}
+
+function renderOf(id: unknown, b: BuildEnv) {
+  if (id !== undefined && typeof id !== "string") throw new Error('render must be a render id from a render caption, e.g. "r3"');
+  const rec = getRender(b.doc, id);
+  if (!rec) throw new Error(id ? `no recent render "${id}" (kept: ${renderIds(b.doc).join(", ") || "none"}); render again, and freeze picks you store` : "no render of this document yet; call render first");
+  return rec;
+}
+
+function depthOf(d: unknown, what: string): PickDepth {
+  if (d === undefined) return "visible";
+  if (d !== "visible" && d !== "through") throw new Error(`${what}.depth must be "visible" (the surface the camera saw) or "through" (the whole volume behind the outline)`);
+  return d;
+}
 
 function asExpr(x: unknown): SelExpr {
   if (typeof x === "string" || (x && typeof x === "object" && !Array.isArray(x))) return x as SelExpr;

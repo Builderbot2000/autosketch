@@ -1,47 +1,19 @@
 import { z } from "zod";
-import { defaultCacheDir } from "../../assets/cache.js";
 import { Mask } from "../../core/mask.js";
 import { formatVec, type Box, type Vec3 } from "../../core/region.js";
-import { dataVersionFor } from "../../core/version.js";
-import { blockIndex, documentFromSnapshot, snapshotOf, type Snapshot } from "../../formats/snapshot.js";
-import { Library } from "../../library/index.js";
+import { blockIndex, snapshotOf, type Snapshot } from "../../formats/snapshot.js";
+import type { Library } from "../../library/index.js";
 import { formatKnowledgeList, listKnowledge, readKnowledge } from "../../library/knowledge.js";
 import { loadPrefab, savePrefab, type Prefab } from "../../library/prefabs.js";
 import { formatProcedureList, listProcedures } from "../../library/procedures.js";
-import { libraryRoots, type LibraryRoot } from "../../library/roots.js";
 import { stampPrefab, type StampAt } from "../../ops/stamp.js";
-import { renderDocument } from "../../perception/render/render.js";
 import type { InstanceContext } from "../context.js";
 import { formatEdit } from "../format.js";
 import type { Session } from "../session.js";
+import { libraryFor, rootsFor } from "./library-context.js";
 import { runProcedureFile } from "./script.js";
-import { bakerFor, boxSchema, editWith, env, image, regionOf, selSchema, text, vec3, type ToolDeps } from "./shared.js";
+import { boxSchema, editWith, env, image, regionOf, selSchema, text, vec3, type ToolDeps } from "./shared.js";
 
-/** Library roots for this server: AUTOSKETCH_LIBRARY or <workspace>/library, the starter library, and the instance's Axiom blueprints. */
-export function rootsFor(session: Session, c?: InstanceContext): LibraryRoot[] {
-  return libraryRoots({ workspace: session.workspace, env: process.env, ...(c?.info.root ? { instanceRoot: c.info.root } : {}) });
-}
-
-const libraries = new WeakMap<InstanceContext, Library>();
-
-/** One library per loaded instance (it remembers the last prefab sheet for cell refs). */
-export function libraryFor(c: InstanceContext, session: Session): Library {
-  let lib = libraries.get(c);
-  if (!lib) {
-    const dataVersion = dataVersionFor(c.info.mcVersion) ?? 0;
-    lib = new Library({
-      roots: rootsFor(session, c),
-      registry: c.registry,
-      cacheDir: defaultCacheDir(),
-      thumbnail: async (snap) => {
-        const doc = documentFromSnapshot(snap, { name: "thumbnail", dataVersion, source: "prefab" });
-        return (await renderDocument(doc, await bakerFor(c), { views: ["iso_se"], size: 96, thumbnail: true })).png;
-      },
-    });
-    libraries.set(c, lib);
-  }
-  return lib;
-}
 
 const footprintSchema = z.tuple([z.number().int().min(1), z.number().int().min(1)]).describe("Largest footprint [x, z]; either orientation fits");
 

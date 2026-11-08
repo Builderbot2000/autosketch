@@ -8,7 +8,7 @@ import { runScript, ScriptError, type ScriptRun } from "../../script/run.js";
 import type { InstanceContext } from "../context.js";
 import { formatEdit } from "../format.js";
 import type { Session } from "../session.js";
-import { libraryFor } from "./library.js";
+import { libraryFor } from "./library-context.js";
 import { env, fail, text, type Result, type ToolDeps } from "./shared.js";
 
 /** Scripting (05 L4): run_script and the API reference resource. */

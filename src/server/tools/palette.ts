@@ -2,7 +2,7 @@ import { z } from "zod";
 import { findLibraryPalette, formatMissing, instantiatePalette, listLibraryPalettes, saveLibraryPalette } from "../../library/palettes.js";
 import { describePalette, editPalette, pickPalette, type NamedPalette } from "../../palette/pick.js";
 import type { InstanceContext } from "../context.js";
-import { rootsFor } from "./library.js";
+import { rootsFor } from "./library-context.js";
 import { fail, image, text, type ToolDeps } from "./shared.js";
 
 /** Palette sheets, picking and named palettes (03), and saved palettes in the library (07). */

@@ -36,6 +36,19 @@ This measures whether the perception and palette design actually help the agent.
 - **Scoped sessions (`11`):** large builds done two ways, monolithically by one agent and with delegation to sandboxed subagents allowed. They are compared on cross-part consistency (matching reference lines, palette, repeated elements), defects, total tokens and wall time. This tests the premise that block-coordinate volume is the main cause of attention drift, and whether the delegation overhead pays off. Small and medium prompts in the main suite also record how often agents fork. There it should be almost never, which calibrates the skill's delegation threshold.
 - **Results:** written to `test/eval/results/<date>-<git-sha>.json` plus a summary table. Regressions are compared against the last baseline.
 
+### How the tier is built
+
+- **Runner and drivers.** `test/eval/runner.ts` gives each run a fresh workspace (with the seed document written in, if the prompt has one), hands a model driver the prompt, a fixed system prompt and the server to use, then scores the saved document. `drivers/sdk.ts` runs the model through the Claude Agent SDK, with the server as a stdio child process (`host.ts`). Only Autosketch tools are allowed (plus `Task` for the `builder` subagent in delegated runs), and no user settings are loaded. `drivers/scripted.ts` replays scripted tool calls against the real server code and emits the same message shapes, so `npm test` covers the runner, scoring, the log join, ablations and result files without a model or network. The SDK is imported only inside the SDK driver, so the unit tests never load it.
+- **Benchmark set** (`prompts.ts`): 20 prompts. 6 small and 10 medium prompts form the main suite, and 3 of the medium ones start from a seed document (`seeds.ts`, built in code). 4 large multi-part prompts are kept for the scoped comparison. Each prompt names its document and lists only the checks for what it asks. `s-hut`, `m-cottage` and `m-porch` are the reduced suite.
+- **Automatic checks** (`checks.ts`), all through the harness's own architectural detector (`test/eval/structure.ts`: the labelling analyzer the server dropped when `06` switched to measurements; agents never see it): `minBlocks`, `withinBox`, `storeys`, `door` (side), `windows`, `roofWatertight` (a roof was found and has no `roof_gap`), `roofType`, `noFloating`, `material` (palette roles: the share of wall, roof or all blocks whose id matches the role's materials; walls use the detector's wall material), `preserved` (seed blocks kept), and `consistency` (mean pairwise Jaccard of the parts' block-id sets, plus the spread of their heights).
+- **Rubric** (`rubric.ts`): a judge model gets the south-east iso render and the front elevation (768 px) and scores prompt match, style, proportion and craft from 1 to 5 in JSON. The judge prompts are fixed text, and their hash (`rubricVersion`) is stored in every results file.
+- **Cost:** tokens from the transcript (input, output, cache read and write, counted once per API message), dollars from `cost.ts` prices, image tokens from the logged image pixels (w × h / 750), tool calls, wall time.
+- **Ablations** (`ablations.ts`) use the server setting `server.hideTools`. It drops the named tools from the tool list and adds one line to the instructions naming them. `full`, `no_analyze`, `no_components`, `text_only`, `images_only`, `no_palette_sheets`. Hiding is per tool, so `no_components` keeps the `as:` argument and `{component}` selections, and `text_only` keeps ops' optional preview renders.
+- **Log join** (`join.ts`, `12` *Metrics and evals*): Autosketch calls in transcript order are paired with the earliest unmatched logged call of the same tool. Each call is credited with the context growth to the next turn of its agent thread, split across that turn's calls by result size. From that come per-job rows (scope, depth, ops, calls, refusals, response size, tokens, fork-to-merge time) and session stats (forks, merges, abandons, depth, parallelism, refusal codes, repeated briefs).
+- **Scoped comparison:** each large prompt runs `monolithic` (scope tools hidden) and `delegated` (scope tools, the `builder` subagent and an advisory note in the system prompt). Delegated runs are recorded as skipped when the server has no `scope_fork`/`scope_merge`. The main suite's `full` runs report the fork rate for small and medium prompts.
+- **Results** (`results.ts`): `results/<date>-<sha>.json` (meta, every run, summary), a `.md` summary table, and per-run transcripts with the joined calls and events in `results/<date>-<sha>/`. The baseline is `results/baseline.json` when it exists, otherwise the newest earlier file. A regression is a drop of more than 5 points in either check rate, a rubric drop of more than 0.25, or 20% more tokens. `results/` is git-ignored.
+- **Safety:** `npm run eval` prints the plan and its cost drivers (prompts × ablations, scoped runs, judge calls, a rough dollar range). It refuses to run without `ANTHROPIC_API_KEY` or with `CI` set. `--dry-run` only prints the plan. The default is the reduced suite with every tool: `--suite full`, `--ablations all|a,b`, `--scoped`, `--prompts`, `--model` (default `claude-sonnet-5-5`), `--judge-model`, `--no-judge`, `--max-turns`. It needs a Minecraft instance (`--instance` or `AUTOSKETCH_INSTANCE`), like the server.
+
 ## Commands
 
 ```
@@ -44,7 +57,7 @@ npm run test:golden # tier 2 only
 npm run golden:update   # rewrite goldens after an intentional change; review the diff
 npm run golden:instance -- <dir>   # write the synthetic instance somewhere to inspect it
 npm run test:local  # + real-instance tier (needs AUTOSKETCH_INSTANCE)
-npm run eval        # tier 3 (needs ANTHROPIC_API_KEY)
+npm run eval        # tier 3 (needs ANTHROPIC_API_KEY and an instance); -- --dry-run prints the plan only
 ```
 
 ## Implementation status
@@ -59,8 +72,15 @@ npm run eval        # tier 3 (needs ANTHROPIC_API_KEY)
 | Tier 2: real Axiom/Create-saved fixtures | Not started (needs files saved in-game; none planned) | — |
 | Tier 2: render snapshots | Done (6 goldens, perceptual tolerance, one-block mutation check) | `test/golden/render.test.ts` |
 | Tier 2: sheet determinism | Done (7 sheet specs, two independent loads, cell-map JSON and PNG goldens) | `test/golden/sheets.test.ts` |
-| Tier 2: analysis goldens | Not started (waits for silo B's `analyze`) | — |
+| Tier 2: analysis goldens | Not started (`analyze` now reports measurements; goldens should pin those) | — |
 | Golden update command | Done: `npm run golden:update` (`UPDATE_GOLDEN=1`) | `test/golden/harness.ts` |
 | Tier 2 in `npm test` and CI speed | Done; the whole golden tier runs in under 1 s | `vitest.config.ts` (unchanged: it already includes `test/**`) |
 | Optional local tier | Done (before this work) | `test/local/` |
-| Tier 3: agent evaluation | Not started (wave 3) | — |
+| Tier 3: runner, scripted driver, Agent SDK driver | Built. The SDK driver has not yet run against the real SDK or API (no tokens spent so far), so expect small fixes on the first real run | `test/eval/runner.ts`, `test/eval/drivers/`, `test/eval/host.ts` |
+| Tier 3: benchmark set (20 prompts, 3 seeds) | Done | `test/eval/prompts.ts`, `test/eval/seeds.ts` |
+| Tier 3: automatic checks, rubric, cost | Done (the rubric is wired and parsed, but no judge has run yet) | `test/eval/checks.ts`, `rubric.ts`, `cost.ts` |
+| Tier 3: ablations (`server.hideTools`) | Done | `src/server/settings.ts`, `test/eval/ablations.ts` |
+| Tier 3: scoped comparison and fork rate | Built against `scope_fork`/`scope_merge` and `scope.*` events. Delegated runs are skipped until silo F lands | `test/eval/runner.ts`, `join.ts` |
+| Tier 3: log/transcript join | Done | `test/eval/join.ts`, `transcript.ts` |
+| Tier 3: results, summary, baseline comparison, `npm run eval` | Done. No real run yet | `test/eval/results.ts`, `cli.ts` |
+| Tier 3 harness tests (no network) | Done | `test/unit/eval/`, `test/unit/server/hide-tools.test.ts` |

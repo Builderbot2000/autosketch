@@ -12,6 +12,7 @@
     "golden:update": "UPDATE_GOLDEN=1 vitest run test/golden",
     "golden:instance": "tsx scripts/gen-golden-instance.ts",
     "test:local": "vitest run test/local",
+    "eval": "tsx test/eval/cli.ts",
     "dev": "tsx src/server/index.ts",
     "start": "node dist/server/index.js"
   },
@@ -33,6 +34,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.319",
     "@types/node": "^26.6.6",
     "@types/pngjs": "^6.0.5",
     "tsx": "^4.23.15",

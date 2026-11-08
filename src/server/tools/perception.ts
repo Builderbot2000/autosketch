@@ -11,6 +11,7 @@ import { renderDocument, VIEW_NAMES, type Cutaway, type View } from "../../perce
 import { viewSlice } from "../../perception/slice.js";
 import type { InstanceContext } from "../context.js";
 import type { Session } from "../session.js";
+import { perspectiveSchema, resolvePerspective, type PerspectiveInput } from "./camera.js";
 import { bakerFor, box, boxSchema, editWith, image, selSchema, text, vec3, type Result, type ToolDeps } from "./shared.js";
 
 /** Resolves a selection for a perception call without changing "last". */
@@ -58,6 +59,8 @@ const viewSchema = z.union([
     distance: z.number().positive().optional().describe("Blocks framed around target (zoom; views are orthographic)"),
     target: vec3.optional().describe("Point the view centres on (default: the middle of what is drawn)"),
   }),
+  z.object(perspectiveSchema).describe("Perspective camera from an eye (may be inside the build)"),
+  z.object({ camera: z.string() }).describe("A camera saved with the camera tool"),
 ]);
 
 /** Renders, slices, analysis, diffs and raycast (06). */
@@ -70,6 +73,9 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
         "Draws the build with the instance's real block models and textures. views (max 4, shared in one image): iso_se|iso_sw|iso_ne|iso_nw (3/4 views from that corner), " +
         "front|back|left|right (flat elevations, resolved through the document's front), top (plan, north up), \"component:<id>\" (auto-framed on a component), " +
         "or {yaw, pitch, distance?, target?} (camera bearing from the build: 0 north, 90 east; pitch above horizon; distance = blocks framed around target). " +
+        "Perspective: {eye:[x,y,z], target, fov?} looks from an eye (blocks; an integer is the block's centre), which may sit inside a room to see an interior the way a player does; " +
+        "target is [x,y,z], an anchor, or {sel: <selection>} (framed); fov is vertical, default 70. {camera:\"<name>\"} reuses a camera saved with the camera tool. " +
+        "Perspective and orthographic views share one sheet; perspective cells have no ticks (the caption gives eye, target and fov) and cost the same as any view. " +
         "Default: iso_se, iso_nw, front, top at 768px (~800 tokens). One view at 512px is ~350 tokens. region takes any selection: only it is drawn, framed tightly. " +
         "cutaway: {maxY} hides everything above y; {plane:\"x\"|\"y\"|\"z\", at, keep:\"west|east|down|up|north|south\"} keeps one side of a plane. " +
         "highlight: any selection, tinted orange; {changed:\"op:-1\"|\"checkpoint:<name>\"} shows a diff ({since:..} still works). style: textured | flat (mean colours) | depth (darker = farther) | xray (translucent shell). " +
@@ -106,8 +112,14 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
           highlight = r.mask;
         }
       }
+      const views = a.views?.map((v): View => {
+        if (typeof v !== "object" || !("eye" in v)) return v as View;
+        const p = resolvePerspective(c, doc, v as PerspectiveInput);
+        notes.push(...p.notes);
+        return p.view;
+      });
       const r = await renderDocument(doc, await bakerFor(c), {
-        ...(a.views ? { views: a.views as View[] } : {}),
+        ...(views ? { views } : {}),
         ...(region ? { region } : {}),
         ...(a.cutaway ? { cutaway: a.cutaway as Cutaway } : {}),
         ...(highlight ? { highlight } : {}),

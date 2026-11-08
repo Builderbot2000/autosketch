@@ -1,7 +1,7 @@
 import { Mask } from "../../core/mask.js";
 import { boxVolume, type Vec3 } from "../../core/region.js";
 import type { Document } from "../../document/document.js";
-import { marchRay, rayThrough, type RenderRecord, type ViewCamera } from "./cameras.js";
+import { marchRay, projectToImage, rayThrough, type RenderRecord, type ViewCamera } from "./cameras.js";
 
 /**
  * Render-seeded selections (docs/design/05-operations.md, *Picking*: `view_box`, `view_lasso`): a
@@ -66,17 +66,12 @@ function pick(doc: Document, rec: RenderRecord, area: Area, inside: (fx: number,
   return { mask, notes };
 }
 
-/** Output-image position of a world point in a view. */
-function project(v: ViewCamera, p: Vec3): [number, number] {
-  const c = v.cam;
-  const sx = p[0] * c.right[0] + p[1] * c.right[1] + p[2] * c.right[2];
-  const sy = p[0] * c.up[0] + p[1] * c.up[1] + p[2] * c.up[2];
-  return [v.ox + ((sx - c.cx) * c.scale + c.width / 2) / v.ss, v.oy + (-(sy - c.cy) * c.scale + c.height / 2) / v.ss];
-}
-
 function pickThrough(v: ViewCamera, a: Area, inside: (fx: number, fy: number) => boolean, out: Mask): void {
   const test = (x: number, y: number, z: number) => {
-    const [fx, fy] = project(v, [x + 0.5, y + 0.5, z + 0.5]);
+    // Perspective: only positions in front of the eye.
+    const f = projectToImage(v, [x + 0.5, y + 0.5, z + 0.5]);
+    if (!f) return;
+    const [fx, fy] = f;
     if (fx >= a.x0 && fx < a.x1 && fy >= a.y0 && fy < a.y1 && inside(fx, fy)) out.add(x, y, z);
   };
   if (v.mask) {
@@ -92,7 +87,8 @@ function pickThrough(v: ViewCamera, a: Area, inside: (fx: number, fy: number) =>
 }
 
 function pickVisible(doc: Document, v: ViewCamera, a: Area, inside: (fx: number, fy: number) => boolean, out: Mask, notes: string[]): void {
-  const blockPx = v.cam.scale / v.ss;
+  // Perspective blocks shrink with distance: sample twice per pixel.
+  const blockPx = v.cam.eye ? 1 : v.cam.scale / v.ss;
   const w = a.x1 - a.x0, h = a.y1 - a.y0;
   let step = Math.min(1, blockPx / 2);
   if ((w / step) * (h / step) > PICK_MAX_RAYS) {
@@ -102,12 +98,19 @@ function pickVisible(doc: Document, v: ViewCamera, a: Area, inside: (fx: number,
   for (let fy = a.y0 + step / 2; fy < a.y1; fy += step)
     for (let fx = a.x0 + step / 2; fx < a.x1; fx += step) {
       if (!inside(fx, fy)) continue;
-      const { origin, dir } = rayThrough(v, fx, fy);
-      marchRay(v.clip, v.mask, origin, dir, (p) => {
-        if (doc.getState(p[0], p[1], p[2]) === "minecraft:air") return false;
-        out.add(p[0], p[1], p[2]);
-        return true;
-      });
+      const { origin, dir, tMin } = rayThrough(v, fx, fy);
+      marchRay(
+        v.clip,
+        v.mask,
+        origin,
+        dir,
+        (p) => {
+          if (doc.getState(p[0], p[1], p[2]) === "minecraft:air") return false;
+          out.add(p[0], p[1], p[2]);
+          return true;
+        },
+        tMin,
+      );
     }
 }
 

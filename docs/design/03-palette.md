@@ -139,7 +139,7 @@ Ingestion must work on any modpack with **no per-pack configuration**. Every gro
 
 | Instance | Blocks | Buildable families | Overview | Plugins change |
 |----------|--------|--------------------|----------|----------------|
-| Craftoria (NeoForge 1.21.1, ~530 mods) | 30,945 | 2,981 | 804 tiles, 32×29, ≈1.4k tokens | ≤5 families |
+| Craftoria (NeoForge 1.21.1, ~530 mods) | 30,945 | 2,981 | 804 tiles, 32×29, ≈1.4k tokens | ≤5 families before the Create plugins; `create` + `createdeco` now change 98 block assignments (`09`) |
 | ATM10 (NeoForge 1.21.1, ~480 mods) | 51,347 | 4,439 | 984 tiles, 34×32, ≈1.6k tokens | ≤5 families |
 | Vanilla 1.21.1 | 1,062 | 265 | 61 tiles | none |
 
@@ -156,7 +156,7 @@ Ingestion must work on any modpack with **no per-pack configuration**. Every gro
 | Index build | ~0.7 s cold (texture stats for ~2.9k families); cached load ~20 ms |
 
 Rules learned from real data:
-- **Variant tags resolve through shapes and aliases.** `rechiseled:andesite_stairs` maps to andesite, and `chipped:waxed_copper_block` maps to copper. Tags with no base block (Chipped `borderless_bricks`) are headed by their first member.
+- **Variant tags resolve through shapes and aliases.** `rechiseled:andesite_stairs` maps to andesite, and `chipped:waxed_copper_block` maps to copper. A tag with no block of its name (Chipped `borderless_bricks`) is headed by a member from another mod when it lists one (the block the patterns are carved from: `minecraft:bricks`, vanilla first), else by its first member. Heading it with the first member put `minecraft:bricks`, and Create Deco's red bricks with it, under `chipped:angry_borderless_bricks`.
 - **Wood forms** (`X_wood`, `stripped_X_log/wood`) are variants of `X_log`. **Numbered sets** (`zane_block_0…15`) become one family.
 - **Tints:** biome colormaps only for plant-like blocks. Dye-named tinted blocks use the dye colour, since mods often tint in code. Anything else is untinted.
 - **Model and texture fallbacks feed in from the registry:** custom-loader overrides (XyCraft connected textures) fall back to the lower pack's model, and face textures that don't exist as files (runtime-generated) are skipped.

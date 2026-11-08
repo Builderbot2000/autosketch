@@ -34,6 +34,31 @@ describe("variant-tag detection (no plugins)", () => {
   });
 });
 
+describe("variant tags with no block of their name", () => {
+  // A decorative mod's tag "fancy_bricks" names no block, but lists the vanilla bricks it carves
+  // from besides its own patterns; the same bricks are also in its "bricks" tag.
+  const bases = ["andesite", "granite", "diorite", "stone", "bricks"];
+  const reg = fakeRegistry([
+    ...bases.map((b) => ({ id: `minecraft:${b}`, tags: [`decomod:${b}`, ...(b === "bricks" ? ["decomod:fancy_bricks"] : [])] })),
+    ...bases.flatMap((b) => ["carved", "tiled", "rough", "worn"].map((p) => ({ id: `decomod:${p}_${b}`, tags: [`decomod:${b}`] }))),
+    ...["angry", "plain", "split"].map((p) => ({ id: `decomod:${p}_fancy_bricks`, tags: ["decomod:fancy_bricks"] })),
+    { id: "othermod:loose_a", tags: ["decomod:loose"] },
+    { id: "decomod:loose_b", tags: ["decomod:loose"] },
+    { id: "decomod:loose_c", tags: ["decomod:loose"] },
+  ]);
+  const { families } = buildFamilies(reg, []);
+
+  it("keeps the vanilla block at the head, with the mod-only patterns as its variants", () => {
+    const bricks = families.find((f) => f.id === "minecraft:bricks");
+    expect(bricks).toBeDefined();
+    expect(families.some((f) => f.variants.some((v) => v.base === "minecraft:bricks"))).toBe(false);
+    expect(bricks!.variants.map((v) => v.base)).toEqual(expect.arrayContaining(["decomod:angry_fancy_bricks", "decomod:carved_bricks"]));
+  });
+  it("heads a group of only the tagging mod's blocks with its first member, unless another mod's block is in it", () => {
+    expect(families.find((f) => f.id === "othermod:loose_a")?.variants.map((v) => v.base).sort()).toEqual(["decomod:loose_b", "decomod:loose_c"]);
+  });
+});
+
 describe("placeholder textures (camo/frame mods)", () => {
   const shapes = ["slope", "corner", "panel", "pillar", "post", "rail_slope", "prism", "pyramid", "half_stairs", "slab_edge", "ladder", "sign", "flower_pot", "lever", "chest"];
   const frame = "framemod:block/frame";

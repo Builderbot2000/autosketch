@@ -2,7 +2,7 @@ import type { BlockInfo, Registry } from "../assets/registry.js";
 import type { RenderHook } from "../assets/builtin-models/index.js";
 import type { Box } from "../core/region.js";
 import type { Mask } from "../core/mask.js";
-import type { Document, EditResult } from "../document/document.js";
+import type { Document, EditResult, Transaction } from "../document/document.js";
 import type { Compound } from "prismarine-nbt";
 import type { z } from "zod";
 import type { StateOverride } from "../core/rotate.js";
@@ -26,12 +26,41 @@ export interface FamilyHint {
   buildable?: boolean;
 }
 
-/** What a plugin action runs against (05: ops go through the document API, so they are journaled and undoable). */
+/** A shape group as plugin actions see it (structurally a palette `ShapeGroup`, 03). */
+export interface VariantGroupView {
+  base: string;
+  shapes: Partial<Record<string, string>>;
+}
+
+/** A material family as plugin actions see it (structurally a palette `Family`, 03). */
+export interface FamilyView extends VariantGroupView {
+  id: string;
+  variants: VariantGroupView[];
+}
+
+/**
+ * What a plugin action runs against (05: ops go through the document API, so they are journaled
+ * and undoable). Built by `ops/plugin-actions.ts`, which owns selection resolution and the op
+ * pipeline, so plugins never import `ops/` (ARCHITECTURE, dependency rules).
+ */
 export interface PluginActionContext {
   doc: Document;
   registry?: Registry;
+  /** Active plugins. */
+  plugins: readonly AutosketchPlugin[];
   /** Resolves a selection expression (05) to the region it covers. */
   region(sel: unknown): Box | Mask;
+  /**
+   * Runs the action's writes as one journal entry named after the op, with auto-connection unless
+   * the caller passed `raw` (05). A script runner may substitute its own transaction (silo C).
+   */
+  edit<T>(summary: string, body: (tx: Transaction) => T): EditResult;
+  /** A block matcher as `replace` uses it: "*", "#tag", "id" or "id[props]". */
+  matcher(spec: string): (state: string) => boolean;
+  /** The palette family a block belongs to, when a palette is loaded. */
+  family?(blockId: string): FamilyView | undefined;
+  /** Tag namespaces that group decorative variants (plugin-declared plus detected, 03). */
+  variantNamespaces: readonly string[];
 }
 
 /** An agent-facing op registered as "<plugin id>.<name>" (09, `actions`; 05, `ops_list`). */
@@ -79,8 +108,10 @@ export interface AutosketchPlugin {
   items?(state: string, nbt: Compound | undefined): { item: string; count: number }[] | undefined;
   /** Warnings about a block entity's NBT (e.g. a camo block that doesn't exist in this instance). */
   validateNbt?(state: string, nbt: Compound | undefined): string[];
-  /** Agent actions, registered as "<id>.<name>" ops. */
+  /** Agent actions, registered as "<opNamespace>.<name>" ops. */
   actions?: Record<string, PluginAction>;
+  /** Prefix of this plugin's op names (09: `framed.shape` for the `framedblocks` plugin). Default: `id`. */
+  opNamespace?: string;
   /**
    * State remapping override for rotate/mirror (01, Orientation). Called once per elementary step
    * (a rotation or a mirror); return the transformed state, or undefined for the generic rules.
@@ -115,5 +146,23 @@ export function validateNbt(plugins: readonly AutosketchPlugin[], state: string,
       out.push(`${p.id}: validateNbt failed (${(e as Error).message})`);
     }
   }
+  return out;
+}
+
+/**
+ * `validateNbt` over every block entity of a document (09), condensed: at most `limit` distinct
+ * warnings plus a count of the rest. Called on import and export, where NBT enters or leaves.
+ */
+export function documentNbtWarnings(plugins: readonly AutosketchPlugin[], doc: Document, limit = 5): string[] {
+  if (!doc.blockEntities.size || !plugins.some((p) => p.validateNbt)) return [];
+  const seen = new Map<string, number>();
+  for (const [key, nbt] of doc.blockEntities) {
+    const [sx, sy, sz] = key.split(",").map(Number) as [number, number, number];
+    const state = doc.states.get(doc.voxels.get(sx, sy, sz));
+    for (const w of validateNbt(plugins, state, nbt)) seen.set(w, (seen.get(w) ?? 0) + 1);
+  }
+  const all = [...seen];
+  const out = all.slice(0, limit).map(([w, n]) => (n > 1 ? `${w} (${n} blocks)` : w));
+  if (all.length > limit) out.push(`… ${all.length - limit} more block-entity warnings`);
   return out;
 }

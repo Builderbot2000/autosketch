@@ -175,10 +175,15 @@ export function buildFamilies(registry: Registry, plugins: readonly AutosketchPl
     for (const [tag, members] of tagMembers) {
       let base = variantTagBase(tag, groupOf, aliasOf);
       if (!base) {
-        // A mod-only group (no base block): head it with the first member.
-        const own = members.map((m) => groupOf.get(aliasOf.get(m) ?? m)).filter((g): g is string => !!g).sort();
-        if (own.length < 2) continue;
-        base = own[0]!;
+        // No block is named after the tag (Chipped `borderless_bricks`). A member from another mod is
+        // the block the patterns are carved from (minecraft:bricks), so it heads the group; vanilla
+        // first. Only a group of the tagging mod's own blocks is headed by its first member.
+        const tagNs = tag.slice(0, tag.indexOf(":"));
+        const inGroups = [...new Set(members.map((m) => groupOf.get(aliasOf.get(m) ?? m)).filter((g): g is string => !!g))].sort();
+        const foreign = inGroups.filter((g) => !g.startsWith(`${tagNs}:`)).sort((a, b) => Number(!a.startsWith("minecraft:")) - Number(!b.startsWith("minecraft:")));
+        if (foreign.length) base = foreign[0]!;
+        else if (inGroups.length >= 2) base = inGroups[0]!;
+        else continue;
       }
       const parent = groupOf.get(base)!;
       for (const m of members) {

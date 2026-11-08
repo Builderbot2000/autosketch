@@ -124,7 +124,7 @@ at: { anchor: "gatehouse.door", offset: [0, 0, 3] }
 
 ## Mod actions
 
-Plugins (`09`) register extra ops under their namespace, e.g. `framed.camo(sel, camo_block)` and `chisel.pattern(sel, "bricks_soft")`. They are discoverable through `ops_list({ namespace })` and callable from scripts.
+Plugins (`09`) register extra ops under their namespace, e.g. `framed.camo(sel, camo_block)` and `chisel.pattern(sel, "bricks_soft")`. They are discoverable through `ops_list({ namespace })`, run with `op_run({ op, args })` as one journal entry, and callable from scripts.
 
 ## Scripting (L4)
 

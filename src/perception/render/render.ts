@@ -248,11 +248,20 @@ async function buildScene(doc: Document, baker: BlockBaker, opts: RenderOptions,
     box.min = [Math.min(box.min[0], xs[i]!), Math.min(box.min[1], ys[i]!), Math.min(box.min[2], zs[i]!)];
     box.max = [Math.max(box.max[0], xs[i]! + 1), Math.max(box.max[1], ys[i]! + 1), Math.max(box.max[2], zs[i]! + 1)];
   }
+  const baked = ids.map((id) => bakedById.get(id)!);
+  // Blocks drawn from their NBT (09: a framed block with its camo) bake per position.
+  if (doc.blockEntities.size && baker.hasRenderHooks)
+    await Promise.all(
+      xs.map(async (x, i) => {
+        const nbt = doc.getBlockEntity(x, ys[i]!, zs[i]!);
+        if (nbt) baked[i] = await baker.bakeAt([x, ys[i]!, zs[i]!], doc.states.get(ids[i]!), nbt);
+      }),
+    );
   return {
     xs: Int32Array.from(xs),
     ys: Int32Array.from(ys),
     zs: Int32Array.from(zs),
-    baked: ids.map((id) => bakedById.get(id)!),
+    baked,
     flags: Uint8Array.from(flags),
     box,
     clip,

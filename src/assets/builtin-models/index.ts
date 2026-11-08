@@ -25,6 +25,8 @@ export interface CodeModel {
   parts: CodeModelPart[];
   /** Drawn on top of the block's JSON geometry instead of replacing it (the bell inside its frame). */
   overlay?: boolean;
+  /** Block id whose tint applies to tinted faces (a camo block's), instead of the drawn block's. */
+  tintFrom?: string;
 }
 
 /**

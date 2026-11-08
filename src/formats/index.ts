@@ -6,7 +6,7 @@ import { formatVec, type Box, type Vec3 } from "../core/region.js";
 import type { Document, Facing } from "../document/document.js";
 import { decodeNative, encodeNative } from "../document/native.js";
 import type { PaletteBook } from "../palette/pick.js";
-import type { AutosketchPlugin } from "../plugins/types.js";
+import { documentNbtWarnings, type AutosketchPlugin } from "../plugins/types.js";
 import { materialList, type MaterialList } from "./materials.js";
 import { isGzip, readNbt } from "./nbt.js";
 import { documentFromSnapshot, snapshotBlockCount, snapshotOf, type Snapshot } from "./snapshot.js";
@@ -93,6 +93,8 @@ export async function exportDocument(doc: Document, req: ExportRequest, env: Exp
     const unknown = [...new Set(snap.palette.map(stateId).filter((id) => id !== "minecraft:air" && !env.registry!.get(id)))];
     if (unknown.length) warnings.push(`${unknown.length} block id${unknown.length > 1 ? "s" : ""} not in this instance (kept): ${unknown.slice(0, 8).join(", ")}${unknown.length > 8 ? " …" : ""}`);
   }
+
+  if (env.plugins) warnings.push(...documentNbtWarnings(env.plugins, doc));
 
   const name = req.name ?? doc.meta.name;
   if (!/^[\w-][\w .-]{0,63}$/.test(name) || name.includes("..")) throw new Error(`export name must be letters, digits, space, _ . or - (max 64; got "${name}")`);
@@ -262,7 +264,10 @@ export interface Imported {
 }
 
 /** Reads a schematic file into a fresh document named `name`. */
-export async function importFile(path: string, opts: { name: string; registry?: Registry; dataVersion?: number; palettes?: PaletteBook; front?: Facing }): Promise<Imported> {
+export async function importFile(
+  path: string,
+  opts: { name: string; registry?: Registry; dataVersion?: number; palettes?: PaletteBook; front?: Facing; plugins?: readonly AutosketchPlugin[] },
+): Promise<Imported> {
   const buf = await readFile(path);
   const format = detectFormat(buf, path);
   const warnings: string[] = [];
@@ -294,6 +299,7 @@ export async function importFile(path: string, opts: { name: string; registry?: 
         (older ? "other block changes between versions (properties) are not upgraded" : "blocks added after this instance's version may be unknown"),
     );
   }
+  if (opts.plugins) warnings.push(...documentNbtWarnings(opts.plugins, doc));
   return { doc, format, warnings };
 }
 

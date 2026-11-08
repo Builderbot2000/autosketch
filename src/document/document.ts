@@ -122,8 +122,8 @@ export class Document {
    */
   guard?: WriteGuard;
   /**
-   * More write guards, run in order after `guard` (13: the live link's sync barrier composes with
-   * the scope layer's lock guard instead of replacing it). Empty on an unlinked document.
+   * More write guards, run in order before `guard` (13: the live link's sync barrier composes with
+   * the scope layer's guard instead of replacing it, and speaks first for a step over a sync). Empty on an unlinked document.
    */
   readonly guards: WriteGuard[] = [];
   /**
@@ -330,10 +330,10 @@ export class Document {
     return this.guard !== undefined || this.guards.length > 0;
   }
 
-  /** Runs `guard`, then every entry of `guards`, in order; the first refusal throws. */
+  /** Runs every entry of `guards` in order, then `guard`; the first refusal throws. */
   private check(changes: PendingChanges, op: string): void {
-    if (this.guard) this.guard(changes, op);
     for (const g of this.guards) g(changes, op);
+    if (this.guard) this.guard(changes, op);
   }
 
   undo(opts: StepOptions = {}): { entry: JournalEntry; shift?: Vec3 } | undefined {

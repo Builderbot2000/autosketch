@@ -4,6 +4,9 @@ import type { Box, Vec3 } from "../core/region.js";
 import type { Document, EditResult, WriteGuard } from "../document/document.js";
 import type { JournalEntry } from "../document/journal.js";
 import { refusal } from "../scope/scopes.js";
+import type { BridgeError } from "./bridge.js";
+import type { SyncReason, WorldLink } from "./link.js";
+import { WORLD_SYNC_OP } from "./no-push.js";
 import { nbtHash, sectionHash, sectionsOf } from "./protocol/hash.js";
 import type { Hash64, SectionHash, SnapshotRegion, VolatileList, WireBox, WorldBlock } from "./protocol/messages.js";
 import { encodeNbt } from "./protocol/nbt.js";
@@ -25,8 +28,8 @@ import { encodeNbt } from "./protocol/nbt.js";
  * (0,0,0), the work volume's minimum corner (13, *Frame*).
  */
 
-/** Op name of every sync entry. */
-export const WORLD_SYNC = "world_sync";
+/** Op name of every sync entry: P's "does not push" marker (`no-push.ts`). */
+export const WORLD_SYNC = WORLD_SYNC_OP;
 
 /** True for a `world_sync` journal entry: written from the world, never sent back as a patch. */
 export function isWorldSync(e: Pick<JournalEntry, "op">): boolean {
@@ -259,6 +262,79 @@ function hashCacheOf(doc: Document, frame: LinkFrame): HashCache {
   };
   c = cache;
   return c;
+}
+
+// -- on the link ----------------------------------------------------------------------------------
+
+/** The `hashes` and `snapshot` requests over a link's bridge, in the volumes' dimension. */
+export function bridgeSource(link: WorldLink, dimension: string): WorldSource {
+  return {
+    hashes: async (boxes) => (await link.bridge.request({ type: "hashes", dimension, boxes })).sections,
+    snapshot: (req) => link.bridge.request({ type: "snapshot", dimension, sections: req.sections }),
+  };
+}
+
+/** The frame a linked document's cache sits in: the agent's (extended) work volume and every context box. */
+export function linkFrame(link: WorldLink): LinkFrame | undefined {
+  const v = link.volumes;
+  if (!v) return undefined;
+  return { origin: v.origin, volumes: [v.extended, ...v.context], volatile: link.volatile };
+}
+
+/**
+ * The link's sync implementation (`WorldLink.setSync`; 13, *Automatic*, *Manual*). Takes the
+ * accumulated dirty notices first. For a `dirty` sync with listed positions it writes them (the
+ * partial form, no round trip); after an "everything" notice, on reconnect and for the `world_sync`
+ * tool it compares section hashes and snapshots the sections that differ. Resolves undefined when
+ * nothing is linked or nothing changed.
+ */
+export async function syncLink(link: WorldLink, reason: SyncReason): Promise<SyncResult | undefined> {
+  const doc = link.doc, v = link.volumes, frame = linkFrame(link);
+  if (link.state !== "linked" || !doc || !v || !frame) return undefined;
+  const dirty = link.takeDirty();
+  let r: SyncResult;
+  if (reason === "dirty" && dirty && !dirty.everything) {
+    if (!dirty.blocks.length) return undefined;
+    r = applyWorldState(doc, { blocks: dirty.blocks }, { origin: frame.origin, volumes: frame.volumes, volatile: frame.volatile });
+  } else {
+    r = await syncBySections(doc, bridgeSource(link, v.dimension), frame);
+  }
+  return r.changed ? r : undefined;
+}
+
+/** A call as the auto-sync hook sees it (the session's `CallInfo`, structurally: `world/` doesn't import `server/`). */
+export interface SyncCall {
+  tool: string;
+  doc: boolean;
+}
+
+/**
+ * Auto-sync (13, *Automatic*, W5): before a tool call on a document, if the link reports dirty
+ * volumes, sync first, so the tool sees the player's edits. Returned as a call hook for the
+ * session's `callHooks` (`server/index.ts` installs it with `link.setSync(syncLink)`), never in a
+ * tool module. Concurrent calls share one sync in flight; calls that take no document, the
+ * `world_sync` tool (which runs its own full sync), and calls while the bridge is down (a reconnect
+ * syncs) don't sync.
+ */
+export function autoSyncHook(link: () => WorldLink | undefined): { before(call: SyncCall): Promise<void> } {
+  let inflight: Promise<unknown> | undefined;
+  return {
+    async before(call) {
+      const l = link();
+      if (!call.doc || call.tool === WORLD_SYNC || !l || l.state !== "linked") return;
+      if (inflight) await inflight; // a sync already running for another call covers this one
+      if (!l.isDirty() || !l.bridge.connected) return;
+      const run = l.syncNow("dirty").catch((e: unknown) => {
+        if ((e as BridgeError).refusal !== "world_disconnected") throw e; // the reconnect will sync
+      });
+      inflight = run;
+      try {
+        await run;
+      } finally {
+        if (inflight === run) inflight = undefined;
+      }
+    },
+  };
 }
 
 /** Blocks changed by an entry inside each component's box (store coordinates, half-open). */

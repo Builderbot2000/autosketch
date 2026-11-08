@@ -10,6 +10,8 @@ const HEADER = `// Autosketch script API (docs/design/05-operations.md, Scriptin
 // A script is a function body: \`args\` holds the arguments, \`return\` gives the result (JSON).
 // The whole run is one undo step; if it throws or hits a limit (64 MB, 10 s), nothing changes.
 // Coordinates are document-local; boxes are inclusive, as in the tools.
+// Plugin ops (ops_list) are functions too: framed.shape({ sel, shape, … }) takes op_run's args
+// and returns an EditSummary.
 
 type Vec3 = [number, number, number];
 type Box = { min: Vec3; max: Vec3 };

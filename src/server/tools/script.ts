@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { z } from "zod";
 import { scriptApiDts } from "../../script/dts.js";
+import { pluginScriptOps } from "../../script/plugins.js";
 import type { ScriptOp } from "../../script/ops.js";
 import { runScript, ScriptError, type ScriptRun } from "../../script/run.js";
 import type { InstanceContext } from "../context.js";
@@ -12,9 +13,9 @@ import { env, fail, text, type Result, type ToolDeps } from "./shared.js";
 
 export const SCRIPT_API_URI = "autosketch://script/api.d.ts";
 
-/** Extra script ops for an instance (plugin actions, 09). */
-export function extraScriptOps(_c: InstanceContext): readonly ScriptOp[] {
-  return [];
+/** Extra script ops for an instance: its plugin actions (09), as "<plugin>.<op>" functions. */
+export function extraScriptOps(c: InstanceContext): readonly ScriptOp[] {
+  return pluginScriptOps(c.plugins);
 }
 
 /** Runs a script on the open document and formats the result (shared with run_procedure). */
@@ -45,7 +46,7 @@ export function registerScriptTools({ tool, resource, session }: ToolDeps): void
       description:
         "Runs JavaScript in a sandbox (QuickJS: no files, network or Node; 64 MB, 10 s) against the open document, for anything repetitive. The source is a function body: " +
         "args holds the arguments, return gives the result. API: sel.* builders (same trees as the tools), every op and generator (fill, replace, array, roof, tower, window…), " +
-        `component(), anchor(), palette(), query() (read-only), select(), positions(), log(), seeded rand(). Full reference: resource ${SCRIPT_API_URI}. ` +
+        `component(), anchor(), palette(), query() (read-only), select(), positions(), log(), seeded rand(), and plugin ops as <plugin>.<op>({…same args as op_run}). Full reference: resource ${SCRIPT_API_URI}. ` +
         "The whole run is one undo step; on an error or limit nothing changes. Returns the diff summary, the return value and the log. Text, <300 tokens.",
       inputSchema: {
         source: z.string().max(200_000),
@@ -59,7 +60,12 @@ export function registerScriptTools({ tool, resource, session }: ToolDeps): void
 
   resource(
     "script-api",
-    { title: "Script API", description: "TypeScript declarations of the run_script API, generated from the op registry (05).", uri: SCRIPT_API_URI, mimeType: "text/plain" },
+    {
+      title: "Script API",
+      description: "TypeScript declarations of the run_script API, generated from the op registry (05), plus a note on plugin ops (listed by ops_list).",
+      uri: SCRIPT_API_URI,
+      mimeType: "text/plain",
+    },
     () => ({ text: scriptApiDts() }),
   );
 }

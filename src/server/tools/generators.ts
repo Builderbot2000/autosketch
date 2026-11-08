@@ -109,7 +109,7 @@ export function registerGeneratorTools({ tool, session }: ToolDeps): void {
     "staircase",
     {
       title: "Staircase",
-      description: `Builds a straight staircase from its lowest step: dir + height, or to (the top step, a 45° run). width extends right of the climb; support solid (default) or none. Stairs from the material's family, or stairs:. ${tail}`,
+      description: `Builds a straight staircase from its lowest step: dir + height, or to (the top step, a 45° run). width extends right of the climb; support solid (default) or none. shape:"spiral" winds height steps around a newel post at from (radius, default 2; first step on the dir side, default north; turn cw|ccw; steps_per_turn; support none drops the post). Stairs from the material's family, or stairs:. ${tail}`,
       inputSchema: {
         from: atSchema,
         material: materialSchema,
@@ -119,6 +119,10 @@ export function registerGeneratorTools({ tool, session }: ToolDeps): void {
         width: z.number().int().min(1).max(32).optional(),
         stairs: materialSchema.optional(),
         support: z.enum(["solid", "none"]).optional(),
+        shape: z.enum(["straight", "spiral"]).optional(),
+        radius: z.number().int().min(1).max(16).optional().describe("Spiral: outer radius around the post"),
+        turn: z.enum(["cw", "ccw"]).optional().describe("Spiral: turning direction seen from above"),
+        steps_per_turn: z.number().int().min(3).max(64).optional(),
         ...gen,
       },
       readOnly: false,
@@ -129,7 +133,7 @@ export function registerGeneratorTools({ tool, session }: ToolDeps): void {
           doc,
           staircase(doc, env(c), a.material as MaterialExpr, {
             from: a.from as AtSpec,
-            ...defined({ dir: a.dir, height: a.height, width: a.width, support: a.support }),
+            ...defined({ dir: a.dir, height: a.height, width: a.width, support: a.support, shape: a.shape, radius: a.radius, turn: a.turn, steps_per_turn: a.steps_per_turn }),
             ...(a.to !== undefined ? { to: a.to as AtSpec } : {}),
             ...(a.stairs !== undefined ? { stairs: a.stairs as MaterialExpr } : {}),
             ...genOpts(a),
@@ -142,7 +146,7 @@ export function registerGeneratorTools({ tool, session }: ToolDeps): void {
     "wall_run",
     {
       title: "Wall run",
-      description: `Builds a wall along a path of points (any at: form; y = base): height, thickness (centred), crenellation (true or {every, height, material}), buttresses {every, depth, side left|right|both}, cap (top course material). ${tail}`,
+      description: `Builds a wall along a path of points (any at: form; y = base): height, thickness (centred), crenellation (true or {every, height, material}), buttresses {every, depth, side left|right|both}, cap (top course material), curve polyline (default) | smooth (a curve through the points) | bezier (points are control points). ${tail}`,
       inputSchema: {
         path: z.array(atSchema).min(2),
         material: materialSchema,
@@ -151,6 +155,7 @@ export function registerGeneratorTools({ tool, session }: ToolDeps): void {
         crenellation: z.union([z.boolean(), z.object({ every: z.number().int().optional(), height: z.number().int().optional(), material: materialSchema.optional() })]).optional(),
         buttresses: z.object({ every: z.number().int(), depth: z.number().int().optional(), side: z.enum(["left", "right", "both"]).optional(), material: materialSchema.optional() }).optional(),
         cap: materialSchema.optional(),
+        curve: z.enum(["polyline", "smooth", "bezier"]).optional(),
         ...gen,
       },
       readOnly: false,
@@ -162,7 +167,7 @@ export function registerGeneratorTools({ tool, session }: ToolDeps): void {
           wallRun(doc, env(c), a.material as MaterialExpr, {
             path: a.path as AtSpec[],
             height: a.height,
-            ...defined({ thickness: a.thickness }),
+            ...defined({ thickness: a.thickness, curve: a.curve }),
             ...(a.crenellation !== undefined ? { crenellation: typeof a.crenellation === "boolean" ? a.crenellation : (defined(a.crenellation) as never) } : {}),
             ...(a.buttresses ? { buttresses: defined(a.buttresses) as never } : {}),
             ...(a.cap !== undefined ? { cap: a.cap as MaterialExpr } : {}),

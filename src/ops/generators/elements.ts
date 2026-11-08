@@ -108,11 +108,21 @@ export interface StaircaseOptions extends GenOptions {
   /** Steps wide, extending to the right of the climb (default 1). */
   width?: number;
   stairs?: MaterialExpr;
-  /** What fills under the steps: solid (default), none. */
+  /** What fills under the steps: solid (default), none. On a spiral, solid is the central newel post. */
   support?: "solid" | "none";
+  /** straight (default) or spiral (around a newel post at `from`, the first step on the `dir` side). */
+  shape?: "straight" | "spiral";
+  /** Spiral: outer radius of the steps around the post (default 2). */
+  radius?: number;
+  /** Spiral: turning direction seen from above, cw (default) or ccw. */
+  turn?: "cw" | "ccw";
+  /** Spiral: steps per full turn (default 8 up to radius 2, else 4 × radius). */
+  steps_per_turn?: number;
 }
 
 export function staircase(doc: Document, env: OpEnv, material: MaterialExpr, opts: StaircaseOptions): GenResult {
+  if (opts.shape === "spiral") return spiralStaircase(doc, env, material, opts);
+  if (opts.shape !== undefined && opts.shape !== "straight") throw new Error(`unknown staircase shape "${opts.shape}" (straight, spiral)`);
   const notes: string[] = [];
   const from = at(doc, env, opts.from, notes, "from");
   let dir = opts.dir;
@@ -146,6 +156,66 @@ export function staircase(doc: Document, env: OpEnv, material: MaterialExpr, opt
     W.register(id, "staircase", opts, { bottom: from, top, landing: [top[0] + fwd[0], top[1] + 1, top[2] + fwd[2]] });
   });
   notes.unshift(`${n} steps climbing ${dir}, ${width} wide`);
+  return { ...r, component: id, notes };
+}
+
+/**
+ * Spiral staircase: one step per block of rise, each a sector of the ring around a newel post at
+ * `from` (the post's base). Sector k of a turn is centred k·360°/steps_per_turn from the `dir`
+ * side, turning cw or ccw seen from above; every cell of the ring belongs to exactly one sector.
+ * Stairs face the direction of climb (the tangent, rounded to the nearest horizontal direction);
+ * the post is full blocks from the first to the last step unless support is "none".
+ */
+function spiralStaircase(doc: Document, env: OpEnv, material: MaterialExpr, opts: StaircaseOptions): GenResult {
+  const notes: string[] = [];
+  if (opts.to !== undefined) throw new Error("a spiral staircase takes height, not to");
+  if (opts.width !== undefined) throw new Error("a spiral staircase takes radius, not width");
+  const c = at(doc, env, opts.from, notes, "from");
+  const n = checkInt(opts.height, "height", 1, 256);
+  const radius = checkInt(opts.radius ?? 2, "radius", 1, 16);
+  const per = checkInt(opts.steps_per_turn ?? (radius <= 2 ? 8 : 4 * radius), "steps_per_turn", 3, 64);
+  const dir: Dir = opts.dir ?? "north";
+  if (!(dir in DIRS)) throw new Error("dir must be north, south, east or west");
+  const turn = opts.turn ?? "cw";
+  if (turn !== "cw" && turn !== "ccw") throw new Error('turn must be "cw" or "ccw"');
+  const s = turn === "cw" ? 1 : -1;
+  // Angles in the xz plane: 0 = east, +90° = south, so a growing angle turns clockwise from above.
+  const d0 = DIRS[dir], a0 = Math.atan2(d0[2], d0[0]), step = (2 * Math.PI) / per;
+  const sectors: [number, number][][] = Array.from({ length: per }, () => []);
+  const rr = (radius + 0.5) ** 2;
+  for (let dx = -radius; dx <= radius; dx++)
+    for (let dz = -radius; dz <= radius; dz++) {
+      if ((dx === 0 && dz === 0) || dx * dx + dz * dz > rr) continue;
+      const k = ((Math.round((s * (Math.atan2(dz, dx) - a0)) / step) % per) + per) % per;
+      sectors[k]!.push([dx, dz]);
+    }
+  const empty = sectors.findIndex((l) => l.length === 0);
+  if (empty >= 0) throw new Error(`steps_per_turn ${per} is too many for radius ${radius}: step ${empty} of each turn gets no block`);
+  const facingOf = (k: number): Dir => {
+    const a = a0 + s * (k * step - 1e-6); // a diagonal step keeps the facing of the one before
+    const tx = -s * Math.sin(a), tz = s * Math.cos(a);
+    return Math.abs(tx) >= Math.abs(tz) ? (tx > 0 ? "east" : "west") : tz > 0 ? "south" : "north";
+  };
+  const shapes = shapeSet(doc, env, material, opts.stairs !== undefined ? { stairs: opts.stairs } : {}, "staircase material");
+  const id = componentId(doc, opts, "staircase");
+  const r = opEdit(doc, env, "staircase", `spiral staircase ${n} steps ${turn} from ${c.join(",")} as ${id}`, opts, (tx) => {
+    const W = new Writer(doc, env, tx);
+    const full = W.material(shapes.full);
+    const st = shapes.stairs !== undefined ? W.material(shapes.stairs, "stairs") : undefined;
+    for (const wn of shapes.warnings) if (/stairs/.test(wn)) tx.warn(wn);
+    for (let i = 0; i < n; i++) {
+      const k = i % per, facing = facingOf(k);
+      for (const [dx, dz] of sectors[k]!) {
+        const p: Vec3 = [c[0] + dx, c[1] + i, c[2] + dz];
+        W.set(p, st ? W.shaped(st, p, { facing, half: "bottom" }) : full(...p));
+      }
+      if (opts.support !== "none") W.set([c[0], c[1] + i, c[2]], full(c[0], c[1] + i, c[2]));
+    }
+    const a = a0 + s * (n % per) * step;
+    const landing: Vec3 = [c[0] + Math.round(Math.cos(a) * radius), c[1] + n, c[2] + Math.round(Math.sin(a) * radius)];
+    W.register(id, "staircase", opts, { bottom: c, top: [c[0], c[1] + n - 1, c[2]], landing });
+  });
+  notes.unshift(`spiral of ${n} steps turning ${turn} from the ${dir} side, radius ${radius}, ${per} steps per turn`);
   return { ...r, component: id, notes };
 }
 

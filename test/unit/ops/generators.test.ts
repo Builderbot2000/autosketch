@@ -136,6 +136,40 @@ describe("arch, staircase, column (05 Generators)", () => {
     expect(s.notes[0]).toBe("4 steps climbing east, 1 wide");
   });
 
+  it("staircase spiral: one sector per step around a newel post, stairs facing the climb", () => {
+    const doc = newDoc();
+    const pos = doc.journal.position;
+    const r = staircase(doc, env, "oak_planks", { from: [0, 0, 0], shape: "spiral", radius: 1, height: 9 });
+    expect(doc.journal.position).toBe(pos + 1);
+    expect(r.notes[0]).toBe("spiral of 9 steps turning cw from the north side, radius 1, 8 steps per turn");
+    // clockwise from above starting north: N, NE, E, SE, S, SW, W, NW, then N one turn up
+    const cells: [number, number, string][] = [[0, -1, "east"], [1, -1, "east"], [1, 0, "south"], [1, 1, "south"], [0, 1, "west"], [-1, 1, "west"], [-1, 0, "north"], [-1, -1, "north"], [0, -1, "east"]];
+    cells.forEach(([x, z, f], y) => {
+      expect(at(doc, x, y, z)).toMatch(new RegExp(`^oak_stairs\\[facing=${f},half=bottom`));
+      // each step is alone on its layer, apart from the post
+      if (y < 8) expect(at(doc, x, y + 1, z)).toBe("air");
+    });
+    for (let y = 0; y < 9; y++) expect(at(doc, 0, y, 0)).toBe("oak_planks");
+    expect(at(doc, 0, 9, 0)).toBe("air");
+    expect(doc.blockCount()).toBe(18);
+    expect(doc.componentLocal("staircase")!.anchors).toMatchObject({ bottom: [0, 0, 0], top: [0, 8, 0], landing: [1, 9, -1] });
+  });
+
+  it("staircase spiral: ccw, radius 2 sectors cover the ring, support none drops the post", () => {
+    const doc = newDoc();
+    staircase(doc, env, "oak_planks", { from: [0, 0, 0], shape: "spiral", dir: "east", turn: "ccw", height: 8, support: "none" });
+    expect(at(doc, 2, 0, 0)).toMatch(/^oak_stairs\[facing=north/); // ccw from east climbs north
+    expect(at(doc, 1, 0, 0)).toMatch(/^oak_stairs\[facing=north/);
+    expect(at(doc, 0, 2, -2)).toMatch(/^oak_stairs\[facing=west/); // two steps on: the north side
+    expect(at(doc, 0, 0, 0)).toBe("air");
+    // one full turn: every ring cell (20 within radius 2.5, minus the post) holds exactly one step
+    let n = 0;
+    for (let x = -2; x <= 2; x++) for (let z = -2; z <= 2; z++) for (let y = 0; y < 8; y++) if (at(doc, x, y, z) !== "air") n++;
+    expect(n).toBe(20);
+    expect(() => staircase(doc, env, "oak_planks", { from: [9, 0, 9], shape: "spiral", radius: 1, height: 4, steps_per_turn: 12 })).toThrow(/too many/);
+    expect(() => staircase(doc, env, "oak_planks", { from: [9, 0, 9], shape: "spiral", height: 4, width: 2 })).toThrow(/radius, not width/);
+  });
+
   it("column: shaft with base and capital at an anchor", () => {
     const doc = newDoc();
     fill(doc, env, B([0, 0, 0], [4, 0, 4]), "stone", { as: "plinth" });
@@ -187,6 +221,29 @@ describe("wall_run and tower (05 Generators)", () => {
     expect(at(doc, 1, 0, -1)).toBe("air");
     expect(at(doc, 3, 1, -1)).toBe("cobblestone");
     expect(at(doc, 3, 2, -1)).toBe("air");
+  });
+
+  it("wall_run curve: bezier and smooth paths are gap-free and pass where the curve does", () => {
+    const run = (path: Vec3[], curve: "smooth" | "bezier") => {
+      const doc = newDoc();
+      wallRun(doc, env, "cobblestone", { path, height: 1, curve });
+      const cells: Vec3[] = [];
+      for (let x = -2; x <= 10; x++) for (let z = -2; z <= 10; z++) if (at(doc, x, 0, z) !== "air") cells.push([x, 0, z]);
+      return { doc, cells };
+    };
+    const bz = run([[0, 0, 0], [4, 0, 8], [8, 0, 0]], "bezier");
+    expect(at(bz.doc, 0, 0, 0)).toBe("cobblestone");
+    expect(at(bz.doc, 8, 0, 0)).toBe("cobblestone");
+    expect(at(bz.doc, 4, 0, 4)).toBe("cobblestone"); // B(½) = (4, 4): control point pulls the apex halfway
+    expect(at(bz.doc, 4, 0, 8)).toBe("air"); // the curve does not reach its control point
+    // symmetric about x = 4, and every block touches another (no gaps)
+    for (const [x, , z] of bz.cells) expect(at(bz.doc, 8 - x, 0, z)).toBe("cobblestone");
+    for (const c of bz.cells) expect(bz.cells.some((d) => d !== c && Math.max(Math.abs(d[0] - c[0]), Math.abs(d[2] - c[2])) === 1)).toBe(true);
+    const sm = run([[0, 0, 0], [4, 0, 4], [8, 0, 0]], "smooth");
+    expect(at(sm.doc, 4, 0, 4)).toBe("cobblestone"); // passes through every point
+    expect(at(sm.doc, 4, 0, 5)).toBe("air");
+    for (const [x, , z] of sm.cells) expect(at(sm.doc, 8 - x, 0, z)).toBe("cobblestone");
+    expect(() => run([[0, 0, 0], [4, 0, 4]], "spline" as never)).toThrow(/unknown curve/);
   });
 
   it("tower: hollow round walls plus a roof as one journal entry with a child roof component", () => {

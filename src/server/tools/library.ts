@@ -111,8 +111,8 @@ export function registerLibraryTools({ tool, resource, session }: ToolDeps): voi
   );
 
   const atSchema = z
-    .union([vec3, z.string(), z.object({ anchor: z.string(), offset: vec3.optional() })])
-    .describe('[x,y,z], "component.anchor" (named anchors, or min/max/center/bottom/top), or {anchor:"gate.top", offset:[0,0,3]}');
+    .union([vec3, z.string(), z.object({ anchor: z.string(), offset: vec3.optional() }), z.object({ face: z.string(), u: z.union([z.number(), z.string()]).optional(), v: z.union([z.number(), z.string()]).optional(), offset: vec3.optional() })])
+    .describe('[x,y,z], "component.anchor" (named anchors, or min/max/center/bottom/top/front/back/left/right/storey:n), {anchor:"gate.top", offset:[0,0,3]}, or {face:"keep.front", u:0.5, v:"storey:2"}');
 
   tool(
     "stamp",

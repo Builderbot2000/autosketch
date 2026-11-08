@@ -10,6 +10,7 @@ import type { PaletteIndex } from "../palette/index.js";
 import type { RoleMember } from "../palette/pick.js";
 import type { AutosketchPlugin } from "../plugins/types.js";
 import type { LoadedPrefab, Prefab } from "./prefabs.js";
+import { resolveAnchor, type AtSpec } from "../ops/anchors.js";
 
 /**
  * stamp (docs/design/07-library.md, 05 Generators): places a library prefab into the document as
@@ -17,8 +18,8 @@ import type { LoadedPrefab, Prefab } from "./prefabs.js";
  * through families, so a stair stays a stair (with its facing) in the new material.
  */
 
-/** Where to stamp: a local position, "component.anchor", or {anchor, offset}. */
-export type StampAt = Vec3 | string | { anchor: string; offset?: Vec3 };
+/** Where to stamp: a local position, "component.anchor", {anchor, offset} or {face, u, v} (05). */
+export type StampAt = AtSpec;
 
 export interface StampOptions {
   at: StampAt;
@@ -55,7 +56,7 @@ export function stampPrefab(doc: Document, env: StampEnv, prefab: Prefab, loaded
   const snap = loaded.snapshot;
   const frame = prefabFrame(snap.size, opts, env);
   const palette = frame.state ? snap.palette.map(frame.state) : snap.palette;
-  const at = resolveAt(doc, opts.at);
+  const at = resolveAt(doc, opts.at, env);
   const anchorName = opts.anchor ?? (prefab.meta.anchors.base ? "base" : undefined);
   const a: Vec3 = anchorName ? frame.place(prefab.meta.anchors[anchorName] ?? fail(`prefab "${prefab.id}" has no anchor "${anchorName}" (anchors: ${Object.keys(prefab.meta.anchors).join(", ") || "none"})`)) : [0, 0, 0];
   const origin: Vec3 = [at[0] - a[0], at[1] - a[1], at[2] - a[2]];
@@ -141,39 +142,11 @@ export function prefabFrame(size: Vec3, opts: Pick<StampOptions, "rotate" | "mir
 // -- placement ---------------------------------------------------------------------------------------
 
 /**
- * Resolves `at` to a local position. Components expose their named anchors plus min, max, center
- * (centre of the box), bottom (centre of the floor layer) and top (centre, one above the box).
- * TODO(silo C): use the shared anchor resolver in ops/anchors.ts (05) once it lands.
+ * Resolves `at` to a local position through the shared anchor resolver (05, `ops/anchors.ts`):
+ * named and implicit anchors, `{anchor, offset}` and `{face, u, v}`.
  */
-export function resolveAt(doc: Document, at: StampAt): Vec3 {
-  if (Array.isArray(at)) {
-    if (at.length !== 3 || at.some((n) => !Number.isInteger(n))) throw new Error(`at must be [x,y,z] integers (got ${JSON.stringify(at)})`);
-    return [at[0], at[1], at[2]];
-  }
-  if (typeof at === "object" && at && typeof at.anchor === "string") {
-    const p = resolveAt(doc, at.anchor);
-    const o = at.offset ?? [0, 0, 0];
-    return [p[0] + o[0], p[1] + o[1], p[2] + o[2]];
-  }
-  if (typeof at !== "string") throw new Error('at must be [x,y,z], "component.anchor" or {anchor, offset}');
-  const dot = at.lastIndexOf(".");
-  const compId = dot > 0 ? at.slice(0, dot) : at;
-  const name = dot > 0 ? at.slice(dot + 1) : "base";
-  const c = doc.componentLocal(compId);
-  if (!c) throw new Error(`no component "${compId}" (have: ${[...doc.components.keys()].join(", ") || "none"})`);
-  if (c.anchors[name]) return c.anchors[name]!;
-  const { min, max } = c.box;
-  const cx = Math.floor((min[0] + max[0] - 1) / 2), cz = Math.floor((min[2] + max[2] - 1) / 2);
-  const implicit: Record<string, Vec3> = {
-    min: [...min],
-    max: [max[0] - 1, max[1] - 1, max[2] - 1],
-    center: [cx, Math.floor((min[1] + max[1] - 1) / 2), cz],
-    bottom: [cx, min[1], cz],
-    top: [cx, max[1], cz],
-  };
-  const p = implicit[name];
-  if (!p) throw new Error(`component "${compId}" has no anchor "${name}" (named: ${Object.keys(c.anchors).join(", ") || "none"}; implicit: ${Object.keys(implicit).join(", ")})`);
-  return p;
+export function resolveAt(doc: Document, at: StampAt, env: StampEnv = {}): Vec3 {
+  return resolveAnchor(doc, at, env).pos;
 }
 
 export function uniqueComponentId(doc: Document, base: string): string {

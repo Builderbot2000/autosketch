@@ -163,14 +163,35 @@ export class Document {
    * body throws, so an op either commits completely or not at all.
    */
   edit<T>(op: string, summary: string, body: (tx: Transaction) => T): EditResult & { value: T } {
+    return this.run(op, summary, body, false);
+  }
+
+  /**
+   * Like `edit`, but every `edit` made while `body` runs joins this one journal entry (05: a script
+   * run is one entry). A nested edit that throws is rolled back on its own, so a script that
+   * catches the error keeps its earlier writes; if `body` throws, everything is rolled back.
+   */
+  group<T>(op: string, summary: string, body: (tx: Transaction) => T): EditResult & { value: T } {
+    return this.run(op, summary, body, true);
+  }
+
+  /** The transaction of the innermost running `group`, which nested edits join. */
+  private open?: Transaction;
+
+  private run<T>(op: string, summary: string, body: (tx: Transaction) => T, group: boolean): EditResult & { value: T } {
+    const parent = this.open;
     const tx = new Transaction(this);
+    if (group) this.open = tx;
     let value: T;
     try {
       value = body(tx);
     } catch (e) {
       tx.rollback();
       throw e;
+    } finally {
+      if (group) this.open = parent;
     }
+    if (parent) return { op, seq: this.journal.headSeq, ...parent.absorb(tx), value };
     return { ...this.commit(op, summary, tx), value };
   }
 
@@ -337,16 +358,7 @@ export class Transaction {
     if (!t) this.touched.set(sk, (t = new Int32Array(4096)));
     const ti = indexInSection(sx, sy, sz);
     const prev = this.doc.voxels.set(sx, sy, sz, id);
-    let i = t[ti]! - 1;
-    if (i < 0) {
-      i = this.n++;
-      if (this.n > this.before.length) this.grow();
-      t[ti] = i + 1;
-      this.pos[i * 3] = sx;
-      this.pos[i * 3 + 1] = sy;
-      this.pos[i * 3 + 2] = sz;
-      this.before[i] = prev;
-    }
+    const i = this.slot(t, ti, sx, sy, sz, prev);
     if (nbt === undefined && this.doc.blockEntities.size === 0) return; // fast path: no NBT anywhere
     const pk = posKey(sx, sy, sz);
     const had = this.doc.blockEntities.get(pk);
@@ -365,6 +377,51 @@ export class Transaction {
       }
       this.nbtChanges.set(i, c);
     }
+  }
+
+  /** Diff index of a store position, recording `prev` as its before value on first touch. */
+  private slot(t: Int32Array, ti: number, sx: number, sy: number, sz: number, prev: number): number {
+    let i = t[ti]! - 1;
+    if (i < 0) {
+      i = this.n++;
+      if (this.n > this.before.length) this.grow();
+      t[ti] = i + 1;
+      this.pos[i * 3] = sx;
+      this.pos[i * 3 + 1] = sy;
+      this.pos[i * 3 + 2] = sz;
+      this.before[i] = prev;
+    }
+    return i;
+  }
+
+  /**
+   * Takes over a finished nested transaction's diff (Document.group): positions it touched first
+   * keep the nested before values. Returns the nested op's own count, box and warnings.
+   */
+  absorb(child: Transaction): Omit<EditResult, "op" | "seq"> {
+    let changed = 0;
+    let box: Box | undefined;
+    for (let i = 0; i < child.n; i++) {
+      const sx = child.pos[i * 3]!, sy = child.pos[i * 3 + 1]!, sz = child.pos[i * 3 + 2]!;
+      const c = child.nbtChanges.get(i);
+      if (this.doc.voxels.get(sx, sy, sz) !== child.before[i] || (c && c.before !== c.after)) {
+        changed++;
+        box = growBox(box, sx, sy, sz);
+      }
+      const sk = sectionKey(sx >> 4, sy >> 4, sz >> 4);
+      let t = this.touched.get(sk);
+      if (!t) this.touched.set(sk, (t = new Int32Array(4096)));
+      const pi = this.slot(t, indexInSection(sx, sy, sz), sx, sy, sz, child.before[i]!);
+      if (!c) continue;
+      const mine = this.nbtChanges.get(pi);
+      if (mine) {
+        if (c.after) mine.after = c.after;
+        else delete mine.after;
+      } else this.nbtChanges.set(pi, { ...c });
+    }
+    if (child.componentsBefore) this.componentsBefore ??= child.componentsBefore;
+    for (const w of child.warnings) this.warn(w);
+    return { changed, ...(box ? { box: this.doc.boxToLocal(box) } : {}), warnings: child.warnings };
   }
 
   private grow(): void {
@@ -472,6 +529,11 @@ function diff(a: Vec3, b: Vec3): Vec3 | undefined {
 function shiftOf(from: Vec3, to: Vec3): { shift?: Vec3 } {
   const d = diff(to, from);
   return d ? { shift: d } : {};
+}
+
+function growBox(b: Box | undefined, x: number, y: number, z: number): Box {
+  if (!b) return { min: [x, y, z], max: [x + 1, y + 1, z + 1] };
+  return { min: [Math.min(b.min[0], x), Math.min(b.min[1], y), Math.min(b.min[2], z)], max: [Math.max(b.max[0], x + 1), Math.max(b.max[1], y + 1), Math.max(b.max[2], z + 1)] };
 }
 
 function changedBox(p: Int32Array): Box | undefined {

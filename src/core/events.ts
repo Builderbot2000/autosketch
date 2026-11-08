@@ -30,10 +30,10 @@ export interface DeltaRef {
 }
 
 export type ObserveEvent =
-  | { kind: "session.open"; name: string; bounds?: PublicBox; version?: string }
+  | { kind: "session.open"; name: string; bounds?: PublicBox; version?: string; delta?: DeltaRef }
   | { kind: "session.close"; name: string }
   | { kind: "doc.op"; jseq: number; op: string; summary: string; changed: number; box?: PublicBox; counts: BlockCounts; shift?: [number, number, number]; delta?: DeltaRef }
-  | { kind: "doc.undo" | "doc.redo"; jseq: number; op: string; changed: number; box?: PublicBox; delta?: DeltaRef }
+  | { kind: "doc.undo" | "doc.redo"; jseq: number; op: string; changed: number; box?: PublicBox; shift?: [number, number, number]; delta?: DeltaRef }
   | { kind: "state.add"; id: number; state: string }
   | { kind: "doc.checkpoint"; name: string; jseq: number }
   | { kind: "call.start"; call: number; tool: string; scope?: string }

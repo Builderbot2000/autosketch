@@ -63,6 +63,14 @@ main { flex: 1; min-height: 0; display: grid; gap: 6px; padding: 6px; grid-templ
 .tl-wait { fill: rgba(255, 200, 80, 0.45); }
 .tl-refusal { stroke: var(--refused); stroke-width: 2; }
 #activity { width: 100%; flex: 1; min-height: 0; display: block; }
+#replay { display: flex; gap: 8px; align-items: center; padding: 4px 12px 8px; }
+#replay-seq { flex: 1; }
+#replay-pos { min-width: 16ch; font-variant-numeric: tabular-nums; }
+#replay-live.on { background: #23402a; color: #8e8; }
+#fallback { position: absolute; inset: 0; margin: 0; background: var(--panel); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; }
+#fallback[hidden] { display: none; }
+#fallback img { max-width: 100%; max-height: calc(100% - 40px); image-rendering: pixelated; }
+#fallback figcaption { color: var(--dim); font-size: 12px; }
 @media (max-width: 800px) {
   main { grid-template-columns: 1fr; grid-template-rows: 60vh auto auto; grid-template-areas: "view" "side" "bottom"; }
   .side { max-height: 70vh; }

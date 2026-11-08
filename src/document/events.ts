@@ -26,7 +26,9 @@ export function opEvent(doc: Document, e: JournalEntry): ObserveEvent {
 
 export function stepEvent(doc: Document, kind: "doc.undo" | "doc.redo", e: JournalEntry): ObserveEvent {
   const box = localBox(doc, e.positions);
-  return { kind, jseq: e.seq, op: e.op, changed: e.after.length, ...(box ? { box } : {}) };
+  // The origin moves back on undo: shift is always (origin now) - (origin before this step).
+  const shift = kind === "doc.undo" ? diff(e.originBefore, e.originAfter) : diff(e.originAfter, e.originBefore);
+  return { kind, jseq: e.seq, op: e.op, changed: e.after.length, ...(box ? { box } : {}), ...(shift ? { shift } : {}) };
 }
 
 /** Inclusive local box of store positions, in the document's current frame. */

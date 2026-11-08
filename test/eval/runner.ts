@@ -9,7 +9,8 @@ import { loadNative, saveNative } from "../../src/document/native.js";
 import { ablationByName, SCOPE_REQUIRED, SCOPE_TOOLS, type Ablation } from "./ablations.js";
 import { publicBounds, runChecks, type CheckResult } from "./checks.js";
 import { costUsd } from "./cost.js";
-import { imageTokens, jobTable, joinCalls, readEvents, type JobRow, type SessionStats } from "./join.js";
+import { readWorkspaceEvents } from "../../src/observe/reader.js";
+import { imageTokens, jobTable, joinCalls, type JobRow, type SessionStats } from "./join.js";
 import type { EvalPrompt, PromptSize } from "./prompts.js";
 import { parseJudgeReply, type Judge, type RubricScore } from "./rubric.js";
 import { SEEDS } from "./seeds.js";
@@ -208,7 +209,7 @@ export async function runCase(p: EvalPrompt, ablation: Ablation, mode: RunMode, 
       rec.status = "error";
       rec.error = `run ended with ${t.stopReason ?? "an error"}`;
     }
-    const { events, dropped } = await readEvents(workspace);
+    const { events, dropped } = await readWorkspaceEvents(workspace);
     const joined = joinCalls(t, events);
     const { jobs, session } = jobTable(events, joined);
     rec.turns = t.turns.length;

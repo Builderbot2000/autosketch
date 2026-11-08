@@ -1,5 +1,3 @@
-import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
 import type { LoggedEvent } from "../../src/core/events.js";
 import { resultTokens, type Transcript } from "./transcript.js";
 
@@ -16,41 +14,6 @@ import { resultTokens, type Transcript } from "./transcript.js";
 
 /** Image tokens for a picture of this many pixels (Anthropic's documented estimate, w × h / 750). */
 export const imageTokens = (pixels: number): number => Math.ceil(pixels / 750);
-
-/** Every event in a workspace's logs (`<ws>/<doc>/observe/<session>/events.ndjson`), in `seq` order. */
-export async function readEvents(workspace: string): Promise<{ events: LoggedEvent[]; dropped: number }> {
-  const events = new Map<number, LoggedEvent>();
-  let dropped = 0;
-  for (const doc of await safeReaddir(workspace))
-    for (const session of await safeReaddir(join(workspace, doc, "observe"))) {
-      let text: string;
-      try {
-        text = await readFile(join(workspace, doc, "observe", session, "events.ndjson"), "utf8");
-      } catch {
-        continue;
-      }
-      for (const line of text.split("\n")) {
-        if (!line.trim()) continue;
-        let e: LoggedEvent & { count?: number };
-        try {
-          e = JSON.parse(line);
-        } catch {
-          continue;
-        }
-        if ((e.kind as string) === "observe.dropped") dropped += e.count ?? 0;
-        else if (typeof e.seq === "number") events.set(e.seq, e);
-      }
-    }
-  return { events: [...events.values()].sort((a, b) => a.seq - b.seq), dropped };
-}
-
-async function safeReaddir(dir: string): Promise<string[]> {
-  try {
-    return (await readdir(dir)).sort();
-  } catch {
-    return [];
-  }
-}
 
 export interface LoggedCall {
   call: number;

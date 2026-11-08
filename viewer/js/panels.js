@@ -20,8 +20,7 @@ export const ago = (t, now) => {
 };
 
 /** Panel 2: a live, human-readable scope_list(). */
-export function renderScopeTree(el, model, { selected, onSelect }) {
-  const now = Date.now();
+export function renderScopeTree(el, model, { selected, onSelect, now = Date.now() }) {
   const node = ({ scope: s, children }) => {
     const age = s.forkT ? ago(s.forkT, s.endT ?? now) : "";
     const row = h(
@@ -56,12 +55,13 @@ export function renderFeed(el, model, filters, limit = 400) {
 }
 
 /** Panel 5: one bar per job from fork to merge, nested under its parent; refusals and lock waits marked. */
-export function renderTimeline(el, model, { selected, onSelect }) {
+export function renderTimeline(el, model, { selected, onSelect, now }) {
   const rows = model.timelineRows();
   const t0 = rows[0]?.start ?? 0;
   // A live session runs to now; a finished one (no open scopes) ends at its last event.
   const live = model.openScopes().length > 0;
-  const t1 = Math.max(live ? Date.now() : model.now, t0 + 1000);
+  // During replay the caller passes the replayed event's time as "now".
+  const t1 = Math.max(now ?? (live ? Date.now() : model.now), t0 + 1000);
   const W = Math.max(300, el.clientWidth || 600), rowH = 18, labelW = 120;
   const x = (t) => labelW + ((t - t0) / (t1 - t0)) * (W - labelW - 8);
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");

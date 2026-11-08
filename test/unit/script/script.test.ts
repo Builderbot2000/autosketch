@@ -118,6 +118,14 @@ describe("script sandbox (05 Scripting)", () => {
     expect(doc.blockCount()).toBe(0);
   });
 
+  it("sel.kind and sel.tagged select components by metadata", async () => {
+    const doc = newDoc();
+    fill(doc, env, B([0, 0, 0], [1, 0, 0]), "oak_planks", { as: "a", kind: "hut" });
+    fill(doc, env, B([5, 0, 0], [5, 0, 0]), "oak_planks", { as: "b", kind: "hut" });
+    const r = await runScript(doc, env, { source: `return [sel.kind("hut").count(), sel.tagged("x").count(), sel.kind("hut").tree];` });
+    expect(JSON.parse(r.value!)).toEqual([3, 0, { kind: "hut" }]);
+  });
+
   it("generates a .d.ts from the op registry", () => {
     const d = scriptApiDts([{ name: "framed.camo", params: "sel: SelLike", returns: "EditSummary", doc: "Camo.", run: () => null }]);
     expect(d).toMatch(/declare function fill\(sel: SelLike, material: Material/);

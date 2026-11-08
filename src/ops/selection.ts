@@ -1,5 +1,6 @@
 import type { Registry } from "../assets/registry.js";
-import { stateId } from "../core/blockstate.js";
+import { parseState, stateId } from "../core/blockstate.js";
+import { deltaE } from "../palette/color.js";
 import { Mask, shellOf } from "../core/mask.js";
 import { defaultPivot, mirrorPos, rotatePos, type MirrorAxis } from "../core/rotate.js";
 import { boxVolume, formatBox, fromPublic, intersectBox, isEmptyBox, type Box, type PublicBox, type Vec3 } from "../core/region.js";
@@ -21,6 +22,8 @@ import { enclosedMask, interiorMask, topMask } from "../perception/semantic.js";
  *             {"cylinder":{center,radius,height,axis?}} · {"sphere":{center,radius}} · {"ellipsoid":{center,radii}}
  *             {"polygon":{points:[[x,z],..],y:[y0,y1]}} · {"plane":{axis,at,within?}} · {"component":"id"}
  * Picking     {"connected":{seed,match?,connectivity?,within?}} · {"similar":{seed,by?,within?}}
+ *             (match/by: block|state|family|solid|air|tag|role|colour|prop:<name>; tag?, palette?, role?, tolerance?)
+ *             {"kind":"tower"|"prefab:*"} · {"tagged":"ruined"} (component boxes, by registered metadata)
  * References  "<name>" (a named selection) · "last" (the most recent selection)
  * Booleans    {"union":[a,b,..]} · {"intersect":[a,b,..]} · {"subtract":[a,b,..]} · {"xor":[a,b]} · {"invert":a,"within"?:b}
  * Modifiers   {"expand":a,"by":n|[dx,dy,dz]|{up,down,north,south,east,west}} · {"contract":a,"by":..}
@@ -191,6 +194,11 @@ const BUILDERS: Record<string, (e: Record<string, unknown>, b: BuildEnv) => Mask
     return fromBoxChecked(c.box);
   },
 
+  // Component metadata (05, Picking): the union of the boxes of every component of a kind, or
+  // carrying a tag. Kinds and tags are whatever was registered; nothing is inferred from blocks.
+  kind: (e, b) => componentsWhere(e.kind, "kind", b, (c, k) => (k.endsWith("*") ? (c.kind ?? "").startsWith(k.slice(0, -1)) : c.kind === k)),
+  tagged: (e, b) => componentsWhere(e.tagged, "tagged", b, (c, t) => c.tags.includes(t)),
+
   connected: (e, b) => {
     const c = obj(e.connected, "connected");
     const seed = vec(c.seed, "connected.seed");
@@ -200,7 +208,7 @@ const BUILDERS: Record<string, (e: Record<string, unknown>, b: BuildEnv) => Mask
     const within = withinBox(c.within, b);
     const doc = b.doc;
     const seedState = doc.getState(...seed);
-    const test = sameAs(match, seedState, b.ctx);
+    const test = sameAs(match, seedState, b.ctx, matchOpts(c), b.notes, "connected");
     const m = new Mask();
     if (!within || !inside(within, seed) || !test(seedState)) {
       b.notes.push(`connected: the seed ${fmt(seed)} is ${seedState === "minecraft:air" ? "air" : seedState}, which doesn't match "${match}"; nothing selected`);
@@ -236,7 +244,7 @@ const BUILDERS: Record<string, (e: Record<string, unknown>, b: BuildEnv) => Mask
     const seed = vec(c.seed, "similar.seed");
     const by = (c.by ?? "block") as string;
     const seedState = b.doc.getState(...seed);
-    const test = sameAs(by, seedState, b.ctx);
+    const test = sameAs(by, seedState, b.ctx, matchOpts(c), b.notes);
     const within = withinBox(c.within, b);
     const m = new Mask();
     if (!within) return m;
@@ -593,6 +601,25 @@ function scopeOf(x: unknown, b: BuildEnv): Mask | undefined {
   return b.ev(x);
 }
 
+function componentsWhere(x: unknown, what: "kind" | "tagged", b: BuildEnv, test: (c: { kind?: string; tags: string[] }, v: string) => boolean): Mask {
+  if (typeof x !== "string" || !x) throw new Error(what === "kind" ? 'kind takes a component kind, e.g. {"kind":"tower"} (a trailing * matches a prefix, "prefab:*")' : 'tagged takes a component tag, e.g. {"tagged":"ruined"}');
+  const m = new Mask();
+  const ids: string[] = [];
+  for (const id of b.doc.components.keys()) {
+    const c = b.doc.componentLocal(id)!;
+    if (!test(c, x)) continue;
+    ids.push(id);
+    m.unionWith(fromBoxChecked(c.box));
+  }
+  if (!ids.length) {
+    const have = new Set<string>();
+    for (const c of b.doc.components.values()) for (const v of what === "kind" ? (c.kind ? [c.kind] : []) : c.tags) have.add(v);
+    b.notes.push(`${what}: no component ${what === "kind" ? "of kind" : "tagged"} "${x}"${have.size ? ` (have: ${[...have].sort().join(", ")})` : ""}; nothing selected`);
+  }
+  if (m.count() > MAX_OP_VOLUME) throw new Error(`${what} "${x}" covers more than ${MAX_OP_VOLUME.toLocaleString("en-US")} blocks`);
+  return m;
+}
+
 function renderOf(id: unknown, b: BuildEnv) {
   if (id !== undefined && typeof id !== "string") throw new Error('render must be a render id from a render caption, e.g. "r3"');
   const rec = getRender(b.doc, id);
@@ -666,8 +693,118 @@ function withinBox(w: unknown, b: BuildEnv): Box | undefined {
   return lb && { min: [lb.min[0] - 1, lb.min[1] - 1, lb.min[2] - 1], max: [lb.max[0] + 1, lb.max[1] + 1, lb.max[2] + 1] };
 }
 
-function sameAs(by: string, seed: string, ctx: SelContext): (s: string) => boolean {
+/** Extra parameters of the palette- and tag-based matches (05, Picking). */
+interface MatchOpts {
+  /** by "tag": the tag to match ("#minecraft:logs"); default the seed's most specific tag. */
+  tag?: unknown;
+  /** by "role": the palette (default the only one) and role (default every role holding the seed). */
+  palette?: unknown;
+  role?: unknown;
+  /** by "colour": largest CIELAB ΔE between family mean colours (default 10). */
+  tolerance?: unknown;
+}
+
+function matchOpts(c: Record<string, unknown>): MatchOpts {
+  return { tag: c.tag, palette: c.palette, role: c.role, tolerance: c.tolerance };
+}
+
+/** Caches a per-state test: picks call it for every voxel, but a build has few distinct states. */
+function cached(test: (s: string) => boolean): (s: string) => boolean {
+  const memo = new Map<string, boolean>();
+  return (s) => {
+    let r = memo.get(s);
+    if (r === undefined) memo.set(s, (r = test(s)));
+    return r;
+  };
+}
+
+function sameAs(by: string, seed: string, ctx: SelContext, o: MatchOpts = {}, notes: string[] = [], what = "similar"): (s: string) => boolean {
+  if (by.startsWith("prop:")) {
+    const k = by.slice(5);
+    const v = parseState(seed).props[k];
+    if (v === undefined) {
+      notes.push(`${what}: the seed ${seed} has no property "${k}"; nothing matches`);
+      return () => false;
+    }
+    return cached((s) => parseState(s).props[k] === v);
+  }
   switch (by) {
+    case "tag": {
+      if (!ctx.registry) throw new Error('matching by "tag" needs a loaded instance');
+      const own = ctx.registry.get(stateId(seed))?.tags ?? [];
+      let tag: string;
+      if (o.tag !== undefined) {
+        if (typeof o.tag !== "string" || !o.tag) throw new Error('tag must be a block tag, e.g. "#minecraft:logs"');
+        tag = o.tag.replace(/^#/, "");
+        if (!own.includes(tag)) notes.push(`${what}: the seed ${stateId(seed)} is not in #${tag}`);
+      } else {
+        if (!own.length) {
+          notes.push(`${what}: the seed ${stateId(seed)} has no block tags; nothing matches`);
+          return () => false;
+        }
+        // The most specific tag (fewest blocks), ties by name, so the choice is stable.
+        tag = [...own].sort((a, b) => ctx.registry!.withTag(a).length - ctx.registry!.withTag(b).length || a.localeCompare(b))[0]!;
+        notes.push(`${what}: by tag #${tag} (the seed's most specific of ${own.length} tag${own.length > 1 ? "s" : ""}; pass tag to choose another)`);
+      }
+      const ids = new Set(ctx.registry.withTag(tag).map((b) => b.id));
+      return (s) => ids.has(stateId(s));
+    }
+    case "role": {
+      const book = ctx.doc.palettes;
+      let p;
+      if (o.palette !== undefined) {
+        if (typeof o.palette !== "string") throw new Error("palette must be a palette name");
+        p = book.get(o.palette.replace(/^palette:/, ""));
+        if (!p) throw new Error(`no palette "${o.palette}" (have: ${book.list().map((x) => x.name).join(", ") || "none"})`);
+      } else {
+        const all = book.list();
+        if (all.length !== 1) throw new Error(all.length ? `matching by "role" needs palette (have: ${all.map((x) => x.name).join(", ")})` : 'matching by "role" needs a named palette (palette_pick) and none exists');
+        p = all[0]!;
+      }
+      const seedId = stateId(seed);
+      const seedFam = ctx.index?.familyOfBlock(seedId)?.id;
+      const holds = (ms: { family: string; block: string }[]) => ms.some((m) => m.block === seedId || (seedFam !== undefined && m.family === seedFam));
+      let roles: string[];
+      if (o.role !== undefined) {
+        if (typeof o.role !== "string" || !p.roles[o.role]) throw new Error(`palette "${p.name}" has no role ${JSON.stringify(o.role)} (roles: ${Object.keys(p.roles).join(", ")})`);
+        roles = [o.role];
+        if (!holds(p.roles[o.role]!)) notes.push(`${what}: the seed ${seedId} is not in ${p.name}.${o.role}`);
+      } else {
+        roles = Object.keys(p.roles).filter((r) => holds(p.roles[r]!));
+        if (!roles.length) {
+          notes.push(`${what}: the seed ${seedId} is in no role of palette "${p.name}"; nothing matches`);
+          return () => false;
+        }
+        notes.push(`${what}: by role ${roles.map((r) => `${p.name}.${r}`).join(", ")}`);
+      }
+      const fams = new Set<string>(), blocks = new Set<string>();
+      for (const r of roles) for (const m of p.roles[r]!) (fams.add(m.family), blocks.add(m.block));
+      const index = ctx.index;
+      return cached((s) => {
+        const id = stateId(s);
+        if (blocks.has(id)) return true;
+        const f = index?.familyOfBlock(id)?.id;
+        return f !== undefined && fams.has(f);
+      });
+    }
+    case "colour":
+    case "color": {
+      const index = ctx.index;
+      if (!index) throw new Error('matching by "colour" needs a loaded instance');
+      const tol = o.tolerance === undefined ? 10 : num(o.tolerance, "tolerance", 0);
+      const fam = index.familyOfBlock(stateId(seed))?.id;
+      const lab = fam !== undefined ? index.stats(fam)?.lab : undefined;
+      if (!lab) {
+        notes.push(`${what}: the seed ${stateId(seed)} has no colour in the palette index; matching the block instead`);
+        const id = stateId(seed);
+        return (s) => stateId(s) === id;
+      }
+      return cached((s) => {
+        const f = index.familyOfBlock(stateId(s))?.id;
+        const l = f !== undefined ? index.stats(f)?.lab : undefined;
+        return l !== undefined && deltaE(l, lab) <= tol;
+      });
+    }
     case "solid":
       return (s) => s !== "minecraft:air";
     case "air":
@@ -688,7 +825,7 @@ function sameAs(by: string, seed: string, ctx: SelContext): (s: string) => boole
       return (s) => ctx.index!.familyOfBlock(stateId(s))?.id === fam;
     }
     default:
-      throw new Error(`unknown match "${by}"; use solid, air, block, state or family`);
+      throw new Error(`unknown match "${by}"; use solid, air, block, state, family, tag, role, colour or prop:<name>`);
   }
 }
 

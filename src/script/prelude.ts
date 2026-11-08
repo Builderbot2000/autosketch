@@ -52,6 +52,8 @@ export function prelude(ops: readonly ScriptOp[]): string {
     box: (min, max) => S({ min, max: max === undefined ? min : max }),
     named: (n) => S(n),
     component: (id) => S({ component: id }),
+    kind: (k) => S({ kind: k }),
+    tagged: (t) => S({ tagged: t }),
     cylinder: (center, radius, height, axis) => S({ cylinder: opt({ center, radius, height, axis }) }),
     sphere: (center, radius) => S({ sphere: { center, radius } }),
     ellipsoid: (center, radii) => S({ ellipsoid: { center, radii } }),

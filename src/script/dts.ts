@@ -60,13 +60,17 @@ declare class Sel {
   info(): SelectionInfo; count(): number; positions(): Vec3[];
 }
 
+/** tag: "#ns:tag" (by "tag"); palette, role (by "role"); tolerance: CIELAB ΔE (by "colour", default 10). */
+type MatchOpts = { tag?: string; palette?: string; role?: string; tolerance?: number };
+type Match = "block" | "state" | "family" | "solid" | "air" | "tag" | "role" | "colour" | \`prop:\${string}\`;
+
 declare const sel: {
-  box(min: Vec3, max?: Vec3): Sel; readonly all: Sel; readonly last: Sel; named(name: string): Sel; component(id: string): Sel;
+  box(min: Vec3, max?: Vec3): Sel; readonly all: Sel; readonly last: Sel; named(name: string): Sel; component(id: string): Sel; kind(kind: string): Sel; tagged(tag: string): Sel;
   cylinder(center: Vec3, radius: number, height?: number, axis?: "x" | "y" | "z"): Sel; sphere(center: Vec3, radius: number): Sel; ellipsoid(center: Vec3, radii: Vec3): Sel;
   polygon(points: [number, number][], y0: number, y1?: number): Sel; plane(axis: "x" | "y" | "z", at: number, within?: SelLike): Sel;
   hull(points: Vec3[]): Sel; tube(path: Vec3[], radius: number): Sel;
-  connected(seed: Vec3, opts?: { match?: "block" | "state" | "family" | "solid" | "air"; connectivity?: 6 | 18 | 26; within?: SelLike }): Sel;
-  similar(seed: Vec3, opts?: { by?: "block" | "state" | "family"; within?: SelLike }): Sel;
+  connected(seed: Vec3, opts?: { match?: Match; connectivity?: 6 | 18 | 26; within?: SelLike } & MatchOpts): Sel;
+  similar(seed: Vec3, opts?: { by?: Match; within?: SelLike } & MatchOpts): Sel;
   union(...a: SelLike[]): Sel; intersect(...a: SelLike[]): Sel; subtract(...a: SelLike[]): Sel; xor(a: SelLike, b: SelLike): Sel; invert(a: SelLike, within?: SelLike): Sel;
   expand(a: SelLike, by?: number | Vec3 | Partial<Record<Direction, number>>): Sel; contract(a: SelLike, by?: number | Vec3 | Partial<Record<Direction, number>>): Sel;
   offset(a: SelLike, dx: number | Vec3, dy?: number, dz?: number): Sel; shell(a: SelLike, thickness?: number, opts?: { walls_only?: boolean }): Sel;

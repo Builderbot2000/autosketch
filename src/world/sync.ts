@@ -1,8 +1,9 @@
 import type { Compound } from "prismarine-nbt";
 import { AIR } from "../core/blockstate.js";
 import type { Box, Vec3 } from "../core/region.js";
-import type { Document, EditResult } from "../document/document.js";
+import type { Document, EditResult, WriteGuard } from "../document/document.js";
 import type { JournalEntry } from "../document/journal.js";
+import { refusal } from "../scope/scopes.js";
 import { nbtHash, sectionHash, sectionsOf } from "./protocol/hash.js";
 import type { Hash64, SectionHash, SnapshotRegion, VolatileList, WireBox, WorldBlock } from "./protocol/messages.js";
 import { encodeNbt } from "./protocol/nbt.js";
@@ -30,6 +31,28 @@ export const WORLD_SYNC = "world_sync";
 /** True for a `world_sync` journal entry: written from the world, never sent back as a patch. */
 export function isWorldSync(e: Pick<JournalEntry, "op">): boolean {
   return e.op === WORLD_SYNC;
+}
+
+/**
+ * The sync barrier (13, *World undo and restore*, W6): undo and redo refuse to step past a
+ * `world_sync` entry that changed blocks, since going past it would push the pre-sync cache into
+ * the world over the player's hand edits. `overwriteHandEdits: true` crosses it. A write guard, so
+ * tools, scripts and `restore` (which checks every step first, all or nothing) obey it alike.
+ */
+export const syncBarrier: WriteGuard = (changes, op) => {
+  const e = changes.entry;
+  if ((op !== "undo" && op !== "redo") || !e || !isWorldSync(e) || e.before.length === 0 || changes.overwriteHandEdits) return;
+  const n = e.before.length;
+  throw refusal(
+    "sync_barrier",
+    `${op} would step past #${e.seq} ${e.summary}, which brought ${n.toLocaleString("en-US")} block${n === 1 ? "" : "s"} changed in the world (mostly the player's hand edits) into the cache. ` +
+      `Going past it would push the pre-sync cache into the world and erase those edits. Pass overwriteHandEdits: true only if the player asked to discard their hand edits. Nothing was written.`,
+  );
+};
+
+/** Installs the sync barrier on a linked document, beside any lock guard (idempotent). */
+export function attachSyncBarrier(doc: Document): void {
+  if (!doc.guards.includes(syncBarrier)) doc.guards.push(syncBarrier);
 }
 
 /** World changes to write into the cache, in any combination; applied in the order listed here. */
@@ -83,6 +106,7 @@ export function applyWorldState(doc: Document, changes: WorldChanges, opts: Sync
   const keep = opts.volumes;
   const inside = (x: number, y: number, z: number) => !keep || keep.some((b) => x >= b.min[0] && x <= b.max[0] && y >= b.min[1] && y <= b.max[1] && z >= b.min[2] && z <= b.max[2]);
   const same = sameNbt(opts.volatile);
+  attachSyncBarrier(doc);
 
   const r = doc.editUnguarded(WORLD_SYNC, opts.summary ?? describe(changes), (tx) => {
     /** Writes one world block at a world position, unless the cache already holds it. */

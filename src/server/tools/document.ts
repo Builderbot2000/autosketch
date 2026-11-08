@@ -98,14 +98,21 @@ export function registerDocumentTools({ tool, session }: ToolDeps): void {
   );
 }
 
+/** Live world link (13, *World undo and restore*): crosses the sync barrier and forces the patch. */
+const overwriteHandEdits = z
+  .boolean()
+  .optional()
+  .describe("Linked document only: step past a world sync and force the world to the result, erasing the player's hand edits. Only when the player asked to discard them.");
+const stepOpts = (a: { overwriteHandEdits?: boolean | undefined }) => (a.overwriteHandEdits ? { overwriteHandEdits: true } : {});
+
 /** Journal (04): undo, redo, checkpoints, history. */
 export function registerHistoryTools({ tool, session }: ToolDeps): void {
-  const steps = (dir: "undo" | "redo", n: number): string => {
+  const steps = (dir: "undo" | "redo", n: number, opts: { overwriteHandEdits?: boolean }): string => {
     const doc = session.require();
     const done: string[] = [];
     let net: Vec3 = [0, 0, 0];
     for (let i = 0; i < n; i++) {
-      const r = dir === "undo" ? doc.undo() : doc.redo();
+      const r = dir === "undo" ? doc.undo(opts) : doc.redo(opts);
       if (!r) break;
       done.push(`#${r.entry.seq} ${r.entry.summary}`);
       if (r.shift) net = [net[0] + r.shift[0], net[1] + r.shift[1], net[2] + r.shift[2]];
@@ -117,14 +124,14 @@ export function registerHistoryTools({ tool, session }: ToolDeps): void {
 
   tool(
     "undo",
-    { title: "Undo", description: "Undoes the last op (or several). Text.", inputSchema: { steps: z.number().int().min(1).max(1000).optional() }, readOnly: false },
-    (_c, a) => editWith(session, () => steps("undo", a.steps ?? 1)),
+    { title: "Undo", description: "Undoes the last op (or several). Text.", inputSchema: { steps: z.number().int().min(1).max(1000).optional(), overwriteHandEdits }, readOnly: false },
+    (_c, a) => editWith(session, () => steps("undo", a.steps ?? 1, stepOpts(a))),
   );
 
   tool(
     "redo",
-    { title: "Redo", description: "Redoes undone ops. Text.", inputSchema: { steps: z.number().int().min(1).max(1000).optional() }, readOnly: false },
-    (_c, a) => editWith(session, () => steps("redo", a.steps ?? 1)),
+    { title: "Redo", description: "Redoes undone ops. Text.", inputSchema: { steps: z.number().int().min(1).max(1000).optional(), overwriteHandEdits }, readOnly: false },
+    (_c, a) => editWith(session, () => steps("redo", a.steps ?? 1, stepOpts(a))),
   );
 
   tool(
@@ -147,12 +154,12 @@ export function registerHistoryTools({ tool, session }: ToolDeps): void {
     {
       title: "Restore checkpoint",
       description: "Undoes (or redoes) back to a named checkpoint. Text.",
-      inputSchema: { name: z.string() },
+      inputSchema: { name: z.string(), overwriteHandEdits },
       readOnly: false,
     },
     (_c, a) =>
       editWith(session, (doc) => {
-        const r = doc.restore(a.name);
+        const r = doc.restore(a.name, stepOpts(a));
         const head = r.direction === "none" ? `already at checkpoint "${a.name}"` : `restored "${a.name}" (${r.direction === "undo" ? "undid" : "redid"} ${r.steps} op${r.steps === 1 ? "" : "s"})`;
         return [head, shiftLine(r.shift), sizeLine(doc)].filter(Boolean).join("\n");
       }),

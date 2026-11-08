@@ -104,8 +104,8 @@ describe("section-hash sync (13, W5)", () => {
     const r = await syncBySections(doc, client, frame);
     expect(r.sections.differing).toEqual([[6, 4, -13]]);
     expect(at(doc, 0, 0, 0)).toBe("air");
-    // Undo and redo write too, so they invalidate as well.
-    doc.undo();
+    // Undo and redo write too, so they invalidate as well (crossing the sync just made needs overwriteHandEdits).
+    doc.undo({ overwriteHandEdits: true });
     expect(cacheHashes(doc, frame).get("6,4,-13")).toBe(after.get("6,4,-13"));
   });
 

@@ -9,7 +9,7 @@ import { formatKnowledgeList, listKnowledge, readKnowledge } from "../../library
 import { loadPrefab, savePrefab, type Prefab } from "../../library/prefabs.js";
 import { formatProcedureList, listProcedures } from "../../library/procedures.js";
 import { libraryRoots, type LibraryRoot } from "../../library/roots.js";
-import { stampPrefab, type StampAt } from "../../library/stamp.js";
+import { stampPrefab, type StampAt } from "../../ops/stamp.js";
 import { renderDocument } from "../../perception/render/render.js";
 import type { InstanceContext } from "../context.js";
 import { formatEdit } from "../format.js";

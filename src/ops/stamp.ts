@@ -9,8 +9,8 @@ import type { Family, ShapeGroup, ShapeKind } from "../palette/families.js";
 import type { PaletteIndex } from "../palette/index.js";
 import type { RoleMember } from "../palette/pick.js";
 import type { AutosketchPlugin } from "../plugins/types.js";
-import type { LoadedPrefab, Prefab } from "./prefabs.js";
-import { resolveAnchor, type AtSpec } from "../ops/anchors.js";
+import type { LoadedPrefab, Prefab } from "../library/prefabs.js";
+import { resolveAnchor, type AtSpec } from "./anchors.js";
 
 /**
  * stamp (docs/design/07-library.md, 05 Generators): places a library prefab into the document as

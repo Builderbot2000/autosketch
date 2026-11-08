@@ -13,7 +13,7 @@ import { loadPrefab, savePrefab, scanPrefabs } from "../../../src/library/prefab
 import { listProcedures, parseHeader } from "../../../src/library/procedures.js";
 import { libraryRoots, starterRoot, type LibraryRoot } from "../../../src/library/roots.js";
 import { layoutPrefabSheet, prefabAtCell } from "../../../src/library/sheet.js";
-import { resolveAt, stampPrefab } from "../../../src/library/stamp.js";
+import { resolveAt, stampPrefab } from "../../../src/ops/stamp.js";
 import { parseFrontmatter } from "../../../src/library/files.js";
 import { setBlocks } from "../../../src/ops/edit.js";
 import { pickPalette } from "../../../src/palette/pick.js";

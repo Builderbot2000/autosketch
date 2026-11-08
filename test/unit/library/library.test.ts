@@ -84,9 +84,12 @@ describe("knowledge packs", () => {
     expect(formatKnowledgeList(all)).toMatch(/^styles\/gothic \[style\] \(medieval\): Mine\./);
   });
 
-  it("the starter library ships the four general heuristics", async () => {
+  it("the starter library ships the four general heuristics and the review skill", async () => {
     const names = (await listKnowledge([starterRoot()], { kind: "heuristic" })).map((e) => e.name);
     expect(names).toEqual(expect.arrayContaining(["heuristics/proportions", "heuristics/roofs", "heuristics/windows", "heuristics/depth"]));
+    const skills = await listKnowledge([starterRoot()], { kind: "skill" });
+    expect(skills.map((e) => [e.name, e.title])).toEqual([["skills/review", "Review a build"]]);
+    expect((await readKnowledge([starterRoot()], "review")).text).toMatch(/diff\(\{since:"checkpoint:original"\}\)/);
   });
 });
 

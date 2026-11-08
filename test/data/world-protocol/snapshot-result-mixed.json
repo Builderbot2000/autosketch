@@ -1,0 +1,42 @@
+{
+  "description": "Two regions with a mixed palette and two block entities (a chest and a sign with an emoji, exercising modified UTF-8)",
+  "sender": "mod",
+  "header": {
+    "type": "snapshot.result",
+    "id": 10,
+    "dimension": "minecraft:overworld",
+    "regions": [
+      {
+        "min": [-2, 70, 3],
+        "max": [0, 71, 4]
+      },
+      {
+        "min": [40, 64, 40],
+        "max": [41, 64, 40]
+      }
+    ]
+  },
+  "body": {
+    "palette": [
+      "minecraft:stone_bricks",
+      "minecraft:chest[facing=north,type=single,waterlogged=false]",
+      "minecraft:air",
+      "minecraft:oak_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]",
+      "minecraft:oak_sign[rotation=8,waterlogged=false]"
+    ],
+    "regions": [
+      [0, 0, 0, 0, 1, 0, 2, 2, 3, 2, 2, 4],
+      [3, 2]
+    ],
+    "blockEntities": [
+      {
+        "pos": [-1, 70, 4],
+        "nbt": "{Items:[{Slot:0b,count:3,id:\"minecraft:oak_planks\"},{Slot:13b,count:1,id:\"minecraft:lantern\"}],id:\"minecraft:chest\"}"
+      },
+      {
+        "pos": [0, 71, 4],
+        "nbt": "{back_text:{color:\"black\",has_glowing_text:0b,messages:[\"\\\"\\\"\",\"\\\"\\\"\",\"\\\"\\\"\",\"\\\"\\\"\"]},front_text:{color:\"black\",has_glowing_text:0b,messages:[\"\\\"North tower\\\"\",\"\\\"Hi 😀\\\"\",\"\\\"\\\"\",\"\\\"\\\"\"]},id:\"minecraft:oak_sign\",is_waxed:0b}"
+      }
+    ]
+  }
+}

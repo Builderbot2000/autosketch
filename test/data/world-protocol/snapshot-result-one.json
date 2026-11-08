@@ -1,0 +1,24 @@
+{
+  "description": "One one-block region holding stone",
+  "sender": "mod",
+  "header": {
+    "type": "snapshot.result",
+    "id": 9,
+    "dimension": "minecraft:overworld",
+    "regions": [
+      {
+        "min": [5, -60, 7],
+        "max": [5, -60, 7]
+      }
+    ]
+  },
+  "body": {
+    "palette": [
+      "minecraft:stone"
+    ],
+    "regions": [
+      [0]
+    ],
+    "blockEntities": []
+  }
+}

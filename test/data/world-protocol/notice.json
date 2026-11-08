@@ -1,0 +1,9 @@
+{
+  "description": "Action-bar text for every player with notices on",
+  "sender": "mcp",
+  "header": {
+    "type": "notice",
+    "text": "Autosketch: 1,204 placed, 3 skipped",
+    "player": null
+  }
+}

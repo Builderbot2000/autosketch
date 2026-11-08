@@ -1,0 +1,15 @@
+{
+  "description": "Snapshot result with no regions",
+  "sender": "mod",
+  "header": {
+    "type": "snapshot.result",
+    "id": 8,
+    "dimension": "minecraft:overworld",
+    "regions": []
+  },
+  "body": {
+    "palette": [],
+    "regions": [],
+    "blockEntities": []
+  }
+}

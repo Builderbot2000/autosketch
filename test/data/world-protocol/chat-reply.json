@@ -1,0 +1,14 @@
+{
+  "description": "The agent's reply closing a request",
+  "sender": "mcp",
+  "header": {
+    "type": "chat",
+    "request": 1,
+    "player": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    "kind": "reply",
+    "lines": [
+      "Balcony added on the south face, 5 wide.",
+      "Tell me if you want railings."
+    ]
+  }
+}

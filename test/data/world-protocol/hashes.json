@@ -1,0 +1,19 @@
+{
+  "description": "Section hashes over the work and context boxes",
+  "sender": "mcp",
+  "header": {
+    "type": "hashes",
+    "id": 5,
+    "dimension": "minecraft:overworld",
+    "boxes": [
+      {
+        "min": [100, 64, -200],
+        "max": [131, 87, -169]
+      },
+      {
+        "min": [97, 61, -203],
+        "max": [134, 90, -166]
+      }
+    ]
+  }
+}

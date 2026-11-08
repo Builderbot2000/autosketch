@@ -1,0 +1,23 @@
+{
+  "description": "Work volume and two context boxes: the default (work grown by 3) and a distant reference box",
+  "sender": "mod",
+  "header": {
+    "type": "volumes",
+    "link": 3,
+    "dimension": "minecraft:overworld",
+    "work": {
+      "min": [100, 64, -200],
+      "max": [131, 87, -169]
+    },
+    "context": [
+      {
+        "min": [97, 61, -203],
+        "max": [134, 90, -166]
+      },
+      {
+        "min": [300, 60, -40],
+        "max": [340, 110, 0]
+      }
+    ]
+  }
+}

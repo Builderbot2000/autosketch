@@ -1,0 +1,10 @@
+{
+  "description": "A request the mod can't serve, answered by id; the connection stays open",
+  "sender": "mod",
+  "header": {
+    "type": "error",
+    "id": 12,
+    "code": "outside_volumes",
+    "message": "box 0,0,0..15,15,15 lies outside the linked volumes"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "description": "A forced patch (overwriteHandEdits): expected states still sent so the mod can count overwrites",
+  "sender": "mcp",
+  "header": {
+    "type": "patch",
+    "id": 24,
+    "link": 3,
+    "dimension": "minecraft:overworld",
+    "force": true,
+    "origin": [120, 80, -180],
+    "size": [2, 1, 1],
+    "count": 2
+  },
+  "body": {
+    "palette": [
+      "minecraft:stone",
+      "minecraft:oak_planks"
+    ],
+    "blocks": [
+      {
+        "pos": [120, 80, -180],
+        "expected": "minecraft:stone",
+        "state": "minecraft:oak_planks"
+      },
+      {
+        "pos": [121, 80, -180],
+        "expected": "minecraft:stone",
+        "state": "minecraft:oak_planks"
+      }
+    ]
+  }
+}

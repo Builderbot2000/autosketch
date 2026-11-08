@@ -196,6 +196,8 @@ function encodeEntry(e: JournalEntry, idx: (id: number) => number): Compound["va
       : {}),
     ...(e.componentsBefore ? { ComponentsBefore: str(JSON.stringify(e.componentsBefore)) } : {}),
     ...(e.componentsAfter ? { ComponentsAfter: str(JSON.stringify(e.componentsAfter)) } : {}),
+    ...(e.entitiesBefore ? { EntitiesBefore: { type: "list" as const, value: { type: "compound" as const, value: e.entitiesBefore.map((c) => c.value) } } } : {}),
+    ...(e.entitiesAfter ? { EntitiesAfter: { type: "list" as const, value: { type: "compound" as const, value: e.entitiesAfter.map((c) => c.value) } } } : {}),
   };
 }
 
@@ -228,6 +230,8 @@ function decodeEntry(c: Compound["value"], ids: number[]): JournalEntry {
     ...(nbtChanges.length ? { nbt: nbtChanges } : {}),
     ...(cb ? { componentsBefore: JSON.parse(cb) as Component[] } : {}),
     ...(ca ? { componentsAfter: JSON.parse(ca) as Component[] } : {}),
+    ...(c.EntitiesBefore ? { entitiesBefore: listOf<Compound["value"]>(c.EntitiesBefore).map((value) => ({ type: "compound" as const, value })) } : {}),
+    ...(c.EntitiesAfter ? { entitiesAfter: listOf<Compound["value"]>(c.EntitiesAfter).map((value) => ({ type: "compound" as const, value })) } : {}),
   };
 }
 

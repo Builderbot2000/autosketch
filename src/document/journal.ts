@@ -32,10 +32,13 @@ export interface JournalEntry {
   /** Component snapshots when the op changed components. */
   componentsBefore?: Component[];
   componentsAfter?: Component[];
+  /** Entity list snapshots (store coordinates in `Pos`) when the op changed entities. */
+  entitiesBefore?: Compound[];
+  entitiesAfter?: Compound[];
 }
 
 export function entryBytes(e: JournalEntry): number {
-  return 200 + e.positions.byteLength + e.before.byteLength + e.after.byteLength + (e.nbt?.length ?? 0) * 256;
+  return 200 + e.positions.byteLength + e.before.byteLength + e.after.byteLength + ((e.nbt?.length ?? 0) + (e.entitiesBefore?.length ?? 0) + (e.entitiesAfter?.length ?? 0)) * 256;
 }
 
 export interface Checkpoint {

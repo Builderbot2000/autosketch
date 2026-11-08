@@ -1,3 +1,4 @@
+import type { Compound } from "prismarine-nbt";
 import type { Registry } from "../assets/registry.js";
 import { canonicalState, formatState, parseState, stateId } from "../core/blockstate.js";
 import type { Box, Vec3 } from "../core/region.js";
@@ -71,7 +72,8 @@ export function stampPrefab(doc: Document, env: StampEnv, prefab: Prefab, loaded
   let droppedNbt = 0;
 
   const [w, h, l] = snap.size;
-  const r = doc.edit("stamp", `stamp ${prefab.id} at ${at.join(",")} as ${id}${frame.label}`, (tx) => {
+  const ents = snap.entities.length;
+  const r = doc.edit("stamp", `stamp ${prefab.id} at ${at.join(",")} as ${id}${frame.label}${ents ? ` + ${ents} entit${ents > 1 ? "ies" : "y"}` : ""}`, (tx) => {
     const ids = palette.map((s) => tx.intern(s));
     for (let y = 0; y < h; y++)
       for (let z = 0; z < l; z++)
@@ -97,7 +99,17 @@ export function stampPrefab(doc: Document, env: StampEnv, prefab: Prefab, loaded
     tx.setComponent({ id, kind: `prefab:${prefab.id}`, box, anchors, tags: prefab.meta.tags });
     for (const wn of warnings) tx.warn(wn);
     if (droppedNbt) tx.warn(`${droppedNbt} block entities dropped where remap changed the block`);
-    if (snap.entities.length) tx.warn(`${snap.entities.length} entities in the prefab were not placed (entities aren't edited yet)`);
+    for (const e of snap.entities) {
+      const placed = placeEntity(e.pos, e.nbt, frame);
+      const v = placed.nbt.value;
+      // Tile coordinates live in the same (store) frame as Pos.
+      if (v.TileX?.type === "int" && v.TileY?.type === "int" && v.TileZ?.type === "int") {
+        v.TileX.value += origin[0] + doc.origin[0];
+        v.TileY.value += origin[1] + doc.origin[1];
+        v.TileZ.value += origin[2] + doc.origin[2];
+      }
+      tx.addEntity([origin[0] + placed.pos[0], origin[1] + placed.pos[1], origin[2] + placed.pos[2]], placed.nbt);
+    }
   });
   return { ...r, component: id, origin, at };
 }
@@ -111,6 +123,9 @@ interface Frame {
   state?: (s: string) => string;
   size: Vec3;
   label: string;
+  /** Clockwise quarter turns, applied after `mirror`. */
+  turns: number;
+  mirror?: "x" | "z";
 }
 
 /**
@@ -124,7 +139,7 @@ export function prefabFrame(size: Vec3, opts: Pick<StampOptions, "rotate" | "mir
   const turns = (((deg / 90) % 4) + 4) % 4;
   const axis = opts.mirror;
   if (axis !== undefined && axis !== "x" && axis !== "z") throw new Error('mirror must be "x" (east↔west) or "z" (north↔south)');
-  if (!turns && !axis) return { place: (p) => p, size, label: "" };
+  if (!turns && !axis) return { place: (p) => p, size, label: "", turns: 0 };
   const a = axis === "x" ? 0 : 2;
   const raw = (p: Vec3): Vec3 => rotatePos(axis ? mirrorPos(p, axis, (size[a]! - 1) / 2) : p, turns, [0, 0, 0]);
   const bb = transformBox({ min: [0, 0, 0], max: size }, raw);
@@ -136,7 +151,61 @@ export function prefabFrame(size: Vec3, opts: Pick<StampOptions, "rotate" | "mir
   const overrides = (env.plugins ?? []).flatMap((pl) => (pl.rotate ? [pl.rotate.bind(pl)] : []));
   const state = stateTransformer(t, { ...(env.registry ? { registry: env.registry } : {}), overrides });
   const label = `${axis ? ` mirror ${axis}` : ""}${turns ? ` rotate ${turns * 90}°` : ""}`;
-  return { place, state, size: [bb.max[0] - bb.min[0], bb.max[1] - bb.min[1], bb.max[2] - bb.min[2]], label };
+  return { place, state, size: [bb.max[0] - bb.min[0], bb.max[1] - bb.min[1], bb.max[2] - bb.min[2]], label, turns, ...(axis ? { mirror: axis } : {}) };
+}
+
+// -- entities --------------------------------------------------------------------------------------
+
+const DIR3 = ["down", "up", "north", "south", "west", "east"];
+const DIR2 = ["south", "west", "north", "east"];
+const CW: Record<string, string> = { north: "east", east: "south", south: "west", west: "north" };
+
+function turnDir(d: string, frame: Pick<Frame, "turns" | "mirror">): string {
+  if (frame.mirror === "x" && (d === "east" || d === "west")) d = d === "east" ? "west" : "east";
+  if (frame.mirror === "z" && (d === "north" || d === "south")) d = d === "north" ? "south" : "north";
+  for (let i = 0; i < frame.turns && CW[d]; i++) d = CW[d]!;
+  return d;
+}
+
+/**
+ * An entity of a prefab in the oriented prefab's frame (07, stamp). `pos` is in block units from
+ * the prefab's minimum corner (a block at b spans b..b+1), so it goes through the same mirror and
+ * rotation as block positions, measured at block centres. The yaw in `Rotation` turns with it
+ * (0 = south, 90 = west; a clockwise turn adds 90), and so does a hanging entity's facing
+ * (`Facing`: 3D for item frames, 2D otherwise; `facing`: 2D, as paintings use it). `TileX/Y/Z`
+ * become the block holding the new position (prefab frame; the caller moves them). `UUID` is dropped so every stamped copy is its own
+ * entity; the game assigns a new one, as it does when placing a structure template.
+ */
+export function placeEntity(pos: Vec3, nbt: Compound, frame: Pick<Frame, "place" | "turns" | "mirror">): { pos: Vec3; nbt: Compound } {
+  const q = frame.place([pos[0] - 0.5, pos[1] - 0.5, pos[2] - 0.5]);
+  const p: Vec3 = [q[0] + 0.5, q[1] + 0.5, q[2] + 0.5];
+  const v: Compound["value"] = structuredClone(nbt.value);
+  delete v.UUID;
+  delete v.UUIDMost;
+  delete v.UUIDLeast;
+  delete v.Pos;
+  const rot = v.Rotation;
+  if (rot?.type === "list" && (rot.value.type === "float" || rot.value.type === "double") && Array.isArray(rot.value.value) && typeof rot.value.value[0] === "number") {
+    let yaw = rot.value.value[0] as number;
+    if (frame.mirror === "x") yaw = -yaw;
+    if (frame.mirror === "z") yaw = 180 - yaw;
+    yaw = (((yaw + 90 * frame.turns) % 360) + 360) % 360;
+    (rot.value.value as number[])[0] = yaw;
+  }
+  const id = v.id?.type === "string" ? String(v.id.value) : "";
+  for (const key of ["Facing", "facing"] as const) {
+    const t = v[key];
+    if (t?.type !== "byte" || typeof t.value !== "number") continue;
+    const table = key === "Facing" && /item_frame/.test(id) ? DIR3 : DIR2;
+    const d = table[t.value];
+    if (d !== undefined) t.value = table.indexOf(turnDir(d, frame));
+  }
+  if (v.TileX?.type === "int" && v.TileY?.type === "int" && v.TileZ?.type === "int") {
+    v.TileX.value = Math.floor(p[0]);
+    v.TileY.value = Math.floor(p[1]);
+    v.TileZ.value = Math.floor(p[2]);
+  }
+  return { pos: p, nbt: { type: "compound", value: v } };
 }
 
 // -- placement ---------------------------------------------------------------------------------------

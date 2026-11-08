@@ -325,6 +325,47 @@ describe("stamp", () => {
     expect(t.componentLocal("lshape")).toMatchObject({ box: { min: [4, 0, 3], max: [6, 1, 6] }, anchors: { corner: [5, 0, 5] } });
   });
 
+  it("places prefab entities, mirrored, turned and moved with the blocks, in the same undo step", async () => {
+    const c = await libraryContext();
+    const d = await tmp();
+    const src = Document.create({ name: "src", dataVersion: 3955 });
+    setBlocks(src, {}, [{ pos: [0, 0, 0], block: "minecraft:andesite" }, { pos: [2, 0, 1], block: "minecraft:andesite" }]);
+    const { prefab } = await savePrefab([userRoot(d)], snapshotOf(src), { name: "ents", anchors: { corner: [0, 0, 0] } });
+    const S = (v: string) => ({ type: "string" as const, value: v });
+    const I = (v: number) => ({ type: "int" as const, value: v });
+    const Bt = (v: number) => ({ type: "byte" as const, value: v });
+    const entities = [
+      { pos: [0.5, 0, 0.5] as [number, number, number], nbt: { type: "compound" as const, value: { id: S("minecraft:armor_stand"), Rotation: { type: "list" as const, value: { type: "float" as const, value: [0, 5] } }, UUID: { type: "intArray" as const, value: [1, 2, 3, 4] } } } },
+      { pos: [2.5, 0.5, 1.96875] as [number, number, number], nbt: { type: "compound" as const, value: { id: S("minecraft:item_frame"), Facing: Bt(2), TileX: I(2), TileY: I(0), TileZ: I(1) } } },
+      { pos: [1.5, 0.5, 0.0625] as [number, number, number], nbt: { type: "compound" as const, value: { id: S("minecraft:painting"), facing: Bt(3) } } },
+    ];
+    const base = await loadPrefab(prefab, c.registry);
+    const loaded = { ...base, snapshot: { ...base.snapshot, entities: entities as never } };
+    const env = { registry: c.registry, index: c.palette };
+    const doc = Document.create({ name: "t", dataVersion: 3955 });
+    const r = stampPrefab(doc, env, prefab, loaded, { at: [5, 0, 5], anchor: "corner", mirror: "x", rotate: 90 });
+    expect(r.origin).toEqual([4, 0, 3]);
+    expect(r.warnings).toEqual([]);
+    expect(doc.getState(5, 0, 5)).toBe("minecraft:andesite"); // the anchor block, as in the block test
+    // Continuous positions map like block centres: (x, z) → (2 - z, 3 - x) in the turned prefab.
+    const view = doc.entities.map((e) => {
+      const v = e.value as Record<string, { value: unknown }>;
+      return { id: v.id!.value, pos: (v.Pos!.value as { value: number[] }).value, ...(v.Rotation ? { rot: (v.Rotation.value as { value: number[] }).value } : {}), ...(v.Facing ? { Facing: v.Facing.value } : {}), ...(v.facing ? { facing: v.facing.value } : {}), ...(v.TileX ? { tile: [v.TileX.value, v.TileY!.value, v.TileZ!.value] } : {}), uuid: "UUID" in v };
+    });
+    expect(view).toEqual([
+      { id: "minecraft:armor_stand", pos: [5.5, 0, 5.5], rot: [90, 5], uuid: false }, // facing south → (mirror x) south → (cw) west
+      { id: "minecraft:item_frame", pos: [4.03125, 0.5, 3.5], Facing: 5, tile: [4, 0, 3], uuid: false }, // north → north → east
+      { id: "minecraft:painting", pos: [5.9375, 0.5, 4.5], facing: 2, uuid: false }, // east → west → north
+    ]);
+    // the prefab's own entities are untouched
+    expect(entities[0]!.nbt.value.Rotation.value.value).toEqual([0, 5]);
+    expect(r.op).toBe("stamp");
+    doc.undo();
+    expect(doc.entities).toEqual([]);
+    doc.redo();
+    expect(doc.entities.length).toBe(3);
+  });
+
   it("warns about namespaces missing from the instance and keeps unknown blocks", async () => {
     const c = await libraryContext();
     const d = await tmp();

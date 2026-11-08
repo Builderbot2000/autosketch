@@ -20,6 +20,9 @@ const blocks = (doc: Document) => {
   return out.sort();
 };
 const chest: Compound = { type: "compound", value: { id: { type: "string", value: "minecraft:chest" } } };
+function fail(): never {
+  throw new Error("boom");
+}
 
 /** Op i places block_i at (i,0,0); op 3 also adds a chest with NBT and a component. */
 function build(doc: Document, from: number, to: number): void {
@@ -59,6 +62,26 @@ describe("journal persistence", () => {
     expect(back.getBlockEntity(3, 1, 0)).toEqual(chest);
     expect(back.components.get("c3")).toBeDefined();
     expect(back.redo()).toBeUndefined();
+  });
+
+  it("journals added entities: undo, redo, rollback, and the entry survives a reopen", async () => {
+    const path = docPath();
+    const doc = Document.create({ name: "e", dataVersion: 3955, seed: 1 });
+    const stand: Compound = { type: "compound", value: { id: { type: "string", value: "minecraft:armor_stand" } } };
+    const pos = (c: Compound | undefined) => (c?.value.Pos as { value: { value: number[] } } | undefined)?.value.value;
+    const r = doc.edit("ent", "ent", (tx) => tx.addEntity([1.5, 0, 2.5], stand));
+    expect(r.seq).toBeGreaterThan(0); // an entity-only edit is still a journal entry
+    expect(pos(doc.entities[0])).toEqual([1.5, 0, 2.5]);
+    expect(() => doc.edit("bad", "bad", (tx) => (tx.addEntity([0, 0, 0], stand), tx.set(0, 0, 0, "minecraft:stone"), fail()))).toThrow("boom");
+    expect(doc.entities.length).toBe(1); // rolled back
+    await saveNative(doc, path);
+    const back = await loadNative(path);
+    expect(back.entities.length).toBe(1);
+    back.undo();
+    expect(back.entities).toEqual([]);
+    back.redo();
+    expect(pos(back.entities[0])).toEqual([1.5, 0, 2.5]);
+    expect(back.entities[0]!.value.id).toEqual(stand.value.id);
   });
 
   it("continues the sequence after reopening, and a new edit after undo discards the redo tail on disk", async () => {

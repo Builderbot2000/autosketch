@@ -76,6 +76,12 @@ export interface RenderOptions {
   near?: number;
   /** Section box (06, *Cameras*): only blocks inside it are drawn, like `region`, composing with it and with `cutaway`. */
   section?: Box | Mask;
+  /**
+   * Depth peeling (06, *Cameras*): draw the n-th surface along each ray instead of the first (1 is
+   * a normal render). Every block face turned toward the camera counts, faces against a neighbour
+   * included, so peel 2 shows what lies directly behind a one-block façade.
+   */
+  peel?: number;
   /** Plain picture for a file thumbnail: transparent background, no grid, ticks, compass or caption room; size may go down to 32. Not recorded for raycast. */
   thumbnail?: boolean;
 }
@@ -184,6 +190,9 @@ export async function renderDocument(doc: Document, baker: BlockBaker, opts: Ren
   const notes: string[] = [];
   const cams: ViewCamera[] = [];
   const style = opts.style ?? "textured";
+  if (opts.peel !== undefined && !(Number.isInteger(opts.peel) && opts.peel >= 1 && opts.peel <= MAX_PEEL)) throw new Error(`peel must be an integer 1..${MAX_PEEL} (got ${opts.peel})`);
+  const peel = opts.thumbnail ? 1 : (opts.peel ?? 1);
+  const cut: CutOpts = { ...(opts.near ? { near: opts.near } : {}), peel };
   views.forEach((v, i) => {
     const ox = (i % cols) * cellW, oy = Math.floor(i / cols) * cellH;
     const scene = sceneList[i];
@@ -201,9 +210,12 @@ export async function renderDocument(doc: Document, baker: BlockBaker, opts: Ren
         labels.push({ text: id, at: [(c.box.min[0] + c.box.max[0]) / 2, c.box.max[1], (c.box.min[2] + c.box.max[2]) / 2] });
       }
     const r = isPerspective(v)
-      ? drawPerspective(out, ox, oy, cellW, cellH, v, scene, style, labels, opts.near)
-      : drawView(out, ox, oy, cellW, cellH, v, scene, doc.meta.front, style, opts.thumbnail ?? false, labels, opts.near);
-    cams.push({ label: viewLabel(v), ox, oy, width: cellW, height: cellH, ss: SS, cam: r.cam, clip: scene.clip, ...(scene.mask ? { mask: scene.mask } : {}), ...(r.cut ? { cut: r.cut } : {}) });
+      ? drawPerspective(out, ox, oy, cellW, cellH, v, scene, style, labels, cut)
+      : drawView(out, ox, oy, cellW, cellH, v, scene, doc.meta.front, style, opts.thumbnail ?? false, labels, cut);
+    cams.push({
+      label: viewLabel(v), ox, oy, width: cellW, height: cellH, ss: SS, cam: r.cam, clip: scene.clip,
+      ...(scene.mask ? { mask: scene.mask } : {}), ...(r.cut ? { cut: r.cut } : {}), ...(peel > 1 ? { peel } : {}),
+    });
     notes.push(isPerspective(v) ? perspectiveText(v, r.fov!) : `${viewLabel(v)} ${r.scale.toFixed(1)} px/block`);
   });
   if (cols * rows > 1) {
@@ -220,7 +232,8 @@ export async function renderDocument(doc: Document, baker: BlockBaker, opts: Ren
     `render ${out.width}×${out.height} · ${notes.join(" · ")}${id ? ` · id ${id}` : ""}`,
     `drew ${n.toLocaleString("en-US")} blocks in ${formatBox(main.box)}${main.mask ? " (selection)" : ""}${cutawayText(opts.cutaway)}${style !== "textured" ? ` · style ${style}` : ""} · front=${doc.meta.front}` +
       (opts.section ? ` · section ${opts.section instanceof Mask ? `selection in ${formatBox(opts.section.bbox() ?? { min: [0, 0, 0], max: [0, 0, 0] })}` : formatBox(opts.section)}` : "") +
-      (opts.near ? ` · near clip ${opts.near} (blocks nearer are not drawn)` : ""),
+      (opts.near ? ` · near clip ${opts.near} (blocks nearer are not drawn)` : "") +
+      (peel > 1 ? ` · peel ${peel}: the ${ordinal(peel)} surface along each ray (every block face toward the camera counts)` : ""),
     opts.highlight ? `highlighted ${highlighted.toLocaleString("en-US")} position${highlighted === 1 ? "" : "s"} in orange${main.airHighlights.length ? ` (${main.airHighlights.length} now air, outlined)` : ""}` : "",
     main.contextBlocks ? `${main.contextBlocks.toLocaleString("en-US")} read-only context blocks${opts.context === "normal" ? " drawn normally" : " ghosted (grey, translucent)"}` : "",
     doc.context && opts.context === "hide" ? "context hidden" : "",
@@ -241,6 +254,31 @@ function cutawayText(c: Cutaway | undefined): string {
   if (!c) return "";
   if ("maxY" in c) return ` (cutaway above y=${c.maxY})`;
   return ` (cutaway: kept ${c.keep} of ${c.plane}=${c.at})`;
+}
+
+/** Most layers depth peeling draws (each is one more pass over the scene). */
+export const MAX_PEEL = 8;
+
+/** Per-view cuts: near clip distance and the surface to draw (depth peeling). */
+interface CutOpts {
+  near?: number;
+  peel: number;
+}
+
+const ordinal = (n: number) => `${n}${n % 10 === 1 && n % 100 !== 11 ? "st" : n % 10 === 2 && n % 100 !== 12 ? "nd" : n % 10 === 3 && n % 100 !== 13 ? "rd" : "th"}`;
+
+/**
+ * Runs `paint` once per peeled layer: each pass after the first only draws what lies beyond the
+ * previous pass's depth, so the last pass holds the n-th surface (06, *Depth peeling*).
+ */
+function peeled(r: Raster, peel: number, paint: () => void): void {
+  for (let k = 1; k <= peel; k++) {
+    if (k > 1) {
+      r.floor = r.depth.slice();
+      r.depth.fill(Infinity);
+    }
+    paint();
+  }
 }
 
 /** Two regions' intersection (either may be a box or a mask; no first region = everything). */
@@ -391,7 +429,7 @@ interface Look {
 
 function drawView(
   out: Image, ox: number, oy: number, w: number, h: number, v: OrthoView, s: Scene, front: Facing, style: RenderStyle, thumbnail: boolean,
-  labels: Label[], near?: number,
+  labels: Label[], co: CutOpts = { peel: 1 },
 ): { scale: number; cam: Camera; fov?: number; cut?: Cut } {
   const { toward, upHint, kind } = cameraFor(v, front);
   const b = basis(toward, upHint);
@@ -418,20 +456,21 @@ function drawView(
   }
   const cam: Camera = { ...b, scale: scale * SS, cx, cy: cy - capRoom / 2 / scale, width: w * SS, height: h * SS };
   const r = new Raster(w * SS, h * SS, cam);
-  if (!thumbnail) r.fillBackground(BG_TOP, BG_BOTTOM);
-  if (!thumbnail && kind !== "elevation") drawGrid(r, s.box, scale);
-
   // Depth range for the depth style.
   const ds = corners.map((c) => c[0] * b.forward[0] + c[1] * b.forward[1] + c[2] * b.forward[2]);
   const dmin = Math.min(...ds), dspan = Math.max(1e-6, Math.max(...ds) - dmin);
   const fwd = b.forward;
   const depthOf = (c: number, cy2: number, cz: number) => c * fwd[0] + cy2 * fwd[1] + cz * fwd[2];
   // Near clip: measured from the front of the drawn box.
-  const cut: Cut | undefined = near ? { normal: [...fwd], d: dmin + near } : undefined;
-  drawBlocks(
-    s, style, (c, cy2, cz) => (c * b.forward[0] + cy2 * b.forward[1] + cz * b.forward[2] - dmin) / dspan, (q) => facesAway(q, fwd), depthOf,
-    (q, x, y, z, look) => drawQuad(r, q, x, y, z, look), cut,
-  );
+  const cut: Cut | undefined = co.near ? { normal: [...fwd], d: dmin + co.near } : undefined;
+  peeled(r, co.peel, () => {
+    if (!thumbnail) r.fillBackground(BG_TOP, BG_BOTTOM);
+    if (!thumbnail && kind !== "elevation") drawGrid(r, s.box, scale);
+    drawBlocks(
+      s, style, (c, cy2, cz) => (c * b.forward[0] + cy2 * b.forward[1] + cz * b.forward[2] - dmin) / dspan, (q) => facesAway(q, fwd), depthOf,
+      (q, x, y, z, look) => drawQuad(r, q, x, y, z, look), cut, co.peel > 1,
+    );
+  });
 
   // Highlighted positions that are air (e.g. blocks a diff removed): orange wire cubes.
   const lw = Math.max(1, Math.round(SS / 2));
@@ -470,7 +509,7 @@ function lookFor(style: RenderStyle, depthT: (x: number, y: number, z: number) =
  */
 function drawBlocks(
   s: Scene, style: RenderStyle, depthT: (x: number, y: number, z: number) => number, away: (q: BakedQuad, x: number, y: number, z: number) => boolean,
-  depthOf: (x: number, y: number, z: number) => number, draw: (q: BakedQuad, x: number, y: number, z: number, look: Look) => void, cut?: Cut,
+  depthOf: (x: number, y: number, z: number) => number, draw: (q: BakedQuad, x: number, y: number, z: number, look: Look) => void, cut?: Cut, noCull = false,
 ): void {
   const lookOf = lookFor(style, depthT);
   // Opaque pass, collecting blended quads for a sorted second pass.
@@ -482,7 +521,8 @@ function drawBlocks(
     if (cut && !kept(cut, x, y, z)) continue;
     const flags = s.flags[i]!;
     for (const q of blk.quads) {
-      if (q.cull) {
+      // Depth peeling counts faces against neighbours too (peel 2 = directly behind a façade).
+      if (q.cull && !noCull) {
         const d = DIR[q.cull];
         const nb = cut && !kept(cut, x + d[0], y + d[1], z + d[2]) ? undefined : s.occluderAt(x + d[0], y + d[1], z + d[2]);
         // A ghosted context block never hides an editable block's face (11).
@@ -576,13 +616,12 @@ export function perspectiveSetup(v: PerspectiveView, w: number, h: number): { b:
 }
 
 function drawPerspective(
-  out: Image, ox: number, oy: number, w: number, h: number, v: PerspectiveView, s: Scene, style: RenderStyle, labels: Label[], near?: number,
+  out: Image, ox: number, oy: number, w: number, h: number, v: PerspectiveView, s: Scene, style: RenderStyle, labels: Label[], co: CutOpts = { peel: 1 },
 ): { scale: number; cam: Camera; fov: number; cut?: Cut } {
   const { b, eye, fov } = perspectiveSetup(v, w, h);
   const focal = (h * SS) / 2 / Math.tan((fov * Math.PI) / 360);
   const cam: Camera = { ...b, scale: focal, cx: 0, cy: 0, width: w * SS, height: h * SS, eye };
   const r = new Raster(w * SS, h * SS, cam);
-  r.fillBackground(BG_TOP, BG_BOTTOM);
   const fwd = b.forward;
   const depthOf = (x: number, y: number, z: number) => (x - eye[0]) * fwd[0] + (y - eye[1]) * fwd[1] + (z - eye[2]) * fwd[2];
   const ds: number[] = [];
@@ -590,10 +629,16 @@ function drawPerspective(
   const dmin = Math.max(0, Math.min(...ds)), dspan = Math.max(1e-6, Math.max(...ds) - dmin);
   // Grid density from the size of a block at the target.
   const t = centre(v.target);
-  drawGrid(r, s.box, focal / SS / Math.max(1, depthOf(...t)));
   // Near clip: measured from the eye along the view.
-  const cut: Cut | undefined = near ? { normal: [...fwd], d: eye[0] * fwd[0] + eye[1] * fwd[1] + eye[2] * fwd[2] + near } : undefined;
-  drawBlocks(s, style, (x, y, z) => (depthOf(x, y, z) - dmin) / dspan, (q, x, y, z) => facesAwayFrom(q, x, y, z, eye), depthOf, (q, x, y, z, look) => drawQuadClipped(r, q, x, y, z, look), cut);
+  const cut: Cut | undefined = co.near ? { normal: [...fwd], d: eye[0] * fwd[0] + eye[1] * fwd[1] + eye[2] * fwd[2] + co.near } : undefined;
+  peeled(r, co.peel, () => {
+    r.fillBackground(BG_TOP, BG_BOTTOM);
+    drawGrid(r, s.box, focal / SS / Math.max(1, depthOf(...t)));
+    drawBlocks(
+      s, style, (x, y, z) => (depthOf(x, y, z) - dmin) / dspan, (q, x, y, z) => facesAwayFrom(q, x, y, z, eye), depthOf,
+      (q, x, y, z, look) => drawQuadClipped(r, q, x, y, z, look), cut, co.peel > 1,
+    );
+  });
   const lw = Math.max(1, Math.round(SS / 2));
   for (const [x, y, z] of s.airHighlights) if (!cut || kept(cut, x, y, z)) for (const [a, c] of CUBE_EDGES) segment(r, [x + a[0], y + a[1], z + a[2]], [x + c[0], y + c[1], z + c[2]], [255, 140, 0], 0.9, lw, true);
   r.downsampleInto(out, ox, oy, SS);

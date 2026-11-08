@@ -80,6 +80,7 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
         "cutaway: {maxY} hides everything above y; {plane:\"x\"|\"y\"|\"z\", at, keep:\"west|east|down|up|north|south\"} keeps one side of a plane. " +
         "near: n drops blocks nearer than n blocks (perspective: from the eye; orthographic: from the front of what is drawn), so the front falls away without choosing a plane. " +
         "section: a selection the scene is clipped to, like a CAD section box (e.g. {\"subtract\":[<box>,<one octant>]} exposes a corner of the interior). Cut faces draw closed; both compose with region and cutaway. " +
+        "peel: n draws the n-th surface along each ray instead of the first (every block face toward the camera counts, so peel 2 shows what is directly behind a one-block façade; one pass per layer, same image cost). " +
         "highlight: any selection, tinted orange; {changed:\"op:-1\"|\"checkpoint:<name>\"} shows a diff ({since:..} still works). style: textured | flat (mean colours) | depth (darker = farther) | xray (translucent shell). " +
         "overlays: {components} labels components. Axis ticks label block coordinates; N marks north. " +
         "The caption gives the render id for raycast and for view_box/view_lasso selections. Image + caption.",
@@ -94,6 +95,7 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
         context: z.enum(["ghost", "normal", "hide"]).optional().describe("In a scoped job's sandbox: how the read-only context is drawn (default ghost: grey, translucent)"),
         near: z.number().positive().optional().describe("Near clip: blocks nearer than this many blocks are not drawn"),
         section: selSchema.optional().describe("Section box: draw only this selection (composes with region)"),
+        peel: z.number().int().min(1).max(8).optional().describe("Depth peeling: draw the n-th surface along each ray (1 = normal; 2 = directly behind the front)"),
       },
     },
     async (c, a) => {
@@ -140,6 +142,7 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
         ...(a.context ? { context: a.context } : {}),
         ...(a.near ? { near: a.near } : {}),
         ...(section ? { section } : {}),
+        ...(a.peel ? { peel: a.peel } : {}),
       });
       emitRender(session, r.views, r.width, r.height);
       return image(r.png, [r.caption, ...notes.map((n) => `note: ${n}`)].join("\n"));

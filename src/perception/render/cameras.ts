@@ -23,6 +23,8 @@ export interface ViewCamera {
   clip: Box;
   mask?: Mask;
   cut?: Cut;
+  /** Depth peeling: the view shows the n-th block along each ray (06, *Cameras*). */
+  peel?: number;
 }
 
 /** A near clip (06, *Cameras*): a block is drawn when its centre lies at least `d` along `normal`. */
@@ -162,12 +164,16 @@ export function marchRay(clip: Box, mask: Mask | undefined, origin: Vec3, dir: V
   }
 }
 
-/** raycast: the first drawn, non-air block under an output pixel of a stored render. */
+/**
+ * raycast: the first drawn, non-air block under an output pixel of a stored render (the n-th on a
+ * peeled view: every block the ray enters is one more surface, as the renderer counts them).
+ */
 export function raycast(doc: Document, rec: RenderRecord, px: number, py: number): RayHit | undefined {
   const view = viewAt(rec, px, py);
   if (!view) return undefined;
   const { origin, dir, tMin } = pixelRay(view, px, py);
   let hit: RayHit = { view };
+  let skip = (view.peel ?? 1) - 1;
   marchRay(
     view.clip,
     view.mask,
@@ -177,6 +183,7 @@ export function raycast(doc: Document, rec: RenderRecord, px: number, py: number
       if (view.cut && !kept(view.cut, p[0], p[1], p[2])) return false;
       const state = doc.getState(p[0], p[1], p[2]);
       if (state === "minecraft:air") return false;
+      if (skip-- > 0) return false;
       hit = { view, pos: p, state, face };
       return true;
     },

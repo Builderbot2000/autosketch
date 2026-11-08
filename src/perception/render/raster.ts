@@ -58,6 +58,11 @@ export class Raster {
   readonly depth: Float32Array;
   /** Perspective camera (cam.eye set). */
   readonly persp: boolean;
+  /**
+   * Depth peeling (06, *Cameras*): the previous layer's depth per pixel. When set, only fragments
+   * clearly beyond it are drawn, so each pass finds the next surface.
+   */
+  floor?: Float32Array;
 
   constructor(
     readonly width: number,
@@ -128,6 +133,7 @@ export class Raster {
     const persp = this.persp;
     // Perspective: 1/depth per vertex, for perspective-correct texture coordinates.
     const q0 = -p0[2], q1 = -p1[2], q2 = -p2[2];
+    const floor = this.floor;
     for (let y = minY; y <= maxY; y++) {
       const py = y + 0.5;
       for (let x = minX; x <= maxX; x++) {
@@ -141,6 +147,8 @@ export class Raster {
         // Small bias so coplanar overlays (e.g. a pane against glass) favour the later quad
         // (relative to the depth for perspective, whose depths shrink with distance).
         if (persp ? z >= this.depth[di]! + z * 1e-5 : z >= this.depth[di]! - 1e-5) continue;
+        // Peeling: skip the previous layer and anything nearer (a relative margin for perspective).
+        if (floor && (persp ? z <= floor[di]! * (1 - 1e-4) : z <= floor[di]! + 1e-3)) continue;
         let r: number, g: number, b: number, a: number;
         if (flat) {
           [r, g, b] = flat;

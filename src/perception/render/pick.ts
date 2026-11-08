@@ -100,6 +100,7 @@ function pickVisible(doc: Document, v: ViewCamera, a: Area, inside: (fx: number,
     for (let fx = a.x0 + step / 2; fx < a.x1; fx += step) {
       if (!inside(fx, fy)) continue;
       const { origin, dir, tMin } = rayThrough(v, fx, fy);
+      let skip = (v.peel ?? 1) - 1; // a peeled view saw the n-th block along the ray
       marchRay(
         v.clip,
         v.mask,
@@ -108,6 +109,7 @@ function pickVisible(doc: Document, v: ViewCamera, a: Area, inside: (fx: number,
         (p) => {
           if (v.cut && !kept(v.cut, p[0], p[1], p[2])) return false;
           if (doc.getState(p[0], p[1], p[2]) === "minecraft:air") return false;
+          if (skip-- > 0) return false;
           out.add(p[0], p[1], p[2]);
           return true;
         },

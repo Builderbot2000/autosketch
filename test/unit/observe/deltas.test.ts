@@ -27,7 +27,7 @@ function setup(set: string[], scopes: Record<string, Document> = {}) {
   const doc = Document.create({ name: "keep", dataVersion: 3955 });
   const obs = startObserve({
     workspace,
-    settings: Settings.from(set.flatMap((s) => ["--set", s]), {}),
+    settings: Settings.from(["observe.http=false", ...set].flatMap((s) => ["--set", s]), {}), // no viewer unless a test asks
     sessionId: "s",
     flushMs: 5,
     getDoc: () => doc,

@@ -175,8 +175,12 @@ describe("viewer HTTP server (12, phase 3)", () => {
     await http.close();
   });
 
-  it("is off by default", async () => {
-    const obs = startObserve({ workspace: tempWorkspace(), settings: Settings.from([], {}), sessionId: "s", getDoc: () => undefined });
+  it("is on by default on a free port, and off with observe.http=false", async () => {
+    const on = startObserve({ workspace: tempWorkspace(), settings: Settings.from([], {}), sessionId: "s", getDoc: () => undefined });
+    expect(on.http).toBeDefined();
+    expect(await on.ready).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/$/);
+    await on.close();
+    const obs = startObserve({ workspace: tempWorkspace(), settings: Settings.from(["--set", "observe.http=false"], {}), sessionId: "s", getDoc: () => undefined });
     expect(obs.http).toBeUndefined();
     expect(await obs.ready).toBeUndefined();
     await obs.close();

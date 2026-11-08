@@ -75,7 +75,7 @@ async function finishedSession(set: string[] = ["observe.deltas=on"]) {
   const sandbox = Document.create({ name: "s1", dataVersion: 3955 });
   const obs = startObserve({
     workspace,
-    settings: Settings.from(set.flatMap((s) => ["--set", s]), {}),
+    settings: Settings.from(["observe.http=false", ...set].flatMap((s) => ["--set", s]), {}), // no viewer unless a test asks
     sessionId: "20261108T000000000Z-test",
     flushMs: 5,
     getDoc: () => doc,

@@ -5,7 +5,8 @@
  *   autosketch --instance "/path/to/instance" [--version 1.21.1] [--base-jar client.jar] [--workspace ~/autosketch]
  *   (or AUTOSKETCH_INSTANCE / AUTOSKETCH_VERSION / AUTOSKETCH_BASE_JAR / AUTOSKETCH_WORKSPACE)
  *   settings: --set observe.log=false (or AUTOSKETCH_OBSERVE_LOG=false), see core/settings.ts
- *   viewer:   --set observe.http=true (a free port) or =<port>; the URL is printed to stderr
+ *   viewer:   on by default on a free port (--set observe.http=<port> to pin one, =false to turn it
+ *             off); the URL is printed to stderr and opened in the browser (--set observe.open=false)
  *   --set server.hideTools=analyze,render hides tools (eval ablations, docs/design/10)
  *
  *   autosketch observe <path> [--port <n>] [--instance <path>]
@@ -19,6 +20,8 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { Settings } from "../core/settings.js";
 import { startObserve, type Observer } from "../observe/index.js";
 import { serveLog } from "../observe/offline.js";
+import { openInBrowser } from "../observe/open.js";
+import { OBSERVE_OPEN } from "../observe/settings.js";
 import { scopeLimits } from "../scope/settings.js";
 import { configFromEnv, loadInstanceContext } from "./context.js";
 import { createServer, SERVER_VERSION } from "./server.js";
@@ -57,6 +60,7 @@ async function main(): Promise<void> {
     log((e as Error).message);
     process.exit(2);
   }
+  if (settings.get(OBSERVE_OPEN)) void observer.ready.then((url) => url && openInBrowser(url, log));
   session.events = observer.sink("base");
   session.eventsFor = (doc) => observer.sink(doc);
   const server = createServer(ctx, { session, hideTools, log });

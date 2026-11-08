@@ -44,33 +44,33 @@ z↓   0123456789012345
 - **Subregions:** `region` takes any selection (`05`). Only blocks inside it are drawn, and only they hide faces, so a cut through solid material draws as a closed surface. The camera frames the region tightly, and axis ticks show the region's own coordinates. This was verified for boxes on 2026-11-07 (a cube cut from a 40×12×40 solid). Masks work the same way: the tool layer resolves the selection and the renderer takes the mask.
 - **Highlight:** a selection or the last op's diff drawn as a tint or outline.
 - **Context volume** (in a sandbox, `11`; not yet implemented): `context: "ghost"` (default, desaturated and translucent) | `"normal"` | `"hide"`, so read-only surroundings are never mistaken for editable blocks.
-- **Overlays:** axis ticks every 4/8/16 blocks (adaptive), a compass, component labels (optional), and storey lines (optional).
+- **Overlays:** axis ticks every 4/8/16 blocks (adaptive), a compass, and component labels (optional).
 - **Styles:** `textured` (default, real models and textures from `02`), `flat` (mean colours, faster and clearer for structure), `depth` (shaded by distance, for reading 3D form), `xray` (translucent shell).
 - The renderer is a pure-JS software rasterizer: baked models → triangles → z-buffer → PNG via `pngjs`. Back-face and occlusion culling at block level.
 
-### Structural analysis (text, high value)
+### Structural measurements (text, high value)
 
-`analyze({ component? | region? })` returns a compact architectural description:
+`analyze({ component? | region? })` returns compact, objective measurements of the build:
 
 ```
-footprint: 24×16, rectangular, front=south
-storeys: 3 (floor y=0, 5, 10; heights 5,5,4)
-walls: thickness 1, material wall=stone_bricks mix
-openings: front 6 windows (2 per storey, rhythm 4), 1 door (center); left 3 windows; back 0; right 3 windows
-roof: gable, ridge along x at y=19, pitch 1:1, overhang 1
-rooms: 5 enclosed (largest 10×7 on storey 1)
-issues: 2 floating blocks at (3,12,4),(3,12,5); roof gap at (0,15,8)
-proposed components: storey_1..3, roof, door_main
+box: (-1,0,-1)–(9,9,7), 11×10×9 (x×y×z); 306 blocks; front=south
+layers (blocks, x/z extent, share of extent filled):
+  y=0: 63 in x 0..8, z 0..6 (9×7, 100% filled)
+  y=1..4: 28 in x 0..8, z 0..6 (9×7, 44% filled)
+  y=5: 36 in x -1..9, z -1..7 (11×9, 36% filled)
+  …
+materials: oak_planks 146 (48%), oak_stairs 88 (29%), cobblestone 63 (21%), glass_pane 7 (2%), oak_door 2 (1%)
+connectivity: 1 group (faces, edges and corners join); all reach the bottom layer (y=0)
+enclosed air (not reachable from outside; any block bounds it): 1 region: 252 in (1,1,0)–(7,8,6)
 ```
 
-Detection methods:
-- Storeys: horizontal layers with high solid coverage inside the footprint.
-- Rooms: 3D flood fill of enclosed air.
-- Openings: wall-plane gaps and glass, door and pane blocks.
-- Roof: stair/slab topology above the top storey.
-- Issues: unsupported blocks, holes in the shell, z-fighting materials.
+**Principle: measure, don't interpret.** The server never names architectural elements: no storeys, walls, roofs, windows, doors, rooms or facades, and no "issues". Labelling needs thresholds (how much coverage is a floor? how wide is a window?), and every fixed threshold mislabels the builds that sit near it or don't fit the template a house-shaped detector assumes. The model already knows architecture, so the server hands it facts and leaves the reading to it. The same rule applies to selections (`05`, *Semantic*) and anchors (`storey:n` comes only from a named anchor). See also `07`: heuristics are advisory resources the agent may consult, not server verdicts.
 
-The vocabulary is shared with knowledge packs (`07`), so the agent's style guidance and the analysis output use the same terms.
+What is measured:
+- **Layers:** for every y, the block count, the x/z extent of those blocks and the share of that extent filled. Consecutive layers with the same extent and count are merged in the text; past 48 rows the middle is elided (use `region` or `view_slice`).
+- **Materials:** block ids by count (states ignored).
+- **Connectivity:** groups of blocks joined through faces, edges or corners (26 neighbours), and any group that does not reach the bottom layer of the measured box.
+- **Enclosed air:** 6-connected air not reachable from outside the box. Every non-air block bounds it, whatever its shape; there is no minimum size.
 
 ### Diffs
 
@@ -82,7 +82,7 @@ The vocabulary is shared with knowledge packs (`07`), so the agent's style guida
 |------|-----|---------|
 | "What's at X?" | `query_block` / `query_column` | < 50 |
 | Exact layout of a floor | `view_slice` | 300–1,500 |
-| "Does the structure make sense?" | `analyze` | 200–400 |
+| Exact structural numbers (layers, materials, enclosed air) | `analyze` | 200–400 |
 | Overall look / proportion | `render` 2×2 sheet @ 768² | ~800 |
 | Detail check | `render component:<id>` @ 512² | ~350 |
 | Verify the last edit | op `preview: true` | ~350 |
@@ -99,24 +99,13 @@ Each tool's description carries its cost hint.
 | `render` views | Named views, `component:<id>` (iso from the south-east, framed on the component box), custom `{yaw, pitch, distance?, target?}`. Views are orthographic, so `distance` is a zoom: the view frames a sphere of that radius around `target`. |
 | `render` region, cutaway | `region` takes any selection (resolved to a mask by the tool layer; an exact box takes the box path). Cutaways: `{maxY}` and `{plane, at, keep}` (the plane's own layer stays). A component-interior cutaway is not done. |
 | `render` highlight | A resolved mask (any selection; `{"changed":"op:-1"}` for a diff is the preferred form, `{since}` still works), tinted orange; highlighted air is drawn as wire cubes. The scene carries per-block flags; `CONTEXT` is reserved for sandbox ghosting (`11`), not drawn yet. |
-| `render` overlays | Component labels and storey floor lines (from `analyze`), both opt-in. |
+| `render` overlays | Component labels, opt-in. (Storey lines were removed with architectural labelling.) |
 | `raycast` | Done. The cameras of the last 8 renders are kept per document (`perception/render/cameras.ts`, not saved); the render caption gives the id. Hits are voxel-level (the first non-air block in the drawn clip), with the face entered, and warn when the document changed since the render. |
 | Op `preview: true` | On `set_blocks`, `fill`, `clear`, `replace`, the transforms (`move`, `copy`, `rotate`, `mirror`) and the brushes (`hollow`, `paint`, `smooth`, `extrude`, `sweep`, `array`): one 512² iso view of the changed box plus 2 blocks, changes highlighted. |
-| `analyze` | Done (`perception/analyze.ts`), see *Analysis methods* below. Checked against three fixture buildings in `test/helpers/buildings.ts` (gable house, two-storey hip roof, tower with battlements). Not done: z-fighting materials, round-footprint openings (openings are found on the footprint's bounding-box sides), dome/mansard roofs (reported as `other`). |
+| `analyze` | Done (`perception/analyze.ts`): measurements only, see *Structural measurements*. Checked against three fixture buildings in `test/helpers/buildings.ts`. The earlier architectural labelling (footprint, walls, storeys, openings, roof type, rooms, issues, proposed components) was removed on 2026-11-07. |
 | `diff` | Done (`perception/diff.ts`): `checkpoint:<name>` (or a bare name) and `op:-n`, in either journal direction; counts by family (added, removed, replaced, state-only changes) and up to 5 clustered regions. `render: true` adds before/after 384² images of the changed area, the before image from a read-only snapshot. |
-| Semantic and render-seeded selections | Done: `face`, `storey`, `roof`, `room`, `interior`, `openings`, `top`, `changed` (`perception/semantic.ts`, using `analyze`) and `view_box`/`view_lasso` with `depth: visible\|through` (`perception/render/pick.ts`, using the stored cameras). `ops/selection.ts` calls into them read-only; see `05`, *Implementation status*, for the JSON forms. `render` `highlight` takes `{changed}` like any selection; `{since}` still works. |
+| Semantic and render-seeded selections | Done: `enclosed`, `interior`, `top`, `changed` (`perception/semantic.ts`, measured geometry with no labels) and `view_box`/`view_lasso` with `depth: visible\|through` (`perception/render/pick.ts`, using the stored cameras). `face`, `storey`, `roof`, `openings` were removed with architectural labelling; `room` is now `enclosed`. `ops/selection.ts` calls into them read-only; see `05`, *Implementation status*, for the JSON forms. `render` `highlight` takes `{changed}` like any selection; `{since}` still works. |
 | Events | `render`, `diff` with `render: true` and op previews emit `render.produced` (`source: "tool"`, view labels joined by commas, image size) through the session's event sink (`12`). |
-
-### Analysis methods
-
-- **Blocks are classed by id:** doors and fence gates (door), glass, panes and bars (window), stairs and slabs (roof material), decor (torches, flowers, carpets, signs, trapdoors and other non-colliding blocks; the registry's `shape: none` too), walls and fences (partial), everything else solid.
-- **Footprint:** the commonest per-layer bounding box of wall-like blocks, so roof overhangs don't count. Shape is rectangular when the walls cover ≥ 85% of its edge, round when the corners are empty.
-- **Walls:** layers where at least 3 of the 4 footprint sides are ≥ 50% covered (gable triangles cover only 2). Thickness is the median inward run at the first storey's mid-height.
-- **Storeys:** floors are layers with ≥ 60% of the footprint interior covered (a thick floor counts at its top layer). A floor with fewer than 3 layers above it before the next floor or the top of the walls is a roof deck, not a storey.
-- **Openings:** 4-connected gaps, glass and doors in each side's wall plane. Air two high from a storey floor counts as a doorway; anything wider than 5 or larger than 15 blocks is a wide gap.
-- **Roof:** the heightmap above the top storey (bottom slabs count half). Flat when the interior is level within one block, with a parapet or battlements from the raised rim. Otherwise the slope statistics pick gable or shed (one axis) or hip or pyramid (both). Pitch is measured along the middle of the roof.
-- **Rooms:** 6-connected air (and decor) not reachable from outside; pockets under 8 blocks are counted separately.
-- **Issues:** floating groups are not connected to the bottom layer, even diagonally (stair roofs step diagonally and hold in the game). Roof gaps are footprint columns with no roof block, or pits 2 or more below all four neighbours.
 
 ## Open questions
 

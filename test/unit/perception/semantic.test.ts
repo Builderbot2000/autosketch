@@ -8,7 +8,7 @@ import { analyzeStructure } from "../../../src/perception/analyze.js";
 import { diffSince } from "../../../src/perception/diff.js";
 import { recordRender } from "../../../src/perception/render/cameras.js";
 import { enclosedAir } from "../../../src/perception/semantic.js";
-import { gableHouse, tower, twoStorey } from "../../helpers/buildings.js";
+import { gableHouse, twoStorey } from "../../helpers/buildings.js";
 
 const B = (min: Vec3, max: Vec3) => fromPublic({ min, max });
 const sel = (doc: Document, e: SelExpr) => resolveSelection(e, { doc });
@@ -16,72 +16,30 @@ const pts = (m: Mask) => m.positions().map((p) => p.join(",")).sort();
 const boxPts = (min: Vec3, max: Vec3) => pts(Mask.fromBox(B(min, max)));
 
 describe("semantic selections (05, Semantic)", () => {
-  it("face: the wall plane of a facade over the wall rows, air included; depth goes inward", () => {
+  it("offers no architectural selections: face, storey, roof and openings are gone", () => {
     const { doc } = gableHouse();
-    // Front = south = z 6; walls y 0..4.
-    expect(pts(sel(doc, { face: "front" }).mask)).toEqual(boxPts([0, 0, 6], [8, 4, 6]));
-    expect(pts(sel(doc, { face: "south" }).mask)).toEqual(boxPts([0, 0, 6], [8, 4, 6]));
-    expect(pts(sel(doc, { face: "back" }).mask)).toEqual(boxPts([0, 0, 0], [8, 4, 0]));
-    // Right = the viewer's right facing the front (south) = east.
-    expect(pts(sel(doc, { face: "right" }).mask)).toEqual(boxPts([8, 0, 0], [8, 4, 6]));
-    expect(pts(sel(doc, { face: "left", depth: 2 }).mask)).toEqual(boxPts([0, 0, 0], [1, 4, 6]));
-    expect(() => sel(doc, { face: "top" })).toThrow(/front, back/);
+    for (const e of [{ face: "front" }, { storey: 1 }, { roof: "all" }, { openings: "all" }, { room: 1 }]) expect(() => sel(doc, e)).toThrow();
   });
 
-  it("storey: the footprint box of storey n, negative from the top", () => {
-    const { doc } = twoStorey();
-    expect(pts(sel(doc, { storey: 1 }).mask)).toEqual(boxPts([0, 0, 0], [10, 3, 8]));
-    expect(pts(sel(doc, { storey: 2 }).mask)).toEqual(boxPts([0, 4, 0], [10, 7, 8]));
-    expect(pts(sel(doc, { storey: -1 }).mask)).toEqual(boxPts([0, 4, 0], [10, 7, 8]));
-    expect(() => sel(doc, { storey: 3 })).toThrow(/out of range: analysis found 2 storeys/);
-    expect(sel(tower().doc, { storey: 3 }).mask.bbox()).toEqual(B([0, 10, 0], [6, 14, 6]));
-  });
-
-  it("roof: the blocks above the top storey", () => {
-    const { doc } = gableHouse();
-    const m = sel(doc, { roof: "all" }).mask;
-    // 88 stairs, 32 gable-end planks, 11 ridge planks.
-    expect(m.count()).toBe(131);
-    expect(m.bbox()).toEqual(B([-1, 5, -1], [9, 9, 7]));
-    m.forEach((x, y, z) => expect(doc.getState(x, y, z)).not.toBe("minecraft:air"));
-    const flat = sel(tower().doc, { roof: true }).mask;
-    expect(flat.bbox()).toEqual(B([0, 15, 0], [6, 16, 6]));
-  });
-
-  it("openings: window, door and gap cells, filtered by facade, kind and storey", () => {
-    const { doc } = gableHouse();
-    expect(pts(sel(doc, { openings: "all", facade: "front" }).mask)).toEqual(["2,2,6", "4,1,6", "4,2,6", "6,2,6"]);
-    expect(pts(sel(doc, { openings: "all", facade: "front", kind: "door" }).mask)).toEqual(["4,1,6", "4,2,6"]);
-    expect(pts(sel(doc, { openings: "all", facade: "east" }).mask)).toEqual(["8,2,3"]);
-    expect(sel(doc, { openings: "all" }).mask.count()).toBe(9);
-    const t = twoStorey().doc;
-    expect(pts(sel(t, { openings: "all", facade: "front", storey: 2 }).mask)).toEqual(["2,6,8", "5,6,8", "8,6,8"]);
-    const none = sel(doc, { openings: "all", kind: "gap" });
-    expect(none.mask.isEmpty()).toBe(true);
-    expect(none.notes).toEqual(["openings: none match"]);
-  });
-
-  it("room and interior: enclosed air, matching analyze's rooms", () => {
+  it("enclosed and interior: enclosed air, matching analyze", () => {
     const { doc } = twoStorey();
     const a = analyzeStructure(doc);
-    const r1 = sel(doc, { room: 1 }).mask;
-    expect(r1.count()).toBe(a.rooms[0]!.volume);
-    expect(r1.bbox()).toEqual(a.rooms[0]!.box);
-    // Seeded from a position: the ground floor room.
-    const ground = sel(doc, { room: [5, 2, 4] }).mask;
+    const r1 = sel(doc, { enclosed: 1 }).mask;
+    expect(r1.count()).toBe(a.enclosed[0]!.volume);
+    expect(r1.bbox()).toEqual(a.enclosed[0]!.box);
+    // Seeded from a position: the air between y=0 and y=4.
+    const ground = sel(doc, { enclosed: [5, 2, 4] }).mask;
     expect(ground.bbox()).toEqual(B([1, 1, 1], [9, 3, 7]));
     expect(ground.count()).toBe(9 * 3 * 7);
     ground.forEach((x, y, z) => expect(doc.getState(x, y, z)).toBe("minecraft:air"));
-    const r = enclosedAir(doc);
-    expect(r.rooms.length).toBe(a.rooms.length);
-    const inside = sel(doc, { interior: "all" }).mask;
-    expect(inside.count()).toBe(a.rooms.reduce((s, x) => s + x.volume, 0) + r.pockets.count());
-    // A seed on a wall or outside air selects nothing, with a note.
-    const wall = sel(doc, { room: [0, 2, 2] });
+    expect(enclosedAir(doc).map((r) => r.volume)).toEqual(a.enclosed.map((r) => r.volume));
+    expect(sel(doc, { interior: "all" }).mask.count()).toBe(a.enclosed.reduce((s, x) => s + x.volume, 0));
+    // A seed on a block or outside air selects nothing, with a note.
+    const wall = sel(doc, { enclosed: [0, 2, 2] });
     expect(wall.mask.isEmpty()).toBe(true);
     expect(wall.notes[0]).toMatch(/is stone_bricks|is mossy_stone_bricks/);
-    expect(sel(doc, { room: [-1, 2, 2] }).notes[0]).toMatch(/connected to the outside/);
-    expect(() => sel(doc, { room: 9 })).toThrow(/out of range/);
+    expect(sel(doc, { enclosed: [-1, 2, 2] }).notes[0]).toMatch(/connected to the outside/);
+    expect(() => sel(doc, { enclosed: 9 })).toThrow(/out of range/);
   });
 
   it("interior of a shell selection: positions outside the scope count as air", () => {
@@ -115,18 +73,17 @@ describe("semantic selections (05, Semantic)", () => {
     expect(() => sel(doc, { changed: 3 })).toThrow(/op:-n/);
   });
 
-  it("scopes: a selection, or a bare component id, limits the analysis", () => {
+  it("scopes: a selection, or a bare component id, limits the measurement", () => {
     const { doc } = gableHouse();
-    // A second building far to the east confuses whole-document analysis.
     fill(doc, {}, B([30, 0, 0], [36, 11, 6]), "minecraft:stone_bricks", { mode: "walls", as: "annex" });
     fill(doc, {}, B([31, 6, 1], [35, 6, 5]), "minecraft:oak_planks");
-    const house = { min: [-1, 0, -1], max: [9, 9, 7] };
-    expect(pts(sel(doc, { face: "front", of: house }).mask)).toEqual(boxPts([0, 0, 6], [8, 4, 6]));
-    expect(sel(doc, { storey: 2, of: "annex" }).mask.bbox()).toEqual(B([30, 6, 0], [36, 11, 6]));
-    expect(sel(doc, { roof: house }).mask.count()).toBe(131);
+    // The annex's walls are open at the top and bottom, so nothing in it is enclosed.
+    expect(sel(doc, { interior: "annex" }).mask.isEmpty()).toBe(true);
+    // Scoped to the house's box, the annex no longer matters.
+    expect(sel(doc, { enclosed: 1, of: { min: [-1, 0, -1], max: [9, 9, 7] } }).mask.count()).toBe(252);
     // A stored selection of the same name wins over the component.
-    doc.selections.set("annex", house);
-    expect(pts(sel(doc, { face: "front", of: "annex" }).mask)).toEqual(boxPts([0, 0, 6], [8, 4, 6]));
+    doc.selections.set("annex", { min: [-1, 0, -1], max: [9, 9, 7] });
+    expect(sel(doc, { enclosed: 1, of: "annex" }).mask.count()).toBe(252);
   });
 });
 

@@ -5,7 +5,7 @@ import { fill, setBlocks, type BlockPlacement } from "../../src/ops/edit.js";
 
 /**
  * Three small original fixture buildings with known structure, for `analyze` tests and the golden
- * tier (docs/design/10-testing.md, "Analysis"). Each comes with the facts analysis must find.
+ * tier (docs/design/10-testing.md, "Analysis"). Each comes with the measurements analysis must find.
  * Vanilla ids only and no registry needed, so any test can build them. All face south (front).
  */
 
@@ -18,15 +18,9 @@ const panes = (ps: Vec3[], block = "minecraft:glass_pane"): BlockPlacement[] => 
 const newDoc = (name: string) => Document.create({ name, dataVersion: 3955, seed: 11 });
 
 export interface FixtureFacts {
-  footprint: [number, number];
-  storeys: number[];
-  heights: number[];
-  roof: string;
-  ridgeAxis?: "x" | "z";
-  ridgeY: number;
-  /** Windows and doors per facade. */
-  openings: Record<"front" | "back" | "left" | "right", { windows: number; doors: number }>;
-  rooms: number;
+  blocks: number;
+  /** Enclosed air volumes, largest first. */
+  enclosed: number[];
 }
 
 /**
@@ -54,16 +48,7 @@ export function gableHouse(): { doc: Document; facts: FixtureFacts } {
   setBlocks(doc, {}, blocks);
   return {
     doc,
-    facts: {
-      footprint: [9, 7],
-      storeys: [0],
-      heights: [5],
-      roof: "gable",
-      ridgeAxis: "x",
-      ridgeY: 9,
-      openings: { front: { windows: 2, doors: 1 }, back: { windows: 3, doors: 0 }, left: { windows: 1, doors: 0 }, right: { windows: 1, doors: 0 } },
-      rooms: 1,
-    },
+    facts: { blocks: 306, enclosed: [252] },
   };
 }
 
@@ -104,16 +89,7 @@ export function twoStorey(): { doc: Document; facts: FixtureFacts } {
   setBlocks(doc, {}, blocks);
   return {
     doc,
-    facts: {
-      footprint: [11, 9],
-      storeys: [0, 4],
-      heights: [4, 4],
-      roof: "hip",
-      ridgeAxis: "x",
-      ridgeY: 13,
-      openings: { front: { windows: 5, doors: 1 }, back: { windows: 4, doors: 0 }, left: { windows: 2, doors: 0 }, right: { windows: 2, doors: 0 } },
-      rooms: 2,
-    },
+    facts: { blocks: 557, enclosed: [404, 189] },
   };
 }
 
@@ -141,15 +117,7 @@ export function tower(): { doc: Document; facts: FixtureFacts } {
   setBlocks(doc, {}, blocks);
   return {
     doc,
-    facts: {
-      footprint: [7, 7],
-      storeys: [0, 5, 10],
-      heights: [5, 5, 5],
-      roof: "flat",
-      ridgeY: 16,
-      openings: { front: { windows: 2, doors: 1 }, back: { windows: 3, doors: 0 }, left: { windows: 2, doors: 0 }, right: { windows: 2, doors: 0 } },
-      rooms: 3,
-    },
+    facts: { blocks: 496, enclosed: [100, 100, 100] },
   };
 }
 

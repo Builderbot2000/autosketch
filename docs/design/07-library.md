@@ -82,7 +82,7 @@ summary: Pointed arches, verticality, buttresses, tracery, steep roofs.
 
 - `knowledge_list({ kind?, tags? })` returns only names and summaries (cheap). `knowledge_read({ name })` returns the full text.
 - Packs may reference prefabs, palettes and procedures by name, so a style is a bundle of guidance plus reusable parts.
-- The vocabulary is aligned with analysis output (`06`): storey, bay, facade, opening, cornice, buttress, pitch, overhang.
+- The vocabulary (storey, bay, facade, opening, cornice, buttress, pitch, overhang) is for the agent's own reading of builds; `analyze` (`06`) reports measurements only and does not use it.
 - The starter library ships a few general heuristics (proportion, roof pitch, window rhythm, depth/layering) written as *suggestions with reasons*, not rules.
 
 ## Roots

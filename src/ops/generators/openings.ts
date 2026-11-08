@@ -27,7 +27,7 @@ function place(doc: Document, env: OpEnv, p: OpeningPlacement, w: number, vDefau
   const centre = faceIndex(p.u ?? 0.5, face.width, "u");
   const iu = centre - Math.floor((w - 1) / 2);
   const v = p.v ?? vDefault;
-  const iv = typeof v === "string" && /^storey[:_]/.test(v) ? storeyLevel(doc, face.component, Number(v.slice(7)), env) - face.origin[1] : faceIndex(v, face.height, "v");
+  const iv = typeof v === "string" && /^storey[:_]/.test(v) ? storeyLevel(doc, face.component, Number(v.slice(7))) - face.origin[1] : faceIndex(v, face.height, "v");
   const bc = facePoint(face, centre, iv);
   notes.push(`on ${p.on} (${face.dir} face), bottom centre ${bc.join(",")}`);
   if (iu < 0 || iu + w > face.width) notes.push(`the opening runs past the face's edge (face is ${face.width} wide)`);

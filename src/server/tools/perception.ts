@@ -73,7 +73,7 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
         "Default: iso_se, iso_nw, front, top at 768px (~800 tokens). One view at 512px is ~350 tokens. region takes any selection: only it is drawn, framed tightly. " +
         "cutaway: {maxY} hides everything above y; {plane:\"x\"|\"y\"|\"z\", at, keep:\"west|east|down|up|north|south\"} keeps one side of a plane. " +
         "highlight: any selection, tinted orange; {changed:\"op:-1\"|\"checkpoint:<name>\"} shows a diff ({since:..} still works). style: textured | flat (mean colours) | depth (darker = farther) | xray (translucent shell). " +
-        "overlays: {components, storeys} labels components and draws storey floor lines. Axis ticks label block coordinates; N marks north. " +
+        "overlays: {components} labels components. Axis ticks label block coordinates; N marks north. " +
         "The caption gives the render id for raycast and for view_box/view_lasso selections. Image + caption.",
       inputSchema: {
         views: z.array(viewSchema).min(1).max(4).optional(),
@@ -82,7 +82,7 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
         highlight: z.union([z.object({ since: z.string() }), selSchema]).optional(),
         size: z.number().int().min(128).max(1024).optional().describe("Longest side in pixels (default 768 for several views, 512 for one)"),
         style: z.enum(["textured", "flat", "depth", "xray"]).optional(),
-        overlays: z.object({ components: z.boolean().optional(), storeys: z.boolean().optional() }).optional(),
+        overlays: z.object({ components: z.boolean().optional() }).optional(),
       },
     },
     async (c, a) => {
@@ -141,14 +141,14 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
   tool(
     "analyze",
     {
-      title: "Analyze structure",
+      title: "Measure structure",
       description:
-        "Structural summary of the build (or of one component / selection): footprint, storeys with floor heights, wall thickness and material, " +
-        "windows and doors per facade (front/back/left/right via the document's front), roof type, ridge, pitch and overhang, enclosed rooms, " +
-        "issues (floating blocks, roof gaps) and proposed components with boxes. Use it to check \"does this make sense?\" before rendering. Text, ~200–400 tokens.",
+        "Objective measurements of the build (or of one component / selection): bounds and block count; per layer the block count, x/z extent and share of it filled " +
+        "(identical consecutive layers merged); materials by count; connected groups and any not reaching the bottom layer; enclosed air regions with volumes and boxes. " +
+        "It labels nothing (no storeys, walls, roofs or windows): read the numbers with your own architectural judgment. Text, ~200–400 tokens.",
       inputSchema: {
-        component: z.string().optional().describe("Analyse only this component's box"),
-        region: selSchema.optional().describe("Analyse only this selection"),
+        component: z.string().optional().describe("Measure only this component's box"),
+        region: selSchema.optional().describe("Measure only this selection"),
       },
     },
     (c, a) => {
@@ -160,7 +160,7 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
         if (!comp) throw new Error(`no component "${a.component}"${doc.components.size ? ` (have: ${[...doc.components.keys()].join(", ")})` : ""}`);
         region = comp.box;
       } else if (a.region !== undefined) region = maskOf(c, doc, a.region).mask;
-      return text(formatAnalysis(analyzeStructure(doc, { registry: c.registry, index: c.palette, ...(region ? { region } : {}) }), c.registry));
+      return text(formatAnalysis(analyzeStructure(doc, region ? { region } : {}), c.registry));
     },
   );
 

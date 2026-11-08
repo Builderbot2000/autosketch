@@ -9,7 +9,6 @@ import type { BakedBlock, BakedQuad, BlockBaker } from "./bake.js";
 import { recordRender, type ViewCamera } from "./cameras.js";
 import { basis, Raster, type Camera, type V3 } from "./raster.js";
 import type { Face } from "../../assets/models.js";
-import { analyzeStructure } from "../analyze.js";
 
 /**
  * render (docs/design/06-perception.md): textured orthographic views of the document with axis
@@ -49,7 +48,7 @@ export interface RenderOptions {
   style?: RenderStyle;
   /** Positions to tint (a resolved selection or a diff). Highlighted air is outlined. */
   highlight?: Mask;
-  overlays?: { components?: boolean; storeys?: boolean };
+  overlays?: { components?: boolean };
   /** Plain picture for a file thumbnail: transparent background, no grid, ticks, compass or caption room; size may go down to 32. Not recorded for raycast. */
   thumbnail?: boolean;
 }
@@ -76,7 +75,6 @@ const BG_BOTTOM: RGB = [176, 194, 212];
 const INK: RGBA = [32, 40, 52, 255];
 const GRID: RGB = [70, 90, 110];
 const HL: [number, number, number, number] = [255, 140, 0, 0.5];
-const STOREY: RGB = [200, 40, 60];
 
 const OPPOSITE: Record<Face, Face> = { up: "down", down: "up", north: "south", south: "north", east: "west", west: "east" };
 const DIR: Record<Face, V3> = { up: [0, 1, 0], down: [0, -1, 0], north: [0, 0, -1], south: [0, 0, 1], east: [1, 0, 0], west: [-1, 0, 0] };
@@ -145,7 +143,6 @@ export async function renderDocument(doc: Document, baker: BlockBaker, opts: Ren
   const notes: string[] = [];
   const cams: ViewCamera[] = [];
   const style = opts.style ?? "textured";
-  const storeys = opts.overlays?.storeys && !opts.thumbnail ? storeyLines(doc, opts.region) : undefined;
   views.forEach((v, i) => {
     const ox = (i % cols) * cellW, oy = Math.floor(i / cols) * cellH;
     const scene = sceneList[i];
@@ -162,7 +159,7 @@ export async function renderDocument(doc: Document, baker: BlockBaker, opts: Ren
         if (isEmptyBox(intersectBox(c.box, scene.box))) continue;
         labels.push({ text: id, at: [(c.box.min[0] + c.box.max[0]) / 2, c.box.max[1], (c.box.min[2] + c.box.max[2]) / 2] });
       }
-    const r = drawView(out, ox, oy, cellW, cellH, v, scene, doc.meta.front, style, opts.thumbnail ?? false, labels, storeys);
+    const r = drawView(out, ox, oy, cellW, cellH, v, scene, doc.meta.front, style, opts.thumbnail ?? false, labels);
     cams.push({ label: viewLabel(v), ox, oy, width: cellW, height: cellH, ss: SS, cam: r.cam, clip: scene.clip, ...(scene.mask ? { mask: scene.mask } : {}) });
     notes.push(`${viewLabel(v)} ${r.scale.toFixed(1)} px/block`);
   });
@@ -180,7 +177,6 @@ export async function renderDocument(doc: Document, baker: BlockBaker, opts: Ren
     `render ${out.width}×${out.height} · ${notes.join(" · ")}${id ? ` · id ${id}` : ""}`,
     `drew ${n.toLocaleString("en-US")} blocks in ${formatBox(main.box)}${main.mask ? " (selection)" : ""}${cutawayText(opts.cutaway)}${style !== "textured" ? ` · style ${style}` : ""} · front=${doc.meta.front}`,
     opts.highlight ? `highlighted ${highlighted.toLocaleString("en-US")} position${highlighted === 1 ? "" : "s"} in orange${main.airHighlights.length ? ` (${main.airHighlights.length} now air, outlined)` : ""}` : "",
-    storeys?.length ? `storey lines (red) at y=${storeys.map((s) => s.y).join(", ")}` : "",
     "Ticks label block coordinates along the bottom edges; N marks north.",
     id ? `raycast({view:"${id}", px, py}) names the block under a pixel.` : "",
     fallback.size ? `no model for ${[...fallback].slice(0, 5).join(", ")}${fallback.size > 5 ? " …" : ""} (drawn as magenta checker)` : "",
@@ -277,16 +273,6 @@ async function buildScene(doc: Document, baker: BlockBaker, opts: RenderOptions,
   };
 }
 
-/** Storey floor lines from analysis (empty when nothing structural is found). */
-function storeyLines(doc: Document, region: Box | Mask | undefined): { y: number; box: Box }[] {
-  try {
-    const a = analyzeStructure(doc, region ? { region } : {});
-    return a.storeys.map((s) => ({ y: s.floorY, box: s.box }));
-  } catch {
-    return [];
-  }
-}
-
 function cameraFor(v: View, front: Facing): { toward: V3; upHint: V3; kind: "iso" | "elevation" | "top" } {
   if (typeof v === "object") {
     const yaw = (v.yaw * Math.PI) / 180, p = (Math.max(-89, Math.min(89, v.pitch)) * Math.PI) / 180;
@@ -326,7 +312,7 @@ interface Look {
 
 function drawView(
   out: Image, ox: number, oy: number, w: number, h: number, v: View, s: Scene, front: Facing, style: RenderStyle, thumbnail: boolean,
-  labels: Label[], storeys: { y: number; box: Box }[] | undefined,
+  labels: Label[],
 ): { scale: number; cam: Camera } {
   const { toward, upHint, kind } = cameraFor(v, front);
   const b = basis(toward, upHint);
@@ -405,18 +391,8 @@ function drawView(
   for (const [x, y, z] of s.airHighlights)
     for (const [a, c] of CUBE_EDGES) r.line(r.project(x + a[0], y + a[1], z + a[2]), r.project(x + c[0], y + c[1], z + c[2]), [255, 140, 0], 0.9, lw, true);
 
-  // Storey lines: the footprint outline at each floor level.
-  const storeyLabels: Label[] = [];
-  for (const st of storeys ?? []) {
-    const { min, max } = st.box;
-    const yy = st.y + 1;
-    const pts: V3[] = [[min[0], yy, min[2]], [max[0], yy, min[2]], [max[0], yy, max[2]], [min[0], yy, max[2]]];
-    for (let k = 0; k < 4; k++) r.line(r.project(...pts[k]!), r.project(...pts[(k + 1) % 4]!), STOREY, 0.85, lw + 1);
-    storeyLabels.push({ text: `y=${st.y}`, at: [min[0], yy, max[2]] });
-  }
-
   r.downsampleInto(out, ox, oy, SS, thumbnail);
-  if (!thumbnail) drawOverlays(out, ox, oy, w, h, r, s.box, kind, v, toward, [...labels, ...storeyLabels]);
+  if (!thumbnail) drawOverlays(out, ox, oy, w, h, r, s.box, kind, v, toward, labels);
   return { scale, cam };
 }
 
@@ -526,7 +502,7 @@ function drawOverlays(out: Image, ox: number, oy: number, w: number, h: number, 
     edge(0, [0, y0, zNear]);
     edge(2, [xNear, y0, 0]);
   }
-  // Component labels and storey levels, with a backdrop so they read over blocks.
+  // Component labels, with a backdrop so they read over blocks.
   for (const l of extra) label(l.text, toPx(...l.at), [0, -1], 8, l.text.startsWith("y=") ? [200, 40, 60, 255] : INK, true);
   // View name and compass.
   out.text(viewLabel(v).replace(/_/g, " "), ox + 6, oy + 6, INK);

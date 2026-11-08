@@ -17,7 +17,7 @@ export function registerSelectionTools({ tool, session }: ToolDeps): void {
         "Resolves a selection and reports what it covers (block count, solid/air, bounding box, top blocks, components touched), so you can check it before an op uses it. " +
         "name stores it for reuse as sel:\"<name>\" (stored as an expression: flood fills and filters follow later edits). name alone shows a stored selection; delete:true removes it; " +
         "no arguments lists stored selections. Every op's selection also becomes \"last\". " +
-          "Semantic picks ({\"face\":\"front\"}, {\"storey\":2}, {\"roof\":\"all\"}, {\"openings\":\"all\"}, {\"room\":1}, {\"interior\":\"all\"}, {\"top\":\"all\"}, {\"changed\":\"op:-1\"}) come from analyze; " +
+          "Measured picks ({\"enclosed\":1}, {\"interior\":\"all\"}, {\"top\":\"all\"}, {\"changed\":\"op:-1\"}) are geometry, not architectural labels; " +
           "view_box/view_lasso pick from pixels of a render (store them with {\"freeze\":..}). Text, <150 tokens.",
       inputSchema: {
         sel: selSchema.optional(),

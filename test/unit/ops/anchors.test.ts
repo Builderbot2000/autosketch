@@ -60,23 +60,21 @@ describe("anchors (05)", () => {
     expect(resolveFace(doc, "keep.front")).toMatchObject({ dir: "east", origin: [8, 0, 6], u: [0, 0, -1] });
   });
 
-  it("resolves storey:n from named anchors, else from analysis", () => {
+  it("resolves storey:n from named anchors only", () => {
     const doc = keepDoc();
     doc.edit("t", "t", (tx) => tx.setComponent({ id: "keep", box: B([0, 0, 0], [8, 5, 6]), anchors: { "storey:2": [0, 4, 0] } }));
     expect(resolveAnchor(doc, { face: "keep.front", u: 0.5, v: "storey:2" }).pos).toEqual([4, 4, 6]);
     expect(resolveAnchor(doc, "keep.storey:2").pos).toEqual([0, 4, 0]); // the named anchor itself
-    expect(resolveAnchor(doc, { anchor: "keep.storey_2", offset: [0, 0, 0] }).pos).toEqual([4, 4, 3]); // implicit: footprint centre
+    expect(resolveAnchor(doc, { anchor: "keep.storey_2", offset: [0, 0, 0] }).pos).toEqual([4, 4, 3]); // implicit: box centre at that y
 
-    // A hollow two-storey house: analysis finds the floors.
+    // Storeys are never inferred from the voxels, even in an obvious two-floor shell.
     const h = Document.create({ name: "h", dataVersion: 3955, seed: 1 });
     fill(h, env, B([0, 0, 0], [8, 9, 8]), "stone_bricks", { mode: "walls", as: "house" });
-    fill(h, env, B([0, 0, 0], [8, 0, 8]), "oak_planks");
     fill(h, env, B([0, 4, 0], [8, 4, 8]), "oak_planks");
-    fill(h, env, B([0, 9, 0], [8, 9, 8]), "oak_planks");
-    expect(resolveAnchor(h, { face: "house.front", u: 0.5, v: "storey:1" }, env).pos[1]).toBe(1);
-    expect(resolveAnchor(h, { face: "house.front", u: 0.5, v: "storey:2" }, env).pos[1]).toBe(5);
-    expect(() => resolveAnchor(h, "house.storey:5", env)).toThrow(/has 2 storeys by analysis/);
+    expect(() => resolveAnchor(h, { face: "house.front", u: 0.5, v: "storey:2" }, env)).toThrow(/no anchor "storey:2"; storey levels are not inferred/);
+    expect(() => resolveAnchor(h, "house.storey:1", env)).toThrow(/not inferred/);
   });
+
 });
 
 describe("Document.group (05: one journal entry)", () => {

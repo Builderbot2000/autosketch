@@ -206,8 +206,8 @@ describe("MCP server", () => {
     expect((await call("query_block", { pos: [0, 0, 0] })).text).toBe("(0,0,0) andesite · in: base");
     expect((await call("query_column", { x: 0, z: 0 })).text).toBe("column (0,0) bottom→top: y0 andesite, y1-3 oak_planks");
     expect((await call("query_region", { sel: { min: [0, 0, 0], max: [4, 0, 4] } })).text).toMatch(/^region: 25 positions, 25 blocks \(100% solid\)[\s\S]*by family: andesite 25\ncomponents inside: base/);
-    expect((await call("analyze")).text).toMatch(/footprint: 5×5[\s\S]*storeys: 1 \(floor y=0; heights 4\)[\s\S]*roof: none/);
-    expect((await call("analyze", { component: "base" })).text).toMatch(/footprint: 5×5/);
+    expect((await call("analyze")).text).toMatch(/^box: \(0,0,0\)–\(4,3,4\)[\s\S]*y=0: 25 in x 0\.\.4, z 0\.\.4 \(5×5, 100% filled\)\n {2}y=1\.\.3: 16 in[\s\S]*enclosed air [^\n]*: none/);
+    expect((await call("analyze", { component: "base" })).text).toMatch(/^box: \(0,0,0\)–\(4,0,4\), 5×1×5/);
     expect((await call("analyze", { component: "nope" })).text).toMatch(/no component "nope" \(have: base\)/);
 
     const diff = await call("diff", { since: "checkpoint:a", render: true });
@@ -221,7 +221,7 @@ describe("MCP server", () => {
     // The middle of the plan looks down through the hollow walls onto the floor.
     expect(hit.text).toBe(`${id} top (128,128) → (2,0,2) andesite, up face`);
     expect((await call("raycast", { px: 5000, py: 5 })).text).toMatch(/outside render/);
-    expect((await call("render", { views: ["component:base", "front"], size: 256, cutaway: { plane: "x", at: 1, keep: "west" }, overlays: { components: true, storeys: true } })).text).toMatch(
+    expect((await call("render", { views: ["component:base", "front"], size: 256, cutaway: { plane: "x", at: 1, keep: "west" }, overlays: { components: true } })).text).toMatch(
       /cutaway: kept west of x=1/,
     );
     expect((await call("view_slice", { axis: "y", at: 1, mode: "runs" })).text).toMatch(/z0: x0-4 O/);

@@ -90,8 +90,7 @@ export const selSchema = z
       '{"grow":a,"by"?:n,"match"?:"solid|same|any"} {"shrink":a,"by"?:n} (along connected blocks) {"edges":a} {"slab":a,"axis","from","to"} {"convex":a} {"fill_holes":a} · ' +
       '{"checker":a,"size"?} {"random":a,"ratio":0.3,"seed"?} {"every":a,"n":4,"along":"x"} {"freeze":a} (a stored selection keeps today\'s voxels) · ' +
       '{"hull":[[x,y,z],...]} {"tube":{"path":[[x,y,z],...],"radius":r}} · ' +
-      'Semantic, from analyze (S = a selection, a component id, or "all"): {"face":"front|back|left|right|north|..","of"?:S,"depth"?:n} (wall plane, air included) ' +
-      '{"storey":n,"of"?:S} (-1 = top) {"roof":S} {"openings":S,"facade"?,"kind"?:"window|door|gap","storey"?} {"room":[x,y,z]|n,"of"?:S} (enclosed air; n as analyze lists them) ' +
+      'Measured (S = a selection, a component id, or "all"): {"enclosed":[x,y,z]|n,"of"?:S} (one enclosed air region, seeded or n-th largest as analyze lists them) ' +
       '{"interior":S} (all enclosed air) {"top":S} (highest block per column) {"changed":"op:-1|checkpoint:<name>"} · ' +
       'From a render: {"view_box":{"render"?:"r3","rect":[x0,y0,x1,y1],"depth"?:"visible|through"}} {"view_lasso":{"render"?,"points":[[px,py],...],"depth"?}} ' +
       '(image pixels; visible = surface seen, through = whole volume behind, air included; freeze picks you store, only 8 renders are kept). Nest freely.',

@@ -1,6 +1,5 @@
 import { formatVec, type Box, type Vec3 } from "../core/region.js";
 import type { Document, Facing } from "../document/document.js";
-import { analyzeStructure } from "../perception/analyze.js";
 import type { OpEnv } from "./edit.js";
 
 /**
@@ -15,8 +14,8 @@ import type { OpEnv } from "./edit.js";
  * Implicit anchors of every component: `min`, `max` (its corner blocks), `center`, `bottom` (centre
  * of the lowest layer), `top` (centre, one above the box), the face centres `front`, `back`,
  * `left`, `right` (on the box's outer layer, at mid-height; resolved through the document's
- * front, `01`), and `storey:n` (centre of the footprint at storey n's standing level). Named
- * anchors win over implicit ones. A bare component id means its `base` anchor, else `bottom`.
+ * front, `01`), and `storey:n` (box centre at the y of the component's named `storey:n` anchor).
+ * Named anchors win over implicit ones. A bare component id means its `base` anchor, else `bottom`.
  *
  * Face coordinates: `u` runs across the face from the viewer's left to right (standing outside,
  * looking at it), `v` from the bottom up; on `top`/`bottom` faces u runs east and v south. A number
@@ -24,9 +23,9 @@ import type { OpEnv } from "./edit.js";
  * the start, a negative one counts back from the far end (-1 = last block), and a numeric string
  * ("1") is always a block offset. `v: "storey:n"` is storey n's standing level.
  *
- * Storeys come from the component's named anchors (`storey:n` or `storey_n`, whose y is the level)
- * or, failing that, from structural analysis of the component's box (`06`): the layer above the
- * detected floor. Every resolution returns a description that echoes the absolute coordinates.
+ * Storey levels come only from the component's named anchors (`storey:n` or `storey_n`, whose y is
+ * the level); they are never inferred. Every resolution returns a description that echoes the
+ * absolute coordinates.
  */
 
 export type AtSpec = Vec3 | string | { anchor: string; offset?: Vec3 } | FaceAt;
@@ -93,7 +92,7 @@ export function resolveAnchor(doc: Document, at: AtSpec, env: AnchorEnv = {}): R
     const f = at as FaceAt;
     const face = resolveFace(doc, f.face);
     const iu = faceIndex(f.u ?? 0.5, face.width, "u");
-    const iv = typeof f.v === "string" && /^storey[:_]/.test(f.v) ? storeyLevel(doc, face.component, storeyNumber(f.v), env) - face.origin[1] : faceIndex(f.v ?? 0.5, face.height, "v");
+    const iv = typeof f.v === "string" && /^storey[:_]/.test(f.v) ? storeyLevel(doc, face.component, storeyNumber(f.v)) - face.origin[1] : faceIndex(f.v ?? 0.5, face.height, "v");
     const p = facePoint(face, iu, iv);
     const pos = addOffset(p, f.offset);
     return { pos, desc: `${f.face}(u ${JSON.stringify(f.u ?? 0.5)}, v ${JSON.stringify(f.v ?? 0.5)})${f.offset ? ` + ${formatVec(f.offset)}` : ""} = ${formatVec(pos)}` };
@@ -141,7 +140,7 @@ function namedAnchor(doc: Document, ref: string, env: AnchorEnv): Vec3 {
   const implicit = implicitAnchors(doc, c.box);
   if (implicit[name]) return implicit[name]!;
   if (/^storey[:_]\d+$/.test(name)) {
-    const y = storeyLevel(doc, comp, storeyNumber(name), env);
+    const y = storeyLevel(doc, comp, storeyNumber(name));
     return [implicit.center![0], y, implicit.center![2]];
   }
   throw new Error(`component "${comp}" has no anchor "${name}" (named: ${Object.keys(c.anchors).join(", ") || "none"}; implicit: ${Object.keys(implicit).join(", ")}, storey:n)`);
@@ -213,18 +212,15 @@ function storeyNumber(s: string): number {
 }
 
 /**
- * The standing level (y of the first air layer above the floor) of storey `n` of a component,
- * from its named anchors, else from structural analysis of its box (06).
+ * The standing level of storey `n` of a component: the y of its named anchor `storey:n` (or
+ * `storey_n`). Storeys are never inferred from the voxels (06: no architectural labels).
  */
-export function storeyLevel(doc: Document, comp: string, n: number, env: AnchorEnv = {}): number {
+export function storeyLevel(doc: Document, comp: string, n: number): number {
   const c = doc.componentLocal(comp);
   if (!c) throw new Error(noComponent(doc, comp));
   const named = c.anchors[`storey:${n}`] ?? c.anchors[`storey_${n}`];
   if (named) return named[1];
-  const a = analyzeStructure(doc, { region: c.box, ...(env.registry ? { registry: env.registry } : {}), ...(env.index ? { index: env.index } : {}) });
-  const s = a.storeys[n - 1];
-  if (!s) throw new Error(`component "${comp}" has ${a.storeys.length} storey${a.storeys.length === 1 ? "" : "s"} by analysis (floors at y=${a.storeys.map((x) => x.floorY).join(", ") || "none"}); name an anchor "storey:${n}" to set it`);
-  return s.floorY + 1;
+  throw new Error(`component "${comp}" has no anchor "storey:${n}"; storey levels are not inferred, so name one with the anchor tool (its y is the standing level)`);
 }
 
 function addOffset(p: Vec3, o: Vec3 | undefined): Vec3 {

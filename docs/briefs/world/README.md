@@ -54,7 +54,7 @@ These are the seams between silos. The owner lands the contract in its first mer
 
 ## Rules specific to these silos
 
-- **Branch** from `feat/assets` at or after the commit that adds `13` and these briefs (not `5f94416` as the main README says), one branch per silo (`silo/<letter>-<slug>`).
+- **Branch** from `main` at or after the commit that adds `13` and these briefs (not `5f94416` as the main README says), one branch per silo (`silo/<letter>-<slug>`).
 - **The world is authoritative** (`13`, *Principles*). If a design choice could let the cache win a disagreement, or write over a hand edit without `overwriteHandEdits: true`, stop and raise it.
 - **No tool imports `world/`**, and no tool result changes when no link is open. A linked document behaves exactly like an unlinked one, except for the `world:` lines `13` specifies.
 - **Java code lives only in `mod/`**, and TypeScript code never reaches into it. The golden vectors in `test/data/world-protocol/` are the only shared files. Both sides' tests read them.

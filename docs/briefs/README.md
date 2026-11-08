@@ -19,7 +19,7 @@ A wave starts when the previous wave's dependencies have merged. Within a wave, 
 
 ## Rules for every team
 
-**Branching.** Branch from `feat/assets` at or after `5f94416`, one branch per silo (`silo/<letter>-<slug>`), ideally in its own worktree. Rebase on `feat/assets` before asking for a merge. Merge small, coherent steps rather than one large branch at the end.
+**Branching.** Branch from `main` (formerly `feat/assets`) at or after `5f94416`, one branch per silo (`silo/<letter>-<slug>`), ideally in its own worktree. Rebase on `main` before asking for a merge. Merge small, coherent steps rather than one large branch at the end.
 
 **Stay in your files.** Each brief lists the files the silo owns. Create new files freely inside your own areas. For a file another silo owns, keep the change minimal and additive (a new optional field, a new export), and say so in the merge request. The contested files are listed below.
 

@@ -77,8 +77,13 @@ export class BlockBaker {
     const hooked = this.hooks.length ? await this.hookModel(pos, state, nbt).catch(() => undefined) : undefined;
     if (!hooked) return this.bake(state);
     const quads = hooked.overlay ? [...(await this.bake(state)).quads] : [];
-    await this.bakeCode(hooked, quads, this.tinter?.tintFor(parseState(state).id), undefined);
+    await this.bakeCode(hooked, quads, this.tinter?.tintFor(hooked.tintFrom ?? parseState(state).id), undefined);
     return this.finish(quads);
+  }
+
+  /** True when plugin render hooks may draw a block differently with its NBT (render.ts calls `bakeAt` then). */
+  get hasRenderHooks(): boolean {
+    return this.hooks.some((h) => h.render);
   }
 
   private async hookModel(pos: [number, number, number] | undefined, state: string, nbt: Compound | undefined): Promise<CodeModel | undefined> {

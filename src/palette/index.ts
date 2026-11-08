@@ -31,7 +31,7 @@ export interface PaletteIndexData {
 }
 
 /** Changes whenever the palette-building code changes, invalidating caches automatically. */
-const CACHE_VERSION = codeHash(import.meta.url, ["./index", "./families", "./textures", "./color", "../plugins/builtin", "../plugins/create"]);
+const CACHE_VERSION = codeHash(import.meta.url, ["./index", "./families", "./textures", "./color", "../plugins/builtin", "../plugins/create", "../plugins/chisel", "../plugins/framed"]);
 
 export const CATEGORY_ORDER: readonly Category[] = ["stone", "wood", "metal", "colored", "glass", "earth", "organic", "light", "decor"];
 

@@ -66,6 +66,7 @@ export function registerDocumentTools({ tool, session }: ToolDeps): void {
         name: name || "imported",
         registry: c.registry,
         palettes: c.book,
+        plugins: c.plugins,
         ...(dataVersion ? { dataVersion } : {}),
         ...(a.front ? { front: a.front } : {}),
       });

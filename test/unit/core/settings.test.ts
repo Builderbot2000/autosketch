@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { envName, parseBool, parseInt0, parseOneOf, setting, Settings } from "../../../src/core/settings.js";
+import { envName, parseBool, parseInt0, parseList, parseOneOf, setting, Settings } from "../../../src/core/settings.js";
 
 const FLAG = setting("observe.log", true, "true or false", parseBool);
 const MODE = setting("observe.snapshots", "off", "merge, checkpoint, off", parseOneOf(["merge", "checkpoint", "off"] as const));
@@ -17,6 +17,20 @@ describe("settings", () => {
     expect(Settings.from(["--set", "observe.log=yes"], { AUTOSKETCH_OBSERVE_LOG: "off" }).get(FLAG)).toBe(true);
     expect(Settings.from(["--instance", "x", "--set=observe.snapshots=checkpoint"], {}).get(MODE)).toBe("checkpoint");
     expect(Settings.from([], { AUTOSKETCH_OBSERVE_RETAIN_SESSIONS: "5" }).get(N)).toBe(5);
+  });
+
+  it("reads a declared flag alias between --set and the environment", () => {
+    const LIST = setting<string[] | undefined>("modOrder", undefined, "a list", parseList, { flag: "mod-order" });
+    expect(envName("modOrder")).toBe("AUTOSKETCH_MOD_ORDER");
+    expect(Settings.from([], {}).get(LIST)).toBeUndefined();
+    expect(Settings.from([], { AUTOSKETCH_MOD_ORDER: "a, b" }).get(LIST)).toEqual(["a", "b"]);
+    expect(Settings.from(["--mod-order", "c"], { AUTOSKETCH_MOD_ORDER: "a" }).get(LIST)).toEqual(["c"]);
+    expect(Settings.from(["--mod-order=d,e"], {}).get(LIST)).toEqual(["d", "e"]);
+    expect(Settings.from(["--mod-order", "c", "--set", "modOrder=z"], {}).get(LIST)).toEqual(["z"]);
+    expect(() => Settings.from(["--mod-order", " , "], {}).get(LIST)).toThrow("setting modOrder (--mod-order) must be a list");
+    // Settings without an alias ignore look-alike flags.
+    expect(Settings.from(["--observe.log", "false"], {}).get(FLAG)).toBe(true);
+    expect(() => setting("x", 1, "", () => 1, { flag: "--x" })).toThrow(/flag alias/);
   });
 
   it("rejects bad values with the key, source and accepted values", () => {

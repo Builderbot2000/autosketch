@@ -137,6 +137,10 @@ describe("MCP server", () => {
     expect(configFromEnv([], { AUTOSKETCH_INSTANCE: "/y" })).toEqual({ instance: "/y" });
     expect(configFromEnv([], {})).toBeUndefined();
     expect(configFromEnv(["--instance", "/x", "--workspace", "/w"], {})).toEqual({ instance: "/x", workspace: "/w" });
+    // modOrder / tintBiome are settings: the old flags and env vars still work, and --set does too.
+    expect(configFromEnv(["--instance", "/x", "--mod-order", "a, b", "--tint-biome", "jungle"], {})).toEqual({ instance: "/x", modOrder: ["a", "b"], tintBiome: "jungle" });
+    expect(configFromEnv(["--instance", "/x"], { AUTOSKETCH_MOD_ORDER: "c", AUTOSKETCH_TINT_BIOME: "swamp" })).toEqual({ instance: "/x", modOrder: ["c"], tintBiome: "swamp" });
+    expect(configFromEnv(["--instance", "/x", "--set", "tintBiome=desert", "--set=modOrder=d"], { AUTOSKETCH_TINT_BIOME: "swamp" })).toEqual({ instance: "/x", modOrder: ["d"], tintBiome: "desert" });
   });
 
   it("builds, checks, undoes, checkpoints and reopens a document", async () => {

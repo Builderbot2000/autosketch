@@ -1,0 +1,41 @@
+{
+  "box": {"min":[-1,0,-1],"max":[9,9,7]},
+  "front": "south",
+  "blocks": 306,
+  "layers": [
+    {"y":0,"blocks":63,"x":[0,8],"z":[0,6]},
+    {"y":1,"blocks":28,"x":[0,8],"z":[0,6]},
+    {"y":2,"blocks":28,"x":[0,8],"z":[0,6]},
+    {"y":3,"blocks":28,"x":[0,8],"z":[0,6]},
+    {"y":4,"blocks":28,"x":[0,8],"z":[0,6]},
+    {"y":5,"blocks":36,"x":[-1,9],"z":[-1,7]},
+    {"y":6,"blocks":32,"x":[-1,9],"z":[0,6]},
+    {"y":7,"blocks":28,"x":[-1,9],"z":[1,5]},
+    {"y":8,"blocks":24,"x":[-1,9],"z":[2,4]},
+    {"y":9,"blocks":11,"x":[-1,9],"z":[3,3]}
+  ],
+  "materials": [
+    ["minecraft:oak_planks",146],
+    ["minecraft:oak_stairs",88],
+    ["minecraft:cobblestone",63],
+    ["minecraft:glass_pane",7],
+    ["minecraft:oak_door",2]
+  ],
+  "groups": 1,
+  "ungrounded": [],
+  "enclosed": [{"volume":252,"box":{"min":[1,1,0],"max":[7,8,6]}}],
+  "text": [
+    "box: (-1,0,-1)–(9,9,7), 11×10×9 (x×y×z); 306 blocks; front=south",
+    "layers (blocks, x/z extent, share of extent filled):",
+    "  y=0: 63 in x 0..8, z 0..6 (9×7, 100% filled)",
+    "  y=1..4: 28 in x 0..8, z 0..6 (9×7, 44% filled)",
+    "  y=5: 36 in x -1..9, z -1..7 (11×9, 36% filled)",
+    "  y=6: 32 in x -1..9, z 0..6 (11×7, 42% filled)",
+    "  y=7: 28 in x -1..9, z 1..5 (11×5, 51% filled)",
+    "  y=8: 24 in x -1..9, z 2..4 (11×3, 73% filled)",
+    "  y=9: 11 in x -1..9, z 3 (11×1, 100% filled)",
+    "materials: oak_planks 146 (48%), oak_stairs 88 (29%), cobblestone 63 (21%), glass_pane 7 (2%), oak_door 2 (1%)",
+    "connectivity: 1 group (faces, edges and corners join); all reach the bottom layer (y=0)",
+    "enclosed air (not reachable from outside; any block bounds it): 1 region: 252 in (1,1,0)–(7,8,6)"
+  ]
+}

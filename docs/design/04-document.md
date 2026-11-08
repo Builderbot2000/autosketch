@@ -96,7 +96,7 @@ interface Component {
 | Voxel store, components, journal, checkpoints | Built (`document/`). |
 | Native format | Built (`native.ts`), including `JournalHead`. |
 | Journal persistence | Built (`journal.ts`, `journal-store.ts`): segments, memory window with load-back, history across reopen, redo-tail discard on disk, mismatch fallback, best-effort disk writes during edits (warning, retried). Synchronous file I/O: undo and redo are synchronous. |
-| Sandboxes (`11`) | Not built here (silo F). |
+| Sandboxes (`11`) | Built in `src/scope/`. The document side is two optional hooks: `guard` (a write guard run on every edit, undo and redo) and `context` (a sandbox's read-only context mask, read by perception). |
 
 ## Open questions
 

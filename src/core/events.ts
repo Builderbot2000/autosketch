@@ -29,7 +29,7 @@ export type ObserveEvent =
   | { kind: "call.end"; call: number; tool: string; scope?: string; ms: number; ok: boolean; chars: number; images: number; pixels: number }
   | { kind: "call.refused"; call: number; tool: string; scope?: string; code: string; message: string }
   | { kind: "render.produced"; view: string; size: [number, number]; scope?: string; source?: "tool" | "snapshot"; path?: string }
-  // Defined for silo F (scoped sessions, 11); nothing emits them yet.
+  // Scoped sessions (11): emitted by src/scope/scopes.ts through the parent document's sink.
   | { kind: "scope.fork"; scope: string; parent: string; depth: number; work: PublicBox; context: PublicBox; translation: [number, number, number]; brief: string; [extra: string]: unknown }
   | { kind: "scope.merge"; scope: string; report: string; box?: PublicBox; jseq: number; [extra: string]: unknown }
   | { kind: "scope.abandon"; scope: string; reason: "call" | "restart" };

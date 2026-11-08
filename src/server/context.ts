@@ -1,5 +1,7 @@
 import { defaultCacheDir } from "../assets/cache.js";
 import { biomeClimate } from "../assets/biomes.js";
+import { MOD_ORDER, TINT_BIOME } from "../assets/settings.js";
+import { Settings } from "../core/settings.js";
 import { locateInstance, type InstanceInfo, type LocateOptions } from "../assets/locate.js";
 import { openStack, type PackStack } from "../assets/pack.js";
 import { loadRegistry, type Registry } from "../assets/registry.js";
@@ -35,7 +37,11 @@ export interface ServerConfig extends LocateOptions {
   tintBiome?: string;
 }
 
-/** Reads config from CLI args (--instance, --version, --base-jar, --mod-order a,b, --tint-biome) and env (AUTOSKETCH_*). */
+/**
+ * Reads config from CLI args (--instance, --version, --base-jar, --workspace) and env (AUTOSKETCH_*).
+ * modOrder and tintBiome are settings (`assets/settings.ts`): `--set modOrder=a,b` or the older
+ * `--mod-order a,b` / `AUTOSKETCH_MOD_ORDER`, likewise `tintBiome`.
+ */
 export function configFromEnv(argv = process.argv.slice(2), env = process.env): ServerConfig | undefined {
   const arg = (name: string) => {
     const i = argv.indexOf(`--${name}`);
@@ -48,9 +54,11 @@ export function configFromEnv(argv = process.argv.slice(2), env = process.env): 
   const baseJar = arg("base-jar") ?? env.AUTOSKETCH_BASE_JAR;
   if (version) cfg.version = version;
   if (baseJar) cfg.baseJar = baseJar;
-  const modOrder = arg("mod-order") ?? env.AUTOSKETCH_MOD_ORDER;
-  if (modOrder) cfg.modOrder = modOrder.split(",").map((s) => s.trim()).filter(Boolean);
-  const tintBiome = arg("tint-biome") ?? env.AUTOSKETCH_TINT_BIOME;
+  // Settings (core/settings.ts): --set key=value, the flag alias, then AUTOSKETCH_<KEY>.
+  const settings = Settings.from(argv, env);
+  const modOrder = settings.get(MOD_ORDER);
+  if (modOrder) cfg.modOrder = modOrder;
+  const tintBiome = settings.get(TINT_BIOME);
   if (tintBiome) cfg.tintBiome = tintBiome;
   const workspace = arg("workspace") ?? env.AUTOSKETCH_WORKSPACE;
   if (workspace) cfg.workspace = workspace;

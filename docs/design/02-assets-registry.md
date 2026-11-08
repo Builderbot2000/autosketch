@@ -35,7 +35,7 @@ Layer order (lowest priority first), as implemented in `locate.ts`:
 
 **Pack overlays** (`pack.mcmeta` `overlays.entries`) are applied as higher-priority sub-folder layers, with assets matched against the resource pack format and data against the data pack format (1.21.1: 34 / 48).
 
-**Known approximation:** mod-to-mod order inside `mod_resources` follows the loader's dependency sort, which we don't reproduce. Conflicts over the same path between mods are rare. **Pinned mod order** (`modOrder`, `--mod-order a,b` or `AUTOSKETCH_MOD_ORDER`) fixes a conflict: each entry names a jar by file name, by its name before the version (`create` matches `create-1.21.1-6.0.4.jar`) or by a `*` glob. Pinned jars sit above the alphabetical rest in the order given, so the last entry wins. An entry matching nothing is warned about.
+**Known approximation:** mod-to-mod order inside `mod_resources` follows the loader's dependency sort, which we don't reproduce. Conflicts over the same path between mods are rare. **Pinned mod order** (setting `modOrder`: `--set modOrder=a,b`, `--mod-order a,b` or `AUTOSKETCH_MOD_ORDER`) fixes a conflict: each entry names a jar by file name, by its name before the version (`create` matches `create-1.21.1-6.0.4.jar`) or by a `*` glob. Pinned jars sit above the alphabetical rest in the order given, so the last entry wins. An entry matching nothing is warned about.
 
 Jars are indexed by central directory only (file list, no decompression). Only `assets/`, `data/`, `resourcepacks/`, top-level pack folders, `META-INF/jarjar/` and mod metadata are indexed. Entries are decompressed lazily. A small LRU of file handles avoids fd exhaustion.
 
@@ -47,7 +47,7 @@ Jars are indexed by central directory only (file list, no decompression). Only `
 - `models/block/*.json`: parent chain, texture variable resolution (`#var`), `elements` (from/to, per-face uv, rotation, `tintindex`, `cullface`), and builtin parents (`builtin/entity`, `builtin/generated`).
 - Output: a **baked model** per block state, made of cuboids with resolved texture refs, cached by state key.
 - **Code-drawn blocks** (chests, signs, beds, banners, heads, shulkers, bells) have no usable JSON model. They get hand-written fallback models in `assets/builtin-models/`.
-- **Tint:** `tintindex` faces use the grass/foliage colormaps at a configurable default biome (plains), plus fixed tints for water, redstone and stems. The biome is set with `tintBiome` (`--tint-biome` or `AUTOSKETCH_TINT_BIOME`, e.g. `jungle`, `minecraft:swamp`) and applies to renders, palette sheets and colour stats. `assets/biomes.ts` holds the vanilla overworld climates (temperature, downfall) and the code-side colours: fixed badlands and swamp colours (swamp grass varies by noise in game; we take one), mangrove foliage, and the dark forest grass blend. A non-default biome is part of the palette cache key. An unknown name fails at startup with the list of known biomes.
+- **Tint:** `tintindex` faces use the grass/foliage colormaps at a configurable default biome (plains), plus fixed tints for water, redstone and stems. The biome is set with the setting `tintBiome` (`--set tintBiome=jungle`, `--tint-biome` or `AUTOSKETCH_TINT_BIOME`, e.g. `jungle`, `minecraft:swamp`) and applies to renders, palette sheets and colour stats. `assets/biomes.ts` holds the vanilla overworld climates (temperature, downfall) and the code-side colours: fixed badlands and swamp colours (swamp grass varies by noise in game; we take one), mangrove foliage, and the dark forest grass blend. A non-default biome is part of the palette cache key. An unknown name fails at startup with the list of known biomes.
 - Unresolvable models fall back to the `particle` texture on a full cube, flagged `approximate`.
 
 ## Registry (`assets/registry.ts`)
@@ -102,7 +102,7 @@ Texture averages are stored per family inside the palette file, since that is th
 | Piece | Status |
 |-------|--------|
 | Locator | CurseForge, vanilla launcher, Prism / MultiMC (instance folder or its game folder), generic (with `baseJar`). Unit tests use synthetic layouts. |
-| Pack VFS | Built, with overlays, built-in packs, nested jars and the jar index cache. Pinned mod order (`modOrder`) built. |
+| Pack VFS | Built, with overlays, built-in packs, nested jars and the jar index cache. Pinned mod order (`modOrder`) built. `modOrder` and `tintBiome` are settings (`assets/settings.ts`, on the general settings module, `12` *Settings*), with the older flags and variables as aliases. |
 | Model resolution | Built. Tint biome configurable (`tintBiome`, default plains). Code-drawn fallbacks: silo E (`builtin-models/`). |
 | Registry | Built, cached. |
 | Caches | Jar index, registry, palette (families and texture averages), rendered sheets. No pruning. |

@@ -121,7 +121,7 @@ export function registerLibraryTools({ tool, resource, session }: ToolDeps): voi
       description:
         "Places a library prefab (by name, or a cell of the last prefab_sheet) so its anchor (default \"base\", else its minimum corner) lands on at. " +
         'palette_remap recolours prefab roles, keeping shapes and states: {"log":"palette:castle.trim"} or {"leaves":"spruce_leaves"}; a family or block in the prefab works as a key too. ' +
-        "Air in the prefab leaves existing blocks unless include_air. Registers a component (kind prefab:<id>) with the prefab's anchors. One undo step. Text.",
+        "rotate/mirror orient it first (the anchor stays on at). Air in the prefab leaves existing blocks unless include_air. Registers a component (kind prefab:<id>) with the prefab's anchors. One undo step. Text.",
       inputSchema: {
         prefab: z.string().describe('Prefab id/name, or a cell like "B2" from the last prefab_sheet'),
         at: atSchema,
@@ -129,8 +129,8 @@ export function registerLibraryTools({ tool, resource, session }: ToolDeps): voi
         palette_remap: z.record(z.string(), z.string()).optional(),
         include_air: z.boolean().optional(),
         as: z.string().optional().describe("Component id (default: the prefab id, numbered if taken)"),
-        rotate: z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]).optional().describe("Not available yet (needs block-state transforms)"),
-        mirror: z.enum(["x", "z"]).optional().describe("Not available yet (needs block-state transforms)"),
+        rotate: z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]).optional().describe("Degrees clockwise seen from above, after mirror; states, block entities and anchors turn too"),
+        mirror: z.enum(["x", "z"]).optional().describe("Flip across the prefab's centre: x = east↔west, z = north↔south"),
       },
       readOnly: false,
     },

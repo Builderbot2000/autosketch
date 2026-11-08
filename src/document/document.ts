@@ -217,7 +217,8 @@ export class Document {
       ...(this.bounds ? { boundsAfter: structuredClone(this.bounds) } : {}),
       ...(componentsChanged ? { componentsBefore: tx.componentsBefore, componentsAfter: cloneComponents(this.components.values()) } : {}),
     };
-    this.journal.push(entry);
+    const journalWarning = this.journal.push(entry); // never throws: disk failures come back as a warning (04)
+    if (journalWarning) tx.warn(journalWarning);
     this.revision++;
     if (this.events.enabled) this.events.emit(opEvent(this, entry));
 

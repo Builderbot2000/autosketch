@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -114,6 +114,70 @@ describe("journal persistence", () => {
     expect(doc.journal.entries.length).toBeLessThan(30);
     for (let i = 0; i < 30; i++) doc.redo();
     expect(doc.blockCount()).toBe(600);
+  });
+
+  it("treats journal disk writes as best-effort: the edit succeeds with a warning, memory passes the cap, and the write is retried", async () => {
+    const path = docPath();
+    const doc = new Document({ name: "f", front: "south", dataVersion: 3955, seed: 1, createdAt: "" }, { journalBytes: 2000 });
+    await saveNative(doc, path); // attaches the store
+    const store = doc.journal.store!;
+    let failing = true;
+    const fail = <T extends unknown[]>(real: (...a: T) => void) => (...a: T) => {
+      if (failing) throw new Error("ENOSPC: disk full");
+      real(...a);
+    };
+    const append = store.append.bind(store), discard = store.discard.bind(store);
+    vi.spyOn(store, "append").mockImplementation(fail(append));
+    vi.spyOn(store, "discard").mockImplementation(fail(discard));
+    const big = (i: number) =>
+      doc.edit("fill", `fill ${i}`, (tx) => {
+        for (let x = 0; x < 20; x++) tx.set(x, i, 0, `test:layer_${i}`);
+      });
+
+    const results = Array.from({ length: 30 }, (_, i) => big(i));
+    const rev = doc.revision;
+    expect(rev).toBe(30); // every edit committed
+    expect(results.every((r) => r.changed === 20)).toBe(true);
+    expect(results.at(-1)!.warnings).toEqual([expect.stringMatching(/^undo history couldn't be written to disk \(ENOSPC: disk full\); it is kept in memory/)]);
+    expect(results[0]!.warnings).toEqual([]); // under the cap, nothing to write yet
+    expect(doc.journal.entries.length).toBe(30); // nothing evicted past the cap
+    expect(doc.journal.start).toBe(0);
+
+    // A discarded redo tail is retried too.
+    doc.undo();
+    doc.undo();
+    const after = big(40);
+    expect(after.warnings.length).toBe(1);
+    expect(doc.journal.seqs.length).toBe(29);
+
+    // The disk recovers: the next edit persists and trims, and undo reaches everything.
+    failing = false;
+    expect(big(41).warnings).toEqual([]);
+    expect(doc.journal.start).toBeGreaterThan(0);
+    expect(store.allSeqs().length).toBe(doc.journal.seqs.length);
+    await saveNative(doc, path);
+    const back = await loadNative(path);
+    expect(back.journal.seqs).toEqual(doc.journal.seqs);
+    const summaries: string[] = [];
+    for (let e = back.undo(); e; e = back.undo()) summaries.push(e.entry.summary);
+    expect(summaries.slice(0, 3)).toEqual(["fill 41", "fill 40", "fill 27"]);
+    expect(summaries.length).toBe(30);
+    expect(back.blockCount()).toBe(0);
+  });
+
+  it("reports a save failure from a failing store and saves once it recovers", async () => {
+    const path = docPath();
+    const doc = Document.create({ name: "g", dataVersion: 3955, seed: 1 });
+    await saveNative(doc, path);
+    const store = doc.journal.store!;
+    const spy = vi.spyOn(store, "append").mockImplementation(() => {
+      throw new Error("EIO");
+    });
+    build(doc, 0, 3);
+    await expect(saveNative(doc, path)).rejects.toThrow(/EIO/);
+    spy.mockRestore();
+    await saveNative(doc, path);
+    expect((await loadNative(path)).journal.seqs).toEqual([1, 2, 3]);
   });
 
   it("starts fresh when the journal doesn't match the document, or for files outside the workspace layout", async () => {

@@ -3,13 +3,14 @@ import type { Vec3 } from "../../core/region.js";
 import { array, extrude, hollow, morph, paint, sweep, type ProfileCell } from "../../ops/brush.js";
 import type { MaterialExpr } from "../../ops/material.js";
 import { formatEdit } from "../format.js";
-import { boxSchema, common, commonSchema, componentLine, editWith, env, materialSchema, regionOf, selSchema, vec3, type ToolDeps } from "./shared.js";
+import { boxSchema, common, commonSchema, componentLine, env, materialSchema, regionOf, selSchema, vec3, type ToolDeps } from "./shared.js";
+import { editWithPreview, previewSchema } from "./perception.js";
 
 const dirEnum = z.enum(["up", "down", "north", "south", "east", "west"]);
 
 /** Brushes (05 L2): hollow, paint, smooth/erode/dilate, extrude, sweep, array. */
 export function registerBrushTools({ tool, session }: ToolDeps): void {
-  const where = { sel: selSchema.optional(), box: boxSchema.optional().describe("Shorthand for sel:{min,max}"), ...commonSchema };
+  const where = { sel: selSchema.optional(), box: boxSchema.optional().describe("Shorthand for sel:{min,max}"), ...commonSchema, preview: previewSchema };
   const notesOf = (a: { as?: string | undefined }, notes: string[]) => [...componentLine(a), ...notes.map((n) => `note: ${n}`)];
 
   tool(
@@ -21,7 +22,7 @@ export function registerBrushTools({ tool, session }: ToolDeps): void {
       readOnly: false,
     },
     (c, a) =>
-      editWith(session, (doc) => {
+      editWithPreview(c, session, a.preview, (doc) => {
         const { region, label, notes } = regionOf(c, doc, a);
         return formatEdit(doc, hollow(doc, env(c), region, a.thickness ?? 1, a.material as MaterialExpr | undefined, { ...common(a), ...(label ? { label } : {}) }), notesOf(a, notes));
       }),
@@ -36,7 +37,7 @@ export function registerBrushTools({ tool, session }: ToolDeps): void {
       readOnly: false,
     },
     (c, a) =>
-      editWith(session, (doc) => {
+      editWithPreview(c, session, a.preview, (doc) => {
         const { region, label, notes } = regionOf(c, doc, a);
         return formatEdit(doc, paint(doc, env(c), region, a.material as MaterialExpr, { ...common(a), ...(label ? { label } : {}), ...(a.dirs ? { dirs: a.dirs } : {}) }), notesOf(a, notes));
       }),
@@ -59,7 +60,7 @@ export function registerBrushTools({ tool, session }: ToolDeps): void {
       readOnly: false,
     },
     (c, a) =>
-      editWith(session, (doc) => {
+      editWithPreview(c, session, a.preview, (doc) => {
         const { region, label, notes } = regionOf(c, doc, a);
         const r = morph(doc, env(c), region, a.mode ?? "smooth", {
           ...common(a),
@@ -82,7 +83,7 @@ export function registerBrushTools({ tool, session }: ToolDeps): void {
       readOnly: false,
     },
     (c, a) =>
-      editWith(session, (doc) => {
+      editWithPreview(c, session, a.preview, (doc) => {
         const { region, label, notes } = regionOf(c, doc, a);
         return formatEdit(doc, extrude(doc, env(c), region, a.n, { ...common(a), ...(label ? { label } : {}), ...(a.dir ? { dir: a.dir } : {}) }), notesOf(a, notes));
       }),
@@ -99,10 +100,11 @@ export function registerBrushTools({ tool, session }: ToolDeps): void {
         profile: z.array(z.object({ u: z.number().int(), v: z.number().int(), block: materialSchema })).min(1),
         path: z.array(vec3).min(2).describe("Polyline points [[x,y,z],...]"),
         ...commonSchema,
+        preview: previewSchema,
       },
       readOnly: false,
     },
-    (c, a) => editWith(session, (doc) => formatEdit(doc, sweep(doc, env(c), a.profile as ProfileCell[], a.path as Vec3[], common(a)), componentLine(a))),
+    (c, a) => editWithPreview(c, session, a.preview, (doc) => formatEdit(doc, sweep(doc, env(c), a.profile as ProfileCell[], a.path as Vec3[], common(a)), componentLine(a))),
   );
 
   tool(
@@ -115,7 +117,7 @@ export function registerBrushTools({ tool, session }: ToolDeps): void {
       readOnly: false,
     },
     (c, a) =>
-      editWith(session, (doc) => {
+      editWithPreview(c, session, a.preview, (doc) => {
         const { region, label, notes } = regionOf(c, doc, a);
         return formatEdit(doc, array(doc, env(c), region, a.step as Vec3, a.count, { ...common(a), ...(label ? { label } : {}), ...(a.skip_air ? { skipAir: true } : {}) }), notesOf(a, notes));
       }),

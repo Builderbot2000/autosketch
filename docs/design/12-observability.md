@@ -122,6 +122,15 @@ The server never sees model tokens. It records response sizes, and the eval runn
 | `observe.snapshots` | `"off"` | `"merge"`, `"checkpoint"` or `"off"` |
 | `observe.retainSessions` | 20 | Older session folders are pruned at startup |
 
+Settings are one server-wide system (`src/core/settings.ts`), not specific to observability. Every setting is read, highest priority first, from `--set <key>=<value>`, then a flag alias if the setting declares one, then `AUTOSKETCH_<KEY>` (key upper-cased, `.` and camel-case humps become `_`), then its default. Each area declares its keys next to the code that uses them. A flag alias exists only to keep a flag that predates the module working; new settings don't add one. The settings outside this doc:
+
+| Setting | Aliases | Declared in | Doc |
+|---|---|---|---|
+| `modOrder` | `--mod-order a,b`, `AUTOSKETCH_MOD_ORDER` | `assets/settings.ts` | `02`, Layered pack VFS |
+| `tintBiome` | `--tint-biome <biome>`, `AUTOSKETCH_TINT_BIOME` | `assets/settings.ts` | `02`, Model resolution |
+
+The instance location flags (`--instance`, `--version`, `--base-jar`, `--workspace`) are startup arguments read by `server/context.ts`, not settings.
+
 ## Phases
 
 1. The event bus, `events.ndjson`, and `EventSink` hooks in document commits, scope tools and the server adapter.
@@ -140,7 +149,7 @@ Phases 1 and 2 are built. Phases 3–5 wait on scoped sessions (`11`).
 | Bus | `src/observe/bus.ts`. Stamps the envelope and calls subscribers synchronously; a throwing subscriber is isolated. Adds the server version to `session.open`. |
 | Hooks | `Document`: `doc.op` after each commit, `doc.undo`/`doc.redo` per step (so `restore` logs each step), `doc.checkpoint`. Payloads are built in `src/document/events.ts`, only when the sink is enabled. `Session`: `session.open` on create/open/adopt, `session.close` on close. Tool wrapper (`src/server/observe-call.ts`): `call.start`, `call.end` (ms, ok, text characters, image count, pixels read from the PNG header) and `call.refused`. `call.start`/`call.end` share a `call` number. `render.produced` is emitted for snapshots (`source: "snapshot"`) and by the perception tools (`render`, `diff` renders, op previews; `source: "tool"`). |
 | `events.ndjson` | `src/observe/log.ts`. Buffered, flushed every 200 ms off the call path. Past an 8 MB unwritten backlog, events are dropped and the next line is an `observe.dropped` marker with the count. |
-| Settings | `src/core/settings.ts` (general: `--set key=value`, then `AUTOSKETCH_<KEY>`, then the default). Observe keys in `src/observe/settings.ts`: `observe.log`, `observe.snapshots`, `observe.retainSessions`. The others in the table come with phases 3–4. |
+| Settings | `src/core/settings.ts` (general: `--set key=value`, then an optional flag alias, then `AUTOSKETCH_<KEY>`, then the default). `modOrder` and `tintBiome` (`src/assets/settings.ts`) moved onto it, keeping their old flags and variables as aliases. Observe keys in `src/observe/settings.ts`: `observe.log`, `observe.snapshots`, `observe.retainSessions`. The others in the table come with phases 3–4. |
 | Time-lapse | `src/observe/snapshots.ts`. `flat`, `iso_ne`, 512² into `snapshots/<seq>.png`, plus a `render.produced` event with `source: "snapshot"`. |
 | Wiring | `src/server/index.ts` (the process entry point) calls `startObserve()` and gives the session `observer.sink("base")`. Shutdown closes the session, waits up to 3 s for a pending snapshot, then flushes the log. |
 | Tests | `test/unit/observe/`: kinds-table payloads and `seq` order for ops, checkpoint, undo and redo; tool results identical with the log on and off; refusals; a stalled disk never blocking `emit`; op latency with and without the log; snapshots. `test/unit/core/settings.test.ts`. |

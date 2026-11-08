@@ -2,11 +2,13 @@ import type { Registry } from "../assets/registry.js";
 import { canonicalState, formatState, parseState, stateId } from "../core/blockstate.js";
 import type { Box, Vec3 } from "../core/region.js";
 import { hash01, hashString } from "../core/rng.js";
+import { mirrorPos, rotatePos, stateTransformer, transformBox, type StateTransform } from "../core/rotate.js";
 import type { Document, EditResult } from "../document/document.js";
 import { checkComponentId } from "../document/components.js";
 import type { Family, ShapeGroup, ShapeKind } from "../palette/families.js";
 import type { PaletteIndex } from "../palette/index.js";
 import type { RoleMember } from "../palette/pick.js";
+import type { AutosketchPlugin } from "../plugins/types.js";
 import type { LoadedPrefab, Prefab } from "./prefabs.js";
 
 /**
@@ -28,14 +30,17 @@ export interface StampOptions {
   includeAir?: boolean;
   /** Component id (default: the prefab id, numbered when taken). */
   as?: string;
-  /** Quarter turns clockwise seen from above; needs block-state transforms (silo A). */
+  /** Degrees clockwise seen from above (a multiple of 90), applied after `mirror`. */
   rotate?: number;
+  /** Flip the prefab across its own centre plane: "x" east↔west, "z" north↔south. */
   mirror?: "x" | "z";
 }
 
 export interface StampEnv {
   registry?: Registry;
   index?: PaletteIndex;
+  /** Plugin state-rotation overrides (09), used when stamping rotated or mirrored. */
+  plugins?: readonly AutosketchPlugin[];
 }
 
 export interface StampResult extends EditResult {
@@ -47,49 +52,90 @@ export interface StampResult extends EditResult {
 }
 
 export function stampPrefab(doc: Document, env: StampEnv, prefab: Prefab, loaded: LoadedPrefab, opts: StampOptions): StampResult {
-  // TODO(silo A): rotate/mirror the snapshot with the block-state transform tables once they merge.
-  if ((opts.rotate ?? 0) % 360 !== 0 || opts.mirror) throw new Error("stamp rotate/mirror needs the block-state transforms (silo A), which aren't merged yet; stamp unrotated for now");
-
   const snap = loaded.snapshot;
+  const frame = prefabFrame(snap.size, opts, env);
+  const palette = frame.state ? snap.palette.map(frame.state) : snap.palette;
   const at = resolveAt(doc, opts.at);
   const anchorName = opts.anchor ?? (prefab.meta.anchors.base ? "base" : undefined);
-  const a: Vec3 = anchorName ? prefab.meta.anchors[anchorName] ?? fail(`prefab "${prefab.id}" has no anchor "${anchorName}" (anchors: ${Object.keys(prefab.meta.anchors).join(", ") || "none"})`) : [0, 0, 0];
+  const a: Vec3 = anchorName ? frame.place(prefab.meta.anchors[anchorName] ?? fail(`prefab "${prefab.id}" has no anchor "${anchorName}" (anchors: ${Object.keys(prefab.meta.anchors).join(", ") || "none"})`)) : [0, 0, 0];
   const origin: Vec3 = [at[0] - a[0], at[1] - a[1], at[2] - a[2]];
-  const box: Box = { min: origin, max: [origin[0] + snap.size[0], origin[1] + snap.size[1], origin[2] + snap.size[2]] };
+  const size = frame.size;
+  const box: Box = { min: origin, max: [origin[0] + size[0], origin[1] + size[1], origin[2] + size[2]] };
   const id = opts.as ?? uniqueComponentId(doc, prefab.id.replace(/^axiom\//, "").replace(/[^a-z0-9_.-]+/gi, "_").toLowerCase() || "prefab");
   checkComponentId(id);
 
-  const remap = compileRemap(doc, env, prefab, snap.palette, opts.remap ?? {});
+  const remap = compileRemap(doc, env, prefab, palette, opts.remap ?? {});
   const warnings = [...loaded.warnings, ...remap.warnings, ...namespaceWarnings(prefab, snap.palette, env.registry)];
   const beAt = new Map(snap.blockEntities.map((b) => [`${b.pos[0]},${b.pos[1]},${b.pos[2]}`, b.nbt]));
   let droppedNbt = 0;
 
   const [w, h, l] = snap.size;
-  const r = doc.edit("stamp", `stamp ${prefab.id} at ${at.join(",")} as ${id}`, (tx) => {
-    const ids = snap.palette.map((s) => tx.intern(s));
+  const r = doc.edit("stamp", `stamp ${prefab.id} at ${at.join(",")} as ${id}${frame.label}`, (tx) => {
+    const ids = palette.map((s) => tx.intern(s));
     for (let y = 0; y < h; y++)
       for (let z = 0; z < l; z++)
         for (let x = 0; x < w; x++) {
           const p = snap.blocks[x + z * w + y * w * l]!;
           if (p === 0 && !opts.includeAir) continue;
-          const dx = origin[0] + x, dy = origin[1] + y, dz = origin[2] + z;
+          const q = frame.place([x, y, z]);
+          const dx = origin[0] + q[0], dy = origin[1] + q[1], dz = origin[2] + q[2];
           const nbt = beAt.get(`${x},${y},${z}`);
           const mapped = p === 0 ? undefined : remap.map(p, dx, dy, dz);
           if (mapped === undefined) {
             tx.set(dx, dy, dz, ids[p]!, nbt ? structuredClone(nbt) : null);
             continue;
           }
-          if (nbt && stateId(mapped) !== stateId(snap.palette[p]!)) droppedNbt++;
-          tx.set(dx, dy, dz, mapped, nbt && stateId(mapped) === stateId(snap.palette[p]!) ? structuredClone(nbt) : null);
+          if (nbt && stateId(mapped) !== stateId(palette[p]!)) droppedNbt++;
+          tx.set(dx, dy, dz, mapped, nbt && stateId(mapped) === stateId(palette[p]!) ? structuredClone(nbt) : null);
         }
     const anchors: Record<string, Vec3> = {};
-    for (const [k, v] of Object.entries(prefab.meta.anchors)) anchors[k] = [origin[0] + v[0], origin[1] + v[1], origin[2] + v[2]];
+    for (const [k, v] of Object.entries(prefab.meta.anchors)) {
+      const q = frame.place(v);
+      anchors[k] = [origin[0] + q[0], origin[1] + q[1], origin[2] + q[2]];
+    }
     tx.setComponent({ id, kind: `prefab:${prefab.id}`, box, anchors, tags: prefab.meta.tags });
     for (const wn of warnings) tx.warn(wn);
     if (droppedNbt) tx.warn(`${droppedNbt} block entities dropped where remap changed the block`);
     if (snap.entities.length) tx.warn(`${snap.entities.length} entities in the prefab were not placed (entities aren't edited yet)`);
   });
   return { ...r, component: id, origin, at };
+}
+
+// -- orientation -----------------------------------------------------------------------------------
+
+interface Frame {
+  /** Prefab-local position → position in the rotated/mirrored prefab (its min corner at 0,0,0). */
+  place: (p: Vec3) => Vec3;
+  /** Block-state remap, when the stamp is rotated or mirrored. */
+  state?: (s: string) => string;
+  size: Vec3;
+  label: string;
+}
+
+/**
+ * The prefab's own frame after `mirror` (across its centre plane), then `rotate` clockwise turns
+ * (01, Orientation): positions, anchors and block states all go through it, so the rotated prefab
+ * still occupies [0, size) and its anchors stay on the same blocks.
+ */
+export function prefabFrame(size: Vec3, opts: Pick<StampOptions, "rotate" | "mirror">, env: StampEnv = {}): Frame {
+  const deg = opts.rotate ?? 0;
+  if (!Number.isInteger(deg) || deg % 90 !== 0) throw new Error(`rotate must be a multiple of 90 degrees (got ${deg})`);
+  const turns = (((deg / 90) % 4) + 4) % 4;
+  const axis = opts.mirror;
+  if (axis !== undefined && axis !== "x" && axis !== "z") throw new Error('mirror must be "x" (east↔west) or "z" (north↔south)');
+  if (!turns && !axis) return { place: (p) => p, size, label: "" };
+  const a = axis === "x" ? 0 : 2;
+  const raw = (p: Vec3): Vec3 => rotatePos(axis ? mirrorPos(p, axis, (size[a]! - 1) / 2) : p, turns, [0, 0, 0]);
+  const bb = transformBox({ min: [0, 0, 0], max: size }, raw);
+  const place = (p: Vec3): Vec3 => {
+    const q = raw(p);
+    return [q[0] - bb.min[0], q[1] - bb.min[1], q[2] - bb.min[2]];
+  };
+  const t: StateTransform = { turns, ...(axis ? { mirror: axis } : {}) };
+  const overrides = (env.plugins ?? []).flatMap((pl) => (pl.rotate ? [pl.rotate.bind(pl)] : []));
+  const state = stateTransformer(t, { ...(env.registry ? { registry: env.registry } : {}), overrides });
+  const label = `${axis ? ` mirror ${axis}` : ""}${turns ? ` rotate ${turns * 90}°` : ""}`;
+  return { place, state, size: [bb.max[0] - bb.min[0], bb.max[1] - bb.min[1], bb.max[2] - bb.min[2]], label };
 }
 
 // -- placement ---------------------------------------------------------------------------------------

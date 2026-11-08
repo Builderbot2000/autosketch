@@ -16,8 +16,8 @@ import type { Face } from "../../assets/models.js";
  * into one contact sheet. Each render's cameras are kept per document (cameras.ts) for raycast.
  *
  * Styles: textured, flat (mean colours), depth (flat colours darkened with distance) and xray
- * (translucent shell; highlighted blocks stay solid). Per-block flags (HIGHLIGHT, and CONTEXT
- * reserved for sandbox context volumes, 11) change how a block is drawn in any style.
+ * (translucent shell; highlighted blocks stay solid). Per-block flags (HIGHLIGHT, and CONTEXT for
+ * a sandbox's read-only context volume, 11) change how a block is drawn in any style.
  */
 
 export const ISO_VIEWS = ["iso_se", "iso_sw", "iso_ne", "iso_nw"] as const;
@@ -34,6 +34,7 @@ export type CustomView = { yaw: number; pitch: number; distance?: number; target
 export type ComponentView = `component:${string}`;
 export type View = ViewName | ComponentView | CustomView;
 export type RenderStyle = "textured" | "flat" | "depth" | "xray";
+export type ContextMode = "ghost" | "normal" | "hide";
 
 /** Cut away part of the build to look inside: everything above maxY, or one side of a plane (at stays). */
 export type Cutaway = { maxY: number } | { plane: "x" | "y" | "z"; at: number; keep: "west" | "east" | "down" | "up" | "north" | "south" };
@@ -49,6 +50,11 @@ export interface RenderOptions {
   /** Positions to tint (a resolved selection or a diff). Highlighted air is outlined. */
   highlight?: Mask;
   overlays?: { components?: boolean };
+  /**
+   * How a sandbox's context volume (`doc.context`, 11) is drawn: ghost (default: desaturated and
+   * translucent, never hiding editable blocks), normal, or hide. Ignored outside a sandbox.
+   */
+  context?: ContextMode;
   /** Plain picture for a file thumbnail: transparent background, no grid, ticks, compass or caption room; size may go down to 32. Not recorded for raycast. */
   thumbnail?: boolean;
 }
@@ -66,7 +72,7 @@ export interface RenderResult {
 export const DEFAULT_VIEWS: ViewName[] = ["iso_se", "iso_nw", "front", "top"];
 /** Per-block flags. */
 export const HIGHLIGHT = 1;
-/** Reserved for sandbox context volumes (11, silo F): drawn ghosted. */
+/** A sandbox's read-only context volume (11): drawn ghosted. */
 export const CONTEXT = 2;
 
 const SS = 2; // supersampling factor
@@ -97,6 +103,10 @@ interface Scene {
   fallbackIds: Set<string>;
   /** Highlighted positions that are air inside the clip (outlined). */
   airHighlights: Vec3[];
+  /** Ghosted context positions: they never hide the faces of editable blocks. */
+  ghost?: Mask;
+  /** Context blocks drawn. */
+  contextBlocks: number;
 }
 
 interface Label {
@@ -177,11 +187,19 @@ export async function renderDocument(doc: Document, baker: BlockBaker, opts: Ren
     `render ${out.width}×${out.height} · ${notes.join(" · ")}${id ? ` · id ${id}` : ""}`,
     `drew ${n.toLocaleString("en-US")} blocks in ${formatBox(main.box)}${main.mask ? " (selection)" : ""}${cutawayText(opts.cutaway)}${style !== "textured" ? ` · style ${style}` : ""} · front=${doc.meta.front}`,
     opts.highlight ? `highlighted ${highlighted.toLocaleString("en-US")} position${highlighted === 1 ? "" : "s"} in orange${main.airHighlights.length ? ` (${main.airHighlights.length} now air, outlined)` : ""}` : "",
+    main.contextBlocks ? `${main.contextBlocks.toLocaleString("en-US")} read-only context blocks${opts.context === "normal" ? " drawn normally" : " ghosted (grey, translucent)"}` : "",
+    doc.context && opts.context === "hide" ? "context hidden" : "",
     "Ticks label block coordinates along the bottom edges; N marks north.",
     id ? `raycast({view:"${id}", px, py}) names the block under a pixel.` : "",
     fallback.size ? `no model for ${[...fallback].slice(0, 5).join(", ")}${fallback.size > 5 ? " …" : ""} (drawn as magenta checker)` : "",
   ].filter(Boolean);
   return { png: out.encodePng(), width: out.width, height: out.height, caption: caption.join("\n"), ...(id ? { id } : {}), views: cams };
+}
+
+/** Context blocks: desaturated toward a light grey (11, ghosted context). */
+function ghostColour(m: RGB): RGB {
+  const g = 0.3 * m[0] + 0.59 * m[1] + 0.11 * m[2];
+  return [g * 0.5 + 200 * 0.5, g * 0.5 + 205 * 0.5, g * 0.5 + 215 * 0.5];
 }
 
 function cutawayText(c: Cutaway | undefined): string {
@@ -215,18 +233,25 @@ async function buildScene(doc: Document, baker: BlockBaker, opts: RenderOptions,
   if (mask && !regionBox) return undefined;
   const clip = applyCutaway(regionBox ? intersectBox(regionBox, bounds) : bounds, opts.cutaway);
   if (isEmptyBox(clip)) return undefined;
+  const ctxMode = opts.context ?? "ghost";
+  const context = doc.context && !doc.context.isEmpty() ? doc.context : undefined;
+  const hidden = ctxMode === "hide" ? context : undefined;
   const inClip = (x: number, y: number, z: number) =>
-    x >= clip.min[0] && x < clip.max[0] && y >= clip.min[1] && y < clip.max[1] && z >= clip.min[2] && z < clip.max[2] && (!mask || mask.has(x, y, z));
+    x >= clip.min[0] && x < clip.max[0] && y >= clip.min[1] && y < clip.max[1] && z >= clip.min[2] && z < clip.max[2] && (!mask || mask.has(x, y, z)) && !hidden?.has(x, y, z);
 
   const xs: number[] = [], ys: number[] = [], zs: number[] = [], ids: number[] = [], flags: number[] = [];
+  let contextBlocks = 0;
   doc.voxels.forEachInBox(doc.boxToStore(clip), (sx, sy, sz, id) => {
     const [x, y, z] = doc.toLocal(sx, sy, sz);
     if (mask && !mask.has(x, y, z)) return;
+    const inContext = context?.has(x, y, z) ?? false;
+    if (inContext && hidden) return;
+    if (inContext) contextBlocks++;
     xs.push(x);
     ys.push(y);
     zs.push(z);
     ids.push(id);
-    flags.push(opts.highlight?.has(x, y, z) ? HIGHLIGHT : 0);
+    flags.push((opts.highlight?.has(x, y, z) ? HIGHLIGHT : 0) | (inContext && ctxMode === "ghost" ? CONTEXT : 0));
   });
   if (!xs.length) return undefined;
   const airHighlights: Vec3[] = [];
@@ -264,6 +289,8 @@ async function buildScene(doc: Document, baker: BlockBaker, opts: RenderOptions,
     ...(mask ? { mask } : {}),
     fallbackIds,
     airHighlights,
+    ...(context && ctxMode === "ghost" ? { ghost: context } : {}),
+    contextBlocks,
     occluderAt: (x, y, z) => {
       if (!inClip(x, y, z)) return undefined;
       const [sx, sy, sz] = doc.toStore(x, y, z);
@@ -347,6 +374,7 @@ function drawView(
   const dmin = Math.min(...ds), dspan = Math.max(1e-6, Math.max(...ds) - dmin);
   const lookOf = (flags: number, q: BakedQuad, x: number, y: number, z: number): Look => {
     const hl = flags & HIGHLIGHT ? HL : undefined;
+    if (flags & CONTEXT) return { flat: ghostColour(q.tex.mean), ...(hl ? { overlay: hl } : {}), mode: "blend", alpha: 0.3 };
     if (style === "xray") return hl ? { flat: q.tex.mean, overlay: hl, mode: "opaque", alpha: 1 } : { flat: q.tex.mean, mode: "blend", alpha: 0.28 };
     if (style === "depth") {
       const c = (q.pos[0]! + q.pos[6]!) / 2 + x, cy2 = (q.pos[1]! + q.pos[7]!) / 2 + y, cz = (q.pos[2]! + q.pos[8]!) / 2 + z;
@@ -369,8 +397,10 @@ function drawView(
       if (q.cull) {
         const d = DIR[q.cull];
         const nb = s.occluderAt(x + d[0], y + d[1], z + d[2]);
+        // A ghosted context block never hides an editable block's face (11).
+        const seeThrough = s.ghost && !(flags & CONTEXT) && s.ghost.has(x + d[0], y + d[1], z + d[2]);
         // Hidden by an opaque neighbour, or between two blocks of the same translucent kind (glass, water).
-        if (nb && (nb.occludes.has(OPPOSITE[q.cull]) || (nb === blk && blk.translucent))) continue;
+        if (nb && !seeThrough && (nb.occludes.has(OPPOSITE[q.cull]) || (nb === blk && blk.translucent))) continue;
       }
       const look = lookOf(flags, q, x, y, z);
       // X-ray shows the far side of the shell through the near side.

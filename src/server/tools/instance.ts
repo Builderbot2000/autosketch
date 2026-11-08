@@ -7,6 +7,7 @@ export function registerInstanceTools({ tool }: ToolDeps): void {
   tool(
     "instance_info",
     {
+      doc: false,
       title: "Instance info",
       description: "What Minecraft instance Autosketch is reading: version, loader, block and material counts, load warnings. Text, <150 tokens.",
       inputSchema: {},
@@ -30,6 +31,7 @@ export function registerBlockInfoTool({ tool }: ToolDeps): void {
   tool(
     "block_info",
     {
+      doc: false,
       title: "Block info",
       description:
         "Looks up a block id (properties, defaults, shape, family, shapes/variants, colour) or searches ids by substring when not exact (max 20 results). Text.",

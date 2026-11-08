@@ -9,6 +9,7 @@ export function registerPluginTools({ tool, session }: ToolDeps): void {
   tool(
     "ops_list",
     {
+      doc: false,
       title: "List plugin ops",
       description:
         'Lists ops added by mod-compat plugins (named "<plugin>.<op>", e.g. framed.camo) with their params and side effects. Filter by plugin id or mod namespace. Text, ~20 tokens per op.',

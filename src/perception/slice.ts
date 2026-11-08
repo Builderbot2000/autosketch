@@ -10,6 +10,9 @@ import type { Document } from "../document/document.js";
  *   axis y: looking down, rows = z (north at top), columns = x (west at left)
  *   axis z: looking north at a south-facing elevation, rows = y (top first), columns = x
  *   axis x: looking east at the west face, rows = y (top first), columns = z (north at left)
+ *
+ * In a sandbox (11) rows that hold read-only context are marked: "| ctx" when the whole row is
+ * context, "| ctx x-3..-1,8..10" naming the context columns otherwise.
  */
 
 export const SLICE_MAX = 64;
@@ -59,6 +62,27 @@ export function viewSlice(doc: Document, registry: Registry | undefined, opts: S
     notes.push(`cropped ${axisName(ra)} to ${r0}..${r1 - 1} of ${layer.min[ra]}..${layer.max[ra]! - 1}; pass region to see the rest`);
   }
 
+  // Context marks (11): per row, the column ranges that are read-only context.
+  const context = doc.context && !doc.context.isEmpty() ? doc.context : undefined;
+  const ctxMark = (r: number): string => {
+    if (!context) return "";
+    const ranges: [number, number][] = [];
+    for (let c = c0; c < c1; c++) {
+      const p = [0, 0, 0] as [number, number, number];
+      p[a] = opts.at;
+      p[ca] = c;
+      p[ra] = r;
+      if (!context.has(p[0], p[1], p[2])) continue;
+      const last = ranges[ranges.length - 1];
+      if (last && last[1] === c - 1) last[1] = c;
+      else ranges.push([c, c]);
+    }
+    if (!ranges.length) return "";
+    if (ranges.length === 1 && ranges[0]![0] === c0 && ranges[0]![1] === c1 - 1) return "  | ctx";
+    return `  | ctx ${axisName(ca)}${ranges.map(([x, y]) => (x === y ? `${x}` : `${x}..${y}`)).join(",")}`;
+  };
+  if (context) notes.push('"| ctx" marks read-only context (the sandbox\'s surroundings; not editable)');
+
   const rows: number[] = [];
   if (rowsDown) for (let r = r0; r < r1; r++) rows.push(r);
   else for (let r = r1 - 1; r >= r0; r--) rows.push(r);
@@ -98,7 +122,7 @@ export function viewSlice(doc: Document, registry: Registry | undefined, opts: S
         if (line[k] !== "minecraft:air") parts.push(`${cn}${c0 + k}${e > k ? `-${c0 + e}` : ""} ${charOf(line[k]!)}`);
         k = e + 1;
       }
-      if (parts.length) out.push(`${rn}${rows[i]}: ${parts.join(", ")}`);
+      if (parts.length) out.push(`${rn}${rows[i]}: ${parts.join(", ")}${ctxMark(rows[i]!)}`);
     });
     out.push(legendLine());
     for (const n of notes) out.push(`note: ${n}`);
@@ -119,7 +143,7 @@ export function viewSlice(doc: Document, registry: Registry | undefined, opts: S
   out.push(`${opts.axis}=${opts.at}  columns ${axisName(ca)}→ ${c0}..${c1 - 1}, rows ${axisName(ra)}${rowsDown ? "↓" : "↑"} ${rowsDown ? `${r0}..${r1 - 1}` : `${r1 - 1}..${r0}`}  (${viewName(a)})`);
   out.push(`${pad}${tens}`);
   out.push(`${pad}${units}`);
-  grid.forEach((line, i) => out.push(`${String(rows[i]).padStart(width)} ${line.map(charOf).join("")}`));
+  grid.forEach((line, i) => out.push(`${String(rows[i]).padStart(width)} ${line.map(charOf).join("")}${ctxMark(rows[i]!)}`));
   out.push(legendLine());
   for (const n of notes) out.push(`note: ${n}`);
   return out.join("\n");

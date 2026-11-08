@@ -31,9 +31,9 @@ function emitRender(session: Session, views: { label: string }[], width: number,
  * contract, 06 "Verify the last edit"). Used by the edit tools.
  */
 export async function withPreview(c: InstanceContext, session: Session, preview: boolean | undefined, run: () => Result): Promise<Result> {
-  const before = session.doc?.journal.headSeq;
+  const before = session.current?.journal.headSeq;
   const res = run();
-  const doc = session.doc;
+  const doc = session.current;
   if (!preview || !doc || res.isError || doc.journal.headSeq === before) return res;
   const r = await renderEditPreview(doc, await bakerFor(c), doc.journal.headSeq);
   if (!r) return res;
@@ -83,6 +83,7 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
         size: z.number().int().min(128).max(1024).optional().describe("Longest side in pixels (default 768 for several views, 512 for one)"),
         style: z.enum(["textured", "flat", "depth", "xray"]).optional(),
         overlays: z.object({ components: z.boolean().optional() }).optional(),
+        context: z.enum(["ghost", "normal", "hide"]).optional().describe("In a scoped job's sandbox: how the read-only context is drawn (default ghost: grey, translucent)"),
       },
     },
     async (c, a) => {
@@ -113,6 +114,7 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
         ...(a.size ? { size: a.size } : {}),
         ...(a.style ? { style: a.style } : {}),
         ...(a.overlays ? { overlays: a.overlays } : {}),
+        ...(a.context ? { context: a.context } : {}),
       });
       emitRender(session, r.views, r.width, r.height);
       return image(r.png, [r.caption, ...notes.map((n) => `note: ${n}`)].join("\n"));

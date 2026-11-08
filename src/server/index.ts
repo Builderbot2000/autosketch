@@ -11,6 +11,7 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { Settings } from "../core/settings.js";
 import { startObserve, type Observer } from "../observe/index.js";
+import { scopeLimits } from "../scope/settings.js";
 import { configFromEnv, loadInstanceContext } from "./context.js";
 import { createServer, SERVER_VERSION } from "./server.js";
 import { defaultWorkspace, Session } from "./session.js";
@@ -27,17 +28,26 @@ async function main(): Promise<void> {
   const ctx = loadInstanceContext(cfg, log);
   ctx.catch((e: Error) => log(`failed to load instance: ${e.message}`));
   const workspace = cfg.workspace ?? defaultWorkspace();
-  const session = new Session(workspace, log);
+  let settings: Settings;
+  let session: Session;
+  try {
+    settings = Settings.from();
+    session = new Session(workspace, log, { scopeLimits: scopeLimits(settings) });
+  } catch (e) {
+    log((e as Error).message);
+    process.exit(2);
+  }
   // Observability (12): the process entry point is the one place that wires observe/ in; the
   // session, documents and tool wrapper only see the EventSink.
   let observer: Observer;
   try {
-    observer = startObserve({ workspace, settings: Settings.from(), version: SERVER_VERSION, getDoc: () => session.doc, getBaker: async () => bakerFor(await ctx), log });
+    observer = startObserve({ workspace, settings, version: SERVER_VERSION, getDoc: () => session.doc, getBaker: async () => bakerFor(await ctx), log });
   } catch (e) {
     log((e as Error).message);
     process.exit(2);
   }
   session.events = observer.sink("base");
+  session.eventsFor = (doc) => observer.sink(doc);
   const server = createServer(ctx, { session });
   const transport = new StdioServerTransport();
   // Save the open document before exiting, so a closed client never loses the last op.

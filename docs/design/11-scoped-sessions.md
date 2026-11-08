@@ -51,7 +51,7 @@ Guidance for the skill (advisory, like all heuristics):
 ### 1. Fork
 
 ```
-scope_fork({ work: sel, context?: sel | { expand: n }, brief, spec? })
+scope_fork({ work: sel, context?: sel | { expand: n }, brief, spec?, scope? })
   → scope id, local frame, lock, handoff text
 ```
 
@@ -146,9 +146,43 @@ The skill's threshold is advisory, so the server adds hard limits that stop runa
 - The ratio and size limits alone don't bound depth tightly on a very large build (halving from 512³ to 8³ takes 18 levels), so the depth cap is the backstop.
 - All three are configurable in server settings. They stop pathological forks, while deciding *whether* to delegate stays with the skill.
 
+## Persistence
+
+Resolved (was an open question): open scopes and locks live **in memory only** and are abandoned when the session closes (`scope.abandon` with reason `restart`, `12`). `scope_list` and `scope_abandon` are the cleanup tools. Persisting them under `<doc>/scopes/<id>/` would mean saving every sandbox and reconciling locks with a base document that may have been edited by another process; that isn't worth it until a real session shows jobs outliving a restart. While a scope is open, `doc_new` and `doc_open` (including imports) are refused (`scopes_open`), so a job's base document can't be swapped out from under it.
+
+## Implementation status
+
+| Piece | Status |
+|-------|--------|
+| Scope model | Built: `src/scope/scopes.ts` (`ScopeManager`, held by `Session.scopes`). A sandbox is a `Document` with only the work and context volumes copied (block entities cloned), re-origined so the work volume's minimum corner is (0,0,0). It shares the parent's state table and palette book. `offset` records the translation; boxes in events compose offsets up the chain into the base frame. |
+| `scope_fork` | Built (`src/server/tools/scope.ts`). Whole-block extension (`src/scope/multiblock.ts`): doors and other `half=upper\|lower` blocks, beds, double chests and a new optional plugin hook `multiBlock.partners(state)` (`plugins/types.ts`); applied to work and context, the work extension is reported. Limits, locks, stale-context report and the handoff block as specified. |
+| Limits | `scope.maxWorkRatio` (0.5), `scope.minWorkBlocks` (512), `scope.maxDepth` (3) in `src/scope/settings.ts`, read through `core/settings.ts` (`--set scope.maxDepth=2`, `AUTOSKETCH_SCOPE_MAX_DEPTH`), passed to `Session` by `server/index.ts`. |
+| Write rules and locks | Built on a new optional `Document.guard` (checked after an edit body, inside its rollback, and before every undo and redo) so tools, scripts, plugin actions and history all obey it. |
+| `scope_merge` | Built: one parent journal entry (`scope_merge`), content sanity check, seam recompute with `reconnectPositions` over a one-block shell on both sides, components written back. Result: report, `formatDiff` counts by family, changed box, seam count, optional render. |
+| `scope_abandon`, `scope_list` | Built. Abandon cascades to jobs forked from the abandoned one. |
+| Components | Built per the table. External components are tagged `external` (and `partial` when clipped). |
+| Addressing | Built centrally: the `tool()` wrapper adds `scope` to every document tool's schema and runs the call in `Session.inScope`; `Session.require()` returns the addressed document (AsyncLocalStorage, so concurrent calls never mix). Tools that address no document carry `doc: false`. |
+| Nesting | Built. |
+| Perception | `render({ context })` ghosts (default), draws normally or hides `doc.context`; ghosted blocks never cull an editable block's faces. `view_slice` marks context rows (`\| ctx`, or `\| ctx x3..4` for part of a row). |
+| Events | `scope.fork`, `scope.merge`, `scope.abandon` through the parent's sink; sandbox documents get `Session.eventsFor(id)` (the observer's sink tagged with the scope id), so their `doc.op` events carry `doc: "<id>"`. |
+| Tests | `test/unit/scope/` (every refusal code, fence seam in sandbox and after merge, parallel merges in either order, one-undo merge, nesting, components, extension, events, settings, ghosting and slice marks) and `test/unit/server/scope-tools.test.ts` (over MCP). |
+
+Decisions made while building:
+
+- **Connection properties** are defined by `connectionNeutral` in `ops/connect.ts`: fence, pane and wire sides, wall sides and `up`, stair `shape`, chest `type`. A plugin's connecting block keeps only its id, since the plugin doesn't say which properties it derives. A change is "derived" when the neutral states match and the block entity didn't change.
+- **Net changes only.** The guard sees each position's net change, so an op over a larger selection that changes nothing outside the work volume (a `clear` of air, a `replace` that matches nothing there) passes.
+- **Context recompute** is allowed anywhere in the context volume, not only next to the work volume. In practice only neighbours of written blocks are ever recomputed, so it is the same rule, checked more cheaply.
+- **Locks also guard undo and redo** in the parent: undoing an older edit inside a lock would break the merge check. `restore` stops at the first refused step.
+- **The merge diff** compares the sandbox with the parent inside the work volume (the check guarantees the parent is unchanged), rather than replaying the sandbox journal. Block entities are compared by value.
+- **The ratio limit for a fork from the base** uses the base document's bounds (declared size plus everything built). An empty document with no declared size has no bounds, so every fork from it is too large.
+- **Default context** is the work volume grown by 3 blocks (a cube kernel). A nested job's context is clipped to its parent's volumes and the result says how much was dropped. A nested work volume outside the parent's is refused.
+- **Extra refusal codes** beyond those `12` lists: `nest_outside`, `scope_unknown`, `scope_children` (merge a job with open children), `scopes_open`, `component_reserved`, `merge_check`.
+- **Who merges.** The parent calls `scope_merge` with the subagent's report; the handoff tells the subagent not to merge itself. `scope_merge`, `scope_abandon` and `scope_list` name the job directly and don't take the wrapper's `scope`. For `scope_fork`, `scope` is the document to fork from.
+- **Sandbox documents** are named `<doc>-<id>`. `export` works from a sandbox and writes into the base document's `exports/` folder.
+- **Spec v1 shape:** `{ palette?, levels? (named y values, translated), anchors? (named points, translated), values? (anything else, passed as is) }`.
+
 ## Open questions
 
-- **Persistence.** Should open scopes and locks survive a server restart (stored under `<doc>/scopes/<id>/`), or are they in memory only and abandoned on exit? Proposal: in memory for v1, with `scope_list` and `scope_abandon` for cleanup.
-- **Spec format.** What is the smallest shared spec that keeps neighbouring jobs consistent? Reference lines, palette roles and anchors are the starting set. Should it be a library item (`07`) so it can be reused across jobs?
+- **Spec format.** v1 uses the shape above. Is it the smallest spec that keeps neighbouring jobs consistent, and should it be a library item (`07`) so it can be reused across jobs?
 - **Threshold wording.** How should the skill describe "too large to comprehend" so agents delegate when they should and not otherwise? Tier 3 evals (`10`) should calibrate it, including runs that show over-eager forking.
-- **Component picks.** When an agent picks a component, what does it select by default: the component's box, its voxel mask, or connected blocks of the same family? (Ties into the box-vs-mask question in `04`.)
+- **Component picks.** When an agent picks a component, what does it select by default: the component's box, its voxel mask, or connected blocks of the same family? (Ties into the box-vs-mask question in `04`.) Sandboxes classify components by their box for now.

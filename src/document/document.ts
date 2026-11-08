@@ -1,6 +1,7 @@
 import type { Compound } from "prismarine-nbt";
 import { AIR } from "../core/blockstate.js";
 import { NO_EVENTS, type EventSink } from "../core/events.js";
+import type { Mask } from "../core/mask.js";
 import { boxVolume, type Box, type Vec3 } from "../core/region.js";
 import { PaletteBook } from "../palette/pick.js";
 import { checkComponentId, cloneComponents, type Component } from "./components.js";
@@ -55,6 +56,19 @@ export interface ComponentInput {
   notes?: string;
 }
 
+/**
+ * The changes an edit, undo or redo is about to commit, for a write guard (11: sandbox write rules
+ * and locks). Positions are local; `nbt` is true when the block entity changed too.
+ */
+export interface PendingChanges {
+  forEach(fn: (x: number, y: number, z: number, before: number, after: number, nbt: boolean) => void): void;
+  /** Set when components change: the list before and after (store coordinates). */
+  components?: { before: readonly Component[]; after: readonly Component[] };
+}
+
+/** Throws to refuse a change; the edit is rolled back (or the undo/redo not applied). */
+export type WriteGuard = (changes: PendingChanges, op: string) => void;
+
 const sectionKey = (sx: number, sy: number, sz: number) => ((sx + 2048) * 4096 + (sz + 2048)) * 128 + (sy + 64);
 const posKey = (x: number, y: number, z: number) => `${x},${y},${z}`;
 
@@ -83,6 +97,13 @@ export class Document {
   revision = 0;
   /** Observability sink (12): commits, undo, redo and checkpoints are published here. Never read back. */
   events: EventSink = NO_EVENTS;
+  /**
+   * Checks every edit, undo and redo before it commits (11: a sandbox refuses writes outside its
+   * work volume; a parent refuses edits inside a held lock). Set by the scope layer.
+   */
+  guard?: WriteGuard;
+  /** In a sandbox (11): the read-only context volume, local. Renders ghost it and slices mark it. */
+  context?: Mask;
 
   constructor(
     public meta: DocMeta,
@@ -185,6 +206,7 @@ export class Document {
     let value: T;
     try {
       value = body(tx);
+      if (this.guard) this.guard(tx.pending(), op);
     } catch (e) {
       tx.rollback();
       throw e;
@@ -258,7 +280,9 @@ export class Document {
   undo(): { entry: JournalEntry; shift?: Vec3 } | undefined {
     this.journal.ensureUndo(); // loads an on-disk journal segment when undo reaches past memory (04)
     if (!this.journal.canUndo) return undefined;
-    const e = this.journal.entries[--this.journal.cursor]!;
+    const e = this.journal.entries[this.journal.cursor - 1]!;
+    if (this.guard) this.guard(entryChanges(this, e, "before"), "undo");
+    this.journal.cursor--;
     this.apply(e, "before");
     if (this.events.enabled) this.events.emit(stepEvent(this, "doc.undo", e));
     return { entry: e, ...shiftOf(e.originAfter, e.originBefore) };
@@ -267,7 +291,9 @@ export class Document {
   redo(): { entry: JournalEntry; shift?: Vec3 } | undefined {
     this.journal.ensureRedo();
     if (!this.journal.canRedo) return undefined;
-    const e = this.journal.entries[this.journal.cursor++]!;
+    const e = this.journal.entries[this.journal.cursor]!;
+    if (this.guard) this.guard(entryChanges(this, e, "after"), "redo");
+    this.journal.cursor++;
     this.apply(e, "after");
     if (this.events.enabled) this.events.emit(stepEvent(this, "doc.redo", e));
     return { entry: e, ...shiftOf(e.originBefore, e.originAfter) };
@@ -433,6 +459,22 @@ export class Transaction {
     this.before = before;
   }
 
+  /** The net changes so far (positions that differ from their first before value), for a write guard. */
+  pending(): PendingChanges {
+    return {
+      forEach: (fn) => {
+        for (let i = 0; i < this.n; i++) {
+          const sx = this.pos[i * 3]!, sy = this.pos[i * 3 + 1]!, sz = this.pos[i * 3 + 2]!;
+          const after = this.doc.voxels.get(sx, sy, sz);
+          const c = this.nbtChanges.get(i);
+          const nbt = !!c && c.before !== c.after;
+          if (after !== this.before[i] || nbt) fn(sx - this.origin[0], sy - this.origin[1], sz - this.origin[2], this.before[i]!, after, nbt);
+        }
+      },
+      ...(this.componentsBefore ? { components: { before: this.componentsBefore, after: [...this.doc.components.values()] } } : {}),
+    };
+  }
+
   /** Visits each local position written so far in this op, once (auto-connection reads it, 05). */
   forEachTouched(fn: (x: number, y: number, z: number) => void): void {
     for (let i = 0; i < this.n; i++) fn(this.pos[i * 3]! - this.origin[0], this.pos[i * 3 + 1]! - this.origin[1], this.pos[i * 3 + 2]! - this.origin[2]);
@@ -515,6 +557,22 @@ export class Transaction {
     }
     return { positions, before, after, nbt };
   }
+}
+
+/** What undoing (`to` = "before") or redoing (`to` = "after") a journal entry would change. */
+function entryChanges(doc: Document, e: JournalEntry, to: "before" | "after"): PendingChanges {
+  const nbtAt = new Set((e.nbt ?? []).map((c) => c.index));
+  const [from, into] = to === "before" ? [e.after, e.before] : [e.before, e.after];
+  const comps = to === "before" ? [e.componentsAfter, e.componentsBefore] : [e.componentsBefore, e.componentsAfter];
+  return {
+    forEach: (fn) => {
+      for (let i = 0; i < from.length; i++) {
+        const [x, y, z] = doc.toLocal(e.positions[i * 3]!, e.positions[i * 3 + 1]!, e.positions[i * 3 + 2]!);
+        fn(x, y, z, from[i]!, into[i]!, nbtAt.has(i));
+      }
+    },
+    ...(comps[0] && comps[1] ? { components: { before: comps[0], after: comps[1] } } : {}),
+  };
 }
 
 function add(a: Vec3, b: Vec3): Vec3 {

@@ -171,6 +171,31 @@ function recompute(kind: Kind, state: string, x: number, y: number, z: number, g
   return formatState(id, out);
 }
 
+/** Properties each kind derives from its neighbours (connection properties, 05). */
+const DERIVED: Record<Exclude<Kind, "plugin">, readonly string[]> = {
+  fence: ["north", "east", "south", "west"],
+  pane: ["north", "east", "south", "west"],
+  wall: ["north", "east", "south", "west", "up"],
+  stairs: ["shape"],
+  wire: ["north", "east", "south", "west"],
+  chest: ["type"],
+};
+
+/**
+ * A state with its connection properties removed: the block's content, which sandbox merge checks
+ * and locks compare (11, Connection seams). A plugin-declared connecting block keeps only its id,
+ * since the plugin doesn't say which properties it derives.
+ */
+export function connectionNeutral(state: string, env: ConnectEnv): string {
+  const k = kindOf(state, env);
+  if (!k) return state;
+  const { id, props } = parseState(state);
+  if (k === "plugin") return id;
+  const out = { ...props };
+  for (const p of DERIVED[k]) delete out[p];
+  return formatState(id, out);
+}
+
 /**
  * Recomputes connection properties at exactly the given positions (silo F calls this at sandbox
  * seams, 11). Returns how many blocks changed. Block entities are kept.

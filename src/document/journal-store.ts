@@ -94,22 +94,29 @@ export class JournalStore {
     for (const e of entries) this.persisted.add(e.seq);
   }
 
-  /** Forgets entries (a discarded redo tail): drops their segments, rewriting one that also holds kept entries. */
+  /**
+   * Forgets entries (a discarded redo tail): drops their segments, rewriting one that also holds
+   * kept entries. Rewrites happen before any state changes, so a failed write leaves the store as
+   * it was and the discard can be retried; old files go last (an orphan is swept by writeIndex).
+   */
   discard(seqs: Iterable<number>): void {
     const gone = new Set([...seqs].filter((q) => this.persisted.has(q)));
     if (!gone.size) return;
     const next: SegmentRef[] = [];
+    const old: SegmentRef[] = [];
     for (const s of this.segments) {
       if (!s.seqs.some((q) => gone.has(q))) {
         next.push(s);
         continue;
       }
+      // The discarded seqs are a redo tail, so a rewritten segment never reuses its own file name.
       const kept = s.seqs.some((q) => !gone.has(q)) ? this.read(s).filter((e) => !gone.has(e.seq)) : [];
-      this.remove(s);
+      old.push(s);
       if (kept.length) next.push(this.write(kept));
     }
     this.segments = next;
     for (const q of gone) this.persisted.delete(q);
+    for (const s of old) this.remove(s);
   }
 
   writeIndex(meta: { nextSeq: number; lost: number; checkpoints: Checkpoint[] }): void {

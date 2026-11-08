@@ -57,6 +57,8 @@ export class Journal {
   /** Entries dropped before a store was attached (no longer reachable). */
   lost = 0;
   private nextSeq = 1;
+  /** Redo-tail seqs whose on-disk discard failed; dropped from the store on the next persist. */
+  private pendingDiscard: number[] = [];
   readonly checkpoints = new Map<string, Checkpoint>();
   store?: JournalStore;
 
@@ -80,15 +82,24 @@ export class Journal {
     return this.start + this.cursor;
   }
 
-  /** Records a committed op: discards the redo tail, then trims the window to the memory cap. */
-  push(e: JournalEntry): void {
+  /**
+   * Records a committed op: discards the redo tail, then trims the window to the memory cap.
+   * Disk writes here are best-effort (04, Journal segments): the op has already applied, so a
+   * failing store never throws. Entries stay in memory past the cap, the failure comes back as a
+   * warning for the op result, and the write is retried on the next trim or save.
+   */
+  push(e: JournalEntry): string | undefined {
     const discarded = this.seqs.splice(this.position);
     this.entries.length = this.cursor;
-    if (discarded.length) this.store?.discard(discarded);
+    let warning: string | undefined;
+    if (discarded.length && this.store) {
+      this.pendingDiscard.push(...discarded);
+      warning = this.tryDisk(() => this.flushDiscard());
+    }
     this.entries.push(e);
     this.seqs.push(e.seq);
     this.cursor = this.entries.length;
-    this.trim();
+    return this.trim() ?? warning;
   }
 
   get canUndo(): boolean {
@@ -107,7 +118,7 @@ export class Journal {
   ensureUndo(): void {
     if (this.cursor > 0 || this.start === 0 || !this.store) return;
     this.loadBefore();
-    this.trim();
+    this.trim(); // best-effort; a write failure keeps entries in memory
   }
 
   /** Makes sure the entry redo would apply is in memory. */
@@ -131,6 +142,7 @@ export class Journal {
   persist(): void {
     const store = this.store;
     if (!store) return;
+    this.flushDiscard();
     store.append(this.entries.filter((e) => !store.has(e.seq)));
     store.writeIndex({ nextSeq: this.nextSeq, lost: this.lost, checkpoints: [...this.checkpoints.values()] });
   }
@@ -146,6 +158,7 @@ export class Journal {
     this.start = pos;
     this.cursor = 0;
     this.lost = index.lost;
+    this.pendingDiscard = [];
     this.nextSeq = Math.max(index.nextSeq, (seqs[seqs.length - 1] ?? 0) + 1, head + 1);
     this.checkpoints.clear();
     for (const c of index.checkpoints) this.checkpoints.set(c.name, c);
@@ -206,6 +219,22 @@ export class Journal {
     this.entries.push(...newer);
   }
 
+  private flushDiscard(): void {
+    if (!this.pendingDiscard.length) return;
+    this.store?.discard(this.pendingDiscard);
+    this.pendingDiscard = [];
+  }
+
+  /** Runs a disk write, turning a failure into a warning (the caller's op has already applied). */
+  private tryDisk(write: () => void): string | undefined {
+    try {
+      write();
+      return undefined;
+    } catch (err) {
+      return `undo history couldn't be written to disk (${(err as Error).message}); it is kept in memory and retried on the next edit or save`;
+    }
+  }
+
   private chainIndex(seq: number): number {
     // seqs only grow, so binary search.
     let lo = 0, hi = this.seqs.length - 1;
@@ -218,10 +247,13 @@ export class Journal {
     return -1;
   }
 
-  /** Keeps the window under the memory cap, never evicting the entry undo needs next. */
-  private trim(): void {
+  /**
+   * Keeps the window under the memory cap, never evicting the entry undo needs next. Returns a
+   * warning when persisting failed: nothing is evicted then, so the window may exceed the cap.
+   */
+  private trim(): string | undefined {
     let bytes = this.entries.reduce((s, x) => s + entryBytes(x), 0);
-    if (bytes <= this.maxBytes) return;
+    if (bytes <= this.maxBytes) return undefined;
     if (!this.store) {
       while (bytes > this.maxBytes && this.cursor > 1) {
         const e = this.entries.shift()!;
@@ -230,14 +262,16 @@ export class Journal {
         this.cursor--;
         this.lost++;
       }
-      return;
+      return undefined;
     }
-    this.persist(); // everything evicted must be on disk first
+    const failed = this.tryDisk(() => this.persist()); // everything evicted must be on disk first
+    if (failed) return failed;
     while (bytes > this.maxBytes && this.cursor > 1) {
       bytes -= entryBytes(this.entries.shift()!);
       this.start++;
       this.cursor--;
     }
     while (bytes > this.maxBytes && this.entries.length > this.cursor) bytes -= entryBytes(this.entries.pop()!);
+    return undefined;
   }
 }

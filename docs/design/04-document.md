@@ -85,6 +85,7 @@ interface Component {
 - **Memory bound:** when the window passes the cap, it is persisted, then entries furthest from the undo point leave memory (never the one undo needs next). Undo or redo past the window loads the neighbouring segment back. Without a store (a document never saved in the workspace) the old behaviour stays: the oldest entries are dropped.
 - **Reopen:** `doc_open` attaches the segments and puts the undo point at `JournalHead`. Nothing is read until undo, redo or `history()` needs it. If `JournalHead` isn't in the chain (the journal and document disagree after a crash or a foreign save), history starts fresh and the next save replaces the folder.
 - A new edit after undo discards the redo tail on disk too, rewriting a segment that also holds kept entries.
+- **Disk failures are best-effort:** the op has already applied when its entry is recorded, so a failing segment write (a full disk, a read-only folder) never fails the edit. The entries stay in memory past the cap, the op result carries a warning, and the write (persist or redo-tail discard) is retried on the next trim or save. A save itself still reports the failure. A redo-tail discard writes its rewritten segments before it changes the index, so a failure leaves the store as it was.
 - Imports (`doc_open({path})`) and `doc_new` start a fresh journal folder. Only files named `doc.autosketch` (the workspace layout) persist a journal; `saveNative`/`loadNative` take `journal: boolean` to override.
 - Checkpoints are saved with the index. Creating one doesn't bump the revision, so it reaches disk with the next save.
 
@@ -94,7 +95,7 @@ interface Component {
 |-------|--------|
 | Voxel store, components, journal, checkpoints | Built (`document/`). |
 | Native format | Built (`native.ts`), including `JournalHead`. |
-| Journal persistence | Built (`journal.ts`, `journal-store.ts`): segments, memory window with load-back, history across reopen, redo-tail discard on disk, mismatch fallback. Synchronous file I/O: undo and redo are synchronous. |
+| Journal persistence | Built (`journal.ts`, `journal-store.ts`): segments, memory window with load-back, history across reopen, redo-tail discard on disk, mismatch fallback, best-effort disk writes during edits (warning, retried). Synchronous file I/O: undo and redo are synchronous. |
 | Sandboxes (`11`) | Not built here (silo F). |
 
 ## Open questions

@@ -101,8 +101,8 @@ describe("library tools", () => {
     expect(st.text).toMatch(/missing: frame: minecraft:spruce_log is not in this instance; no colour saved/);
   });
 
-  it("lists and reads knowledge packs, also as MCP resources; lists procedures; run_procedure waits for the sandbox", async () => {
-    await writeTree(join(base, "library"), { "procedures/bay.js": "/** Window bay. @param face the face */\n" });
+  it("lists and reads knowledge packs, also as MCP resources; lists and runs procedures", async () => {
+    await writeTree(join(base, "library"), { "procedures/bay.js": "/** Window bay. @param face the face */\nfill(sel.box([0,0,0],[args.n - 1,0,0]), \"oak_planks\");\nreturn args.n;\n" });
     const { client, call } = await connect();
     const list = await call("knowledge_list", { kind: "heuristic" });
     expect(list.text).toMatch(/heuristics\/roofs \[heuristic\]/);
@@ -115,8 +115,10 @@ describe("library tools", () => {
     expect((read.contents[0] as { text: string }).text).toMatch(/Depth and layering/);
 
     expect((await call("procedure_list")).text).toMatch(/^bay\(face\): Window bay\./);
-    const run = await call("run_procedure", { name: "bay" });
-    expect(run.isError).toBe(true);
-    expect(run.text).toMatch(/needs the script sandbox \(silo C\), which is not available yet/);
+    await call("doc_new", { name: "proc" });
+    const run = await call("run_procedure", { name: "bay", args: { n: 3 } });
+    expect(run.isError).toBeFalsy();
+    expect(run.text).toMatch(/^ok · procedure bay · 3 blocks changed · box \(0,0,0\)–\(2,0,0\)/);
+    expect(run.text).toMatch(/returned: 3/);
   });
 });

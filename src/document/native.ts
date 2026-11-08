@@ -4,6 +4,7 @@ import { gunzipSync, gzipSync } from "node:zlib";
 import nbt, { type Compound, type NBT } from "prismarine-nbt";
 import type { Box, Vec3 } from "../core/region.js";
 import { PaletteBook, type NamedPalette } from "../palette/pick.js";
+import type { SavedCamera } from "./cameras.js";
 import type { Component } from "./components.js";
 import { Document, FACINGS, type DocMeta, type Facing } from "./document.js";
 import { JournalStore } from "./journal-store.js";
@@ -81,6 +82,7 @@ export function encodeNative(doc: Document): Buffer {
       Components: str(JSON.stringify([...doc.components.values()])),
       Palettes: str(JSON.stringify(doc.palettes.toJSON())),
       ...(doc.selections.size ? { Selections: str(JSON.stringify(Object.fromEntries(doc.selections))) } : {}),
+      ...(doc.cameras.size ? { Cameras: str(JSON.stringify(Object.fromEntries(doc.cameras))) } : {}),
     },
   };
   return gzipSync(nbt.writeUncompressed(root));
@@ -142,6 +144,7 @@ export function decodeNative(buf: Buffer, opts: { palettes?: PaletteBook } = {})
   doc.entities = listOf<Compound["value"]>(v.Entities).map((value) => ({ type: "compound", value }));
   for (const c of JSON.parse(text(v.Components) ?? "[]") as Component[]) doc.components.set(c.id, c);
   for (const [k, e] of Object.entries(JSON.parse(text(v.Selections) ?? "{}") as Record<string, string | Record<string, unknown>>)) doc.selections.set(k, e);
+  for (const [k, c] of Object.entries(JSON.parse(text(v.Cameras) ?? "{}") as Record<string, SavedCamera>)) doc.cameras.set(k, c);
   journalHeads.set(doc, num(m.JournalHead) ?? 0);
   return doc;
 }

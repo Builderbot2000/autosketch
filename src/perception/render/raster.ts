@@ -2,9 +2,11 @@ import type { RGB } from "../../palette/color.js";
 import type { Image } from "../../palette/image.js";
 
 /**
- * Pure-JS triangle rasterizer with a z-buffer (docs/design/06-perception.md). Orthographic
- * cameras only, so affine texture interpolation is exact. Draws at a supersampled size and
- * downsamples for anti-aliasing.
+ * Pure-JS triangle rasterizer with a z-buffer (docs/design/06-perception.md). Orthographic cameras
+ * interpolate textures affinely, which is exact for them. Perspective cameras (06, *Cameras*)
+ * divide by depth: the z-buffer holds -1/depth (linear in screen space) and textures are
+ * interpolated perspective-correctly. Callers clip geometry to the near plane before projecting
+ * (render.ts). Draws at a supersampled size and downsamples for anti-aliasing.
  */
 
 export type V3 = [number, number, number];
@@ -14,14 +16,19 @@ export interface Camera {
   up: V3;
   /** Into the scene: larger dot(p, forward) = farther away. */
   forward: V3;
-  /** Pixels per block. */
+  /** Pixels per block; for a perspective camera, the focal length in pixels (image half-height / tan(fov/2)). */
   scale: number;
   /** Screen-space centre (in camera units) placed at the image centre. */
   cx: number;
   cy: number;
   width: number;
   height: number;
+  /** Perspective camera: the eye (world point). The image centre looks along `forward`; cx and cy are 0. */
+  eye?: V3;
 }
+
+/** Near-plane distance of perspective cameras, in blocks: geometry closer to the eye is clipped. */
+export const NEAR = 0.05;
 
 export function dot(a: V3, b: V3): number {
   return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -49,6 +56,13 @@ export function basis(toward: V3, upHint: V3 = [0, 1, 0]): { right: V3; up: V3; 
 export class Raster {
   readonly color: Float32Array;
   readonly depth: Float32Array;
+  /** Perspective camera (cam.eye set). */
+  readonly persp: boolean;
+  /**
+   * Depth peeling (06, *Cameras*): the previous layer's depth per pixel. When set, only fragments
+   * clearly beyond it are drawn, so each pass finds the next surface.
+   */
+  floor?: Float32Array;
 
   constructor(
     readonly width: number,
@@ -57,11 +71,29 @@ export class Raster {
   ) {
     this.color = new Float32Array(width * height * 3);
     this.depth = new Float32Array(width * height).fill(Infinity);
+    this.persp = !!cam.eye;
   }
 
-  /** World point → [px, py, depth] in this raster's pixels. */
+  /** Camera-space coordinates [right, up, depth] of a world point (perspective: relative to the eye). */
+  viewSpace(x: number, y: number, z: number): V3 {
+    const c = this.cam;
+    if (c.eye) (x -= c.eye[0]), (y -= c.eye[1]), (z -= c.eye[2]);
+    return [x * c.right[0] + y * c.right[1] + z * c.right[2], x * c.up[0] + y * c.up[1] + z * c.up[2], x * c.forward[0] + y * c.forward[1] + z * c.forward[2]];
+  }
+
+  /** Perspective: camera-space point (beyond the near plane) → [px, py, -1/depth]. */
+  projectView(vx: number, vy: number, vz: number): V3 {
+    const k = this.cam.scale / vz;
+    return [vx * k + this.width / 2, -vy * k + this.height / 2, -1 / vz];
+  }
+
+  /**
+   * World point → [px, py, depth] in this raster's pixels. Perspective: depth is -1/distance along
+   * the view (smaller is nearer, as for orthographic), and the point must lie beyond the near plane.
+   */
   project(x: number, y: number, z: number): V3 {
     const c = this.cam;
+    if (c.eye) return this.projectView(...this.viewSpace(x, y, z));
     const sx = x * c.right[0] + y * c.right[1] + z * c.right[2];
     const sy = x * c.up[0] + y * c.up[1] + z * c.up[2];
     const d = x * c.forward[0] + y * c.forward[1] + z * c.forward[2];
@@ -98,6 +130,10 @@ export class Raster {
     const inv = 1 / area;
     const tw = img.width, th = img.height, td = img.data;
     const tr = tint ? tint[0] / 255 : 1, tg = tint ? tint[1] / 255 : 1, tb = tint ? tint[2] / 255 : 1;
+    const persp = this.persp;
+    // Perspective: 1/depth per vertex, for perspective-correct texture coordinates.
+    const q0 = -p0[2], q1 = -p1[2], q2 = -p2[2];
+    const floor = this.floor;
     for (let y = minY; y <= maxY; y++) {
       const py = y + 0.5;
       for (let x = minX; x <= maxX; x++) {
@@ -108,12 +144,26 @@ export class Raster {
         if (w0 < -1e-6 || w1 < -1e-6 || w2 < -1e-6) continue;
         const z = w0 * p0[2] + w1 * p1[2] + w2 * p2[2];
         const di = y * this.width + x;
-        // Small bias so coplanar overlays (e.g. a pane against glass) favour the later quad.
-        if (z >= this.depth[di]! - 1e-5) continue;
+        // Small bias so coplanar overlays (e.g. a pane against glass) favour the later quad
+        // (relative to the depth for perspective, whose depths shrink with distance).
+        if (persp ? z >= this.depth[di]! + z * 1e-5 : z >= this.depth[di]! - 1e-5) continue;
+        // Peeling: skip the previous layer and anything nearer (a relative margin for perspective).
+        if (floor && (persp ? z <= floor[di]! * (1 - 1e-4) : z <= floor[di]! + 1e-3)) continue;
         let r: number, g: number, b: number, a: number;
         if (flat) {
           [r, g, b] = flat;
           a = 255;
+        } else if (persp) {
+          const a0 = w0 * q0, a1 = w1 * q1, a2 = w2 * q2, k = 1 / (a0 + a1 + a2);
+          const u = (a0 * uv[0]! + a1 * uv[2]! + a2 * uv[4]!) * k;
+          const v = (a0 * uv[1]! + a1 * uv[3]! + a2 * uv[5]!) * k;
+          const tx = Math.min(tw - 1, Math.max(0, Math.floor(u * tw)));
+          const ty = Math.min(th - 1, Math.max(0, Math.floor(v * th)));
+          const ti = (ty * tw + tx) * 4;
+          r = td[ti]!;
+          g = td[ti + 1]!;
+          b = td[ti + 2]!;
+          a = td[ti + 3]!;
         } else {
           const u = w0 * uv[0]! + w1 * uv[2]! + w2 * uv[4]!;
           const v = w0 * uv[1]! + w1 * uv[3]! + w2 * uv[5]!;

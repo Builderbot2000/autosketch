@@ -4,6 +4,7 @@ import { NO_EVENTS, type EventSink } from "../core/events.js";
 import type { Mask } from "../core/mask.js";
 import { boxVolume, type Box, type Vec3 } from "../core/region.js";
 import { PaletteBook } from "../palette/pick.js";
+import type { SavedCamera } from "./cameras.js";
 import { checkComponentId, cloneComponents, type Component } from "./components.js";
 import { opEvent, stepEvent } from "./events.js";
 import { Journal, type JournalEntry } from "./journal.js";
@@ -94,6 +95,8 @@ export class Document {
    * saved with the document. Kept as plain JSON so this module doesn't depend on ops.
    */
   selections = new Map<string, string | Record<string, unknown>>();
+  /** Saved cameras (06, *Cameras*), in store coordinates; use `document/cameras.ts`. Not journaled; saved with the document. */
+  cameras = new Map<string, SavedCamera>();
   /** The most recent selection an op or select used ("last"). Not saved. */
   lastSelection?: string | Record<string, unknown>;
   /** Bumped on every change; the session uses it for autosave. */

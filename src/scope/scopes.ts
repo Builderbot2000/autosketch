@@ -2,6 +2,7 @@ import type { Compound } from "prismarine-nbt";
 import { NO_EVENTS, type EventSink } from "../core/events.js";
 import { Mask } from "../core/mask.js";
 import { boxVolume, formatBox, toPublic, translateBox, unionBox, type Box, type PublicBox, type Vec3 } from "../core/region.js";
+import { listCameras, saveCamera } from "../document/cameras.js";
 import type { Component } from "../document/components.js";
 import { Document, type EditResult, type PendingChanges, type WriteGuard } from "../document/document.js";
 import type { StateTable } from "../document/voxels.js";
@@ -286,6 +287,13 @@ export class ScopeManager {
         ...(keepParent ? { parent: c.parent } : {}),
       });
       if (!keepParent) delete doc.components.get(c.id)!.parent;
+    }
+
+    // Saved cameras (06, *Cameras*): those whose eye lies in the sandbox's volumes come along,
+    // translated into its frame like anchors; the rest would look from outside what it holds.
+    for (const [name, cam] of listCameras(parent)) {
+      const [ex, ey, ez] = cam.eye.map(Math.round) as Vec3;
+      if (work.has(ex, ey, ez) || context.has(ex, ey, ez)) saveCamera(doc, name, { ...cam, eye: sub(cam.eye, offset), target: sub(cam.target, offset) });
     }
 
     const spec = input.spec && translateSpec(input.spec, offset);

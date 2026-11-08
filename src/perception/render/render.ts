@@ -5,15 +5,18 @@ import { Mask } from "../../core/mask.js";
 import { formatBox, intersectBox, isEmptyBox, type Box, type Vec3 } from "../../core/region.js";
 import type { Facing } from "../../document/document.js";
 import type { Document } from "../../document/document.js";
+import { DEFAULT_FOV, getCamera } from "../../document/cameras.js";
 import type { BakedBlock, BakedQuad, BlockBaker } from "./bake.js";
-import { recordRender, type ViewCamera } from "./cameras.js";
-import { basis, Raster, type Camera, type V3 } from "./raster.js";
+import { bandOf, explodeAt, kept, recordRender, unexplode, type Cut, type Explode, type ViewCamera } from "./cameras.js";
+import { basis, NEAR, Raster, type Camera, type V3 } from "./raster.js";
 import type { Face } from "../../assets/models.js";
 
 /**
  * render (docs/design/06-perception.md): textured orthographic views of the document with axis
- * ticks, a ground grid and a compass, so pixels map back to block coordinates. Several views go
- * into one contact sheet. Each render's cameras are kept per document (cameras.ts) for raycast.
+ * ticks, a ground grid and a compass, so pixels map back to block coordinates, and perspective
+ * views from an eye (06, *Cameras*), captioned with eye, target and fov instead of ticks. Several
+ * views go into one contact sheet. Each render's cameras are kept per document (cameras.ts) for
+ * raycast.
  *
  * Styles: textured, flat (mean colours), depth (flat colours darkened with distance) and xray
  * (translucent shell; highlighted blocks stay solid). Per-block flags (HIGHLIGHT, and CONTEXT for
@@ -32,7 +35,27 @@ export type ViewName = (typeof VIEW_NAMES)[number];
 export type CustomView = { yaw: number; pitch: number; distance?: number; target?: Vec3 };
 /** "component:<id>" frames that component from the south-east. */
 export type ComponentView = `component:${string}`;
-export type View = ViewName | ComponentView | CustomView;
+/**
+ * Perspective camera (06, *Cameras*): eye and target in local block units, where an integer is the
+ * block's centre (as saved cameras, document/cameras.ts); `fov` is vertical, in degrees (default
+ * 70). `frame` is a local half-open box to fit: without `fov`, the fov is chosen so it fills the
+ * view (a selection target is framed). `label` names the view in the caption.
+ */
+export type PerspectiveView = { eye: Vec3; target: Vec3; fov?: number; frame?: Box; label?: string };
+/** A camera saved on the document (`camera` tool, document/cameras.ts). */
+export type SavedCameraView = { camera: string };
+/** Cubemap (06, *Cameras*): the six faces seen from one point (block units), 90° each, as a labelled 3×2 sheet. */
+export type CubemapView = { cubemap: Vec3 };
+/**
+ * Turntable (06, *Cameras*): `steps` orthographic views (default 8, 2..12) at even bearings around
+ * a target point (block units), at `pitch` degrees above the horizon (default 30), all at one zoom
+ * that fits `frame` (a local half-open box; default everything drawn).
+ */
+export type TurntableView = { turntable: Vec3; steps?: number; pitch?: number; frame?: Box };
+export type CompositeView = CubemapView | TurntableView;
+export type View = ViewName | ComponentView | CustomView | PerspectiveView | SavedCameraView | CompositeView;
+type OrthoView = ViewName | ComponentView | CustomView;
+type SingleView = OrthoView | PerspectiveView;
 export type RenderStyle = "textured" | "flat" | "depth" | "xray";
 export type ContextMode = "ghost" | "normal" | "hide";
 
@@ -55,6 +78,25 @@ export interface RenderOptions {
    * translucent, never hiding editable blocks), normal, or hide. Ignored outside a sandbox.
    */
   context?: ContextMode;
+  /**
+   * Near clip (06, *Cameras*): blocks whose centre is nearer than this many blocks are not drawn
+   * and hide nothing, so cut faces draw closed. Perspective: measured from the eye along the view;
+   * orthographic: from the front of the drawn box.
+   */
+  near?: number;
+  /** Section box (06, *Cameras*): only blocks inside it are drawn, like `region`, composing with it and with `cutaway`. */
+  section?: Box | Mask;
+  /**
+   * Depth peeling (06, *Cameras*): draw the n-th surface along each ray instead of the first (1 is
+   * a normal render). Every block face turned toward the camera counts, faces against a neighbour
+   * included, so peel 2 shows what lies directly behind a one-block façade.
+   */
+  peel?: number;
+  /**
+   * Exploded view (06, *Cameras*): splits the build at layers along an axis and moves each band
+   * `gap` blocks (default 4) further than the one before. Each `at` value starts a new band.
+   */
+  explode?: { axis: "x" | "y" | "z"; at: number[]; gap?: number };
   /** Plain picture for a file thumbnail: transparent background, no grid, ticks, compass or caption room; size may go down to 32. Not recorded for raycast. */
   thumbnail?: boolean;
 }
@@ -105,6 +147,8 @@ interface Scene {
   airHighlights: Vec3[];
   /** Ghosted context positions: they never hide the faces of editable blocks. */
   ghost?: Mask;
+  /** Exploded view: the split, and the unexploded clip, mask and box (cameras.ts maps rays back through it). */
+  explode?: { spec: Explode; clip: Box; mask?: Mask; box: Box };
   /** Context blocks drawn. */
   contextBlocks: number;
 }
@@ -114,10 +158,43 @@ interface Label {
   at: V3;
 }
 
+export const isPerspective = (v: View): v is PerspectiveView => typeof v === "object" && "eye" in v;
+const isComposite = (v: View): v is CompositeView => typeof v === "object" && ("cubemap" in v || "turntable" in v);
+
+/** Most steps a turntable takes. */
+export const MAX_TURNTABLE_STEPS = 12;
+const CUBE_FACES: [string, V3][] = [["north", [0, 0, -1]], ["east", [1, 0, 0]], ["south", [0, 0, 1]], ["west", [-1, 0, 0]], ["up", [0, 1, 0]], ["down", [0, -1, 0]]];
+
+/** A composite view's cells: single views on a cols × rows grid, and its caption note. */
+function expandComposite(v: CompositeView, s: Scene): { subs: SingleView[]; cols: number; rows: number; note: string } {
+  const f = (p: Vec3) => `(${p.map((n) => +n.toFixed(2)).join(",")})`;
+  if ("cubemap" in v) {
+    const p = v.cubemap;
+    const subs = CUBE_FACES.map(([name, d]): PerspectiveView => ({ eye: [...p], target: [p[0] + d[0], p[1] + d[1], p[2] + d[2]], fov: 90, label: `cubemap ${name}` }));
+    return { subs, cols: 3, rows: 2, note: `cubemap at ${f(p)}: north, east, south / west, up, down (90° each)` };
+  }
+  const steps = v.steps ?? 8, pitch = v.pitch ?? 30;
+  if (!Number.isInteger(steps) || steps < 2 || steps > MAX_TURNTABLE_STEPS) throw new Error(`turntable steps must be an integer 2..${MAX_TURNTABLE_STEPS} (got ${steps})`);
+  if (!(pitch >= -89 && pitch <= 89)) throw new Error(`turntable pitch must be -89..89 (got ${pitch})`);
+  const box = v.frame ?? s.box;
+  const distance = Math.max(1, Math.hypot(box.max[0] - box.min[0], box.max[1] - box.min[1], box.max[2] - box.min[2]) / 2);
+  const subs = Array.from({ length: steps }, (_, i): CustomView => ({ yaw: +((360 * i) / steps).toFixed(1), pitch, distance: +distance.toFixed(1), target: [...v.turntable] }));
+  const cols = Math.min(steps, 4);
+  return { subs, cols, rows: Math.ceil(steps / cols), note: `turntable around ${f(v.turntable)}: ${steps} steps of ${+(360 / steps).toFixed(1)}° from north, pitch ${pitch}` };
+}
+
+/** Replaces `{camera: name}` views with the saved camera (document/cameras.ts). */
+function resolveSaved(doc: Document, v: View): SingleView | CompositeView {
+  if (typeof v !== "object" || !("camera" in v)) return v;
+  const c = getCamera(doc, v.camera);
+  if (!c) throw new Error(`no saved camera "${v.camera}"${doc.cameras.size ? ` (have: ${[...doc.cameras.keys()].sort().join(", ")})` : "; save one with the camera tool"}`);
+  return { ...c, label: `camera ${v.camera}` };
+}
+
 export async function renderDocument(doc: Document, baker: BlockBaker, opts: RenderOptions = {}): Promise<RenderResult> {
-  const views = opts.views?.length ? opts.views : DEFAULT_VIEWS;
+  const views = (opts.views?.length ? opts.views : DEFAULT_VIEWS).map((v) => resolveSaved(doc, v));
   if (views.length > 4) throw new Error("render takes at most 4 views per call (they share one image)");
-  const size = Math.min(1024, Math.max(opts.thumbnail ? 32 : 128, Math.round(opts.size ?? (views.length > 1 ? 768 : 512))));
+  const size = Math.min(1024, Math.max(opts.thumbnail ? 32 : 128, Math.round(opts.size ?? (views.length > 1 || views.some(isComposite) ? 768 : 512))));
 
   // One scene per distinct region (component views frame their own component).
   const scenes = new Map<string, Promise<Scene | undefined>>();
@@ -147,12 +224,44 @@ export async function renderDocument(doc: Document, baker: BlockBaker, opts: Ren
 
   const cols = views.length === 1 ? 1 : 2;
   const rows = views.length <= 2 ? 1 : 2;
-  const cellW = Math.floor(size / cols);
-  const cellH = views.length === 2 ? Math.floor(size / 2) : Math.floor(size / rows);
+  let cellW = Math.floor(size / cols);
+  let cellH = views.length === 2 ? Math.floor(size / 2) : Math.floor(size / rows);
+  // A composite alone gets an image shaped like its grid of square cells.
+  const lone = views.length === 1 && isComposite(views[0]!) && sceneList[0] ? expandComposite(views[0], sceneList[0]) : undefined;
+  if (lone) {
+    const side = Math.floor(cellW / lone.cols);
+    [cellW, cellH] = [side * lone.cols, side * lone.rows];
+  }
   const out = new Image(cellW * cols, cellH * rows);
   const notes: string[] = [];
   const cams: ViewCamera[] = [];
   const style = opts.style ?? "textured";
+  if (opts.peel !== undefined && !(Number.isInteger(opts.peel) && opts.peel >= 1 && opts.peel <= MAX_PEEL)) throw new Error(`peel must be an integer 1..${MAX_PEEL} (got ${opts.peel})`);
+  const peel = opts.thumbnail ? 1 : (opts.peel ?? 1);
+  const cut: CutOpts = { ...(opts.near ? { near: opts.near } : {}), peel };
+  /** Draws one single view into a cell and records its camera; returns its caption note. */
+  const drawOne = (v: SingleView, scene: Scene, ox: number, oy: number, w: number, h: number): string => {
+    const asked = v; // captions give the camera as asked for
+    const note = (r: { fov?: number; scale: number }) => (isPerspective(asked) ? perspectiveText(asked, r.fov!) : `${viewLabel(asked)} ${r.scale.toFixed(1)} px/block`);
+    // In an exploded view a camera's points move with the band they lie in.
+    if (scene.explode) v = explodeView(scene.explode.spec, v);
+    const labels: Label[] = [];
+    if (opts.overlays?.components && !opts.thumbnail)
+      for (const id of doc.components.keys()) {
+        const c = doc.componentLocal(id)!;
+        if (isEmptyBox(intersectBox(c.box, scene.box))) continue;
+        const at: V3 = [(c.box.min[0] + c.box.max[0]) / 2, c.box.max[1], (c.box.min[2] + c.box.max[2]) / 2];
+        labels.push({ text: id, at: scene.explode ? explodeAt(scene.explode.spec, ...at) : at });
+      }
+    const r = isPerspective(v)
+      ? drawPerspective(out, ox, oy, w, h, v, scene, style, labels, cut)
+      : drawView(out, ox, oy, w, h, v, scene, doc.meta.front, style, opts.thumbnail ?? false, labels, cut);
+    cams.push({
+      label: viewLabel(v), ox, oy, width: w, height: h, ss: SS, cam: r.cam, clip: scene.clip,
+      ...(scene.mask ? { mask: scene.mask } : {}), ...(r.cut ? { cut: r.cut } : {}), ...(peel > 1 ? { peel } : {}), ...(scene.explode ? { explode: scene.explode } : {}),
+    });
+    return note(r);
+  };
   views.forEach((v, i) => {
     const ox = (i % cols) * cellW, oy = Math.floor(i / cols) * cellH;
     const scene = sceneList[i];
@@ -162,16 +271,19 @@ export async function renderDocument(doc: Document, baker: BlockBaker, opts: Ren
       notes.push(`${viewLabel(v)} empty`);
       return;
     }
-    const labels: Label[] = [];
-    if (opts.overlays?.components && !opts.thumbnail)
-      for (const id of doc.components.keys()) {
-        const c = doc.componentLocal(id)!;
-        if (isEmptyBox(intersectBox(c.box, scene.box))) continue;
-        labels.push({ text: id, at: [(c.box.min[0] + c.box.max[0]) / 2, c.box.max[1], (c.box.min[2] + c.box.max[2]) / 2] });
-      }
-    const r = drawView(out, ox, oy, cellW, cellH, v, scene, doc.meta.front, style, opts.thumbnail ?? false, labels);
-    cams.push({ label: viewLabel(v), ox, oy, width: cellW, height: cellH, ss: SS, cam: r.cam, clip: scene.clip, ...(scene.mask ? { mask: scene.mask } : {}) });
-    notes.push(`${viewLabel(v)} ${r.scale.toFixed(1)} px/block`);
+    if (!isComposite(v)) {
+      notes.push(drawOne(v, scene, ox, oy, cellW, cellH));
+      return;
+    }
+    // A composite fills its cell with a grid of square sub-cells (counting as one view).
+    const c = lone ?? expandComposite(v, scene);
+    const side = Math.floor(Math.min(cellW / c.cols, cellH / c.rows));
+    const dx = ox + Math.floor((cellW - side * c.cols) / 2), dy = oy + Math.floor((cellH - side * c.rows) / 2);
+    out.fillRect(ox, oy, cellW, cellH, [205, 221, 236, 255]);
+    const subNotes = c.subs.map((sv, j) => drawOne(sv, scene, dx + (j % c.cols) * side, dy + Math.floor(j / c.cols) * side, side, side));
+    for (let k = 1; k < c.cols; k++) out.fillRect(dx + k * side, dy, 1, side * c.rows, [120, 135, 150, 255]);
+    for (let k = 1; k < c.rows; k++) out.fillRect(dx, dy + k * side, side * c.cols, 1, [120, 135, 150, 255]);
+    notes.push("turntable" in v ? `${c.note}, ${subNotes[0]!.replace(/^.* (\S+ px\/block)$/, "$1")}` : c.note);
   });
   if (cols * rows > 1) {
     for (let i = 1; i < cols; i++) out.fillRect(i * cellW, 0, 1, out.height, [120, 135, 150, 255]);
@@ -185,11 +297,17 @@ export async function renderDocument(doc: Document, baker: BlockBaker, opts: Ren
   const id = opts.thumbnail ? undefined : recordRender(doc, { revision: doc.revision, width: out.width, height: out.height, views: cams });
   const caption = [
     `render ${out.width}×${out.height} · ${notes.join(" · ")}${id ? ` · id ${id}` : ""}`,
-    `drew ${n.toLocaleString("en-US")} blocks in ${formatBox(main.box)}${main.mask ? " (selection)" : ""}${cutawayText(opts.cutaway)}${style !== "textured" ? ` · style ${style}` : ""} · front=${doc.meta.front}`,
+    `drew ${n.toLocaleString("en-US")} blocks in ${formatBox(main.explode?.box ?? main.box)}${main.mask || main.explode?.mask ? " (selection)" : ""}${cutawayText(opts.cutaway)}${style !== "textured" ? ` · style ${style}` : ""} · front=${doc.meta.front}` +
+      (opts.section ? ` · section ${opts.section instanceof Mask ? `selection in ${formatBox(opts.section.bbox() ?? { min: [0, 0, 0], max: [0, 0, 0] })}` : formatBox(opts.section)}` : "") +
+      (opts.near ? ` · near clip ${opts.near} (blocks nearer are not drawn)` : "") +
+      (peel > 1 ? ` · peel ${peel}: the ${ordinal(peel)} surface along each ray (every block face toward the camera counts)` : ""),
     opts.highlight ? `highlighted ${highlighted.toLocaleString("en-US")} position${highlighted === 1 ? "" : "s"} in orange${main.airHighlights.length ? ` (${main.airHighlights.length} now air, outlined)` : ""}` : "",
     main.contextBlocks ? `${main.contextBlocks.toLocaleString("en-US")} read-only context blocks${opts.context === "normal" ? " drawn normally" : " ghosted (grey, translucent)"}` : "",
     doc.context && opts.context === "hide" ? "context hidden" : "",
-    "Ticks label block coordinates along the bottom edges; N marks north.",
+    views.every((v) => isPerspective(v) || (typeof v === "object" && "cubemap" in v))
+      ? "Perspective views carry no ticks: the caption gives eye, target and fov."
+      : "Ticks label block coordinates along the bottom edges; N marks north.",
+    main.explode ? `exploded along ${"xyz"[main.explode.spec.axis]} at ${main.explode.spec.at.join(", ")}, ${main.explode.spec.gap} blocks apart (positions in the image are moved; raycast reports real ones)` : "",
     id ? `raycast({view:"${id}", px, py}) names the block under a pixel.` : "",
     fallback.size ? `no model for ${[...fallback].slice(0, 5).join(", ")}${fallback.size > 5 ? " …" : ""} (drawn as magenta checker)` : "",
   ].filter(Boolean);
@@ -206,6 +324,39 @@ function cutawayText(c: Cutaway | undefined): string {
   if (!c) return "";
   if ("maxY" in c) return ` (cutaway above y=${c.maxY})`;
   return ` (cutaway: kept ${c.keep} of ${c.plane}=${c.at})`;
+}
+
+/** Most layers depth peeling draws (each is one more pass over the scene). */
+export const MAX_PEEL = 8;
+
+/** Per-view cuts: near clip distance and the surface to draw (depth peeling). */
+interface CutOpts {
+  near?: number;
+  peel: number;
+}
+
+const ordinal = (n: number) => `${n}${n % 10 === 1 && n % 100 !== 11 ? "st" : n % 10 === 2 && n % 100 !== 12 ? "nd" : n % 10 === 3 && n % 100 !== 13 ? "rd" : "th"}`;
+
+/**
+ * Runs `paint` once per peeled layer: each pass after the first only draws what lies beyond the
+ * previous pass's depth, so the last pass holds the n-th surface (06, *Depth peeling*).
+ */
+function peeled(r: Raster, peel: number, paint: () => void): void {
+  for (let k = 1; k <= peel; k++) {
+    if (k > 1) {
+      r.floor = r.depth.slice();
+      r.depth.fill(Infinity);
+    }
+    paint();
+  }
+}
+
+/** Two regions' intersection (either may be a box or a mask; no first region = everything). */
+function intersectRegion(a: Box | Mask | undefined, b: Box | Mask): Box | Mask {
+  if (!a) return b;
+  if (!(a instanceof Mask) && !(b instanceof Mask)) return intersectBox(a, b);
+  const m = a instanceof Mask ? a.clone() : Mask.fromBox(a);
+  return m.intersectWith(b instanceof Mask ? b : Mask.fromBox(b));
 }
 
 /** The clip box after a cutaway (the plane's own layer is kept). */
@@ -228,6 +379,7 @@ export function applyCutaway(region: Box, c: Cutaway | undefined): Box {
 async function buildScene(doc: Document, baker: BlockBaker, opts: RenderOptions, regionIn: Box | Mask | undefined): Promise<Scene | undefined> {
   const bounds = doc.localBounds();
   if (!bounds) return undefined;
+  if (opts.section) regionIn = intersectRegion(regionIn, opts.section);
   const mask = regionIn instanceof Mask ? regionIn : undefined;
   const regionBox = mask ? mask.bbox() : (regionIn as Box | undefined);
   if (mask && !regionBox) return undefined;
@@ -278,7 +430,7 @@ async function buildScene(doc: Document, baker: BlockBaker, opts: RenderOptions,
         if (nbt) baked[i] = await baker.bakeAt([x, ys[i]!, zs[i]!], doc.states.get(ids[i]!), nbt);
       }),
     );
-  return {
+  const scene: Scene = {
     xs: Int32Array.from(xs),
     ys: Int32Array.from(ys),
     zs: Int32Array.from(zs),
@@ -298,9 +450,66 @@ async function buildScene(doc: Document, baker: BlockBaker, opts: RenderOptions,
       return id ? bakedById.get(id) : undefined;
     },
   };
+  return opts.explode ? explodeScene(scene, explodeSpec(opts.explode)) : scene;
 }
 
-function cameraFor(v: View, front: Facing): { toward: V3; upHint: V3; kind: "iso" | "elevation" | "top" } {
+/** A camera's points moved with the band they lie in (block units: the band of the block a point is in). */
+function explodeView(e: Explode, v: SingleView): SingleView {
+  const move = (p: Vec3): Vec3 => {
+    const q: Vec3 = [...p];
+    q[e.axis] = q[e.axis]! + bandOf(e, Math.round(q[e.axis]!)) * e.gap;
+    return q;
+  };
+  if (isPerspective(v)) return { ...v, eye: move(v.eye), target: move(v.target) };
+  if (typeof v === "object" && v.target) return { ...v, target: move(v.target) };
+  return v;
+}
+
+/** Validates an `explode` option into a spec (axis index, sorted split layers, gap). */
+function explodeSpec(e: NonNullable<RenderOptions["explode"]>): Explode {
+  const axis = "xyz".indexOf(e.axis);
+  if (axis < 0) throw new Error(`explode axis must be x, y or z (got ${e.axis})`);
+  if (!e.at.length || !e.at.every(Number.isInteger)) throw new Error("explode at must list one or more integer layers");
+  const gap = e.gap ?? 4;
+  if (!Number.isInteger(gap) || gap < 1 || gap > 64) throw new Error(`explode gap must be an integer 1..64 (got ${gap})`);
+  return { axis: axis as 0 | 1 | 2, at: [...new Set(e.at)].sort((a, b) => a - b), gap };
+}
+
+/**
+ * The scene of an exploded view (06, *Cameras*): every block drawn at its moved position. Faces
+ * across a split are no longer hidden by their neighbour (it moved away), so each band's cut
+ * faces draw closed.
+ */
+function explodeScene(s: Scene, e: Explode): Scene {
+  const xs = new Int32Array(s.xs.length), ys = new Int32Array(s.ys.length), zs = new Int32Array(s.zs.length);
+  const box: Box = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
+  for (let i = 0; i < xs.length; i++) {
+    const p = explodeAt(e, s.xs[i]!, s.ys[i]!, s.zs[i]!);
+    [xs[i], ys[i], zs[i]] = p;
+    for (let a = 0; a < 3; a++) (box.min[a] = Math.min(box.min[a]!, p[a]!)), (box.max[a] = Math.max(box.max[a]!, p[a]! + 1));
+  }
+  const lo = explodeAt(e, ...s.clip.min), hi = explodeAt(e, s.clip.max[0] - 1, s.clip.max[1] - 1, s.clip.max[2] - 1);
+  let ghost: Mask | undefined;
+  if (s.ghost) {
+    ghost = new Mask();
+    s.ghost.forEach((x, y, z) => ghost!.add(...explodeAt(e, x, y, z)));
+  }
+  const { mask: _mask, ghost: _ghost, ...rest } = s;
+  return {
+    ...rest,
+    xs, ys, zs, box,
+    clip: { min: lo, max: [hi[0] + 1, hi[1] + 1, hi[2] + 1] },
+    airHighlights: s.airHighlights.map((p) => explodeAt(e, ...p)),
+    ...(ghost ? { ghost } : {}),
+    occluderAt: (x, y, z) => {
+      const q = unexplode(e, x, y, z);
+      return q && s.occluderAt(...q);
+    },
+    explode: { spec: e, clip: s.clip, ...(s.mask ? { mask: s.mask } : {}), box: s.box },
+  };
+}
+
+function cameraFor(v: OrthoView, front: Facing): { toward: V3; upHint: V3; kind: "iso" | "elevation" | "top" } {
   if (typeof v === "object") {
     const yaw = (v.yaw * Math.PI) / 180, p = (Math.max(-89, Math.min(89, v.pitch)) * Math.PI) / 180;
     return { toward: [Math.sin(yaw) * Math.cos(p), Math.sin(p), -Math.cos(yaw) * Math.cos(p)], upHint: [0, 1, 0], kind: Math.abs(v.pitch) < 1 ? "elevation" : "iso" };
@@ -324,7 +533,17 @@ function cameraFor(v: View, front: Facing): { toward: V3; upHint: V3; kind: "iso
   }
 }
 
+/** Caption text of a perspective view: eye, target and fov (block units, integer = block centre). */
+function perspectiveText(v: PerspectiveView, fov: number): string {
+  const f = (p: Vec3) => `(${p.map((n) => +n.toFixed(2)).join(",")})`;
+  return `${viewLabel(v)}: eye ${f(v.eye)} target ${f(v.target)} fov ${+fov.toFixed(1)}°`;
+}
+
 function viewLabel(v: View): string {
+  if (typeof v === "object" && "camera" in v) return `camera ${v.camera}`;
+  if (isPerspective(v)) return v.label ?? "perspective";
+  if (typeof v === "object" && "cubemap" in v) return "cubemap";
+  if (typeof v === "object" && "turntable" in v) return "turntable";
   if (typeof v === "object") return `yaw ${v.yaw} pitch ${v.pitch}${v.distance !== undefined ? ` dist ${v.distance}` : ""}`;
   return v;
 }
@@ -338,9 +557,9 @@ interface Look {
 }
 
 function drawView(
-  out: Image, ox: number, oy: number, w: number, h: number, v: View, s: Scene, front: Facing, style: RenderStyle, thumbnail: boolean,
-  labels: Label[],
-): { scale: number; cam: Camera } {
+  out: Image, ox: number, oy: number, w: number, h: number, v: OrthoView, s: Scene, front: Facing, style: RenderStyle, thumbnail: boolean,
+  labels: Label[], co: CutOpts = { peel: 1 },
+): { scale: number; cam: Camera; fov?: number; cut?: Cut } {
   const { toward, upHint, kind } = cameraFor(v, front);
   const b = basis(toward, upHint);
   // Fit the drawn box (plus a little room for tick labels) into the cell.
@@ -366,37 +585,75 @@ function drawView(
   }
   const cam: Camera = { ...b, scale: scale * SS, cx, cy: cy - capRoom / 2 / scale, width: w * SS, height: h * SS };
   const r = new Raster(w * SS, h * SS, cam);
-  if (!thumbnail) r.fillBackground(BG_TOP, BG_BOTTOM);
-  if (!thumbnail && kind !== "elevation") drawGrid(r, s.box, scale);
-
   // Depth range for the depth style.
   const ds = corners.map((c) => c[0] * b.forward[0] + c[1] * b.forward[1] + c[2] * b.forward[2]);
   const dmin = Math.min(...ds), dspan = Math.max(1e-6, Math.max(...ds) - dmin);
-  const lookOf = (flags: number, q: BakedQuad, x: number, y: number, z: number): Look => {
+  const fwd = b.forward;
+  const depthOf = (c: number, cy2: number, cz: number) => c * fwd[0] + cy2 * fwd[1] + cz * fwd[2];
+  // Near clip: measured from the front of the drawn box.
+  const cut: Cut | undefined = co.near ? { normal: [...fwd], d: dmin + co.near } : undefined;
+  peeled(r, co.peel, () => {
+    if (!thumbnail) r.fillBackground(BG_TOP, BG_BOTTOM);
+    if (!thumbnail && kind !== "elevation") drawGrid(r, s.box, scale);
+    drawBlocks(
+      s, style, (c, cy2, cz) => (c * b.forward[0] + cy2 * b.forward[1] + cz * b.forward[2] - dmin) / dspan, (q) => facesAway(q, fwd), depthOf,
+      (q, x, y, z, look) => drawQuad(r, q, x, y, z, look), cut, co.peel > 1,
+    );
+  });
+
+  // Highlighted positions that are air (e.g. blocks a diff removed): orange wire cubes.
+  const lw = Math.max(1, Math.round(SS / 2));
+  for (const [x, y, z] of s.airHighlights) {
+    if (cut && !kept(cut, x, y, z)) continue;
+    for (const [a, c] of CUBE_EDGES) r.line(r.project(x + a[0], y + a[1], z + a[2]), r.project(x + c[0], y + c[1], z + c[2]), [255, 140, 0], 0.9, lw, true);
+  }
+
+  r.downsampleInto(out, ox, oy, SS, thumbnail);
+  if (!thumbnail) drawOverlays(out, ox, oy, w, h, r, s.box, kind, v, toward, labels);
+  return { scale, cam, ...(cut ? { cut } : {}) };
+}
+
+
+/** How a quad looks in a style, given its flags; `depthT` maps a world point to 0 (near) .. 1 (far) for the depth style. */
+function lookFor(style: RenderStyle, depthT: (x: number, y: number, z: number) => number) {
+  return (flags: number, q: BakedQuad, x: number, y: number, z: number): Look => {
     const hl = flags & HIGHLIGHT ? HL : undefined;
     if (flags & CONTEXT) return { flat: ghostColour(q.tex.mean), ...(hl ? { overlay: hl } : {}), mode: "blend", alpha: 0.3 };
     if (style === "xray") return hl ? { flat: q.tex.mean, overlay: hl, mode: "opaque", alpha: 1 } : { flat: q.tex.mean, mode: "blend", alpha: 0.28 };
     if (style === "depth") {
       const c = (q.pos[0]! + q.pos[6]!) / 2 + x, cy2 = (q.pos[1]! + q.pos[7]!) / 2 + y, cz = (q.pos[2]! + q.pos[8]!) / 2 + z;
-      const t = (c * b.forward[0] + cy2 * b.forward[1] + cz * b.forward[2] - dmin) / dspan;
+      const t = depthT(c, cy2, cz);
       const k = 1 - 0.7 * Math.min(1, Math.max(0, t));
       const m = q.tex.mean;
       return { flat: [m[0] * k, m[1] * k, m[2] * k], ...(hl ? { overlay: hl } : {}), mode: "opaque", alpha: 1 };
     }
     return { ...(style === "flat" ? { flat: q.tex.mean } : {}), ...(hl ? { overlay: hl } : {}), mode: q.tex.translucent && style === "textured" ? "blend" : "opaque", alpha: 1 };
   };
+}
 
+/**
+ * Draws the scene's blocks: culls faces against neighbours (block-level occlusion) and faces turned
+ * away from the camera (`away`), draws opaque quads, then blended quads sorted far to near by
+ * `depthOf` (a world point's distance along the view).
+ */
+function drawBlocks(
+  s: Scene, style: RenderStyle, depthT: (x: number, y: number, z: number) => number, away: (q: BakedQuad, x: number, y: number, z: number) => boolean,
+  depthOf: (x: number, y: number, z: number) => number, draw: (q: BakedQuad, x: number, y: number, z: number, look: Look) => void, cut?: Cut, noCull = false,
+): void {
+  const lookOf = lookFor(style, depthT);
   // Opaque pass, collecting blended quads for a sorted second pass.
   const blended: { q: BakedQuad; x: number; y: number; z: number; d: number; look: Look }[] = [];
-  const fwd = b.forward;
   for (let i = 0; i < s.baked.length; i++) {
     const blk = s.baked[i]!;
     const x = s.xs[i]!, y = s.ys[i]!, z = s.zs[i]!;
+    // Near clip: dropped blocks are not drawn and hide nothing (cut faces draw closed).
+    if (cut && !kept(cut, x, y, z)) continue;
     const flags = s.flags[i]!;
     for (const q of blk.quads) {
-      if (q.cull) {
+      // Depth peeling counts faces against neighbours too (peel 2 = directly behind a façade).
+      if (q.cull && !noCull) {
         const d = DIR[q.cull];
-        const nb = s.occluderAt(x + d[0], y + d[1], z + d[2]);
+        const nb = cut && !kept(cut, x + d[0], y + d[1], z + d[2]) ? undefined : s.occluderAt(x + d[0], y + d[1], z + d[2]);
         // A ghosted context block never hides an editable block's face (11).
         const seeThrough = s.ghost && !(flags & CONTEXT) && s.ghost.has(x + d[0], y + d[1], z + d[2]);
         // Hidden by an opaque neighbour, or between two blocks of the same translucent kind (glass, water).
@@ -404,26 +661,17 @@ function drawView(
       }
       const look = lookOf(flags, q, x, y, z);
       // X-ray shows the far side of the shell through the near side.
-      if (!(style === "xray" && look.mode === "blend") && facesAway(q, fwd)) continue;
+      if (!(style === "xray" && look.mode === "blend") && away(q, x, y, z)) continue;
       if (look.mode === "blend") {
         const c = (q.pos[0]! + q.pos[6]!) / 2 + x, cy2 = (q.pos[1]! + q.pos[7]!) / 2 + y, cz = (q.pos[2]! + q.pos[8]!) / 2 + z;
-        blended.push({ q, x, y, z, d: c * fwd[0] + cy2 * fwd[1] + cz * fwd[2], look });
+        blended.push({ q, x, y, z, d: depthOf(c, cy2, cz), look });
         continue;
       }
-      drawQuad(r, q, x, y, z, look);
+      draw(q, x, y, z, look);
     }
   }
   blended.sort((a, c) => c.d - a.d);
-  for (const e of blended) drawQuad(r, e.q, e.x, e.y, e.z, e.look);
-
-  // Highlighted positions that are air (e.g. blocks a diff removed): orange wire cubes.
-  const lw = Math.max(1, Math.round(SS / 2));
-  for (const [x, y, z] of s.airHighlights)
-    for (const [a, c] of CUBE_EDGES) r.line(r.project(x + a[0], y + a[1], z + a[2]), r.project(x + c[0], y + c[1], z + c[2]), [255, 140, 0], 0.9, lw, true);
-
-  r.downsampleInto(out, ox, oy, SS, thumbnail);
-  if (!thumbnail) drawOverlays(out, ox, oy, w, h, r, s.box, kind, v, toward, labels);
-  return { scale, cam };
+  for (const e of blended) draw(e.q, e.x, e.y, e.z, e.look);
 }
 
 const CUBE_EDGES: [V3, V3][] = [
@@ -456,8 +704,154 @@ function drawGrid(r: Raster, box: Box, scale: number): void {
   const pad = 1;
   const x0 = box.min[0] - pad, x1 = box.max[0] + pad, z0 = box.min[2] - pad, z1 = box.max[2] + pad;
   const lw = Math.max(1, Math.round(SS / 2));
-  for (let x = Math.ceil(x0 / step) * step; x <= x1; x += step) r.line(r.project(x, y, z0), r.project(x, y, z1), GRID, x % 16 === 0 ? 0.35 : 0.18, lw);
-  for (let z = Math.ceil(z0 / step) * step; z <= z1; z += step) r.line(r.project(x0, y, z), r.project(x1, y, z), GRID, z % 16 === 0 ? 0.35 : 0.18, lw);
+  // Perspective lines are clipped to the near plane first.
+  const line = (a: V3, b: V3, alpha: number) => (r.persp ? segment(r, a, b, GRID, alpha, lw, false) : r.line(r.project(...a), r.project(...b), GRID, alpha, lw));
+  for (let x = Math.ceil(x0 / step) * step; x <= x1; x += step) line([x, y, z0], [x, y, z1], x % 16 === 0 ? 0.35 : 0.18);
+  for (let z = Math.ceil(z0 / step) * step; z <= z1; z += step) line([x0, y, z], [x1, y, z], z % 16 === 0 ? 0.35 : 0.18);
+}
+
+// ---- perspective (06, *Cameras*) ------------------------------------------------------------------
+
+/** Block units (integer = block centre) → world point. */
+const centre = (p: Vec3): V3 => [p[0] + 0.5, p[1] + 0.5, p[2] + 0.5];
+
+/**
+ * The vertical fov that fits a box seen from the eye along `b.forward` (with a 6% margin), or
+ * undefined when the eye is inside or beside the box (nothing to fit).
+ */
+function fitFov(box: Box, eye: V3, b: { right: V3; up: V3; forward: V3 }, aspect: number): number | undefined {
+  let t = 0;
+  for (const x of [box.min[0], box.max[0]])
+    for (const y of [box.min[1], box.max[1]])
+      for (const z of [box.min[2], box.max[2]]) {
+        const d: V3 = [x - eye[0], y - eye[1], z - eye[2]];
+        const vz = d[0] * b.forward[0] + d[1] * b.forward[1] + d[2] * b.forward[2];
+        if (vz <= NEAR) return undefined;
+        const vx = d[0] * b.right[0] + d[1] * b.right[1] + d[2] * b.right[2], vy = d[0] * b.up[0] + d[1] * b.up[1] + d[2] * b.up[2];
+        t = Math.max(t, Math.abs(vy) / vz, Math.abs(vx) / vz / aspect);
+      }
+  return Math.min(120, Math.max(5, (2 * Math.atan(t * 1.06) * 180) / Math.PI));
+}
+
+/** A perspective view's basis, eye and fov (degrees) for a w×h cell. */
+export function perspectiveSetup(v: PerspectiveView, w: number, h: number): { b: { right: V3; up: V3; forward: V3 }; eye: V3; fov: number } {
+  const eye = centre(v.eye), t = centre(v.target);
+  const toward: V3 = [eye[0] - t[0], eye[1] - t[1], eye[2] - t[2]];
+  if (Math.hypot(...toward) < 1e-9) throw new Error("perspective camera: target must differ from eye");
+  const b = basis(toward);
+  const fov = v.fov ?? (v.frame && fitFov(v.frame, eye, b, w / h)) ?? DEFAULT_FOV;
+  if (!(fov > 0 && fov < 180)) throw new Error(`perspective camera: fov must be between 0 and 180 degrees (got ${fov})`);
+  return { b, eye, fov };
+}
+
+function drawPerspective(
+  out: Image, ox: number, oy: number, w: number, h: number, v: PerspectiveView, s: Scene, style: RenderStyle, labels: Label[], co: CutOpts = { peel: 1 },
+): { scale: number; cam: Camera; fov: number; cut?: Cut } {
+  const { b, eye, fov } = perspectiveSetup(v, w, h);
+  const focal = (h * SS) / 2 / Math.tan((fov * Math.PI) / 360);
+  const cam: Camera = { ...b, scale: focal, cx: 0, cy: 0, width: w * SS, height: h * SS, eye };
+  const r = new Raster(w * SS, h * SS, cam);
+  const fwd = b.forward;
+  const depthOf = (x: number, y: number, z: number) => (x - eye[0]) * fwd[0] + (y - eye[1]) * fwd[1] + (z - eye[2]) * fwd[2];
+  const ds: number[] = [];
+  for (const x of [s.box.min[0], s.box.max[0]]) for (const y of [s.box.min[1], s.box.max[1]]) for (const z of [s.box.min[2], s.box.max[2]]) ds.push(depthOf(x, y, z));
+  const dmin = Math.max(0, Math.min(...ds)), dspan = Math.max(1e-6, Math.max(...ds) - dmin);
+  // Grid density from the size of a block at the target.
+  const t = centre(v.target);
+  // Near clip: measured from the eye along the view.
+  const cut: Cut | undefined = co.near ? { normal: [...fwd], d: eye[0] * fwd[0] + eye[1] * fwd[1] + eye[2] * fwd[2] + co.near } : undefined;
+  peeled(r, co.peel, () => {
+    r.fillBackground(BG_TOP, BG_BOTTOM);
+    drawGrid(r, s.box, focal / SS / Math.max(1, depthOf(...t)));
+    drawBlocks(
+      s, style, (x, y, z) => (depthOf(x, y, z) - dmin) / dspan, (q, x, y, z) => facesAwayFrom(q, x, y, z, eye), depthOf,
+      (q, x, y, z, look) => drawQuadClipped(r, q, x, y, z, look), cut, co.peel > 1,
+    );
+  });
+  const lw = Math.max(1, Math.round(SS / 2));
+  for (const [x, y, z] of s.airHighlights) if (!cut || kept(cut, x, y, z)) for (const [a, c] of CUBE_EDGES) segment(r, [x + a[0], y + a[1], z + a[2]], [x + c[0], y + c[1], z + c[2]], [255, 140, 0], 0.9, lw, true);
+  r.downsampleInto(out, ox, oy, SS);
+  drawPerspectiveOverlays(out, ox, oy, w, h, r, v, labels);
+  return { scale: focal / SS, cam, fov, ...(cut ? { cut } : {}) };
+}
+
+/** True when a quad (at block x,y,z) turns its outward face away from the eye. */
+function facesAwayFrom(q: BakedQuad, x: number, y: number, z: number, eye: V3): boolean {
+  const p = q.pos;
+  const ax = p[3]! - p[0]!, ay = p[4]! - p[1]!, az = p[5]! - p[2]!;
+  const bx = p[9]! - p[0]!, by = p[10]! - p[1]!, bz = p[11]! - p[2]!;
+  const nx = -(ay * bz - az * by), ny = -(az * bx - ax * bz), nz = -(ax * by - ay * bx);
+  return nx * (p[0]! + x - eye[0]) + ny * (p[1]! + y - eye[1]) + nz * (p[2]! + z - eye[2]) > 1e-9;
+}
+
+/**
+ * Draws a quad through a perspective camera, clipped against the near plane (Sutherland–Hodgman,
+ * texture coordinates interpolated along the cut edges), so an eye inside a room or right against
+ * a wall never sees inverted or smeared geometry.
+ */
+function drawQuadClipped(r: Raster, q: BakedQuad, x: number, y: number, z: number, look: Look): void {
+  const p = q.pos, uv = q.uv;
+  const V = [0, 1, 2, 3].map((i) => r.viewSpace(p[i * 3]! + x, p[i * 3 + 1]! + y, p[i * 3 + 2]! + z));
+  let inside = 0;
+  for (const v of V) if (v[2] >= NEAR) inside++;
+  if (inside === 0) return;
+  const pts: { v: V3; u: number; w: number }[] = [];
+  for (let i = 0; i < 4; i++) {
+    const a = V[i]!, b = V[(i + 1) % 4]!;
+    const ua = uv[i * 2]!, wa = uv[i * 2 + 1]!, ub = uv[((i + 1) % 4) * 2]!, wb = uv[((i + 1) % 4) * 2 + 1]!;
+    const ina = a[2] >= NEAR, inb = b[2] >= NEAR;
+    if (ina) pts.push({ v: a, u: ua, w: wa });
+    if (ina !== inb) {
+      const t = (NEAR - a[2]) / (b[2] - a[2]);
+      pts.push({ v: [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, NEAR], u: ua + (ub - ua) * t, w: wa + (wb - wa) * t });
+    }
+  }
+  const P = pts.map((e) => r.projectView(e.v[0], e.v[1], e.v[2]));
+  for (let i = 1; i + 1 < pts.length; i++) {
+    const a = pts[0]!, b = pts[i]!, c = pts[i + 1]!;
+    r.triangle(P[0]!, P[i]!, P[i + 1]!, [a.u, a.w, b.u, b.w, c.u, c.w], q.tex.img, q.tint, q.shade, look.mode, look.flat, look.overlay, look.alpha);
+  }
+}
+
+/** A world-space line through a perspective camera, clipped to the near plane. */
+function segment(r: Raster, a: V3, b: V3, rgb: RGB, alpha: number, width: number, depthTest: boolean): void {
+  let va = r.viewSpace(...a), vb = r.viewSpace(...b);
+  if (va[2] < NEAR && vb[2] < NEAR) return;
+  if (va[2] < NEAR || vb[2] < NEAR) {
+    const t = (NEAR - va[2]) / (vb[2] - va[2]);
+    const cut: V3 = [va[0] + (vb[0] - va[0]) * t, va[1] + (vb[1] - va[1]) * t, NEAR];
+    if (va[2] < NEAR) va = cut;
+    else vb = cut;
+  }
+  r.line(r.projectView(...va), r.projectView(...vb), rgb, alpha, width, depthTest);
+}
+
+/** Perspective cells: the view name and which way the camera looks (no ticks: they wouldn't be uniform). */
+function drawPerspectiveOverlays(out: Image, ox: number, oy: number, w: number, h: number, r: Raster, v: PerspectiveView, extra: Label[]): void {
+  out.text((v.label ?? "perspective").replace(/_/g, " "), ox + 6, oy + 6, INK);
+  for (const l of extra) {
+    const vs = r.viewSpace(...l.at);
+    if (vs[2] < NEAR) continue;
+    const p = r.projectView(...vs);
+    const tw = textWidth(l.text), tx = Math.round(ox + p[0] / SS - tw / 2), ty = Math.round(oy + p[1] / SS - 11);
+    if (tx < ox + 1 || ty < oy + 1 || tx + tw > ox + w - 1 || ty + 7 > oy + h - 1) continue;
+    out.fillRect(tx - 2, ty - 2, tw + 4, 11, [255, 255, 255, 255]);
+    out.text(l.text, tx, ty, INK);
+  }
+  const f = r.cam.forward;
+  let dir: string;
+  if (Math.abs(f[1]) > 0.92) dir = f[1] < 0 ? "DOWN" : "UP";
+  else {
+    // Compass bearing of the view direction, 8 ways.
+    const deg = ((Math.atan2(f[0], -f[2]) * 180) / Math.PI + 360) % 360;
+    dir = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.round(deg / 45) % 8]!;
+    if (f[1] < -0.4) dir += " DOWN";
+    else if (f[1] > 0.4) dir += " UP";
+  }
+  const t = `LOOKING ${dir}`;
+  const name = (v.label ?? "perspective").replace(/_/g, " ");
+  // Cubemap faces are named for their direction; small cells keep only the name.
+  if (!name.startsWith("cubemap") && textWidth(name) + textWidth(t) + 18 <= w) out.text(t, ox + w - 6 - textWidth(t), oy + 6, INK);
 }
 
 function tickStep(pxPerBlock: number): number {

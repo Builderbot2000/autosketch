@@ -11,6 +11,7 @@ import { renderDocument, VIEW_NAMES, type Cutaway, type View } from "../../perce
 import { viewSlice } from "../../perception/slice.js";
 import type { InstanceContext } from "../context.js";
 import type { Session } from "../session.js";
+import { perspectiveSchema, pointSchema, resolvePerspective, resolveTarget, targetSchema, type PerspectiveInput } from "./camera.js";
 import { bakerFor, box, boxSchema, editWith, image, selSchema, text, vec3, type Result, type ToolDeps } from "./shared.js";
 
 /** Resolves a selection for a perception call without changing "last". */
@@ -58,6 +59,12 @@ const viewSchema = z.union([
     distance: z.number().positive().optional().describe("Blocks framed around target (zoom; views are orthographic)"),
     target: vec3.optional().describe("Point the view centres on (default: the middle of what is drawn)"),
   }),
+  z.object(perspectiveSchema).describe("Perspective camera from an eye (may be inside the build)"),
+  z.object({ camera: z.string() }).describe("A camera saved with the camera tool"),
+  z.object({ cubemap: pointSchema }).describe("Cubemap: the six 90° faces seen from one point, as a 3×2 sheet"),
+  z
+    .object({ turntable: targetSchema, steps: z.number().int().min(2).max(12).optional(), pitch: z.number().min(-89).max(89).optional() })
+    .describe("Turntable: orthographic views at even bearings around a target (default 8 steps, pitch 30)"),
 ]);
 
 /** Renders, slices, analysis, diffs and raycast (06). */
@@ -70,8 +77,18 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
         "Draws the build with the instance's real block models and textures. views (max 4, shared in one image): iso_se|iso_sw|iso_ne|iso_nw (3/4 views from that corner), " +
         "front|back|left|right (flat elevations, resolved through the document's front), top (plan, north up), \"component:<id>\" (auto-framed on a component), " +
         "or {yaw, pitch, distance?, target?} (camera bearing from the build: 0 north, 90 east; pitch above horizon; distance = blocks framed around target). " +
+        "Perspective: {eye:[x,y,z], target, fov?} looks from an eye (blocks; an integer is the block's centre), which may sit inside a room to see an interior the way a player does; " +
+        "target is [x,y,z], an anchor, or {sel: <selection>} (framed); fov is vertical, default 70. {camera:\"<name>\"} reuses a camera saved with the camera tool. " +
+        "Perspective and orthographic views share one sheet; perspective cells have no ticks (the caption gives eye, target and fov) and cost the same as any view. " +
         "Default: iso_se, iso_nw, front, top at 768px (~800 tokens). One view at 512px is ~350 tokens. region takes any selection: only it is drawn, framed tightly. " +
         "cutaway: {maxY} hides everything above y; {plane:\"x\"|\"y\"|\"z\", at, keep:\"west|east|down|up|north|south\"} keeps one side of a plane. " +
+        "near: n drops blocks nearer than n blocks (perspective: from the eye; orthographic: from the front of what is drawn), so the front falls away without choosing a plane. " +
+        "section: a selection the scene is clipped to, like a CAD section box (e.g. {\"subtract\":[<box>,<one octant>]} exposes a corner of the interior). Cut faces draw closed; both compose with region and cutaway. " +
+        "peel: n draws the n-th surface along each ray instead of the first (every block face toward the camera counts, so peel 2 shows what is directly behind a one-block façade; one pass per layer, same image cost). " +
+        "Composite views (each counts as one of the 4; alone it gets an image shaped to its grid, longest side `size`, default 768, max 1024): " +
+        "{cubemap:[x,y,z]} six labelled 90° faces from one point, 3×2 (~520 tokens at 768×512: a whole room at a glance); " +
+        "{turntable: target, steps?:8, pitch?:30} a ring of orthographic views around a target (target as for perspective; a selection sets the zoom), 4 per row (~400 tokens for 8 at 768×384). " +
+        "explode: {axis:\"x\"|\"y\"|\"z\", at:[layer,…], gap?:4} splits the build at those layers and moves each band gap blocks further (each at starts a band); raycast reports real positions. " +
         "highlight: any selection, tinted orange; {changed:\"op:-1\"|\"checkpoint:<name>\"} shows a diff ({since:..} still works). style: textured | flat (mean colours) | depth (darker = farther) | xray (translucent shell). " +
         "overlays: {components} labels components. Axis ticks label block coordinates; N marks north. " +
         "The caption gives the render id for raycast and for view_box/view_lasso selections. Image + caption.",
@@ -80,10 +97,17 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
         region: selSchema.optional().describe("Draw only this selection (a box {min,max} or any selection)"),
         cutaway: z.union([z.object({ maxY: z.number().int() }), z.object({ plane: z.enum(["x", "y", "z"]), at: z.number().int(), keep: z.enum(["west", "east", "down", "up", "north", "south"]) })]).optional(),
         highlight: z.union([z.object({ since: z.string() }), selSchema]).optional(),
-        size: z.number().int().min(128).max(1024).optional().describe("Longest side in pixels (default 768 for several views, 512 for one)"),
+        size: z.number().int().min(128).max(1024).optional().describe("Longest side in pixels (default 768 for several views or a composite, 512 for one)"),
         style: z.enum(["textured", "flat", "depth", "xray"]).optional(),
         overlays: z.object({ components: z.boolean().optional() }).optional(),
         context: z.enum(["ghost", "normal", "hide"]).optional().describe("In a scoped job's sandbox: how the read-only context is drawn (default ghost: grey, translucent)"),
+        near: z.number().positive().optional().describe("Near clip: blocks nearer than this many blocks are not drawn"),
+        section: selSchema.optional().describe("Section box: draw only this selection (composes with region)"),
+        peel: z.number().int().min(1).max(8).optional().describe("Depth peeling: draw the n-th surface along each ray (1 = normal; 2 = directly behind the front)"),
+        explode: z
+          .object({ axis: z.enum(["x", "y", "z"]), at: z.array(z.number().int()).min(1), gap: z.number().int().min(1).max(64).optional() })
+          .optional()
+          .describe("Exploded view: split at these layers, bands moved gap blocks apart (default 4)"),
       },
     },
     async (c, a) => {
@@ -96,6 +120,13 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
         if (r.mask.isEmpty()) throw new Error(["the region selection is empty", ...r.notes].join("; "));
         region = r.mask.isBox() ?? r.mask;
       }
+      let section: Box | Mask | undefined;
+      if (a.section !== undefined) {
+        const r = maskOf(c, doc, a.section);
+        notes.push(...r.notes);
+        if (r.mask.isEmpty()) throw new Error(["the section selection is empty", ...r.notes].join("; "));
+        section = r.mask.isBox() ?? r.mask;
+      }
       let highlight: Mask | undefined;
       if (a.highlight !== undefined) {
         const h = a.highlight as unknown;
@@ -106,8 +137,19 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
           highlight = r.mask;
         }
       }
+      const views = a.views?.map((v): View => {
+        if (typeof v === "object" && "turntable" in v) {
+          const t = resolveTarget(c, doc, v.turntable);
+          notes.push(...t.notes);
+          return { turntable: t.point, ...(t.frame ? { frame: t.frame } : {}), ...(v.steps ? { steps: v.steps } : {}), ...(v.pitch !== undefined ? { pitch: v.pitch } : {}) };
+        }
+        if (typeof v !== "object" || !("eye" in v)) return v as View;
+        const p = resolvePerspective(c, doc, v as PerspectiveInput);
+        notes.push(...p.notes);
+        return p.view;
+      });
       const r = await renderDocument(doc, await bakerFor(c), {
-        ...(a.views ? { views: a.views as View[] } : {}),
+        ...(views ? { views } : {}),
         ...(region ? { region } : {}),
         ...(a.cutaway ? { cutaway: a.cutaway as Cutaway } : {}),
         ...(highlight ? { highlight } : {}),
@@ -115,6 +157,10 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
         ...(a.style ? { style: a.style } : {}),
         ...(a.overlays ? { overlays: a.overlays } : {}),
         ...(a.context ? { context: a.context } : {}),
+        ...(a.near ? { near: a.near } : {}),
+        ...(section ? { section } : {}),
+        ...(a.peel ? { peel: a.peel } : {}),
+        ...(a.explode ? { explode: a.explode } : {}),
       });
       emitRender(session, r.views, r.width, r.height);
       return image(r.png, [r.caption, ...notes.map((n) => `note: ${n}`)].join("\n"));

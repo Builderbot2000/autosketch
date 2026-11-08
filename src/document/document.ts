@@ -208,17 +208,28 @@ export class Document {
     return this.run(op, summary, body, true);
   }
 
+  /**
+   * Like `edit`, but the write guard doesn't run: for writing the world's states into a linked
+   * document's cache (13, *World → agent*; `world/sync.ts`). Locks and the work-volume rule bind
+   * agents, and the world is authoritative, so a sync writes wherever the world changed. Never
+   * joins a running `group`: a sync is always its own journal entry.
+   */
+  editUnguarded<T>(op: string, summary: string, body: (tx: Transaction) => T): EditResult & { value: T } {
+    if (this.open) throw new Error(`${op} can't run inside another edit`);
+    return this.run(op, summary, body, false, true);
+  }
+
   /** The transaction of the innermost running `group`, which nested edits join. */
   private open?: Transaction;
 
-  private run<T>(op: string, summary: string, body: (tx: Transaction) => T, group: boolean): EditResult & { value: T } {
+  private run<T>(op: string, summary: string, body: (tx: Transaction) => T, group: boolean, unguarded = false): EditResult & { value: T } {
     const parent = this.open;
     const tx = new Transaction(this);
     if (group) this.open = tx;
     let value: T;
     try {
       value = body(tx);
-      if (this.guard) this.guard(tx.pending(), op);
+      if (this.guard && !unguarded) this.guard(tx.pending(), op);
     } catch (e) {
       tx.rollback();
       throw e;

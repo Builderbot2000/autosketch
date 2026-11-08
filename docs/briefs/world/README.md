@@ -6,12 +6,12 @@ Silo letters continue after the earlier sets and skip `M` and `W`, so they never
 
 | Silo | Brief | Wave | Requirements | Depends on |
 |---|---|---|---|---|
-| L | [Protocol and fake host](L-protocol.md) | 0 | W9, wire format for M10/W1 | — |
+| L | [Protocol and fake host](L-protocol.md) | 0 | W9, W10, wire format for M10/W1 | — |
 | N | [Mod: skeleton, bridge, region, feedback](N-mod-bridge.md) | 1 | M1–M4, M10–M12 | L's protocol doc and golden vectors |
 | O | [Mod: world I/O](O-mod-world-io.md) | 1 (after N's skeleton merge) | M5–M9 | N's skeleton, L |
 | P | [MCP link core](P-link-core.md) | 1 | W1–W4, W8 | L |
 | Q | [Sync and history safety](Q-sync-history.md) | 1 | W5–W7 | L; P's link object for auto-sync |
-| R | [End-to-end and measurement](R-end-to-end.md) | 2 | open questions in `13` | everything above |
+| R | [End-to-end and measurement](R-end-to-end.md) (setup: [test-setup.md](test-setup.md)) | 2 | open questions in `13` | everything above |
 
 ```
 wave 0          wave 1                                   wave 2
@@ -31,6 +31,7 @@ These are the seams between silos. The owner lands the contract in its first mer
 | Contract | Owner | Users | Shape |
 |---|---|---|---|
 | Wire protocol: framing, message schemas, binary encodings, protocol version | L | N, O, P, Q | `docs/design/13-live-world.md` gains a *Wire format* section; TS codec in `src/world/protocol/`; golden vectors in `test/data/world-protocol/` |
+| Hashing: canonical NBT form, NBT hash, section hash, volatile-key list format | L | O (Java), P and Q (TS) | Defined in *Wire format*; TS reference in `src/world/protocol/hash.ts`; golden vectors with expected hashes |
 | Fake host | L | P, Q | `test/support/fake-host.ts`: an in-memory world plus the mod's side of the protocol, with hooks for "player edits block", "drop connection", "game restarts" |
 | Sync primitive | Q | P (ack handling) | `applyWorldState(doc, changes, opts) → EditResult`: writes world states into the cache as one `world_sync` journal entry; the only way world data enters the cache |
 | Link object | P | Q (auto-sync, barrier) | `WorldLink` on the session: state, region, `isDirty`, `syncNow()`, the bridge connection |
@@ -56,13 +57,13 @@ These are the seams between silos. The owner lands the contract in its first mer
 - **Java code lives only in `mod/`**, and TypeScript code never reaches into it. The golden vectors in `test/data/world-protocol/` are the only shared files. Both sides' tests read them.
 - **Refusals** are errors carrying `refusal: "<code>"` (main README, silo F convention). New codes: `sync_barrier`, `outside_world_region`, `world_disconnected`. Add them to the kinds table in `12`.
 
-## Decisions taken for these briefs
+## Decisions
 
-These were open or unstated in `13`. The briefs assume the answers below. Each silo records the one it implements in `13` with the reason.
+The decisions confirmed with the user on 2026-11-08 are recorded in `13` (*Decisions*, and the sections they cite). In short, with the owning silo:
 
-Confirmed by the user on 2026-11-08.
-
-1. **Everything is bounded by the work region, both ways.** The agent's writes outside the region are refused (`outside_world_region`), the way a sandbox refuses writes outside its work volume; a linked document's bounds are the region and never grow. Player edits outside the region are ignored: the mod never tracks or reports them, and the read-only context shell is refreshed only by full syncs. (Owners: P for the agent side, O for the tracker.)
-2. **Relinking starts a fresh journal.** A new region re-origins the document, and expected states recorded against the old box mean nothing in the new one. Checkpoints and saved selections are kept; checkpoints become unrestorable and say so. (Owner: P, with Q's sync.)
-3. **v1 scope cuts:** the MCP and the game on the same machine (no remote servers), block states only in the guard (no expected NBT), no `/autosketch undo`. Each stays an open question in `13`. "Same machine" includes the dev setup of the game on Windows and the MCP in WSL2: the mod binds to loopback, and WSL2 reaches it with mirrored networking (`networkingMode=mirrored` in `%UserProfile%\.wslconfig`). Without mirrored networking, the mod would have to accept connections from the WSL virtual network, which needs a separate decision. N documents the setup; P reports a clear error when the port in the pairing file can't be reached.
-4. **`restore` sends one patch** (`13`, *World undo and restore*), even though `Document.restore` steps through undo and redo one entry at a time. P coalesces the steps between a restore's start and end into one patch.
+1. **The work region bounds everything.** The agent's writes outside it are refused (`outside_world_region`, P); player edits outside it are ignored (O's tracker).
+2. **A relink starts a fresh journal** (P, with Q's sync).
+3. **Same machine only.** The game on Windows and the MCP in WSL2 counts, through WSL mirrored networking (N documents the setup; P gives the error that names it).
+4. **Expected NBT as a hash, and section hashes for drift** (L defines the canonical form and hash; O and P implement it identically; Q syncs by section).
+5. **No `/autosketch undo`.**
+6. **`restore` sends one patch** (P coalesces the steps between a restore's start and end).

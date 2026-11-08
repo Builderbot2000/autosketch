@@ -126,6 +126,12 @@ export interface AutosketchPlugin {
     handles(state: string): boolean;
     update(state: string, at: (dx: number, dy: number, dz: number) => string): string;
   };
+  /**
+   * Multi-block structures this plugin declares (11, Whole blocks only): the offsets of the other
+   * positions a state belongs with (e.g. [[0,1,0]] for the lower half of a two-block machine), or
+   * undefined when the state is a single block. Sandbox forks extend volumes over them.
+   */
+  multiBlock?: { partners(state: string): [number, number, number][] | undefined };
   /** Markdown explaining the mod's building concepts (exposed as a knowledge resource). */
   docs?: string;
 }

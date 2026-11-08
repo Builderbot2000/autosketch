@@ -12,7 +12,7 @@ The same separation works upward. Block-level history is useless to the agent th
 
 ## Roles
 
-There is **no designated coordinator**. Any agent, whether working on the base build or inside a sandbox, can delegate and act as the parent of the jobs it forks. "Parent" and "subagent" describe one fork, not fixed roles. A subagent that finds its own work volume too large can delegate in turn (see *Nesting*).
+There is **no designated coordinator**. Any agent, whether working on the base build or inside a sandbox, can delegate and act as the parent of the jobs it forks. "Parent" and "subagent" describe one fork, not fixed roles. With a live world link (`13`), the player is the parent of the whole tree: they set the base document's work and context volumes in-game, so the base document is a **root scope** with the same volumes and write rules as a sandbox, and the root agent works inside it. A subagent that finds its own work volume too large can delegate in turn (see *Nesting*).
 
 Most of a parent's work around a fork is **choosing volumes and writing briefs**, usually by selecting boxes or picking components (`05`). It needs to perceive the region at the level of selections (the component graph, coarse renders, `analyze`), not block detail.
 
@@ -174,7 +174,7 @@ Decisions made while building:
 - **Context recompute** is allowed anywhere in the context volume, not only next to the work volume. In practice only neighbours of written blocks are ever recomputed, so it is the same rule, checked more cheaply.
 - **Locks also guard undo and redo** in the parent: undoing an older edit inside a lock would break the merge check. **`restore` is all or nothing:** with a guard installed, `Document.restore` first runs the guard over every step (read from memory or disk with `journal.peek`, each in the origin it would see) and applies none if any is refused. The refusal names the step (`step 3 of 3 (undo of op #1 …)`), keeps that step's code (`lock_overlap`, `outside_work_volume`; `restore_refused` for a guard error without one) and says the document is unchanged.
 - **The merge diff** compares the sandbox with the parent inside the work volume (the check guarantees the parent is unchanged), rather than replaying the sandbox journal. Block entities are compared by value.
-- **The ratio limit for a fork from the base** uses the base document's bounds (declared size plus everything built). An empty document with no declared size has no bounds, so every fork from it is too large.
+- **The ratio limit for a fork from the base** uses the base document's bounds (declared size plus everything built), or the root's work volume when the base is linked to the world (`13`). An empty document with no declared size has no bounds, so every fork from it is too large.
 - **Default context** is the work volume grown by 3 blocks (a cube kernel). A nested job's context is clipped to its parent's volumes and the result says how much was dropped. A nested work volume outside the parent's is refused.
 - **Extra refusal codes** beyond those `12` lists: `nest_outside`, `scope_unknown`, `scope_children` (merge a job with open children), `scopes_open`, `component_reserved`, `merge_check`, `restore_refused`.
 - **Who merges.** The parent calls `scope_merge` with the subagent's report; the handoff tells the subagent not to merge itself. `scope_merge`, `scope_abandon` and `scope_list` name the job directly and don't take the wrapper's `scope`. For `scope_fork`, `scope` is the document to fork from.

@@ -10,10 +10,10 @@ Bring the world into the cache safely and keep undo, redo, restore and scope mer
 
 ## Deliverables, in merge order
 
-1. **Sync primitive** in `src/world/sync.ts`: `applyWorldState(doc, changes, opts)` writes world states and NBT into the cache as one journal entry with op name `world_sync`, carrying P's "does not push" marker. Whole-region form (replace everything inside region plus shell, from a snapshot), section form (replace the listed chunk sections, from a section snapshot), and partial form (listed positions, from `dirty` or an ack).
-   Writes `raw` (no auto-connection recompute: the world's states are the truth). Bypasses write guards that exist for agents (locks, `outside_world_region` doesn't apply to the shell), but never the sandbox rules, which can't apply to the base document anyway.
+1. **Sync primitive** in `src/world/sync.ts`: `applyWorldState(doc, changes, opts)` writes world states and NBT into the cache as one journal entry with op name `world_sync`, carrying P's "does not push" marker. Whole form (replace everything inside the work and context volumes, from a snapshot), section form (replace the listed chunk sections, from a section snapshot), and partial form (listed positions, from `dirty` or an ack).
+   Writes `raw` (no auto-connection recompute: the world's states are the truth). Bypasses the write rules that exist for agents: locks, and the root scope's work-volume rule, since a sync writes context positions too. Clearing context the player removed is a sync as well.
 
-   **Section-hash sync** in the same module: hash the cache per chunk section with L's `hash.ts`, ask the mod for `hashes`, snapshot only the sections that differ, apply them in one entry. Used by `world_sync`, auto-sync after a "whole region" dirty, and P's reconnect. Keep cache section hashes incrementally (invalidate a section on every write) so comparing a large region doesn't rehash it all.
+   **Section-hash sync** in the same module: hash the cache per chunk section with L's `hash.ts`, ask the mod for `hashes`, snapshot only the sections that differ, apply them in one entry. Used by `world_sync`, auto-sync after an "everything" dirty, and P's reconnect. Keep cache section hashes incrementally (invalidate a section on every write) so comparing large volumes doesn't rehash them all.
 2. **What a sync keeps** (W5): saved selections, anchors, palettes and checkpoints survive; expression selections re-resolve on use; components keep their regions, and the result reports blocks changed inside each component it touched. The result also feeds `history`, `diff` and `{"changed": …}` like any entry.
 3. **`world_sync` tool and auto-sync** (W5): a tool in `src/server/tools/world.ts` (shared with P if P creates it; agree in the first merge). Auto-sync: before running any tool call on the linked document, if the link reports dirty, sync first (partial when positions are listed, section-hash sync otherwise). One hook in the `tool()` wrapper, never in tool modules. A sync during a call that already ran a sync is skipped.
 4. **Sync barrier** (W6): undo and redo refuse to step past a `world_sync` entry that changed blocks (`sync_barrier`, with the message `13` describes). `restore` refuses the same way, checked before any step, all or nothing. `overwriteHandEdits: true` on `undo`, `redo` and `restore` (optional arguments, so additive) crosses the barrier and marks the resulting patch as forced. Enforced through `Document.guard` so tools, scripts and history obey it alike.
@@ -34,7 +34,8 @@ Bring the world into the cache safely and keep undo, redo, restore and scope mer
 All against the fake host, in `test/unit/world/`:
 
 - A player edit, then the next tool call: the cache shows the edit before the tool runs, and `history` lists one `world_sync` entry.
-- A "whole region" dirty with one changed section snapshots only that section; a `playerSetNbt` with no dirty is picked up by the next `world_sync`.
+- A player edit in the context volume syncs, and the agent still can't write there.
+- An "everything" dirty with one changed section snapshots only that section; a `playerSetNbt` with no dirty is picked up by the next `world_sync`.
 - `undo` past a sync that changed blocks is refused with `sync_barrier`; `undo({ overwriteHandEdits: true })` crosses it and the fake world is forced.
 - `restore` across a barrier is refused with nothing changed; with `overwriteHandEdits` it sends one forced patch.
 - A sync doesn't drop saved selections, anchors, palettes, checkpoints or components, and reports drift per component.

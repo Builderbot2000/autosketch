@@ -1,6 +1,6 @@
 # Silo R: End-to-end and measurement
 
-**Wave 2**, after N, O, P and Q merge.
+**Wave 3**, after N, O, P, Q and S merge.
 
 **Specs:** `13` (all, especially *Open questions*), `10` (test tiers), `12` (the viewer's `world.*` events).
 
@@ -11,8 +11,8 @@ Prove the link works with the real mod in a real world, on the Craftoria instanc
 ## Deliverables
 
 1. **E2E harness:** start a NeoForge server with the mod (headless), point the MCP at its instance folder, and drive tool calls from a vitest suite (a new tier in `10`, opt-in, skipped when no server is configured). First on a vanilla NeoForge server, then on a Craftoria server.
-2. **Scenarios:** link a region; build a small house with ops, a script and a stamp; a simulated hand edit (the mod's test command, or RCON `/setblock`) on a position the next op writes; undo across a sync (refused, then forced); a fork and merge with a hand edit inside the lock; kill and restart the server mid-build (resume with a full sync, nothing replayed); a modded block from Craftoria (Create, FramedBlocks) round-tripping with its NBT.
-3. **Measurements** (`13`, *Open questions*): per-tick block budget before visible lag on a Craftoria save, the default it suggests; the false-skip rate from volatile NBT on a running Craftoria base (Create contraptions, storage, machines), growing L's default volatile-key list until it's near zero; change-tracker cost per write and whether the mixin holds with Craftoria's mods (else switch O's fallback on by default); snapshot time and size by region volume, and the largest practical region.
+2. **Scenarios:** link a work volume with a context volume that includes a distant reference box, and check the agent sees the reference but can't write it; build a small house with ops, a script and a stamp; a simulated hand edit (the mod's test command, or RCON `/setblock`) on a position the next op writes; undo across a sync (refused, then forced); a fork and merge with a hand edit inside the lock; kill and restart the server mid-build (resume with a full sync, nothing replayed); a modded block from Craftoria (Create, FramedBlocks) round-tripping with its NBT; an in-game request with a focus box reaching a Claude Code session started with `--channels`, with activity and a `world_reply` showing in the game chat.
+3. **Measurements** (`13`, *Open questions*): per-tick block budget before visible lag on a Craftoria save, the default it suggests; the false-skip rate from volatile NBT on a running Craftoria base (Create contraptions, storage, machines), growing L's default volatile-key list until it's near zero; change-tracker cost per write and whether the mixin holds with Craftoria's mods (else switch O's fallback on by default); snapshot time and size by volume, the largest practical volumes, and the default context cap.
 4. **Update `13`:** answer each measured open question in the body with the number and the reason, set the defaults, and mark *Implementation status* complete.
 
 ## Files you own

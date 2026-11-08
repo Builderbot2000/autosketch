@@ -1,18 +1,25 @@
-// WebGL view of a voxel grid with box overlays (docs/design/12-observability.md, panel 1).
+// three.js view of a voxel grid with box overlays (docs/design/12-observability.md, panel 1).
 //
-// Raw WebGL 1: three.js is not in the repository's node_modules and nothing is fetched, so the
-// view draws the baked models itself. One vertex buffer pair (opaque, blended) per 16³ chunk,
-// rebuilt only for dirty chunks. Overlays are coloured lines and translucent boxes in a second
-// program, rebuilt each frame (there are few). Labels are HTML elements positioned by `project`.
+// three.js is served from the installed package (`/vendor/three/`, see src/observe/http.ts) and
+// found through the page's import map; nothing is bundled or fetched from elsewhere. Meshing stays
+// in voxels.js (pure, tested in Node): one opaque mesh (alpha-tested) and one blended mesh per 16³
+// chunk, rebuilt only for dirty chunks, from the instance's baked models and atlas or flat colour
+// cubes without an instance. Overlays (work volumes, context wireframes, change flashes) are
+// rebuilt when drawn (there are few). Labels are HTML elements positioned by `project`.
 
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { meshChunk, fallbackModel, STRIDE } from "./voxels.js";
 
+// Colours are used as given, the way the rasterizer and the baked models define them.
+THREE.ColorManagement.enabled = false;
+
 const VS = `
-attribute vec3 aPos; attribute vec2 aUv; attribute vec4 aCol;
-uniform mat4 uMvp; varying vec2 vUv; varying vec4 vCol;
-void main() { gl_Position = uMvp * vec4(aPos, 1.0); vUv = aUv; vCol = aCol; }`;
+attribute vec4 aCol;
+varying vec2 vUv; varying vec4 vCol;
+void main() { gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); vUv = uv; vCol = aCol; }`;
 const FS = `
-precision mediump float; uniform sampler2D uTex; uniform float uAlphaCut;
+uniform sampler2D uTex; uniform float uAlphaCut;
 varying vec2 vUv; varying vec4 vCol;
 void main() {
   vec4 t = vUv.x < 0.0 ? vec4(1.0) : texture2D(uTex, vUv);
@@ -21,10 +28,9 @@ void main() {
   if (c.a < uAlphaCut) discard;
   gl_FragColor = c;
 }`;
-const LVS = `
-attribute vec3 aPos; attribute vec4 aCol; uniform mat4 uMvp; varying vec4 vCol;
-void main() { gl_Position = uMvp * vec4(aPos, 1.0); vCol = aCol; }`;
-const LFS = `precision mediump float; varying vec4 vCol; void main() { gl_FragColor = vCol; }`;
+
+const BOX_EDGES = [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]];
+const BOX_FACES = [[0, 1, 2, 3], [4, 5, 6, 7], [0, 1, 5, 4], [3, 2, 6, 7], [0, 3, 7, 4], [1, 2, 6, 5]];
 
 export class VoxelView {
   /**
@@ -34,30 +40,50 @@ export class VoxelView {
   constructor(canvas, grid) {
     this.canvas = canvas;
     this.grid = grid;
-    const gl = canvas.getContext("webgl", { antialias: true, alpha: false });
-    if (!gl) throw new Error("WebGL is not available in this browser");
-    this.gl = gl;
-    this.prog = program(gl, VS, FS);
-    this.lprog = program(gl, LVS, LFS);
+    let renderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+    } catch {
+      throw new Error("WebGL is not available in this browser");
+    }
+    this.renderer = renderer;
+    renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+    renderer.setClearColor(0x1c1f24, 1);
+    this.scene = new THREE.Scene();
+    this.camera = new THREE.PerspectiveCamera(51.6, 1, 0.1, 2000);
+    this.controls = new OrbitControls(this.camera, canvas);
+    this.controls.addEventListener("change", () => (this.needsDraw = true));
+    canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+
+    const white = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
+    white.needsUpdate = true;
+    this.tex = white;
+    const uniforms = (cut) => ({ uTex: { value: white }, uAlphaCut: { value: cut } });
+    this.opaqueMat = new THREE.ShaderMaterial({ vertexShader: VS, fragmentShader: FS, uniforms: uniforms(0.5), side: THREE.DoubleSide });
+    this.blendMat = new THREE.ShaderMaterial({ vertexShader: VS, fragmentShader: FS, uniforms: uniforms(0.02), side: THREE.DoubleSide, transparent: true, depthWrite: false });
+    this.lineMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, depthTest: false });
+    this.fillMat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide });
+    this.lines = new THREE.LineSegments(new THREE.BufferGeometry(), this.lineMat);
+    this.fills = new THREE.Mesh(new THREE.BufferGeometry(), this.fillMat);
+    this.lines.renderOrder = 3; // lock outlines stay visible through blocks
+    this.fills.renderOrder = 2;
+    this.lines.frustumCulled = this.fills.frustumCulled = false;
+    this.scene.add(this.lines, this.fills);
+
+    /** chunk key → { opaque?: Mesh, blend?: Mesh } */
     this.meshes = new Map();
     this.models = {};
     this.states = new Map();
     this.fallbacks = new Map();
     this.atlasSize = [1, 1];
-    this.tex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, this.tex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([255, 255, 255, 255]));
-    this.lineBuf = gl.createBuffer();
-    this.triBuf = gl.createBuffer();
-    /** Overlay boxes: { box, color: [r,g,b,a], fill?: alpha, until?: ms } (inclusive boxes). */
+    /** Overlay boxes: { box, color: [r,g,b,a], fill?: alpha } (inclusive boxes). */
     this.overlays = [];
     this.flashes = [];
     /** Marks context voxels as ghosts (drill-in); undefined for none. */
     this.ghost = undefined;
-    this.cam = { target: [0, 0, 0], yaw: Math.PI * 0.75, pitch: 0.6, dist: 40 };
     this.needsDraw = true;
     this.onFrame = null;
-    this.attachControls();
+    this.fit({ min: [0, 0, 0], max: [15, 15, 15] });
     const loop = () => {
       this.frame();
       this.raf = requestAnimationFrame(loop);
@@ -67,7 +93,12 @@ export class VoxelView {
 
   destroy() {
     cancelAnimationFrame(this.raf);
-    this.gl.getExtension("WEBGL_lose_context")?.loseContext();
+    this.controls.dispose();
+    for (const k of [...this.meshes.keys()]) this.dropMesh(k);
+    this.lines.geometry.dispose();
+    this.fills.geometry.dispose();
+    this.renderer.dispose();
+    this.renderer.forceContextLoss();
   }
 
   /** Baked models by state id (from /assets/models.json) and the state names (for fallbacks). */
@@ -79,13 +110,18 @@ export class VoxelView {
   }
 
   setAtlas(img) {
-    const gl = this.gl;
-    gl.bindTexture(gl.TEXTURE_2D, this.tex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const tex = new THREE.Texture(img);
+    tex.magFilter = THREE.NearestFilter;
+    tex.minFilter = THREE.NearestFilter;
+    tex.generateMipmaps = false;
+    tex.flipY = false; // baked UVs are pixels from the atlas's top-left
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.needsUpdate = true;
+    const old = this.tex;
+    this.tex = tex;
+    this.opaqueMat.uniforms.uTex.value = tex;
+    this.blendMat.uniforms.uTex.value = tex;
+    old.dispose();
     this.atlasSize = [img.naturalWidth || img.width, img.naturalHeight || img.height];
     this.remeshAll();
   }
@@ -104,13 +140,17 @@ export class VoxelView {
     return f;
   };
 
-  /** Points the camera at an inclusive box. */
+  /** Points the camera at an inclusive box, keeping the current viewing direction. */
   fit(box) {
     if (!box) return;
-    const c = [0, 1, 2].map((i) => (box.min[i] + box.max[i] + 1) / 2);
+    const c = new THREE.Vector3(...[0, 1, 2].map((i) => (box.min[i] + box.max[i] + 1) / 2));
     const size = Math.max(...[0, 1, 2].map((i) => box.max[i] - box.min[i] + 1));
-    this.cam.target = c;
-    this.cam.dist = Math.max(8, size * 1.8);
+    const dir = this.camera.position.clone().sub(this.controls.target);
+    if (dir.lengthSq() < 1e-6) dir.set(Math.cos(0.6) * Math.sin(Math.PI * 0.75), Math.sin(0.6), Math.cos(0.6) * Math.cos(Math.PI * 0.75));
+    dir.normalize().multiplyScalar(Math.max(8, size * 1.8));
+    this.controls.target.copy(c);
+    this.camera.position.copy(c).add(dir);
+    this.controls.update();
     this.needsDraw = true;
   }
 
@@ -122,14 +162,11 @@ export class VoxelView {
 
   /** Screen position (CSS px) of a world point, or null when behind the camera. */
   project(p) {
-    const m = this.mvp;
-    if (!m) return null;
-    const x = m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12];
-    const y = m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13];
-    const w = m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15];
-    if (w <= 0) return null;
+    const v = new THREE.Vector3(p[0], p[1], p[2]);
+    if (v.clone().applyMatrix4(this.camera.matrixWorldInverse).z >= 0) return null;
+    v.project(this.camera);
     const r = this.canvas.getBoundingClientRect();
-    return [((x / w) * 0.5 + 0.5) * r.width, (1 - ((y / w) * 0.5 + 0.5)) * r.height];
+    return [(v.x * 0.5 + 0.5) * r.width, (1 - (v.y * 0.5 + 0.5)) * r.height];
   }
 
   frame() {
@@ -138,7 +175,6 @@ export class VoxelView {
     const dirty = this.grid.dirty.size > 0;
     if (!dirty && !this.needsDraw && !this.flashes.length && !this.resized()) return;
     this.needsDraw = false;
-    const gl = this.gl;
     // Remesh dirty chunks (bounded per frame so a big snapshot doesn't freeze the page).
     let budget = 64;
     for (const k of this.grid.dirty) {
@@ -148,195 +184,91 @@ export class VoxelView {
     }
     if (this.grid.dirty.size) this.needsDraw = true;
 
-    const w = this.canvas.width, h = this.canvas.height;
-    gl.viewport(0, 0, w, h);
-    gl.clearColor(0.11, 0.12, 0.14, 1);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    gl.enable(gl.DEPTH_TEST);
-    this.mvp = this.matrix(w / Math.max(1, h));
-
-    gl.useProgram(this.prog.p);
-    gl.uniformMatrix4fv(this.prog.u.uMvp, false, this.mvp);
-    gl.bindTexture(gl.TEXTURE_2D, this.tex);
-    gl.disable(gl.BLEND);
-    gl.depthMask(true);
-    gl.uniform1f(this.prog.u.uAlphaCut, 0.5);
-    for (const m of this.meshes.values()) this.drawMesh(m.opaque);
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-    gl.depthMask(false);
-    gl.uniform1f(this.prog.u.uAlphaCut, 0.02);
-    for (const m of this.meshes.values()) this.drawMesh(m.blend);
-
-    this.drawOverlays(now);
-    gl.depthMask(true);
+    const dist = this.camera.position.distanceTo(this.controls.target);
+    this.camera.near = Math.max(0.1, dist / 200);
+    this.camera.far = dist * 20 + 1000;
+    this.camera.updateProjectionMatrix();
+    this.updateOverlays(now);
+    this.renderer.render(this.scene, this.camera);
     this.onFrame?.();
   }
 
   resized() {
-    const dpr = window.devicePixelRatio || 1;
     const r = this.canvas.getBoundingClientRect();
-    const w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
-    if (this.canvas.width === w && this.canvas.height === h) return false;
-    this.canvas.width = w;
-    this.canvas.height = h;
+    const dpr = window.devicePixelRatio || 1;
+    const w = Math.max(1, Math.round(r.width)), h = Math.max(1, Math.round(r.height));
+    if (this.size?.[0] === w && this.size?.[1] === h && this.size?.[2] === dpr) return false;
+    this.size = [w, h, dpr];
+    this.renderer.setPixelRatio(dpr);
+    this.renderer.setSize(w, h, false);
+    this.camera.aspect = w / h;
+    this.camera.updateProjectionMatrix();
     return true;
   }
 
   upload(key, mesh) {
-    const gl = this.gl;
-    let m = this.meshes.get(key);
-    if (!mesh.opaque.length && !mesh.blend.length) {
-      if (m) {
-        gl.deleteBuffer(m.opaque.buf);
-        gl.deleteBuffer(m.blend.buf);
-        this.meshes.delete(key);
-      }
-      return;
-    }
-    if (!m) this.meshes.set(key, (m = { opaque: { buf: gl.createBuffer(), n: 0 }, blend: { buf: gl.createBuffer(), n: 0 } }));
+    this.dropMesh(key);
+    if (!mesh.opaque.length && !mesh.blend.length) return;
+    const m = {};
     for (const part of ["opaque", "blend"]) {
-      gl.bindBuffer(gl.ARRAY_BUFFER, m[part].buf);
-      gl.bufferData(gl.ARRAY_BUFFER, mesh[part], gl.STATIC_DRAW);
-      m[part].n = mesh[part].length / STRIDE;
+      const data = mesh[part];
+      if (!data.length) continue;
+      const buf = new THREE.InterleavedBuffer(data, STRIDE);
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.InterleavedBufferAttribute(buf, 3, 0));
+      g.setAttribute("uv", new THREE.InterleavedBufferAttribute(buf, 2, 3));
+      g.setAttribute("aCol", new THREE.InterleavedBufferAttribute(buf, 4, 5));
+      const obj = new THREE.Mesh(g, part === "opaque" ? this.opaqueMat : this.blendMat);
+      if (part === "blend") obj.renderOrder = 1;
+      m[part] = obj;
+      this.scene.add(obj);
     }
+    this.meshes.set(key, m);
   }
 
-  drawMesh(part) {
-    if (!part.n) return;
-    const gl = this.gl, a = this.prog.a;
-    gl.bindBuffer(gl.ARRAY_BUFFER, part.buf);
-    gl.enableVertexAttribArray(a.aPos);
-    gl.vertexAttribPointer(a.aPos, 3, gl.FLOAT, false, STRIDE * 4, 0);
-    gl.enableVertexAttribArray(a.aUv);
-    gl.vertexAttribPointer(a.aUv, 2, gl.FLOAT, false, STRIDE * 4, 12);
-    gl.enableVertexAttribArray(a.aCol);
-    gl.vertexAttribPointer(a.aCol, 4, gl.FLOAT, false, STRIDE * 4, 20);
-    gl.drawArrays(gl.TRIANGLES, 0, part.n);
+  dropMesh(key) {
+    const m = this.meshes.get(key);
+    if (!m) return;
+    for (const obj of [m.opaque, m.blend]) {
+      if (!obj) continue;
+      this.scene.remove(obj);
+      obj.geometry.dispose();
+    }
+    this.meshes.delete(key);
   }
 
-  drawOverlays(now) {
-    const lines = [], tris = [];
-    const all = [...this.overlays, ...this.flashes.map((f) => ({ box: f.box, color: [...f.color, Math.max(0, (f.until - now) / 1500)], width: 1 }))];
+  updateOverlays(now) {
+    const lines = [], lineCol = [], tris = [], triCol = [];
+    const all = [...this.overlays, ...this.flashes.map((f) => ({ box: f.box, color: [...f.color, Math.max(0, (f.until - now) / 1500)] }))];
     for (const o of all) {
       const [x0, y0, z0] = o.box.min.map((v) => v - 0.02), [x1, y1, z1] = o.box.max.map((v) => v + 1.02);
       const col = o.color.length === 4 ? o.color : [...o.color, 1];
       const c = [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1], [x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1]];
-      for (const [a, b] of [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]]) lines.push(...c[a], ...col, ...c[b], ...col);
+      for (const [a, b] of BOX_EDGES) {
+        lines.push(...c[a], ...c[b]);
+        lineCol.push(...col, ...col);
+      }
       if (o.fill) {
         const fc = [col[0], col[1], col[2], o.fill];
-        for (const f of [[0, 1, 2, 3], [4, 5, 6, 7], [0, 1, 5, 4], [3, 2, 6, 7], [0, 3, 7, 4], [1, 2, 6, 5]])
-          for (const i of [0, 1, 2, 0, 2, 3]) tris.push(...c[f[i]], ...fc);
+        for (const f of BOX_FACES)
+          for (const i of [0, 1, 2, 0, 2, 3]) {
+            tris.push(...c[f[i]]);
+            triCol.push(...fc);
+          }
       }
     }
-    if (!lines.length) return;
-    const gl = this.gl, a = this.lprog.a;
-    gl.useProgram(this.lprog.p);
-    gl.uniformMatrix4fv(this.lprog.u.uMvp, false, this.mvp);
-    const draw = (buf, data, mode) => {
-      if (!data.length) return;
-      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.DYNAMIC_DRAW);
-      gl.enableVertexAttribArray(a.aPos);
-      gl.vertexAttribPointer(a.aPos, 3, gl.FLOAT, false, 28, 0);
-      gl.enableVertexAttribArray(a.aCol);
-      gl.vertexAttribPointer(a.aCol, 4, gl.FLOAT, false, 28, 12);
-      gl.drawArrays(mode, 0, data.length / 7);
-    };
-    draw(this.triBuf, tris, gl.TRIANGLES);
-    gl.disable(gl.DEPTH_TEST); // lock outlines stay visible through blocks
-    draw(this.lineBuf, lines, gl.LINES);
-    gl.enable(gl.DEPTH_TEST);
-  }
-
-  matrix(aspect) {
-    const { target, yaw, pitch, dist } = this.cam;
-    const eye = [target[0] + dist * Math.cos(pitch) * Math.sin(yaw), target[1] + dist * Math.sin(pitch), target[2] + dist * Math.cos(pitch) * Math.cos(yaw)];
-    return mul(perspective(0.9, aspect, Math.max(0.1, dist / 200), dist * 20 + 1000), lookAt(eye, target, [0, 1, 0]));
-  }
-
-  attachControls() {
-    const c = this.canvas;
-    let drag = null;
-    c.addEventListener("contextmenu", (e) => e.preventDefault());
-    c.addEventListener("pointerdown", (e) => {
-      drag = { x: e.clientX, y: e.clientY, pan: e.button === 2 || e.shiftKey };
-      c.setPointerCapture(e.pointerId);
-    });
-    c.addEventListener("pointerup", () => (drag = null));
-    c.addEventListener("pointermove", (e) => {
-      if (!drag) return;
-      const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
-      drag.x = e.clientX;
-      drag.y = e.clientY;
-      const cam = this.cam;
-      if (drag.pan) {
-        const s = cam.dist / 600;
-        const right = [Math.cos(cam.yaw), 0, -Math.sin(cam.yaw)];
-        cam.target = [cam.target[0] - right[0] * dx * s, cam.target[1] + dy * s, cam.target[2] - right[2] * dx * s];
-      } else {
-        cam.yaw -= dx * 0.008;
-        cam.pitch = Math.max(-1.5, Math.min(1.5, cam.pitch + dy * 0.008));
-      }
-      this.needsDraw = true;
-    });
-    c.addEventListener("wheel", (e) => {
-      e.preventDefault();
-      this.cam.dist = Math.max(2, this.cam.dist * Math.exp(e.deltaY * 0.001));
-      this.needsDraw = true;
-    }, { passive: false });
+    setGeometry(this.lines, lines, lineCol);
+    setGeometry(this.fills, tris, triCol);
   }
 }
 
-function program(gl, vs, fs) {
-  const sh = (type, src) => {
-    const s = gl.createShader(type);
-    gl.shaderSource(s, src);
-    gl.compileShader(s);
-    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
-    return s;
-  };
-  const p = gl.createProgram();
-  gl.attachShader(p, sh(gl.VERTEX_SHADER, vs));
-  gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fs));
-  gl.linkProgram(p);
-  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
-  const a = {}, u = {};
-  for (let i = 0; i < gl.getProgramParameter(p, gl.ACTIVE_ATTRIBUTES); i++) {
-    const n = gl.getActiveAttrib(p, i).name;
-    a[n] = gl.getAttribLocation(p, n);
+function setGeometry(obj, pos, col) {
+  obj.geometry.dispose();
+  const g = new THREE.BufferGeometry();
+  if (pos.length) {
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute("color", new THREE.Float32BufferAttribute(col, 4));
   }
-  for (let i = 0; i < gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS); i++) {
-    const n = gl.getActiveUniform(p, i).name;
-    u[n] = gl.getUniformLocation(p, n);
-  }
-  return { p, a, u };
-}
-
-// Column-major 4×4 matrices, as WebGL expects.
-function perspective(fovy, aspect, near, far) {
-  const f = 1 / Math.tan(fovy / 2), nf = 1 / (near - far);
-  return new Float32Array([f / aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, (far + near) * nf, -1, 0, 0, 2 * far * near * nf, 0]);
-}
-
-function lookAt(eye, at, up) {
-  const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-  const norm = (v) => {
-    const l = Math.hypot(...v) || 1;
-    return v.map((x) => x / l);
-  };
-  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-  const z = norm(sub(eye, at)), x = norm(cross(up, z)), y = cross(z, x);
-  return new Float32Array([x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0, -dot(x, eye), -dot(y, eye), -dot(z, eye), 1]);
-}
-
-function mul(a, b) {
-  const o = new Float32Array(16);
-  for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) {
-    let s = 0;
-    for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k];
-    o[c * 4 + r] = s;
-  }
-  return o;
+  obj.geometry = g;
+  obj.visible = pos.length > 0;
 }

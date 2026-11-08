@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Autosketch Observer</title>
   <link rel="stylesheet" href="style.css">
+  <!-- three.js comes from the installed package, served by the observer (src/observe/http.ts). -->
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three/build/three.module.js", "three/addons/": "./vendor/three/examples/jsm/" } }
+  </script>
 </head>
 <body>
   <header>
@@ -21,6 +25,10 @@
     <section id="view-wrap" class="panel">
       <canvas id="view"></canvas>
       <div id="labels"></div>
+      <figure id="fallback" hidden>
+        <img id="fallback-img" alt="time-lapse snapshot">
+        <figcaption><span id="fallback-note"></span> <button id="fallback-close">Show 3D</button></figcaption>
+      </figure>
       <div class="hint">drag: orbit · right-drag or shift-drag: pan · wheel: zoom · boxes: open jobs (work filled, context wireframe)</div>
       <section id="drill" hidden>
         <div class="drill-bar"><b id="drill-title"></b> <span id="drill-note" class="dim"></span><span class="grow"></span><button id="drill-close">Close</button></div>
@@ -57,6 +65,12 @@
       </section>
     </div>
   </main>
+  <footer id="replay">
+    <button id="replay-play" title="Play from here">▶</button>
+    <input id="replay-seq" type="range" min="0" max="0" value="0" step="1" aria-label="replay position (seq)">
+    <span id="replay-pos" class="dim"></span>
+    <button id="replay-live" title="Follow the latest event">Live</button>
+  </footer>
   <script type="module" src="js/main.js"></script>
 </body>
 </html>

@@ -58,7 +58,9 @@ function split(m: Message): { header: Record<string, unknown>; body: Uint8Array 
       return { header: { type: m.type, id: m.id, code: m.code, message: m.message, ...(m.protocol !== undefined ? { protocol: m.protocol } : {}) }, body: none };
     case "volumes":
       if (m.work === null) return { header: { type: m.type, link: m.link, work: null }, body: none };
-      return { header: { type: m.type, link: m.link, dimension: m.dimension, work: box(m.work), context: m.context.map(box) }, body: none };
+      return { header: { type: m.type, link: m.link, dimension: m.dimension, work: box(m.work), context: m.context.map(box), ...(m.extended ? { extended: box(m.extended) } : {}) }, body: none };
+    case "volumes.extend":
+      return { header: { type: m.type, id: m.id, link: m.link, work: box(m.work) }, body: none };
     case "hashes":
       return { header: { type: m.type, id: m.id, dimension: m.dimension, boxes: m.boxes.map(box) }, body: none };
     case "hashes.result":
@@ -169,7 +171,7 @@ export function decodeFrame(frame: Uint8Array, sender: Sender): Message {
   return decodeMessage(frame.subarray(4), sender);
 }
 
-const MCP_TYPES = new Set(["hello", "error", "hashes", "snapshot", "patch", "prompt.result", "notice", "chat"]);
+const MCP_TYPES = new Set(["hello", "error", "volumes.extend", "hashes", "snapshot", "patch", "prompt.result", "notice", "chat"]);
 const MOD_TYPES = new Set(["hello", "error", "volumes", "hashes.result", "snapshot.result", "patch.ack", "dirty", "prompt"]);
 const BODY_TYPES = new Set(["snapshot.result", "patch", "patch.ack", "dirty"]);
 
@@ -201,8 +203,11 @@ function decode(type: string, v: Fields, body: Uint8Array, sender: Sender): Mess
     case "volumes": {
       const link = v.int("link");
       if (!v.nullable("work")) return { type, link, work: null };
-      return { type, link, dimension: v.str("dimension"), work: v.box("work"), context: v.arr("context").map((_, i) => v.boxAt("context", i)) };
+      const extended = v.has("extended") ? { extended: v.box("extended") } : {};
+      return { type, link, dimension: v.str("dimension"), work: v.box("work"), context: v.arr("context").map((_, i) => v.boxAt("context", i)), ...extended };
     }
+    case "volumes.extend":
+      return { type, id: v.id("id"), link: v.int("link"), work: v.box("work") };
     case "hashes":
       return { type, id: v.id("id"), dimension: v.str("dimension"), boxes: v.boxes("boxes") };
     case "hashes.result":

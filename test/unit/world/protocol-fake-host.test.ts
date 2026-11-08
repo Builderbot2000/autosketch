@@ -259,6 +259,38 @@ describe("fake host", () => {
     expect(await client.next("error", (m) => m.id === hid)).toMatchObject({ code: "no_volumes" });
   });
 
+  it("volumes.extend: writes in the extension are rejected before it and applied after; a bad extension is refused", async () => {
+    const { host, client, volumes } = await setup({ volumes: { work, context: [{ min: [-1, 63, -1], max: [8, 68, 8] }] } });
+    const beyond: [number, number, number] = [11, 65, 3]; // a multi-block part 4 blocks past the work box, outside the context too
+    const patch = async () => {
+      const id = client.id();
+      client.send({ type: "patch", id, link: volumes.link, dimension: OW, blocks: [{ pos: beyond, expected: "minecraft:air", state: PLANKS }] });
+      return client.next("patch.ack", (m) => m.id === id);
+    };
+    expect((await patch()).rejected).toEqual([{ pos: beyond, reason: "outside_volumes" }]);
+
+    const bad = client.id();
+    client.send({ type: "volumes.extend", id: bad, link: volumes.link, work: { min: [1, 64, 0], max: [11, 67, 7] } });
+    expect(await client.next("error", (m) => m.id === bad)).toMatchObject({ code: "bad_extension" });
+    const stale = client.id();
+    client.send({ type: "volumes.extend", id: stale, link: volumes.link + 1, work: { min: [0, 64, 0], max: [11, 67, 7] } });
+    expect(await client.next("error", (m) => m.id === stale)).toMatchObject({ code: "stale_link" });
+    expect(host.extended).toBeNull();
+
+    const extended = { min: [0, 64, 0], max: [11, 67, 7] } as WireBox;
+    client.send({ type: "volumes.extend", id: client.id(), link: volumes.link, work: extended });
+    const v = await client.next("volumes");
+    expect(v).toMatchObject({ link: volumes.link, work, extended }); // the link stays: the MCP caused the extension
+    expect((await patch())).toMatchObject({ applied: 1, rejected: [] });
+    expect(host.get(beyond).state).toBe(PLANKS);
+
+    host.setVolumes({ work: { min: [0, 64, 0], max: [7, 68, 7] } }); // the player changes the work volume: new link, extension gone
+    const after = await client.next("volumes");
+    expect(after.link).toBe(volumes.link + 1);
+    expect("extended" in after).toBe(false);
+    expect(host.extended).toBeNull();
+  });
+
   it("reports NBT the game normalized on load", async () => {
     const { host, client } = await setup({
       normalizeNbt: (_pos, state, nbt) => (state.startsWith("minecraft:chest") ? { type: "compound", value: { Items: { type: "list", value: { type: "end", value: [] } } as never, ...(nbt?.value ?? {}), id: { type: "string", value: "minecraft:chest" } } } : nbt),

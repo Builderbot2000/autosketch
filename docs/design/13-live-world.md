@@ -124,6 +124,7 @@ world (the save)
 |-----------|---------|----------|
 | both | `hello` | protocol version, token and volatile-key list (MCP → mod), game/data/mod versions (mod → MCP) |
 | mod → MCP | `volumes` | dimension, work volume box, context boxes, or none (on change and after hello) |
+| MCP → mod | `volumes.extend` | link, the work volume extended to whole blocks (*Model*: a box that cuts a door or multi-block) |
 | MCP → mod | `hashes` | boxes (work and context volumes) |
 | mod → MCP | `hashes.result` | one hash per chunk section the box touches |
 | MCP → mod | `snapshot` | boxes, or a list of chunk sections |
@@ -171,7 +172,7 @@ bytes    body            frameLength − 4 − headerLength bytes; empty unless 
 - **Messages with a body:** `patch`, `snapshot.result`, `patch.ack` and `dirty` (unless `everything`). Every other message has an empty body.
 - **Headers** are written compact (no whitespace), keys in the order the tables below list them, optional fields omitted when absent. Receivers accept any key order and ignore keys they don't know (a later minor addition stays compatible within version 1). Compare headers as JSON values, not as bytes: number formatting differs between JSON libraries.
 - **Ordering:** TCP keeps frames in order. Each side sends messages in the order the events happen. The mod handles MCP requests strictly in arrival order, each finishing before the next starts: a `snapshot` or `hashes` request that arrives while a patch is still applying across ticks is answered after that patch's ack, so it sees the patch. `dirty` and `prompt` may interleave with responses.
-- **Request ids:** `hashes`, `snapshot` and `patch` carry an `id` the MCP assigns from one counter per connection, starting at 1 and increasing by at least 1 per request (so patch ids increase, and patches apply in id order). Their responses (`hashes.result`, `snapshot.result`, `patch.ack`, or `error`) carry the same `id`. `prompt` ids come from the mod's own counter, and `prompt.result` and `chat.request` refer to them.
+- **Request ids:** `volumes.extend`, `hashes`, `snapshot` and `patch` carry an `id` the MCP assigns from one counter per connection, starting at 1 and increasing by at least 1 per request (so patch ids increase, and patches apply in id order). Their responses (`hashes.result`, `snapshot.result`, `patch.ack`, or `error`) carry the same `id`. A `volumes.extend` that succeeds is answered by a `volumes` message (which has no id), and one that fails by an `error` with its id. `prompt` ids come from the mod's own counter, and `prompt.result` and `chat.request` refer to them.
 
 ### Connection and handshake
 
@@ -315,9 +316,11 @@ Every header has `type` first. "MCP → mod" and "mod → MCP" say who sends it.
 | `unknown_type` | both | a well-formed frame of a type the receiver doesn't know; answered only if it carries an `id` | open |
 | `no_volumes` | mod | `hashes` or `snapshot` while no work volume is set | open |
 | `wrong_dimension` | mod | the request's dimension isn't the volumes' dimension | open |
-| `outside_volumes` | mod | a requested box or section lies outside the chunks the link keeps loaded (those under the work and context volumes) | open |
+| `outside_volumes` | mod | a requested box or section lies outside the chunks the link keeps loaded (those under the work volume, its declared extension and the context volumes) | open |
 | `too_large` | mod | the result would exceed the maximum frame size; the MCP asks again for fewer boxes or sections | open |
 | `replaced` | mod | a newer connection took over | closed |
+| `stale_link` | mod | a `volumes.extend` for a `link` that isn't the current one, or while no work volume is set | open |
+| `bad_extension` | mod | a `volumes.extend` box that doesn't contain the player's work volume | open |
 
 **`volumes`**, mod → MCP: after `hello`, and whenever the work volume, the context or the dimension changes.
 
@@ -328,8 +331,25 @@ Every header has `type` first. "MCP → mod" and "mod → MCP" say who sends it.
 | `dimension` | string | The dimension of both volumes. Absent when `work` is `null` |
 | `work` | Box or `null` | The work volume; `null` when none is set (unlinked) |
 | `context` | Box[] | The effective context boxes: by default one box, the work volume grown by 3; then whatever the player grew or added. Always includes a box covering the work volume grown by at least 1 (the seam, `11`). Clipped to the world's build height. Absent when `work` is `null` |
+| `extended` | Box, optional | The extended work volume the MCP declared with `volumes.extend` for this `link`, present while it is in force. `work` stays the player's own box |
 
-The MCP relinks (fresh journal, full snapshot) when `dimension` or `work` differs from what its document was linked to, and treats a `volumes` with only different `context` as a context change (*Work and context volumes in-game*). It stamps each patch with the latest `link` it has received.
+The MCP relinks (fresh journal, full snapshot) when `dimension` or `work` differs from what its document was linked to, and treats a `volumes` with only different `context` (or `extended`) as no relink (*Work and context volumes in-game*). It stamps each patch with the latest `link` it has received.
+
+**`volumes.extend`**, MCP → mod. When the player's work box cuts a door, bed, double chest or plugin multi-block, the MCP extends its work volume to include the whole block (*Model*) and declares the extension to the mod, so the mod's `outside_volumes` check lets those writes through. A plugin multi-block can reach past the one-block seam, and past the context, so the mod can't infer the extension itself.
+
+| Key | Type | Meaning |
+|---|---|---|
+| `type`, `id` | | |
+| `link` | integer | The current link. Otherwise refused with `error` `stale_link` |
+| `work` | Box | The extended work volume. Must contain the player's work volume; otherwise refused with `error` `bad_extension` |
+
+On success the mod:
+
+- uses the box as the work volume for the `outside_volumes` check and the change tracker, and keeps its chunks loaded with the link's ticket;
+- shows it in the work-volume outline and with an action-bar notice (for example `Autosketch: work volume extended to 34×27×32 to include whole blocks`), so the player sees the extension;
+- sends `volumes` again, with the same `link` and the box in `extended`. The `link` doesn't change, because the MCP caused the extension and its journal stays valid.
+
+A later `volumes.extend` replaces the earlier one. The extension is dropped when the player changes the work volume or dimension (a new `link`) or clears it. The MCP declares the extension before sending any patch that writes into it; requests are handled in arrival order, so a patch sent after `volumes.extend` sees it.
 
 **`hashes`**, MCP → mod
 
@@ -395,11 +415,11 @@ Per position the body gives the expected state, the new state, optionally the ex
 | Reason | Meaning |
 |---|---|
 | `stale_link` | The patch's `link` isn't the current one (the work volume changed since the MCP built it), no work volume is set, or the patch's dimension isn't the volumes'. Every position is rejected with this reason |
-| `outside_volumes` | The position lies outside both the work volume and every context box (the MCP's whole-block extension of the work volume stays inside the seam, so it isn't caught by this) |
+| `outside_volumes` | The position lies outside the work volume (or the extension declared with `volumes.extend`) and outside every context box |
 | `unknown_state` | The new state isn't the canonical form of a state the game knows (*Block states*) |
 | `bad_nbt` | The patch gives NBT, but the new block has no block entity, its `id` names another block-entity type, or the game can't load it |
 
-The **normalized** list closes a gap the precondition would otherwise open: the game rewrites block-entity NBT as it loads it (filling defaults, adding `components`), so the NBT the cache sent and the NBT the world now holds can differ even though nobody edited anything. For each applied position, the mod compares the NBT hash of the block entity now in the world with the hash of the NBT the patch sent ("none" counts as a value: a block entity created where the patch sent none, or none where it sent some). When they differ, it lists the position with the world's NBT (or none). The MCP writes those into the cache in the same `world_sync` entry as the skipped positions. State-only types are never listed.
+The **normalized** list closes a gap the precondition would otherwise open: the game rewrites block-entity NBT as it loads it (filling defaults, adding `components`), so the NBT the cache sent and the NBT the world now holds can differ even though nobody edited anything. For each applied position, the mod compares the NBT hash of the block entity now in the world with the hash of the NBT the patch sent ("none" counts as a value: a block entity created where the patch sent none, or none where it sent some). When they differ, it lists the position with the world's NBT (or none). State-only types are never listed. **Who acts on it:** the mod only reports. Writing the world's NBT into the cache is an MCP-side `world_sync` write through Q's sync primitive (`applyWorldState`), in the same `world_sync` entry as the skipped and rejected positions of that ack. P's ack handling hands the list over, and nothing about it is ever pushed back to the world.
 
 **`dirty`**, mod → MCP: at most one per server tick, sent at the end of a tick in which a tracked change happened.
 
@@ -464,7 +484,7 @@ The mod shows a `chat` to the named player (a `reply` always; an `activity` unle
 For each position, in index order, under the tick budget:
 
 1. The patch's `link` isn't the current link, or there are no volumes, or `dimension` isn't theirs: reject (`stale_link`) every position.
-2. Outside the work volume and every context box: reject `outside_volumes`.
+2. Outside the work volume (or its declared extension, `volumes.extend`) and every context box: reject `outside_volumes`.
 3. The new state isn't canonical and known: reject `unknown_state`. NBT given but unusable for the new block: reject `bad_nbt`.
 4. **Precondition:** the canonical printing of the world's state equals the expected state, and, when an expected NBT hash is given, the world's block has a block entity whose NBT hash (*Hashing*, with the hello's volatile list) equals it. Not both: skip, recording the world's state and NBT. With `force`, write anyway and count it as overwritten.
 5. Write the new state without side effects (*Agent → world*), remove the old block entity, and load the patch's NBT when it gives some.
@@ -513,7 +533,7 @@ Both sides compute it the same way: the mod over the world, the MCP over its cac
 - `body`, for messages with a body: the decoded content in encoded order. Patches list `blocks` with world `pos`, `expected`, `expectedNbtHash`, `state` and `nbt`; acks list `skipped`, `rejected` (with `reason`) and `normalized`; dirty notices list `blocks`; snapshot results list each region's `states` (palette indices) and `blockEntities`. The `palette` (and `reasons`) tables are given too, in their encoded order. NBT is written as SNBT (the game's `TagParser.parseTag` reads it).
 - `generated`, instead of `body`, for `patch-large`: the rule that produces its blocks.
 
-There is a vector per message kind: `hello` both ways, `error`, `volumes` (with and without a work volume), `hashes` and its result, `snapshot` by boxes and by sections, `snapshot.result` (empty, one block, mixed palette with block entities and overlapping regions), `patch` (empty, one block, mixed palette given out of order, block entities with expected NBT hashes, forced, large), `patch.ack` (all applied, mixed, forced, stale), `dirty` (positions, everything), `prompt` (full and minimal), `prompt.result` (delivered, refused), `notice` and `chat` (activity, reply). Hash vectors: `hash-nbt.json` (compounds with their volatile lists, canonical bytes in hex and hash: empty, unordered keys, nested, every tag type, modified UTF-8, furnace with and without volatile keys, a nested path and `*`, state only) and `hash-sections.json` (sections with their boxes and blocks and expected hash: full, a single position, negative coordinates with partial overlapping boxes, block entities with volatile and state-only types).
+There is a vector per message kind: `hello` both ways, `error` (including a refused extension), `volumes` (with and without a work volume, and with an extension in force), `volumes.extend`, `hashes` and its result, `snapshot` by boxes and by sections, `snapshot.result` (empty, one block, mixed palette with block entities and overlapping regions), `patch` (empty, one block, mixed palette given out of order, block entities with expected NBT hashes, forced, large), `patch.ack` (all applied, mixed, forced, stale), `dirty` (positions, everything), `prompt` (full and minimal), `prompt.result` (delivered, refused), `notice` and `chat` (activity, reply). Hash vectors: `hash-nbt.json` (compounds with their volatile lists, canonical bytes in hex and hash: empty, unordered keys, nested, every tag type, modified UTF-8, furnace with and without volatile keys, a nested path and `*`, state only) and `hash-sections.json` (sections with their boxes and blocks and expected hash: full, a single position, negative coordinates with partial overlapping boxes, block entities with volatile and state-only types).
 
 An implementation passes when it decodes every vector to its sidecar, re-encodes the sidecar to the same bytes (headers compared as JSON), and reproduces every hash. The vectors are synthetic, and they are frozen: a change to them is a protocol change.
 
@@ -604,7 +624,7 @@ Work is split into silos in `docs/briefs/world/`. Suggested order: protocol, has
 
 | Part | Silo | Status |
 |---|---|---|
-| Wire format, golden vectors, codec, hashing (W10), fake host (W9) | L | Done. *Wire format* above; vectors and hash vectors in `test/data/world-protocol/` (regenerate with `npx tsx test/data/world-protocol/generate.ts` only for a protocol change); codec, frame reader, hashing and pairing file in `src/world/protocol/`; fake host in `test/support/fake-host.ts` (handshake, compare-and-set with NBT hashes, normalized list, dirty notices, section hashes, snapshots, prompts, and hooks for player edits, ticks, volume changes, dropped connections and restarts; no tick budget or chunk loading). A one-million-block patch encodes in about 0.1 s to 3.0 MB. The volatile-key default is the small starting list; growing it stays open (*Volatile keys*). |
+| Wire format, golden vectors, codec, hashing (W10), fake host (W9) | L | Done. *Wire format* above, including `volumes.extend` for the MCP's whole-block extension of the work volume; vectors and hash vectors in `test/data/world-protocol/` (regenerate with `npx tsx test/data/world-protocol/generate.ts` only for a protocol change); codec, frame reader, hashing and pairing file in `src/world/protocol/`; fake host in `test/support/fake-host.ts` (handshake, compare-and-set with NBT hashes, normalized list, dirty notices, section hashes, snapshots, prompts, `volumes.extend` (link and containment checks, reset on a new link), and hooks for player edits, ticks, volume changes, dropped connections and restarts; no tick budget or chunk loading). A one-million-block patch encodes in about 0.1 s to 3.0 MB. The volatile-key default is the small starting list; growing it stays open (*Volatile keys*). |
 
 ## Open questions
 

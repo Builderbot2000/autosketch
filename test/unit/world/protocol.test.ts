@@ -37,7 +37,7 @@ function largePatchBlocks(): PatchBlock[] {
 describe("golden vectors", () => {
   it("has a vector for every message kind", () => {
     const kinds = new Set(vectors.map((v) => (JSON.parse(readFileSync(join(DIR, `${v}.json`), "utf8")) as Sidecar).header.type));
-    expect([...kinds].sort()).toEqual(["chat", "dirty", "error", "hashes", "hashes.result", "hello", "notice", "patch", "patch.ack", "prompt", "prompt.result", "snapshot", "snapshot.result", "volumes"]);
+    expect([...kinds].sort()).toEqual(["chat", "dirty", "error", "hashes", "hashes.result", "hello", "notice", "patch", "patch.ack", "prompt", "prompt.result", "snapshot", "snapshot.result", "volumes", "volumes.extend"]);
   });
 
   for (const name of vectors) {

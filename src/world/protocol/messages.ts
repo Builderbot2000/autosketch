@@ -47,7 +47,7 @@ export type Cardinal = "north" | "south" | "west" | "east";
 export const REJECT_REASONS = ["unknown_state", "bad_nbt", "outside_volumes", "stale_link"] as const;
 export type RejectReason = (typeof REJECT_REASONS)[number];
 
-export const ERROR_CODES = ["protocol_mismatch", "bad_token", "not_ready", "bad_request", "unknown_type", "no_volumes", "wrong_dimension", "outside_volumes", "too_large", "replaced"] as const;
+export const ERROR_CODES = ["protocol_mismatch", "bad_token", "not_ready", "bad_request", "unknown_type", "no_volumes", "wrong_dimension", "outside_volumes", "too_large", "replaced", "stale_link", "bad_extension"] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
 
 export const PROMPT_REFUSALS = ["no_link", "not_allowed", "no_listener"] as const;
@@ -87,8 +87,26 @@ export interface ErrorMessage {
 }
 
 export type VolumesMessage =
-  | { type: "volumes"; link: number; dimension: string; work: WireBox; context: WireBox[] }
+  | {
+      type: "volumes";
+      link: number;
+      dimension: string;
+      /** The player's work volume. */
+      work: WireBox;
+      context: WireBox[];
+      /** The MCP-declared extended work volume (whole blocks) in force for this link, if any. */
+      extended?: WireBox;
+    }
   | { type: "volumes"; link: number; work: null };
+
+/** The MCP declares the work volume extended to whole blocks, for the current link (*Wire format*, `volumes.extend`). */
+export interface VolumesExtend {
+  type: "volumes.extend";
+  id: number;
+  link: number;
+  /** The extended work volume; must contain the player's work volume. */
+  work: WireBox;
+}
 
 export interface HashesRequest {
   type: "hashes";
@@ -193,7 +211,7 @@ export interface ChatMessage {
 }
 
 /** Messages the MCP sends. */
-export type McpMessage = ClientHello | ErrorMessage | HashesRequest | SnapshotRequest | PatchMessage | PromptResult | NoticeMessage | ChatMessage;
+export type McpMessage = ClientHello | ErrorMessage | VolumesExtend | HashesRequest | SnapshotRequest | PatchMessage | PromptResult | NoticeMessage | ChatMessage;
 /** Messages the mod sends. */
 export type ModMessage = ModHello | ErrorMessage | VolumesMessage | HashesResult | SnapshotResult | PatchAck | DirtyMessage | PromptMessage;
 export type Message = McpMessage | ModMessage;

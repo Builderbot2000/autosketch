@@ -77,6 +77,21 @@ vector("volumes", "mod", "Work volume and two context boxes: the default (work g
   work,
   context: [ctx, { min: [300, 60, -40], max: [340, 110, 0] }],
 });
+vector("volumes-extend", "mcp", "The MCP declares the work volume extended to whole blocks (a plugin multi-block cut by the player's box), for link 3", {
+  type: "volumes.extend",
+  id: 4,
+  link: 3,
+  work: { min: [98, 64, -200], max: [131, 90, -169] },
+});
+vector("volumes-extended", "mod", "The mod accepted the extension: same link, the player's work box unchanged, the extension in force", {
+  type: "volumes",
+  link: 3,
+  dimension: OW,
+  work,
+  context: [ctx],
+  extended: { min: [98, 64, -200], max: [131, 90, -169] },
+});
+vector("error-bad-extension", "mod", "An extension that doesn't contain the player's work volume is refused; the connection stays open", { type: "error", id: 4, code: "bad_extension", message: "the extended work volume must contain the player's work volume" });
 vector("volumes-none", "mod", "No work volume (cleared, or never set): unlinked", { type: "volumes", link: 4, work: null });
 vector("hashes", "mcp", "Section hashes over the work and context boxes", { type: "hashes", id: 5, dimension: OW, boxes: [work, ctx] });
 vector("hashes-result", "mod", "One hash per section the boxes touch, ascending y, z, x (truncated list for the vector)", {

@@ -1,0 +1,10 @@
+{
+  "description": "An extension that doesn't contain the player's work volume is refused; the connection stays open",
+  "sender": "mod",
+  "header": {
+    "type": "error",
+    "id": 4,
+    "code": "bad_extension",
+    "message": "the extended work volume must contain the player's work volume"
+  }
+}

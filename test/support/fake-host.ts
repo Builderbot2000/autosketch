@@ -116,6 +116,8 @@ export class FakeHost {
   private server?: Server;
   private socket?: Socket;
   private volumes: (Volumes & { context: WireBox[]; dimension: string }) | null = null;
+  /** The MCP-declared extended work volume for the current link (`volumes.extend`). */
+  extended: WireBox | null = null;
   private queue: Promise<void> = Promise.resolve();
   private promptId = 0;
   private readonly prompts = new Map<number, (r: PromptResult) => void>();
@@ -193,7 +195,10 @@ export class FakeHost {
   setVolumes(v: Volumes | null): void {
     const next = v ? this.normalize(v) : null;
     const prev = this.volumes;
-    if (!next || !prev || next.dimension !== prev.dimension || !sameBox(next.work, prev.work)) this.link++;
+    if (!next || !prev || next.dimension !== prev.dimension || !sameBox(next.work, prev.work)) {
+      this.link++;
+      this.extended = null;
+    }
     this.volumes = next;
     if (this.connected) this.sendVolumes();
   }
@@ -255,7 +260,7 @@ export class FakeHost {
 
   private inVolumes(p: Vec3): boolean {
     const v = this.volumes;
-    return !!v && (inBox(v.work, p) || v.context.some((b) => inBox(b, p)));
+    return !!v && (inBox(v.work, p) || (this.extended !== null && inBox(this.extended, p)) || v.context.some((b) => inBox(b, p)));
   }
 
   private async listen(): Promise<void> {
@@ -362,7 +367,7 @@ export class FakeHost {
 
   private sendVolumes(): void {
     const v = this.volumes;
-    this.send(v ? { type: "volumes", link: this.link, dimension: v.dimension, work: v.work, context: v.context } : { type: "volumes", link: this.link, work: null });
+    this.send(v ? { type: "volumes", link: this.link, dimension: v.dimension, work: v.work, context: v.context, ...(this.extended ? { extended: this.extended } : {}) } : { type: "volumes", link: this.link, work: null });
   }
 
   private async handle(m: McpMessage, s: Socket): Promise<void> {
@@ -373,6 +378,13 @@ export class FakeHost {
         if (err) return this.send({ type: "error", id: m.id, code: err, message: `can't serve ${m.type}: ${err}` }, s);
         if (m.type === "hashes") return this.send({ type: "hashes.result", id: m.id, sections: sectionHashes(m.boxes, (x, y, z) => this.get([x, y, z]), this.volatile) }, s);
         return this.snapshot(m, s);
+      }
+      case "volumes.extend": {
+        const v = this.volumes;
+        if (!v || m.link !== this.link) return this.send({ type: "error", id: m.id, code: "stale_link", message: `extension for link ${m.link}, current link is ${this.link}` }, s);
+        if (!containsBox(m.work, v.work)) return this.send({ type: "error", id: m.id, code: "bad_extension", message: "the extended work volume must contain the player's work volume" }, s);
+        this.extended = m.work;
+        return this.sendVolumes();
       }
       case "patch":
         await this.beforePatch?.(m);
@@ -401,7 +413,7 @@ export class FakeHost {
     if (!v) return "no_volumes";
     if (dimension !== v.dimension) return "wrong_dimension";
     const chunks = new Set<string>();
-    for (const b of [v.work, ...v.context]) for (let cx = b.min[0] >> 4; cx <= b.max[0] >> 4; cx++) for (let cz = b.min[2] >> 4; cz <= b.max[2] >> 4; cz++) chunks.add(`${cx},${cz}`);
+    for (const b of [v.work, ...(this.extended ? [this.extended] : []), ...v.context]) for (let cx = b.min[0] >> 4; cx <= b.max[0] >> 4; cx++) for (let cz = b.min[2] >> 4; cz <= b.max[2] >> 4; cz++) chunks.add(`${cx},${cz}`);
     for (const b of boxes) for (let cx = b.min[0] >> 4; cx <= b.max[0] >> 4; cx++) for (let cz = b.min[2] >> 4; cz <= b.max[2] >> 4; cz++) if (!chunks.has(`${cx},${cz}`)) return "outside_volumes";
     return undefined;
   }
@@ -486,7 +498,11 @@ export class FakeHost {
   }
 }
 
-const KNOWN = new Set(["hello", "error", "hashes", "snapshot", "patch", "prompt.result", "notice", "chat"]);
+function containsBox(outer: WireBox, inner: WireBox): boolean {
+  return [0, 1, 2].every((i) => outer.min[i]! <= inner.min[i]! && outer.max[i]! >= inner.max[i]!);
+}
+
+const KNOWN = new Set(["hello", "error", "volumes.extend", "hashes", "snapshot", "patch", "prompt.result", "notice", "chat"]);
 
 function sectionBox(s: Vec3): WireBox {
   return { min: [s[0] * 16, s[1] * 16, s[2] * 16], max: [s[0] * 16 + 15, s[1] * 16 + 15, s[2] * 16 + 15] };

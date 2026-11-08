@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
+import { createRequire } from "node:module";
 import { dirname, extname, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { LoggedEvent } from "../core/events.js";
@@ -8,7 +9,6 @@ import type { Document } from "../document/document.js";
 import type { BlockBaker } from "../perception/render/bake.js";
 import { Atlas, bakeModels } from "./atlas.js";
 import type { EventBus } from "./bus.js";
-import type { DeltaWriter } from "./deltas.js";
 import type { LogTables } from "./states.js";
 import { encodeVoxels, parseBoxParam } from "./voxels.js";
 
@@ -23,6 +23,12 @@ import { encodeVoxels, parseBoxParam } from "./voxels.js";
  *   GET /assets/models.json        baked block models keyed by log-wide state id
  *   GET /log/deltas?offset&length  raw deltas.bin records
  *   GET /info                      session id, current document, latest seq, what is available
+ *   GET /log/snapshots/<seq>.png   a time-lapse snapshot (replay's fallback when deltas were capped)
+ *   GET /vendor/three/...          three.js from the installed package (build/ and examples/jsm/)
+ *
+ * The same server serves a finished log (`offline.ts`, `autosketch observe <path>`) with
+ * `live: false`: the events come from the file, there is no document to read, and nothing is
+ * written into the log folder.
  *
  * Nothing here is on the tool-call path. The bus subscriber only appends to a ring buffer and
  * schedules a write to the clients; a client whose socket backs up stops receiving events and,
@@ -31,8 +37,17 @@ import { encodeVoxels, parseBoxParam } from "./voxels.js";
  * of this.
  */
 
+/** Reads `deltas.bin` ranges: the live writer (`DeltaWriter`) or a finished file (`offline.ts`). */
+export interface DeltaSource {
+  readonly capped: boolean;
+  readonly bytes: number;
+  size(name: string): number;
+  read(name: string, offset: number, length: number): Promise<Buffer>;
+}
+
 export interface ObserveHttpOptions {
-  bus: EventBus;
+  /** Only the latest seq is read; events arrive through `onEvent`. */
+  bus: Pick<EventBus, "lastSeq">;
   tables: LogTables;
   sessionId: string;
   /** Session folder for a document name (the `url` file is written there). */
@@ -40,7 +55,9 @@ export interface ObserveHttpOptions {
   /** The document behind a `doc` tag ("base" or a scope id). */
   docFor: (doc: string) => Document | undefined;
   getBaker?: () => Promise<BlockBaker>;
-  deltas?: DeltaWriter;
+  deltas?: DeltaSource;
+  /** False for a finished log: no `url` file is written and `/info` says so. Default true. */
+  live?: boolean;
   /** 0 for a free port. */
   port: number;
   version?: string;
@@ -58,6 +75,22 @@ interface Client {
 }
 
 const DEFAULT_VIEWER = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "viewer");
+
+/** The installed three.js package folder, or undefined when it can't be found. */
+let threeRoot: string | undefined | null = null;
+export function threeDir(): string | undefined {
+  if (threeRoot === null) {
+    try {
+      // "three" resolves to build/three.cjs for require; package.json itself is not exported.
+      threeRoot = dirname(dirname(createRequire(import.meta.url).resolve("three")));
+    } catch {
+      threeRoot = undefined;
+    }
+  }
+  return threeRoot;
+}
+/** The parts of the three.js package the viewer may load. */
+const THREE_PATHS = /^(build\/three\.(module|core)\.js|examples\/jsm\/[\w/-]+\.js)$/;
 
 const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -148,7 +181,7 @@ export class ObserveHttp {
   }
 
   private async writeUrl(name: string): Promise<void> {
-    if (!this.url || this.urlWritten.has(name)) return;
+    if (this.opts.live === false || !this.url || this.urlWritten.has(name)) return;
     this.urlWritten.add(name);
     const dir = this.opts.dirFor(name);
     try {
@@ -176,6 +209,18 @@ export class ObserveHttp {
       return void res.end(this.atlas.encode());
     }
     if (path === "/log/deltas") return this.deltas(url, res);
+    const snap = /^\/log\/snapshots\/(\d+\.png)$/.exec(path);
+    if (snap) {
+      const name = this.opts.tables.current;
+      if (name === undefined) return json(res, 404, { error: "no document" });
+      return this.file(join(this.opts.dirFor(name), "snapshots", snap[1]!), res);
+    }
+    if (path.startsWith("/vendor/three/")) {
+      const rel = path.slice("/vendor/three/".length);
+      const root = threeDir();
+      if (!root || !THREE_PATHS.test(rel) || rel.includes("..")) return json(res, 404, { error: "not found" });
+      return this.file(join(root, rel), res);
+    }
     return this.static(path, res);
   }
 
@@ -197,6 +242,7 @@ export class ObserveHttp {
     const d = this.opts.deltas;
     json(res, 200, {
       session: this.opts.sessionId,
+      live: this.opts.live !== false,
       version: this.opts.version,
       doc: this.opts.tables.current ?? null,
       seq: this.opts.bus.lastSeq,
@@ -248,6 +294,10 @@ export class ObserveHttp {
     const rel = normalize(decodeURIComponent(path === "/" ? "/index.html" : path)).replace(/^([/\\])+/, "");
     const file = resolve(root, rel);
     if (!file.startsWith(resolve(root) + sep)) return json(res, 404, { error: "not found" });
+    return this.file(file, res);
+  }
+
+  private async file(file: string, res: ServerResponse): Promise<void> {
     let data: Buffer;
     try {
       data = await readFile(file);

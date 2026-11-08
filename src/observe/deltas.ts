@@ -20,6 +20,12 @@ import type { LogTables } from "./states.js";
  * sandbox ops), then a uint32 id from the `state.add` table, little-endian. An op logs the
  * after-state, an undo the before-state.
  *
+ * `session.open` gets a keyframe: one record per non-air block of the document as it opened (an
+ * opened or imported document already has content the ops never logged), so a reader can rebuild
+ * the document from `deltas.bin` alone by clearing on each `session.open` and applying every range
+ * in `seq` order. The keyframe is copied on the call path (one pass over the blocks, the same order
+ * of work as loading the document); an empty document gets an empty range.
+ *
  * Past `maxBytes` for the session, events carry no `delta` from then on; replay falls back to the
  * time-lapse snapshots.
  */
@@ -39,6 +45,8 @@ export interface DeltaWriterOptions {
 interface Job {
   name: string;
   offset: number;
+  /** Already encoded (a keyframe). */
+  buf?: Buffer;
   positions: Int32Array;
   values: Uint16Array;
   origin: readonly number[];
@@ -71,6 +79,7 @@ export class DeltaWriter {
   }
 
   readonly annotate = (doc: string, e: ObserveEvent): { delta: { offset: number; length: number } } | undefined => {
+    if (e.kind === "session.open") return this.keyframe(doc);
     if (e.kind !== "doc.op" && e.kind !== "doc.undo" && e.kind !== "doc.redo") return undefined;
     const name = this.opts.tables.current;
     const table = this.opts.tables.table();
@@ -91,18 +100,58 @@ export class DeltaWriter {
       const v = values[i]!;
       if (map[v]! < 0) map[v] = table.id(d.states.get(v));
     }
-    let f = this.files.get(name);
-    if (!f) this.files.set(name, (f = { size: 0 }));
-    const offset = f.size;
+    return this.reserve({ name, offset: 0, positions: entry.positions, values, origin: [...(undo ? entry.originBefore : entry.originAfter)], map }, length);
+  };
+
+  /** Every non-air block of the document that just opened, in its local frame. */
+  private keyframe(doc: string): { delta: { offset: number; length: number } } | undefined {
+    const name = this.opts.tables.current;
+    const table = this.opts.tables.table();
+    const d = this.opts.docFor(doc);
+    if (name === undefined || !table || !d || this.capped) return undefined;
+    const map = new Int32Array(d.states.size).fill(-1);
+    const out: number[] = [];
+    const [ox, oy, oz] = d.toLocal(0, 0, 0);
+    d.voxels.forEach((x, y, z, v) => {
+      if (map[v]! < 0) map[v] = table.id(d.states.get(v));
+      out.push(x + ox, y + oy, z + oz, map[v]!);
+    });
+    // An empty document still gets an empty range: it marks the keyframe as logged, so a reader
+    // can tell "nothing to load" from "deltas were off".
+    if (!out.length) {
+      let f = this.files.get(name);
+      if (!f) this.files.set(name, (f = { size: 0 }));
+      return { delta: { offset: f.size, length: 0 } };
+    }
+    const length = (out.length / 4) * RECORD_BYTES;
+    if (this.bytes + length > this.opts.maxBytes) {
+      this.capped = true;
+      this.opts.log?.(`observe: deltas.bin reached observe.maxDeltaBytes (${this.opts.maxBytes} bytes); later ops are logged without deltas`);
+      return undefined;
+    }
+    const buf = Buffer.alloc(length);
+    for (let i = 0, o = 0; i < out.length; i += 4, o += RECORD_BYTES) {
+      buf.writeInt32LE(out[i]!, o);
+      buf.writeInt32LE(out[i + 1]!, o + 4);
+      buf.writeInt32LE(out[i + 2]!, o + 8);
+      buf.writeUInt32LE(out[i + 3]!, o + 12);
+    }
+    return this.reserve({ name, offset: 0, buf, positions: new Int32Array(0), values: new Uint16Array(0), origin: [0, 0, 0], map }, length);
+  }
+
+  private reserve(job: Job, length: number): { delta: { offset: number; length: number } } {
+    let f = this.files.get(job.name);
+    if (!f) this.files.set(job.name, (f = { size: 0 }));
+    job.offset = f.size;
     f.size += length;
     this.bytes += length;
-    this.jobs.push({ name, offset, positions: entry.positions, values, origin: [...(undo ? entry.originBefore : entry.originAfter)], map });
+    this.jobs.push(job);
     if (!this.timer) {
       this.timer = setTimeout(() => void this.flush(), this.opts.flushMs ?? 50);
       this.timer.unref?.();
     }
-    return { delta: { offset, length } };
-  };
+    return { delta: { offset: job.offset, length } };
+  }
 
   /** Encodes and writes every reserved range so far. Resolves when they are on disk. */
   flush(): Promise<void> {
@@ -111,7 +160,7 @@ export class DeltaWriter {
     const jobs = this.jobs;
     this.jobs = [];
     for (const job of jobs) {
-      const buf = encodeJob(job);
+      const buf = job.buf ?? encodeJob(job);
       const handle = this.handle(job.name);
       this.writing = this.writing
         .then(async () => {

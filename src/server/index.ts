@@ -8,11 +8,17 @@
  *   viewer:   --set observe.http=true (a free port) or =<port>; the URL is printed to stderr
  *   --set server.hideTools=analyze,render hides tools (eval ablations, docs/design/10)
  *
+ *   autosketch observe <path> [--port <n>] [--instance <path>]
+ *   opens a finished session log (a session folder, a document's observe/ folder or a document
+ *   folder) in the viewer; no MCP session. Uses the instance's textures when --instance or
+ *   AUTOSKETCH_INSTANCE is set, flat colours otherwise (docs/design/12, Replay).
+ *
  * stdout carries the protocol; all logging goes to stderr.
  */
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { Settings } from "../core/settings.js";
 import { startObserve, type Observer } from "../observe/index.js";
+import { serveLog } from "../observe/offline.js";
 import { scopeLimits } from "../scope/settings.js";
 import { configFromEnv, loadInstanceContext } from "./context.js";
 import { createServer, SERVER_VERSION } from "./server.js";
@@ -72,7 +78,37 @@ async function main(): Promise<void> {
   log(`listening on stdio; workspace ${workspace}`);
 }
 
-main().catch((e: Error) => {
+/** `autosketch observe <path>`: the viewer over a finished log, until interrupted. */
+async function observeCommand(args: string[]): Promise<void> {
+  const path = args.find((a, i) => !a.startsWith("--") && !args[i - 1]?.startsWith("--"));
+  if (!path) {
+    log("usage: autosketch observe <session folder | <doc>/observe | <doc> folder> [--port <n>] [--instance <path>]");
+    process.exit(2);
+  }
+  const i = args.indexOf("--port");
+  const port = i >= 0 ? Number(args[i + 1]) : 0;
+  if (!Number.isInteger(port) || port < 0 || port > 65_535) {
+    log("--port must be 0..65535");
+    process.exit(2);
+  }
+  const cfg = configFromEnv(args);
+  let getBaker;
+  if (cfg) {
+    const ctx = loadInstanceContext(cfg, log);
+    ctx.catch((e: Error) => log(`failed to load instance (drawing flat colours): ${e.message}`));
+    getBaker = async () => bakerFor(await ctx);
+  } else log("no instance configured: blocks are drawn as flat colour cubes (set AUTOSKETCH_INSTANCE for textures)");
+  const viewer = await serveLog({ path, port, log, ...(getBaker ? { getBaker } : {}) });
+  const l = viewer.log;
+  log(`session ${l.sessionId}: ${l.events.length} events, ${l.deltaBytes ? `${l.deltaBytes} bytes of deltas` : "no deltas"}, ${l.snapshots.length} snapshots${l.dropped ? `, ${l.dropped} events dropped` : ""}`);
+  process.stdout.write(`${viewer.url}\n`);
+  const stop = () => void viewer.close().then(() => process.exit(0));
+  process.on("SIGINT", stop);
+  process.on("SIGTERM", stop);
+}
+
+const run = process.argv[2] === "observe" ? observeCommand(process.argv.slice(3)) : main();
+run.catch((e: Error) => {
   log(`fatal: ${e.stack ?? e.message}`);
   process.exit(1);
 });

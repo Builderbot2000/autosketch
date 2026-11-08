@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Autosketch Observer</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <b>Autosketch</b>
+    <span id="docname">…</span>
+    <span id="session" class="dim"></span>
+    <span id="seq" class="dim"></span>
+    <span id="assets" class="dim"></span>
+    <span class="grow"></span>
+    <button id="fit" title="Frame the whole build">Fit</button>
+    <span id="status">connecting…</span>
+  </header>
+  <main>
+    <section id="view-wrap" class="panel">
+      <canvas id="view"></canvas>
+      <div id="labels"></div>
+      <div class="hint">drag: orbit · right-drag or shift-drag: pan · wheel: zoom · boxes: open jobs (work filled, context wireframe)</div>
+      <section id="drill" hidden>
+        <div class="drill-bar"><b id="drill-title"></b> <span id="drill-note" class="dim"></span><span class="grow"></span><button id="drill-close">Close</button></div>
+        <canvas id="drill-canvas"></canvas>
+      </section>
+    </section>
+    <section class="panel side">
+      <h2>Scopes</h2>
+      <div id="scopes"></div>
+      <h2>Events
+        <select id="f-doc"><option value="">all documents</option></select>
+        <select id="f-kind">
+          <option value="">all kinds</option>
+          <option value="doc">doc.*</option>
+          <option value="call">call.*</option>
+          <option value="scope">scope.*</option>
+          <option value="call.refused">refusals</option>
+          <option value="render.produced">renders</option>
+          <option value="state.add">state.add</option>
+        </select>
+        <input id="f-tool" placeholder="tool" size="8">
+        <label><input id="f-refusals" type="checkbox"> refused only</label>
+      </h2>
+      <div id="feed"></div>
+    </section>
+    <div class="bottom">
+      <section class="panel">
+        <h2>Timeline <span class="dim">fork → merge; red: refusals, amber: lock waits</span></h2>
+        <div id="timeline"></div>
+      </section>
+      <section class="panel">
+        <h2>Activity <span class="dim">edit density, lock rectangles</span></h2>
+        <canvas id="activity"></canvas>
+      </section>
+    </div>
+  </main>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

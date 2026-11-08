@@ -19,11 +19,22 @@ export interface BlockCounts {
   removed: number;
 }
 
+/**
+ * A byte range of `deltas.bin` (12, *Block deltas*): 16-byte records `(x, y, z, stateId)`, int32
+ * x/y/z in the emitting document's local frame after the step and uint32 `stateId` from the
+ * `state.add` table, little-endian. Added by the delta writer in `observe/`, never by emitters.
+ */
+export interface DeltaRef {
+  offset: number;
+  length: number;
+}
+
 export type ObserveEvent =
   | { kind: "session.open"; name: string; bounds?: PublicBox; version?: string }
   | { kind: "session.close"; name: string }
-  | { kind: "doc.op"; jseq: number; op: string; summary: string; changed: number; box?: PublicBox; counts: BlockCounts; shift?: [number, number, number] }
-  | { kind: "doc.undo" | "doc.redo"; jseq: number; op: string; changed: number; box?: PublicBox }
+  | { kind: "doc.op"; jseq: number; op: string; summary: string; changed: number; box?: PublicBox; counts: BlockCounts; shift?: [number, number, number]; delta?: DeltaRef }
+  | { kind: "doc.undo" | "doc.redo"; jseq: number; op: string; changed: number; box?: PublicBox; delta?: DeltaRef }
+  | { kind: "state.add"; id: number; state: string }
   | { kind: "doc.checkpoint"; name: string; jseq: number }
   | { kind: "call.start"; call: number; tool: string; scope?: string }
   | { kind: "call.end"; call: number; tool: string; scope?: string; ms: number; ok: boolean; chars: number; images: number; pixels: number }

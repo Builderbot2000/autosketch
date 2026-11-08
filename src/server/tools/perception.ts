@@ -11,7 +11,7 @@ import { renderDocument, VIEW_NAMES, type Cutaway, type View } from "../../perce
 import { viewSlice } from "../../perception/slice.js";
 import type { InstanceContext } from "../context.js";
 import type { Session } from "../session.js";
-import { perspectiveSchema, resolvePerspective, type PerspectiveInput } from "./camera.js";
+import { perspectiveSchema, pointSchema, resolvePerspective, resolveTarget, targetSchema, type PerspectiveInput } from "./camera.js";
 import { bakerFor, box, boxSchema, editWith, image, selSchema, text, vec3, type Result, type ToolDeps } from "./shared.js";
 
 /** Resolves a selection for a perception call without changing "last". */
@@ -61,6 +61,10 @@ const viewSchema = z.union([
   }),
   z.object(perspectiveSchema).describe("Perspective camera from an eye (may be inside the build)"),
   z.object({ camera: z.string() }).describe("A camera saved with the camera tool"),
+  z.object({ cubemap: pointSchema }).describe("Cubemap: the six 90° faces seen from one point, as a 3×2 sheet"),
+  z
+    .object({ turntable: targetSchema, steps: z.number().int().min(2).max(12).optional(), pitch: z.number().min(-89).max(89).optional() })
+    .describe("Turntable: orthographic views at even bearings around a target (default 8 steps, pitch 30)"),
 ]);
 
 /** Renders, slices, analysis, diffs and raycast (06). */
@@ -81,6 +85,10 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
         "near: n drops blocks nearer than n blocks (perspective: from the eye; orthographic: from the front of what is drawn), so the front falls away without choosing a plane. " +
         "section: a selection the scene is clipped to, like a CAD section box (e.g. {\"subtract\":[<box>,<one octant>]} exposes a corner of the interior). Cut faces draw closed; both compose with region and cutaway. " +
         "peel: n draws the n-th surface along each ray instead of the first (every block face toward the camera counts, so peel 2 shows what is directly behind a one-block façade; one pass per layer, same image cost). " +
+        "Composite views (each counts as one of the 4; alone it gets an image shaped to its grid, longest side `size`, default 768, max 1024): " +
+        "{cubemap:[x,y,z]} six labelled 90° faces from one point, 3×2 (~520 tokens at 768×512: a whole room at a glance); " +
+        "{turntable: target, steps?:8, pitch?:30} a ring of orthographic views around a target (target as for perspective; a selection sets the zoom), 4 per row (~400 tokens for 8 at 768×384). " +
+        "explode: {axis:\"x\"|\"y\"|\"z\", at:[layer,…], gap?:4} splits the build at those layers and moves each band gap blocks further (each at starts a band); raycast reports real positions. " +
         "highlight: any selection, tinted orange; {changed:\"op:-1\"|\"checkpoint:<name>\"} shows a diff ({since:..} still works). style: textured | flat (mean colours) | depth (darker = farther) | xray (translucent shell). " +
         "overlays: {components} labels components. Axis ticks label block coordinates; N marks north. " +
         "The caption gives the render id for raycast and for view_box/view_lasso selections. Image + caption.",
@@ -89,13 +97,17 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
         region: selSchema.optional().describe("Draw only this selection (a box {min,max} or any selection)"),
         cutaway: z.union([z.object({ maxY: z.number().int() }), z.object({ plane: z.enum(["x", "y", "z"]), at: z.number().int(), keep: z.enum(["west", "east", "down", "up", "north", "south"]) })]).optional(),
         highlight: z.union([z.object({ since: z.string() }), selSchema]).optional(),
-        size: z.number().int().min(128).max(1024).optional().describe("Longest side in pixels (default 768 for several views, 512 for one)"),
+        size: z.number().int().min(128).max(1024).optional().describe("Longest side in pixels (default 768 for several views or a composite, 512 for one)"),
         style: z.enum(["textured", "flat", "depth", "xray"]).optional(),
         overlays: z.object({ components: z.boolean().optional() }).optional(),
         context: z.enum(["ghost", "normal", "hide"]).optional().describe("In a scoped job's sandbox: how the read-only context is drawn (default ghost: grey, translucent)"),
         near: z.number().positive().optional().describe("Near clip: blocks nearer than this many blocks are not drawn"),
         section: selSchema.optional().describe("Section box: draw only this selection (composes with region)"),
         peel: z.number().int().min(1).max(8).optional().describe("Depth peeling: draw the n-th surface along each ray (1 = normal; 2 = directly behind the front)"),
+        explode: z
+          .object({ axis: z.enum(["x", "y", "z"]), at: z.array(z.number().int()).min(1), gap: z.number().int().min(1).max(64).optional() })
+          .optional()
+          .describe("Exploded view: split at these layers, bands moved gap blocks apart (default 4)"),
       },
     },
     async (c, a) => {
@@ -126,6 +138,11 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
         }
       }
       const views = a.views?.map((v): View => {
+        if (typeof v === "object" && "turntable" in v) {
+          const t = resolveTarget(c, doc, v.turntable);
+          notes.push(...t.notes);
+          return { turntable: t.point, ...(t.frame ? { frame: t.frame } : {}), ...(v.steps ? { steps: v.steps } : {}), ...(v.pitch !== undefined ? { pitch: v.pitch } : {}) };
+        }
         if (typeof v !== "object" || !("eye" in v)) return v as View;
         const p = resolvePerspective(c, doc, v as PerspectiveInput);
         notes.push(...p.notes);
@@ -143,6 +160,7 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
         ...(a.near ? { near: a.near } : {}),
         ...(section ? { section } : {}),
         ...(a.peel ? { peel: a.peel } : {}),
+        ...(a.explode ? { explode: a.explode } : {}),
       });
       emitRender(session, r.views, r.width, r.height);
       return image(r.png, [r.caption, ...notes.map((n) => `note: ${n}`)].join("\n"));

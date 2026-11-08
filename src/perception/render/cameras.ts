@@ -25,6 +25,49 @@ export interface ViewCamera {
   cut?: Cut;
   /** Depth peeling: the view shows the n-th block along each ray (06, *Cameras*). */
   peel?: number;
+  /**
+   * Exploded view: `clip` is then the exploded box and `mask` is unset; positions along a ray map
+   * back to the document through `unexplode`, then `explode.clip` and `explode.mask` apply.
+   */
+  explode?: { spec: Explode; clip: Box; mask?: Mask };
+}
+
+/**
+ * Exploded view (06, *Cameras*): the build split at layers along one axis, each band moved `gap`
+ * blocks further than the one before. Each `at` value starts a new band: blocks at or beyond it
+ * move. `at` is sorted.
+ */
+export interface Explode {
+  axis: 0 | 1 | 2;
+  at: number[];
+  gap: number;
+}
+
+/** The band a coordinate along the axis falls in (0 = before the first split). */
+export function bandOf(e: Explode, c: number): number {
+  let k = 0;
+  while (k < e.at.length && c >= e.at[k]!) k++;
+  return k;
+}
+
+/** Where a document position is drawn in an exploded view. */
+export function explodeAt(e: Explode, x: number, y: number, z: number): Vec3 {
+  const p: Vec3 = [x, y, z];
+  p[e.axis] = p[e.axis]! + bandOf(e, p[e.axis]!) * e.gap;
+  return p;
+}
+
+/** The document position drawn at an exploded position, or undefined in a gap. */
+export function unexplode(e: Explode, x: number, y: number, z: number): Vec3 | undefined {
+  const p: Vec3 = [x, y, z];
+  const c = p[e.axis]!;
+  for (let k = e.at.length; k >= 0; k--) {
+    if (bandOf(e, c - k * e.gap) === k) {
+      p[e.axis] = c - k * e.gap;
+      return p;
+    }
+  }
+  return undefined;
 }
 
 /** A near clip (06, *Cameras*): a block is drawn when its centre lies at least `d` along `normal`. */
@@ -180,14 +223,30 @@ export function raycast(doc: Document, rec: RenderRecord, px: number, py: number
     origin,
     dir,
     (p, face) => {
-      if (view.cut && !kept(view.cut, p[0], p[1], p[2])) return false;
-      const state = doc.getState(p[0], p[1], p[2]);
+      const q = documentPos(view, p);
+      if (!q) return false;
+      const state = doc.getState(q[0], q[1], q[2]);
       if (state === "minecraft:air") return false;
       if (skip-- > 0) return false;
-      hit = { view, pos: p, state, face };
+      hit = { view, pos: q, state, face };
       return true;
     },
     tMin,
   );
   return hit;
+}
+
+/**
+ * The document position a view drew at a position along a ray, or undefined when the view drew
+ * nothing there (removed by its near clip, or a gap or outside the clip of an exploded view).
+ */
+export function documentPos(v: ViewCamera, p: Vec3): Vec3 | undefined {
+  if (v.cut && !kept(v.cut, p[0], p[1], p[2])) return undefined;
+  if (!v.explode) return p;
+  const q = unexplode(v.explode.spec, p[0], p[1], p[2]);
+  if (!q) return undefined;
+  const b = v.explode.clip;
+  if (q.some((c, a) => c < b.min[a]! || c >= b.max[a]!)) return undefined;
+  if (v.explode.mask && !v.explode.mask.has(q[0], q[1], q[2])) return undefined;
+  return q;
 }

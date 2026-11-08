@@ -1,7 +1,7 @@
 import { Mask } from "../../core/mask.js";
 import { boxVolume, type Vec3 } from "../../core/region.js";
 import type { Document } from "../../document/document.js";
-import { kept, marchRay, projectToImage, rayThrough, type RenderRecord, type ViewCamera } from "./cameras.js";
+import { documentPos, explodeAt, kept, marchRay, projectToImage, rayThrough, type RenderRecord, type ViewCamera } from "./cameras.js";
 
 /**
  * Render-seeded selections (docs/design/05-operations.md, *Picking*: `view_box`, `view_lasso`): a
@@ -68,21 +68,23 @@ function pick(doc: Document, rec: RenderRecord, area: Area, inside: (fx: number,
 
 function pickThrough(v: ViewCamera, a: Area, inside: (fx: number, fy: number) => boolean, out: Mask): void {
   const test = (x: number, y: number, z: number) => {
-    if (v.cut && !kept(v.cut, x, y, z)) return; // removed by the near clip
+    // Where the view drew it (an exploded view moves bands apart).
+    const [dx, dy, dz] = v.explode ? explodeAt(v.explode.spec, x, y, z) : [x, y, z];
+    if (v.cut && !kept(v.cut, dx, dy, dz)) return; // removed by the near clip
     // Perspective: only positions in front of the eye.
-    const f = projectToImage(v, [x + 0.5, y + 0.5, z + 0.5]);
+    const f = projectToImage(v, [dx + 0.5, dy + 0.5, dz + 0.5]);
     if (!f) return;
     const [fx, fy] = f;
     if (fx >= a.x0 && fx < a.x1 && fy >= a.y0 && fy < a.y1 && inside(fx, fy)) out.add(x, y, z);
   };
-  if (v.mask) {
-    v.mask.forEach((x, y, z) => {
-      const b = v.clip;
+  const b = v.explode ? v.explode.clip : v.clip;
+  const m = v.explode ? v.explode.mask : v.mask;
+  if (m) {
+    m.forEach((x, y, z) => {
       if (x >= b.min[0] && x < b.max[0] && y >= b.min[1] && y < b.max[1] && z >= b.min[2] && z < b.max[2]) test(x, y, z);
     });
     return;
   }
-  const b = v.clip;
   if (boxVolume(b) > PICK_MAX_VOLUME) throw new Error(`depth "through" would scan ${boxVolume(b).toLocaleString("en-US")} positions; at most ${PICK_MAX_VOLUME.toLocaleString("en-US")}. Render a smaller region first, or use depth "visible".`);
   for (let y = b.min[1]; y < b.max[1]; y++) for (let z = b.min[2]; z < b.max[2]; z++) for (let x = b.min[0]; x < b.max[0]; x++) test(x, y, z);
 }
@@ -107,10 +109,10 @@ function pickVisible(doc: Document, v: ViewCamera, a: Area, inside: (fx: number,
         origin,
         dir,
         (p) => {
-          if (v.cut && !kept(v.cut, p[0], p[1], p[2])) return false;
-          if (doc.getState(p[0], p[1], p[2]) === "minecraft:air") return false;
+          const q = documentPos(v, p);
+          if (!q || doc.getState(q[0], q[1], q[2]) === "minecraft:air") return false;
           if (skip-- > 0) return false;
-          out.add(p[0], p[1], p[2]);
+          out.add(q[0], q[1], q[2]);
           return true;
         },
         tMin,

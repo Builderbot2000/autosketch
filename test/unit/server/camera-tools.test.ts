@@ -72,6 +72,12 @@ describe("camera tool and perspective renders over MCP", () => {
     const hit = await call("raycast", { view: id, px: 96, py: 96 });
     expect(textOf(hit)).toMatch(/camera inside \(96,96\) → \(8,4,4\) andesite, west face/);
 
+    // Composite views, near, section, peel and explode go through the tool too.
+    const comp = await call("render", { views: [{ turntable: { sel: { component: "post" } }, steps: 4 }, { cubemap: [4, 4, 4] }], near: 1, peel: 1, section: "all", explode: { axis: "y", at: [4] } });
+    expect(comp.isError, textOf(comp)).toBeFalsy();
+    expect(textOf(comp)).toMatch(/turntable around \(7,3,4\): 4 steps of 90°[\s\S]*cubemap at \(4,4,4\)/);
+    expect(textOf(comp)).toMatch(/exploded along y at 4/);
+
     expect(textOf(await call("camera", { name: "inside", delete: true }))).toMatch(/removed camera "inside"/);
     expect((await call("render", { views: [{ camera: "inside" }] })).isError).toBe(true);
     expect((await call("camera", { name: "x", eye: [1, 1, 1] })).isError).toBe(true);

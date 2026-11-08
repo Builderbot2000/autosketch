@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Vec3 } from "../../core/region.js";
+import type { Box, Vec3 } from "../../core/region.js";
 import { getCamera, listCameras, removeCamera, saveCamera, type SavedCamera } from "../../document/cameras.js";
 import type { Document } from "../../document/document.js";
 import { resolveAnchor, type AtSpec } from "../../ops/anchors.js";
@@ -34,20 +34,25 @@ export interface PerspectiveInput {
   fov?: number | undefined;
 }
 
-/** Resolves a perspective camera's target to a point (and a frame for a selection). Notes come from selection resolution. */
-export function resolvePerspective(c: InstanceContext, doc: Document, a: PerspectiveInput): { view: PerspectiveView; notes: string[]; desc: string } {
-  const t = a.target;
-  const base = { eye: [...a.eye] as Vec3, ...(a.fov !== undefined ? { fov: a.fov } : {}) };
+/** Resolves a camera target to a point in block units (and a frame box for a selection). Notes come from selection resolution. */
+export function resolveTarget(c: InstanceContext, doc: Document, t: unknown): { point: Vec3; frame?: Box; notes: string[]; desc: string } {
   if (t && typeof t === "object" && !Array.isArray(t) && "sel" in t) {
     const r = resolveSelection((t as { sel: unknown }).sel as SelExpr, { doc, registry: c.registry, index: c.palette });
     const box = r.mask.bbox();
     if (!box) throw new Error(["the camera's target selection is empty", ...r.notes].join("; "));
-    const target: Vec3 = [0, 1, 2].map((i) => (box.min[i]! + box.max[i]!) / 2 - 0.5) as Vec3;
-    return { view: { ...base, target, frame: box }, notes: r.notes, desc: "the selection's centre" };
+    const point: Vec3 = [0, 1, 2].map((i) => (box.min[i]! + box.max[i]!) / 2 - 0.5) as Vec3;
+    return { point, frame: box, notes: r.notes, desc: "the selection's centre" };
   }
-  if (Array.isArray(t) && t.length === 3 && t.every((n) => typeof n === "number")) return { view: { ...base, target: [...t] as Vec3 }, notes: [], desc: "" };
+  if (Array.isArray(t) && t.length === 3 && t.every((n) => typeof n === "number")) return { point: [...t] as Vec3, notes: [], desc: "" };
   const at = resolveAnchor(doc, t as AtSpec, env(c));
-  return { view: { ...base, target: at.pos }, notes: [], desc: at.desc };
+  return { point: at.pos, notes: [], desc: at.desc };
+}
+
+/** Resolves a perspective camera's target (see resolveTarget). */
+export function resolvePerspective(c: InstanceContext, doc: Document, a: PerspectiveInput): { view: PerspectiveView; notes: string[]; desc: string } {
+  const t = resolveTarget(c, doc, a.target);
+  const view: PerspectiveView = { eye: [...a.eye] as Vec3, target: t.point, ...(a.fov !== undefined ? { fov: a.fov } : {}), ...(t.frame ? { frame: t.frame } : {}) };
+  return { view, notes: t.notes, desc: t.desc };
 }
 
 const fmt = (p: Vec3) => `(${p.map((n) => +n.toFixed(2)).join(",")})`;

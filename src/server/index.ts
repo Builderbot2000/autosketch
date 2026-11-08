@@ -42,7 +42,7 @@ async function main(): Promise<void> {
   // session, documents and tool wrapper only see the EventSink.
   let observer: Observer;
   try {
-    observer = startObserve({ workspace, settings, version: SERVER_VERSION, getDoc: () => session.doc, getBaker: async () => bakerFor(await ctx), log });
+    observer = startObserve({ workspace, settings, version: SERVER_VERSION, getDoc: () => session.doc, getScopeDoc: (id) => session.scopes.scopes.get(id)?.doc, getBaker: async () => bakerFor(await ctx), log });
   } catch (e) {
     log((e as Error).message);
     process.exit(2);

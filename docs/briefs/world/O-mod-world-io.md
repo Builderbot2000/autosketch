@@ -1,0 +1,32 @@
+# Silo O: Mod world I/O
+
+**Wave 1**, starting from silo N's skeleton merge. Codec work can begin from L's golden vectors before that.
+
+**Specs:** `13` (*Agent → world: patches*, *World → agent: sync*, *Companion mod requirements*, *Open questions*: throughput, change tracking, snapshot cost), L's *Wire format* section.
+
+## Goal
+
+Read and write the loaded world exactly as `13` requires: guarded, side-effect-free patch writes under a tick budget, region snapshots, and a change tracker that catches every block change the mod didn't make itself.
+
+## Deliverables, in merge order
+
+1. **Guarded patch applier** (M5, M6): for each position, compare the world's current state with the expected one; write on match, skip and record the actual state on mismatch; reject states the game can't parse (never write air). Write with no neighbour updates, physics, drops or light glitches left behind (set the block with update flags that suppress neighbour and shape updates, then fix lighting the way WorldEdit and Axiom do). Remove old block entities and load new ones from the patch NBT. Leave entities alone (M12). `overwriteHandEdits` patches skip the guard and report how many positions differed.
+2. **Ordering and budget** (M7): a queue applied on server ticks, strictly in patch id order, at most the configured number of blocks per tick. A patch in progress is visible part-way. `patch.ack` once a patch finishes. Expose pending count and last result to silo N's `/autosketch status`.
+3. **Snapshots** (M8): region plus a one-block shell, states and block-entity NBT, encoded as L specifies. Read on the server thread in bounded slices so a large region doesn't stall a tick; encode off-thread.
+4. **Change tracker** (M9): every block change inside the region that is not one of the mod's own patch writes, from any source (players, Axiom, pistons, explosions, fluids, other mods). `13` expects this to need a mixin on chunk block-state writes. Mark the mod's own writes so the tracker ignores them. Changes outside the region are ignored, never reported (README *Decisions* 1). Batch into `dirty` messages; switch to "whole region" past L's cap. Keep the per-write cost on non-region chunks to one cheap check.
+5. **Fallback tracker**: periodic snapshot comparison, selected by config, in case the mixin conflicts with something in Craftoria (`13`, *Open questions*). Silo R decides which is default.
+
+## Files you own
+
+- The `…world` package (or whatever N's skeleton names it) in `mod/`, the mixin config, and their tests.
+
+## Notes
+
+- GameTests for each rule: a matching expected state writes; a mismatch skips and reports the actual state; an unknown state is rejected; sand placed mid-air doesn't fall; a placed water source doesn't flow; breaking a chest drops nothing; a 100k-block patch spreads across ticks in order; a piston push inside the region produces a `dirty`; the mod's own writes don't.
+- Measure as you go: blocks per tick before a tick exceeds 50 ms on the GameTest server, and snapshot time per million blocks. Record the numbers in `13`; silo R repeats them on Craftoria.
+
+## Done when
+
+- All the GameTests above pass headless.
+- The guard and ack match L's fake host on the same inputs (feed the same patch and starting world to both and compare acks).
+- `13`'s rows M5–M9 are marked done, with measured numbers next to the throughput and snapshot open questions.

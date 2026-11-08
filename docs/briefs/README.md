@@ -57,3 +57,7 @@ These would need someone in-game, and that is not planned. Don't wait on them or
 - Whether Axiom accepts an Autosketch-written blueprint, and which folder Axiom reads `.schem` from. Keep the current targets.
 - The Craftoria server's real `maxTotalSchematicSize`. Keep reading the local config, defaulting to 256 KB.
 - FramedBlocks and Copycats camo NBT layout (silo E).
+
+## Later sets
+
+- [Live world link and companion mod (`13`)](world/README.md): silos L, N, O, P, Q, R.

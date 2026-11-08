@@ -1,0 +1,36 @@
+# Silo P: MCP link core
+
+**Wave 1**, against silo L's fake host. Runs in parallel with silo Q; the two meet at the sync primitive (Q) and the link object (P), see the contracts table in the README.
+
+**Specs:** `13` (*Model*, *Agent → world: patches*, *Connection*, *MCP requirements*), `12` (*Event stream*: P adds the `world.*` kinds), `04` (journal), `02` (instance locator).
+
+## Goal
+
+Connect a document to the world region and turn every committed journal entry on it into one guarded patch, then fold each ack back into the cache. No tool or op knows the link exists.
+
+## Deliverables, in merge order
+
+1. **Journal subscription.** The link needs every `doc.op`, `doc.undo` and `doc.redo` on the base document, including when observability is off. Today `doc.events` is a single sink and emitters skip building payloads when it isn't `enabled` (`core/events.ts`). Add the smallest change that works: e.g. a fan-out sink that stays enabled while a link is open, or a separate commit listener on `Document`. Like the `deltas.bin` writer (`observe/deltas.ts`), look the entry up by `jseq` to get positions and before/after states. Sandboxes' events are never patched.
+2. **Bridge client** (W1) in `src/world/bridge.ts`: read the pairing file from the instance `02` already locates, connect, `hello`, version check, reconnect with backoff when the game restarts. Queued patches are discarded on disconnect, not replayed (`13`, *Lifecycle*); a reconnect asks Q's sync for a full sync.
+3. **Link** (W2) in `src/world/link.ts`: `doc_open({ world: true })` (an optional argument, so additive) opens or replaces the base document as a linked one when the mod reports a region. Local frame at the region's minimum corner. The read-only context shell, which ops never write and patches never include. Writes outside the region are refused (`outside_world_region`, README *Decisions* 1) through a guard. A new region relinks with a fresh journal (README *Decisions* 2). Expose the link object (README contracts) on the session.
+4. **Patch sender** (W3) in `src/world/patch.ts`: one patch per committed entry, carrying world positions, expected (before) states, new states and NBT. Skip entries marked "does not push" (`world_sync`). Coalesce a `restore` into one patch (README *Decisions* 4): this needs a start/end signal around `Document.restore`; add it as a small additive hook. Patches go out in journal order.
+5. **Ack handling** (W4): write skipped and rejected positions' actual states into the cache through Q's `applyWorldState` (one `world_sync` entry), then add `world: N placed, N skipped (hand-edited), N rejected` to the result of the tool that caused the patch if it's still running, else to the next tool result on the linked document. Do that through the `tool()` wrapper without changing any tool module.
+6. **Events** (W8): `world.link`, `world.patch` (with ack counts) and `world.sync` in `core/events.ts` and the kinds table in `12`. Viewer support for them is optional; a feed line is enough.
+
+## Files you own
+
+- New: `src/world/**` except `src/world/protocol/**` (L) and `src/world/sync.ts` (Q); `src/server/tools/world.ts` if `doc_open`'s argument can't live in `document.ts`'s schema (prefer the latter, one optional field); matching tests in `test/unit/world/`.
+- Additive: `document.ts` (subscription, restore start/end, entry marker), `session.ts`, the `tool()` wrapper, `server/index.ts` wiring, `core/events.ts`.
+
+## Done when
+
+All against the fake host, in `test/unit/world/`:
+
+- A `fill` on a linked document produces one patch whose expected states are the fill's before-states, and the fake world matches the cache afterwards.
+- A fake-host `playerSet` on a position the next op also writes leaves the player's block in the world, the cache matches the world after the ack, and the tool result carries the `world:` line.
+- A `restore` across five ops sends exactly one patch.
+- A script, a stamp, a plugin action and a scope merge each send exactly one patch.
+- `world_sync` entries are never sent.
+- Disconnect, edit, reconnect: nothing queued is replayed, and a full sync runs.
+- An unlinked session's tool results and journal are identical before and after this silo's changes (compare a recorded session).
+- `13`'s rows W1–W4 and W8 are marked done.

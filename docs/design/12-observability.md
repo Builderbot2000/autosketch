@@ -59,7 +59,7 @@ Locks are not separate events. A fork takes its lock and a merge or abandon rele
 
 ## Live viewer
 
-When `observe.http` is set, the MCP process also serves a dashboard on `127.0.0.1:<port>` (stdio stays reserved for MCP). It binds to loopback only and is off by default. On start, the server prints the URL to stderr and writes it to `observe/<session-id>/url`.
+The MCP process also serves a dashboard on `127.0.0.1:<port>` (stdio stays reserved for MCP). It binds to loopback only and is on by default on a free port, so it boots with every session; `observe.http=false` turns it off. On start, the server prints the URL to stderr, writes it to `observe/<session-id>/url` and, unless `observe.open=false`, opens it in the default browser (`src/observe/open.ts`: `open` on macOS, `start` on Windows, `wslview` then `cmd.exe /c start` under WSL, `xdg-open` elsewhere; detached, stdio untouched, failures only logged).
 
 ### Endpoints
 
@@ -119,7 +119,8 @@ The server never sees model tokens. It records response sizes, and the eval runn
 | `observe.log` | `true` | Write `events.ndjson`. Small: no block data. |
 | `observe.deltas` | `"auto"` | `"auto"` (on when the viewer is enabled), `"on"` or `"off"` |
 | `observe.maxDeltaBytes` | 512 MB | Per-session cap on `deltas.bin` |
-| `observe.http` | off | Port number, or `true` for a free port |
+| `observe.http` | free port | Port number, `true` for a free port, or `false` for no viewer |
+| `observe.open` | `true` | Open the live viewer in the default browser when it starts |
 | `observe.snapshots` | `"off"` | `"merge"`, `"checkpoint"` or `"off"` |
 | `observe.retainSessions` | 20 | Older session folders are pruned at startup |
 | `scope.maxWorkRatio` | 0.5 | Largest child work volume as a share of the parent's (`11`) |
@@ -198,4 +199,4 @@ Decisions made while building phase 5:
 - **Large documents in the browser.** At what size does the 3D view need chunked meshing with level of detail, or should it switch to the top-down map automatically? It should be measured on a large Craftoria build before deciding.
 - **Many concurrent jobs.** If a session ever has dozens of open scopes, the scope tree and overlays need grouping (by parent, by brief). Doc 11 expects few concurrent jobs, so this waits until a log shows otherwise.
 - **Claude Code panel.** A side pane next to the chat (scope tree plus the latest snapshot) could reuse `/events`. Is that worth maintaining alongside the web viewer?
-- **In-game preview.** Mirroring merges into a live server as a ghost preview is appealing, but it writes into a real world. It is out of scope unless it can be made strictly non-destructive.
+- **In-game preview.** Superseded by the live world link (`13`): agent edits are written into the loaded world as guarded patches that never overwrite a hand edit without an explicit request, which is the non-destructive condition this question set. A ghost preview (showing a merge before it lands) remains a possible addition to the companion mod.

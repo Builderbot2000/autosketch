@@ -98,13 +98,14 @@ Each tool's description carries its cost hint.
 | `render` styles | `textured`, `flat`, `depth` (flat colours darkened with distance along the view), `xray` (all shell faces, both sides, blended at 28%; highlighted blocks stay solid). |
 | `render` views | Named views, `component:<id>` (iso from the south-east, framed on the component box), custom `{yaw, pitch, distance?, target?}`. Views are orthographic, so `distance` is a zoom: the view frames a sphere of that radius around `target`. |
 | `render` region, cutaway | `region` takes any selection (resolved to a mask by the tool layer; an exact box takes the box path). Cutaways: `{maxY}` and `{plane, at, keep}` (the plane's own layer stays). A component-interior cutaway is not done. |
-| `render` highlight | A resolved mask (a selection, or `{since}` for a diff), tinted orange; highlighted air is drawn as wire cubes. The scene carries per-block flags; `CONTEXT` is reserved for sandbox ghosting (`11`), not drawn yet. |
+| `render` highlight | A resolved mask (any selection; `{"changed":"op:-1"}` for a diff is the preferred form, `{since}` still works), tinted orange; highlighted air is drawn as wire cubes. The scene carries per-block flags; `CONTEXT` is reserved for sandbox ghosting (`11`), not drawn yet. |
 | `render` overlays | Component labels and storey floor lines (from `analyze`), both opt-in. |
 | `raycast` | Done. The cameras of the last 8 renders are kept per document (`perception/render/cameras.ts`, not saved); the render caption gives the id. Hits are voxel-level (the first non-air block in the drawn clip), with the face entered, and warn when the document changed since the render. |
 | Op `preview: true` | On `set_blocks`, `fill`, `clear`, `replace`: one 512² iso view of the changed box plus 2 blocks, changes highlighted. |
 | `analyze` | Done (`perception/analyze.ts`), see *Analysis methods* below. Checked against three fixture buildings in `test/helpers/buildings.ts` (gable house, two-storey hip roof, tower with battlements). Not done: z-fighting materials, round-footprint openings (openings are found on the footprint's bounding-box sides), dome/mansard roofs (reported as `other`). |
 | `diff` | Done (`perception/diff.ts`): `checkpoint:<name>` (or a bare name) and `op:-n`, in either journal direction; counts by family (added, removed, replaced, state-only changes) and up to 5 clustered regions. `render: true` adds before/after 384² images of the changed area, the before image from a read-only snapshot. |
-| Semantic and render-seeded selections | Not yet (wave 2: `face`, `storey`, `roof`, `room`, `interior`, `openings`, `top`, `changed`, `view_box`, `view_lasso`). |
+| Semantic and render-seeded selections | Done: `face`, `storey`, `roof`, `room`, `interior`, `openings`, `top`, `changed` (`perception/semantic.ts`, using `analyze`) and `view_box`/`view_lasso` with `depth: visible\|through` (`perception/render/pick.ts`, using the stored cameras). `ops/selection.ts` calls into them read-only; see `05`, *Implementation status*, for the JSON forms. `render` `highlight` takes `{changed}` like any selection; `{since}` still works. |
+| Events | `render`, `diff` with `render: true` and op previews emit `render.produced` (`source: "tool"`, view labels joined by commas, image size) through the session's event sink (`12`). |
 
 ### Analysis methods
 

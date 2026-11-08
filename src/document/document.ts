@@ -331,7 +331,11 @@ export class Document {
     if (this.events.enabled) this.events.emit({ kind: "doc.checkpoint", name, jseq: this.journal.headSeq });
   }
 
-  /** Undoes or redoes to a checkpoint; returns how many ops were stepped over and the net shift. */
+  /**
+   * Undoes or redoes to a checkpoint; returns how many ops were stepped over and the net shift.
+   * All or nothing: with a write guard (11: locks, sandbox rules), every step is checked before
+   * any is applied, and a refused step refuses the whole restore with nothing changed.
+   */
   restore(name: string): { steps: number; direction: "undo" | "redo" | "none"; shift?: Vec3 } {
     const cp = this.journal.checkpoints.get(name);
     if (!cp) throw new Error(`no checkpoint "${name}" (have: ${[...this.journal.checkpoints.keys()].join(", ") || "none"})`);
@@ -340,9 +344,33 @@ export class Document {
     const originBefore: Vec3 = [...this.origin];
     const steps = Math.abs(target - this.journal.position);
     const direction = target < this.journal.position ? "undo" : target > this.journal.position ? "redo" : "none";
+    if (this.guard && direction !== "none") this.checkRestore(name, target, direction);
     while (this.journal.position > target) this.undo();
     while (this.journal.position < target) this.redo();
     return { steps, direction, ...shiftOf(originBefore, this.origin) };
+  }
+
+  /** Runs the write guard over every step of a restore without applying any (see `restore`). */
+  private checkRestore(name: string, target: number, direction: "undo" | "redo"): void {
+    const pos = this.journal.position;
+    const from = Math.min(pos, target), to = Math.max(pos, target);
+    const entries = this.journal.peek(from, to); // memory or disk, without changing the window
+    if (entries.length !== to - from) throw new Error(`checkpoint "${name}" can't be restored: ${to - from - entries.length} of its ${to - from} ops can't be read from the journal`);
+    if (direction === "undo") entries.reverse();
+    const side = direction === "undo" ? "before" : "after";
+    entries.forEach((e, i) => {
+      // The origin each step would see: an undo starts from the entry's after side, a redo from its before.
+      const origin = side === "before" ? e.originAfter : e.originBefore;
+      try {
+        this.guard!(entryChanges(this, e, side, origin), direction);
+      } catch (err) {
+        const code = (err as { refusal?: unknown }).refusal;
+        throw Object.assign(
+          new Error(`restore "${name}" refused: step ${i + 1} of ${entries.length} (${direction} of op #${e.seq} ${e.summary}) is refused: ${(err as Error).message.replace(/ Nothing was written\.$/, "")} Nothing was changed; the document is still at op #${this.journal.headSeq}.`),
+          { refusal: typeof code === "string" && code ? code : "restore_refused" },
+        );
+      }
+    });
   }
 }
 
@@ -581,15 +609,14 @@ export class Transaction {
 }
 
 /** What undoing (`to` = "before") or redoing (`to` = "after") a journal entry would change. */
-function entryChanges(doc: Document, e: JournalEntry, to: "before" | "after"): PendingChanges {
+function entryChanges(doc: Document, e: JournalEntry, to: "before" | "after", origin: Vec3 = doc.origin): PendingChanges {
   const nbtAt = new Set((e.nbt ?? []).map((c) => c.index));
   const [from, into] = to === "before" ? [e.after, e.before] : [e.before, e.after];
   const comps = to === "before" ? [e.componentsAfter, e.componentsBefore] : [e.componentsBefore, e.componentsAfter];
   return {
     forEach: (fn) => {
       for (let i = 0; i < from.length; i++) {
-        const [x, y, z] = doc.toLocal(e.positions[i * 3]!, e.positions[i * 3 + 1]!, e.positions[i * 3 + 2]!);
-        fn(x, y, z, from[i]!, into[i]!, nbtAt.has(i));
+        fn(e.positions[i * 3]! - origin[0], e.positions[i * 3 + 1]! - origin[1], e.positions[i * 3 + 2]! - origin[2], from[i]!, into[i]!, nbtAt.has(i));
       }
     },
     ...(comps[0] && comps[1] ? { components: { before: comps[0], after: comps[1] } } : {}),

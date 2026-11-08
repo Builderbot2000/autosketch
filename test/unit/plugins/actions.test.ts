@@ -12,7 +12,7 @@ import { renderDocument } from "../../../src/perception/render/render.js";
 import { formatActionList } from "../../../src/plugins/actions.js";
 import { BUILTIN_PLUGINS } from "../../../src/plugins/builtin.js";
 import { patternName } from "../../../src/plugins/chisel.js";
-import { readCopycatCamo, readFramedCamo } from "../../../src/plugins/framed.js";
+import { readCopycatCamo, readFramedCamo, writeCopycatCamo } from "../../../src/plugins/framed.js";
 import { activePlugins, documentNbtWarnings, validateNbt } from "../../../src/plugins/types.js";
 import { solidPng } from "../../helpers/fixtures.js";
 import { fakeRegistry, partial } from "../../helpers/registry.js";
@@ -137,6 +137,41 @@ describe("copycats", () => {
       value: { material_data: { type: "compound", value: { part_a: { type: "compound", value: { material: { type: "compound", value: { Name: { type: "string", value: "minecraft:stone" } } } } } } } },
     };
     expect(readCopycatCamo(multi)).toBe("minecraft:stone");
+  });
+
+  it("writes the material into every part of an imported multi-part copycat", async () => {
+    const s = (value: string) => ({ type: "string" as const, value });
+    const state = (name: string) => ({ type: "compound" as const, value: { Name: s(name) } });
+    const imported: Compound = {
+      type: "compound",
+      value: {
+        id: s("copycats:copycat"),
+        material_data: {
+          type: "compound",
+          value: {
+            top: { type: "compound", value: { material: state("minecraft:stone"), enable_ct: { type: "byte", value: 1 } } },
+            bottom: { type: "compound", value: { material: state("minecraft:air") } },
+          },
+        },
+      },
+    };
+    const doc = newDoc();
+    doc.edit("set", "imported", (tx) => tx.set(0, 0, 0, "copycats:copycat_slope", imported));
+    await runPluginAction(doc, env, "copycat.camo", { sel: sel([0, 0, 0], [0, 0, 0]), material: "granite" });
+    const granite = { material: state("minecraft:granite"), item: { type: "compound", value: { id: s("minecraft:granite"), count: { type: "int", value: 1 } } } };
+    const nbt = doc.getBlockEntity(0, 0, 0)!;
+    expect(nbt.value).toEqual({
+      id: s("copycats:copycat"),
+      material_data: { type: "compound", value: { top: { type: "compound", value: { ...granite, enable_ct: { type: "byte", value: 1 } } }, bottom: { type: "compound", value: granite } } },
+    });
+    expect(readCopycatCamo(nbt)).toBe("minecraft:granite");
+    // Clearing keeps the parts and their other keys.
+    const cleared = writeCopycatCamo("copycats:copycat_slope", undefined, nbt);
+    expect(cleared.value.material_data).toEqual({ type: "compound", value: { top: { type: "compound", value: { enable_ct: { type: "byte", value: 1 } } }, bottom: { type: "compound", value: {} } } });
+    expect(readCopycatCamo(cleared)).toBeUndefined();
+    // An empty material_data is not multi-part: the single-material layout is written.
+    const fresh = writeCopycatCamo("copycats:copycat_slope", "minecraft:stone", { type: "compound", value: { material_data: { type: "compound", value: {} } } });
+    expect(fresh.value.Material).toEqual(state("minecraft:stone"));
   });
 });
 

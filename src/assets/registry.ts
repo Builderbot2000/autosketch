@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { mapLimit } from "../core/async.js";
 import { codeHash } from "../core/codehash.js";
-import { defaultCacheDir } from "./cache.js";
+import { defaultCacheDir, pruneCache } from "./cache.js";
 import {
   blockstateProperties,
   FACES,
@@ -173,7 +173,9 @@ export interface BuildOptions {
 export async function loadRegistry(stack: PackStack, opts: BuildOptions): Promise<{ registry: Registry; cached: boolean }> {
   const fingerprint = stack.fingerprint();
   const cacheDir = opts.cacheDir === false ? undefined : (opts.cacheDir ?? defaultCacheDir());
-  const file = cacheDir && join(cacheDir, `registry-${fingerprint.slice(0, 16)}.json.gz`);
+  const stem = `registry-${fingerprint.slice(0, 16)}`;
+  const file = cacheDir && join(cacheDir, `${stem}.json.gz`);
+  if (cacheDir) await pruneCache(cacheDir, { match: /^(registry-[0-9a-f]+)\.json\.gz$/, current: stem });
   if (file) {
     try {
       const data = JSON.parse(gunzipSync(await readFile(file)).toString("utf8")) as RegistryData;

@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { PNG } from "pngjs";
 import { deflateSync } from "node:zlib";
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { colorName, hexToRgb, labToRgb, rgbToLab } from "../../../src/palette/color.js";
 import { Image, repackPng } from "../../../src/palette/image.js";
-import { buildPaletteIndexData, PaletteIndex } from "../../../src/palette/index.js";
+import { buildPaletteIndexData, loadPaletteIndex, PALETTE_PRUNE_KEEP, PaletteIndex } from "../../../src/palette/index.js";
 import { chooseVariant, describePalette, PaletteBook, pickPalette, resolveRole } from "../../../src/palette/pick.js";
 import { columnLabel, didYouMean, layoutSheet, parseCell, parseRange, SheetRenderer } from "../../../src/palette/sheet.js";
 import { textureStats } from "../../../src/palette/textures.js";
@@ -143,6 +143,57 @@ describe("sheets", () => {
       await new SheetRenderer(index, stack, { cacheDir }).render({ sheet: "overview", zoom: "A1:B1" });
       await new SheetRenderer(index, stack, { cacheDir, tintBiome: "jungle" }).render({ sheet: "overview" });
       expect(readdirSync(join(cacheDir, "sheets")).filter((f) => f.endsWith(".png"))).toHaveLength(3);
+    } finally {
+      rmSync(cacheDir, { recursive: true, force: true });
+    }
+  });
+
+  it("prunes sheets of stale palette indexes, keeping the two most recent others (02, Cache)", async () => {
+    const { index, stack } = await fixture();
+    const cacheDir = mkdtempSync(join(tmpdir(), "autosketch-sheets-"));
+    try {
+      const dir = join(cacheDir, "sheets");
+      mkdirSync(dir);
+      const old = (name: string, ageMin: number) => {
+        writeFileSync(join(dir, name), "x");
+        const t = (Date.now() - ageMin * 60_000) / 1000;
+        utimesSync(join(dir, name), t, t);
+      };
+      old("1111111111111111-aaaaaaaaaaaaaaaa.png", 10);
+      old("1111111111111111-bbbbbbbbbbbbbbbb.png", 10);
+      old("2222222222222222-aaaaaaaaaaaaaaaa.png", 20);
+      old("3333333333333333-aaaaaaaaaaaaaaaa.png", 30);
+      old("0123456789abcdef01234567.png", 40); // the earlier one-hash naming
+      old("README.txt", 50);
+      await new SheetRenderer(index, stack, { cacheDir }).render({ sheet: "overview" });
+      const left = readdirSync(dir).sort();
+      expect(left.filter((f) => /^[12]{16}-|README/.test(f))).toEqual([
+        "1111111111111111-aaaaaaaaaaaaaaaa.png",
+        "1111111111111111-bbbbbbbbbbbbbbbb.png",
+        "2222222222222222-aaaaaaaaaaaaaaaa.png",
+        "README.txt",
+      ]);
+      expect(left).toHaveLength(5); // plus the sheet just drawn
+    } finally {
+      rmSync(cacheDir, { recursive: true, force: true });
+    }
+  });
+
+  it("loadPaletteIndex prunes palette files beyond the most recent others", async () => {
+    const { reg, stack } = await fixture();
+    const cacheDir = mkdtempSync(join(tmpdir(), "autosketch-palette-"));
+    try {
+      const names = [1, 2, 3, 4, 5, 6].map((i) => `palette-000000000000000${i}-abc.json.gz`);
+      names.forEach((n, i) => {
+        writeFileSync(join(cacheDir, n), "x");
+        const t = (Date.now() - (i + 1) * 60_000) / 1000;
+        utimesSync(join(cacheDir, n), t, t);
+      });
+      await loadPaletteIndex(stack, reg, { plugins: BUILTIN_PLUGINS, cacheDir });
+      const left = readdirSync(cacheDir);
+      expect(left.filter((n) => names.includes(n)).sort()).toEqual(names.slice(0, PALETTE_PRUNE_KEEP));
+      expect(left).toHaveLength(PALETTE_PRUNE_KEEP + 1);
+      expect((await loadPaletteIndex(stack, reg, { plugins: BUILTIN_PLUGINS, cacheDir })).cached).toBe(true);
     } finally {
       rmSync(cacheDir, { recursive: true, force: true });
     }

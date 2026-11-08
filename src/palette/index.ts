@@ -3,7 +3,7 @@ import { DEFAULT_TINT_BIOME } from "../assets/biomes.js";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
-import { defaultCacheDir } from "../assets/cache.js";
+import { defaultCacheDir, pruneCache } from "../assets/cache.js";
 import type { PackStack } from "../assets/pack.js";
 import type { BlockInfo, Registry } from "../assets/registry.js";
 import { mapLimit } from "../core/async.js";
@@ -32,6 +32,9 @@ export interface PaletteIndexData {
 
 /** Changes whenever the palette-building code changes, invalidating caches automatically. */
 const CACHE_VERSION = codeHash(import.meta.url, ["./index", "./families", "./textures", "./color", "../plugins/builtin", "../plugins/create", "../plugins/chisel", "../plugins/framed"]);
+
+/** Other palette files kept when pruning (02, Cache): one per recent plugin set / tint biome / stack. */
+export const PALETTE_PRUNE_KEEP = 4;
 
 export const CATEGORY_ORDER: readonly Category[] = ["stone", "wood", "metal", "colored", "glass", "earth", "organic", "light", "decor"];
 
@@ -92,7 +95,10 @@ export async function loadPaletteIndex(stack: PackStack, registry: Registry, opt
   const tint = opts.tintBiome?.replace(/^minecraft:/, "").toLowerCase();
   const pluginKey =
     (opts.plugins ?? []).map((p) => (p.cacheKey ? `${p.id}@${p.cacheKey}` : p.id)).join(",") + (tint && tint !== DEFAULT_TINT_BIOME ? `|tint:${tint}` : "");
-  const file = cacheDir && join(cacheDir, `palette-${fingerprint.slice(0, 16)}-${hashString(pluginKey)}.json.gz`);
+  const stem = `palette-${fingerprint.slice(0, 16)}-${hashString(pluginKey)}`;
+  const file = cacheDir && join(cacheDir, `${stem}.json.gz`);
+  // Each plugin set / tint biome is its own file, so more than the default are kept (02, Cache).
+  if (cacheDir) await pruneCache(cacheDir, { match: /^(palette-[0-9a-f]+-[0-9a-f]+)\.json\.gz$/, current: stem, keep: PALETTE_PRUNE_KEEP });
   if (file) {
     try {
       const data = JSON.parse(gunzipSync(await readFile(file)).toString("utf8")) as PaletteIndexData;

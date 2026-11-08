@@ -72,7 +72,7 @@ npm run eval        # tier 3 (needs ANTHROPIC_API_KEY and an instance); -- --dry
 | Tier 2: real Axiom/Create-saved fixtures | Not started (needs files saved in-game; none planned) | — |
 | Tier 2: render snapshots | Done (6 goldens, perceptual tolerance, one-block mutation check) | `test/golden/render.test.ts` |
 | Tier 2: sheet determinism | Done (7 sheet specs, two independent loads, cell-map JSON and PNG goldens) | `test/golden/sheets.test.ts` |
-| Tier 2: analysis goldens | Not started (`analyze` now reports measurements; goldens should pin those) | — |
+| Tier 2: analysis goldens | Done (the three `test/helpers/buildings.ts` fixtures and the golden cottage: layers, materials, connectivity incl. ungrounded groups, enclosed air, and the tool text; one-block mutation check) | `test/golden/analysis.test.ts`, `__golden__/analysis/` |
 | Golden update command | Done: `npm run golden:update` (`UPDATE_GOLDEN=1`) | `test/golden/harness.ts` |
 | Tier 2 in `npm test` and CI speed | Done; the whole golden tier runs in under 1 s | `vitest.config.ts` (unchanged: it already includes `test/**`) |
 | Optional local tier | Done (before this work) | `test/local/` |

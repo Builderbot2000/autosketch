@@ -63,12 +63,40 @@ export const framedblocks: AutosketchPlugin = {
 /**
  * Create's `CopycatBlockEntity` saves `Material` (a block state) and `Item` (the consumed item
  * stack, 1.21 form `{id, count}`); Copycats+ single-material blocks extend it. Copycats+
- * multi-state blocks keep per-part data under `material_data.<part>.material`: read, but not
- * written. Block-entity ids `create:copycat` and `copycats:copycat` are guesses. Unverified (09).
+ * multi-state blocks keep per-part data under `material_data.<part>` as `{material, item}` in the
+ * same shapes. Block-entity ids `create:copycat` and `copycats:copycat` are guesses. Unverified (09).
+ *
+ * Multi-part writing: part names depend on the block class and aren't known here, so a block counts
+ * as multi-part only when `prev` already has a non-empty `material_data` (a block imported from the
+ * game). Every existing part then gets the material (or loses it when `camo` is undefined), other
+ * per-part keys are kept, and no top-level `Material`/`Item` is added. A new block gets the
+ * single-material layout.
  */
 export function writeCopycatCamo(blockId: string, camo: string | undefined, prev: Compound | undefined): Compound {
   const v: Compound["value"] = { ...(prev?.value ?? {}) };
   if (!v.id) v.id = nbtStr(blockId.startsWith("create:") ? "create:copycat" : "copycats:copycat");
+  const parts = asComp(v.material_data);
+  if (parts && Object.keys(parts.value).length) {
+    const out: Compound["value"] = {};
+    for (const [name, tag] of Object.entries(parts.value)) {
+      const part = asComp(tag);
+      if (!part) {
+        if (tag) out[name] = tag;
+        continue;
+      }
+      const pv: Compound["value"] = { ...part.value };
+      if (camo) {
+        pv.material = stateToNbt(camo);
+        pv.item = nbtComp({ id: nbtStr(stateId(camo)), count: nbtInt(1) });
+      } else {
+        delete pv.material;
+        delete pv.item;
+      }
+      out[name] = nbtComp(pv);
+    }
+    v.material_data = nbtComp(out);
+    return nbtComp(v);
+  }
   if (camo) {
     v.Material = stateToNbt(camo);
     v.Item = nbtComp({ id: nbtStr(stateId(camo)), count: nbtInt(1) });
@@ -114,5 +142,5 @@ export const copycats: AutosketchPlugin = {
   ...camoPlugin(copycatMod, "material"),
   docs:
     "Copycats+ (and Create's copycat panel and step) are shapes that copy a material block stored in NBT. " +
-    'Place them with copycat.shape({sel, shape:"slope", material:"oak_planks"}) and re-skin with copycat.camo. Multi-part copycats (byte, layer stacks) keep one material per part in game; Autosketch writes a single material.',
+    'Place them with copycat.shape({sel, shape:"slope", material:"oak_planks"}) and re-skin with copycat.camo. Multi-part copycats (byte, layer stacks) keep one material per part in game; copycat.camo on one imported from the game writes the material into every part, and a new one gets a single material.',
 };

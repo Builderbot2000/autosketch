@@ -104,6 +104,32 @@ describe("tool-call events (12, phase 1)", () => {
     expect(ends[1]).toMatchObject({ tool: "fill", chars: firstText, images: 0, pixels: 0 });
   });
 
+  it("leaves tool results identical with the viewer and deltas on (12, phases 3–4)", async () => {
+    const ctx = fixtureContext();
+    const run = async (workspace: string, observed: boolean) => {
+      const session = new Session(workspace);
+      const obs = observed
+        ? startObserve({ workspace, settings: Settings.from(["--set", "observe.http=true", "--set", "observe.deltas=on"], {}), sessionId: "s", flushMs: 5, getDoc: () => session.doc })
+        : undefined;
+      if (obs) {
+        expect(await obs.ready).toMatch(/^http:/);
+        session.events = obs.sink();
+      }
+      const client = await connect(ctx, session);
+      const results = [];
+      for (const [name, args] of CALLS) results.push(await client.callTool({ name, arguments: args }));
+      await session.close();
+      await obs?.close();
+      return JSON.parse(JSON.stringify(results).replaceAll(workspace, "<workspace>")) as typeof results;
+    };
+    const plain = await run(tempWorkspace(), false);
+    const workspace = tempWorkspace();
+    expect(await run(workspace, true)).toEqual(plain);
+    const kinds = readFileSync(join(workspace, "tower", "observe", "s", "events.ndjson"), "utf8").trim().split("\n").map((l) => (JSON.parse(l) as LoggedEvent).kind);
+    expect(kinds.filter((k) => k === "state.add")).toHaveLength(2);
+    expect(readFileSync(join(workspace, "tower", "observe", "s", "deltas.bin")).length).toBe(2 * 36 * 16); // the fill and its undo
+  });
+
   it("logs call.refused for errors carrying a refusal code, and counts image pixels", async () => {
     const bus = new EventBus();
     const seen: LoggedEvent[] = [];

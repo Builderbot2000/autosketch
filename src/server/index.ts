@@ -5,6 +5,7 @@
  *   autosketch --instance "/path/to/instance" [--version 1.21.1] [--base-jar client.jar] [--workspace ~/autosketch]
  *   (or AUTOSKETCH_INSTANCE / AUTOSKETCH_VERSION / AUTOSKETCH_BASE_JAR / AUTOSKETCH_WORKSPACE)
  *   settings: --set observe.log=false (or AUTOSKETCH_OBSERVE_LOG=false), see core/settings.ts
+ *   viewer:   --set observe.http=true (a free port) or =<port>; the URL is printed to stderr
  *
  * stdout carries the protocol; all logging goes to stderr.
  */

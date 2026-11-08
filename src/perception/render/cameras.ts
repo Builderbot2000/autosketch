@@ -19,9 +19,21 @@ export interface ViewCamera {
   /** Supersampling factor: the camera works in raster pixels = output pixels × ss. */
   ss: number;
   cam: Camera;
-  /** What was drawn: a local half-open box, optionally narrowed by a mask. */
+  /** What was drawn: a local half-open box, optionally narrowed by a mask and a near clip. */
   clip: Box;
   mask?: Mask;
+  cut?: Cut;
+}
+
+/** A near clip (06, *Cameras*): a block is drawn when its centre lies at least `d` along `normal`. */
+export interface Cut {
+  normal: [number, number, number];
+  d: number;
+}
+
+/** True when a block is on the kept side of a near clip. */
+export function kept(c: Cut, x: number, y: number, z: number): boolean {
+  return (x + 0.5) * c.normal[0] + (y + 0.5) * c.normal[1] + (z + 0.5) * c.normal[2] >= c.d;
 }
 
 export interface RenderRecord {
@@ -162,6 +174,7 @@ export function raycast(doc: Document, rec: RenderRecord, px: number, py: number
     origin,
     dir,
     (p, face) => {
+      if (view.cut && !kept(view.cut, p[0], p[1], p[2])) return false;
       const state = doc.getState(p[0], p[1], p[2]);
       if (state === "minecraft:air") return false;
       hit = { view, pos: p, state, face };

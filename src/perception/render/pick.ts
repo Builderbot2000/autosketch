@@ -1,7 +1,7 @@
 import { Mask } from "../../core/mask.js";
 import { boxVolume, type Vec3 } from "../../core/region.js";
 import type { Document } from "../../document/document.js";
-import { marchRay, projectToImage, rayThrough, type RenderRecord, type ViewCamera } from "./cameras.js";
+import { kept, marchRay, projectToImage, rayThrough, type RenderRecord, type ViewCamera } from "./cameras.js";
 
 /**
  * Render-seeded selections (docs/design/05-operations.md, *Picking*: `view_box`, `view_lasso`): a
@@ -68,6 +68,7 @@ function pick(doc: Document, rec: RenderRecord, area: Area, inside: (fx: number,
 
 function pickThrough(v: ViewCamera, a: Area, inside: (fx: number, fy: number) => boolean, out: Mask): void {
   const test = (x: number, y: number, z: number) => {
+    if (v.cut && !kept(v.cut, x, y, z)) return; // removed by the near clip
     // Perspective: only positions in front of the eye.
     const f = projectToImage(v, [x + 0.5, y + 0.5, z + 0.5]);
     if (!f) return;
@@ -105,6 +106,7 @@ function pickVisible(doc: Document, v: ViewCamera, a: Area, inside: (fx: number,
         origin,
         dir,
         (p) => {
+          if (v.cut && !kept(v.cut, p[0], p[1], p[2])) return false;
           if (doc.getState(p[0], p[1], p[2]) === "minecraft:air") return false;
           out.add(p[0], p[1], p[2]);
           return true;

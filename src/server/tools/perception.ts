@@ -78,6 +78,8 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
         "Perspective and orthographic views share one sheet; perspective cells have no ticks (the caption gives eye, target and fov) and cost the same as any view. " +
         "Default: iso_se, iso_nw, front, top at 768px (~800 tokens). One view at 512px is ~350 tokens. region takes any selection: only it is drawn, framed tightly. " +
         "cutaway: {maxY} hides everything above y; {plane:\"x\"|\"y\"|\"z\", at, keep:\"west|east|down|up|north|south\"} keeps one side of a plane. " +
+        "near: n drops blocks nearer than n blocks (perspective: from the eye; orthographic: from the front of what is drawn), so the front falls away without choosing a plane. " +
+        "section: a selection the scene is clipped to, like a CAD section box (e.g. {\"subtract\":[<box>,<one octant>]} exposes a corner of the interior). Cut faces draw closed; both compose with region and cutaway. " +
         "highlight: any selection, tinted orange; {changed:\"op:-1\"|\"checkpoint:<name>\"} shows a diff ({since:..} still works). style: textured | flat (mean colours) | depth (darker = farther) | xray (translucent shell). " +
         "overlays: {components} labels components. Axis ticks label block coordinates; N marks north. " +
         "The caption gives the render id for raycast and for view_box/view_lasso selections. Image + caption.",
@@ -90,6 +92,8 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
         style: z.enum(["textured", "flat", "depth", "xray"]).optional(),
         overlays: z.object({ components: z.boolean().optional() }).optional(),
         context: z.enum(["ghost", "normal", "hide"]).optional().describe("In a scoped job's sandbox: how the read-only context is drawn (default ghost: grey, translucent)"),
+        near: z.number().positive().optional().describe("Near clip: blocks nearer than this many blocks are not drawn"),
+        section: selSchema.optional().describe("Section box: draw only this selection (composes with region)"),
       },
     },
     async (c, a) => {
@@ -101,6 +105,13 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
         notes.push(...r.notes);
         if (r.mask.isEmpty()) throw new Error(["the region selection is empty", ...r.notes].join("; "));
         region = r.mask.isBox() ?? r.mask;
+      }
+      let section: Box | Mask | undefined;
+      if (a.section !== undefined) {
+        const r = maskOf(c, doc, a.section);
+        notes.push(...r.notes);
+        if (r.mask.isEmpty()) throw new Error(["the section selection is empty", ...r.notes].join("; "));
+        section = r.mask.isBox() ?? r.mask;
       }
       let highlight: Mask | undefined;
       if (a.highlight !== undefined) {
@@ -127,6 +138,8 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
         ...(a.style ? { style: a.style } : {}),
         ...(a.overlays ? { overlays: a.overlays } : {}),
         ...(a.context ? { context: a.context } : {}),
+        ...(a.near ? { near: a.near } : {}),
+        ...(section ? { section } : {}),
       });
       emitRender(session, r.views, r.width, r.height);
       return image(r.png, [r.caption, ...notes.map((n) => `note: ${n}`)].join("\n"));

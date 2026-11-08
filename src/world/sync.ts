@@ -3,8 +3,8 @@ import { AIR } from "../core/blockstate.js";
 import type { Box, Vec3 } from "../core/region.js";
 import type { Document, EditResult } from "../document/document.js";
 import type { JournalEntry } from "../document/journal.js";
-import { nbtHash } from "./protocol/hash.js";
-import type { SnapshotRegion, VolatileList, WireBox, WorldBlock } from "./protocol/messages.js";
+import { nbtHash, sectionHash, sectionsOf } from "./protocol/hash.js";
+import type { Hash64, SectionHash, SnapshotRegion, VolatileList, WireBox, WorldBlock } from "./protocol/messages.js";
 import { encodeNbt } from "./protocol/nbt.js";
 
 /**
@@ -134,6 +134,107 @@ function describe(c: WorldChanges): string {
   if (c.blocks?.length) parts.push(n(c.blocks.length, "block"));
   if (c.nbt?.length) parts.push(n(c.nbt.length, "block entity", "block entities"));
   return `world sync: ${parts.join(", ") || "nothing"}`;
+}
+
+// -- section-hash sync ----------------------------------------------------------------------------
+
+/** The two requests a section-hash sync makes of the mod (13, `hashes` and `snapshot`); the bridge provides them. */
+export interface WorldSource {
+  hashes(boxes: WireBox[]): Promise<SectionHash[]>;
+  snapshot(req: { sections: Vec3[] }): Promise<{ palette: readonly string[]; regions: readonly SnapshotRegion[] }>;
+}
+
+/** Where the cache sits in the world: the link's frame, volumes and volatile list. */
+export interface LinkFrame {
+  /** World position of local (0,0,0). */
+  origin: Vec3;
+  /** The work volume (or its whole-block extension) and every context box, world coordinates. */
+  volumes: WireBox[];
+  volatile: VolatileList;
+}
+
+export interface SectionSyncResult extends SyncResult {
+  /** Sections compared, and those whose hashes differed (and were snapshotted). */
+  sections: { compared: number; differing: Vec3[] };
+}
+
+/**
+ * Section-hash sync (13, *Section hashes instead of full snapshots*): asks the mod for the hash of
+ * every section the volumes touch, compares them with the cache's, snapshots only the sections
+ * that differ and applies them as one `world_sync` entry. Used by the `world_sync` tool, auto-sync
+ * after an "everything" dirty notice, and reconnects. Catches contents-only changes too, which no
+ * dirty notice reports.
+ */
+export async function syncBySections(doc: Document, source: WorldSource, frame: LinkFrame, opts: { summary?: string } = {}): Promise<SectionSyncResult> {
+  const theirs = await source.hashes(frame.volumes);
+  const mine = cacheHashes(doc, frame);
+  const differing: Vec3[] = [];
+  const seen = new Set<string>();
+  for (const s of theirs) {
+    const k = key(s.section);
+    seen.add(k);
+    if (mine.get(k) !== s.hash) differing.push(s.section);
+  }
+  // A section the cache hashes but the world didn't list can't happen with the same boxes; snapshot it anyway.
+  for (const [k, h] of mine) if (h !== undefined && !seen.has(k)) differing.push(k.split(",").map(Number) as Vec3);
+  const compared = seen.size;
+  if (!differing.length) return { op: WORLD_SYNC, seq: doc.journal.headSeq, changed: 0, warnings: [], components: [], sections: { compared, differing } };
+  const snap = await source.snapshot({ sections: differing });
+  const r = applyWorldState(doc, { snapshot: snap }, {
+    origin: frame.origin,
+    volumes: frame.volumes,
+    volatile: frame.volatile,
+    summary: opts.summary ?? `world sync: ${differing.length} of ${compared} section${compared === 1 ? "" : "s"} differed`,
+  });
+  return { ...r, sections: { compared, differing } };
+}
+
+/**
+ * The cache's section hashes over the frame's volumes, by "sx,sy,sz" (undefined: no position of
+ * the section lies in the volumes). Kept per document and updated incrementally: every voxel write
+ * invalidates its section (`VoxelStore.onWrite`), so comparing a large volume rehashes only the
+ * sections written since the last comparison. A change of frame (volumes, origin, volatile list)
+ * starts over.
+ */
+export function cacheHashes(doc: Document, frame: LinkFrame): Map<string, Hash64 | undefined> {
+  const c = hashCacheOf(doc, frame);
+  const out = new Map<string, Hash64 | undefined>();
+  const read = (x: number, y: number, z: number) => {
+    const lx = x - frame.origin[0], ly = y - frame.origin[1], lz = z - frame.origin[2];
+    const s = doc.getState(lx, ly, lz);
+    const state = s === "minecraft:cave_air" || s === "minecraft:void_air" ? AIR : s;
+    return { state, nbt: doc.getBlockEntity(lx, ly, lz) };
+  };
+  for (const s of sectionsOf(frame.volumes)) {
+    const k = key(s);
+    if (!c.hashes.has(k)) c.hashes.set(k, sectionHash(s, frame.volumes, read, frame.volatile));
+    out.set(k, c.hashes.get(k));
+  }
+  return out;
+}
+
+interface HashCache {
+  frameKey: string;
+  /** World minus store coordinates, as of the frame key. */
+  shift: Vec3;
+  hashes: Map<string, Hash64 | undefined>;
+}
+
+const hashCaches = new WeakMap<Document, HashCache>();
+
+function hashCacheOf(doc: Document, frame: LinkFrame): HashCache {
+  // World = store − doc.origin + frame.origin; an explicit re-origin of the document changes it too.
+  const shift: Vec3 = [frame.origin[0] - doc.origin[0], frame.origin[1] - doc.origin[1], frame.origin[2] - doc.origin[2]];
+  const frameKey = JSON.stringify([shift, frame.volumes, frame.volatile]);
+  let c = hashCaches.get(doc);
+  if (c && c.frameKey === frameKey) return c;
+  const cache: HashCache = { frameKey, shift, hashes: new Map() };
+  hashCaches.set(doc, cache);
+  doc.voxels.onWrite = (x, y, z) => {
+    if (cache.hashes.size) cache.hashes.delete(`${(x + cache.shift[0]) >> 4},${(y + cache.shift[1]) >> 4},${(z + cache.shift[2]) >> 4}`);
+  };
+  c = cache;
+  return c;
 }
 
 /** Blocks changed by an entry inside each component's box (store coordinates, half-open). */

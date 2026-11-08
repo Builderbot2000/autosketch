@@ -124,6 +124,7 @@ world (the save)
 |-----------|---------|----------|
 | both | `hello` | protocol version, token and volatile-key list (MCP → mod), game/data/mod versions (mod → MCP) |
 | mod → MCP | `volumes` | dimension, work volume box, context boxes, or none (on change and after hello) |
+| MCP → mod | `volumes.extend` | link, the work volume extended to whole blocks (*Model*: a box that cuts a door or multi-block) |
 | MCP → mod | `hashes` | boxes (work and context volumes) |
 | mod → MCP | `hashes.result` | one hash per chunk section the box touches |
 | MCP → mod | `snapshot` | boxes, or a list of chunk sections |
@@ -135,6 +136,424 @@ world (the save)
 | MCP → mod | `prompt.result` | id, delivered or refused, with the reason when refused |
 | MCP → mod | `notice` | short text for the player's action bar (optional) |
 | MCP → mod | `chat` | request id or none, target (one player or all with log on), kind (`activity` or `reply`), lines |
+
+Field names, types and encodings are in *Wire format*, *Message schemas*.
+
+## Wire format
+
+Protocol version **1**. This section and the golden vectors in `test/data/world-protocol/` are the whole contract between the mod and the MCP: either side can be written from them alone. The TypeScript reference is `src/world/protocol/` (codec, hashing, pairing file) and `test/support/fake-host.ts` (the mod's side, in memory), but nothing here needs them.
+
+### Primitives
+
+- **Byte order** is big-endian everywhere (as `DataOutputStream` writes).
+- **u32** is an unsigned 32-bit integer, 4 bytes.
+- **varint** is an unsigned LEB128 integer: 7 bits per byte, low group first, high bit set on every byte but the last (the same encoding as Minecraft's `FriendlyByteBuf.writeVarInt`, but unsigned and wider). Values are 0 to 2^53 − 1, so a varint is at most 8 bytes. Encodings are minimal: a last byte of `0x00` after a continuation byte is an error. In Java, read and write them as `long`.
+- **string** (in binary bodies) is a varint byte length, then the bytes in standard UTF-8 (`StandardCharsets.UTF_8`).
+- **table** is a varint count, then that many strings.
+- **JSON** is RFC 8259, UTF-8. All integers in headers fit in ±2^53. Non-integer numbers appear only in `prompt` (position, eye, yaw, pitch).
+- **Box** in JSON is `{"min":[x,y,z],"max":[x,y,z]}`: an inclusive box in world coordinates (`01`), with `min ≤ max` on every axis. Senders normalise; a receiver rejects an unnormalised box.
+- **Section** is a 16×16×16 chunk section, named by section coordinates `[sx,sy,sz]` = `[x >> 4, y >> 4, z >> 4]` (arithmetic shift, so −1 is in section −1). Its box is `16·s … 16·s + 15` on each axis.
+- **Hash** is a 64-bit value: the first 8 bytes of a SHA-256 digest. In JSON it is 16 lowercase hex digits; in a binary body it is the 8 bytes, in digest order.
+- **UUID** is lowercase and hyphenated (`3f2504e0-4f89-41d3-9a0c-0305e82c3301`), as `UUID.toString()` prints it.
+- **Dimension** is a resource location: `minecraft:overworld`, `minecraft:the_nether`, a mod's id.
+
+### Framing
+
+The mod listens on a TCP socket on `127.0.0.1`. Each message is one frame:
+
+```
+u32      frameLength     bytes that follow this field (≥ 4)
+u32      headerLength    bytes of the JSON header (≤ frameLength − 4, ≤ 1 MiB)
+bytes    header          a JSON object, UTF-8, with a "type" field
+bytes    body            frameLength − 4 − headerLength bytes; empty unless the message has a body
+```
+
+- **Maximum frame size:** `frameLength` ≤ 268,435,456 (256 MiB). A sender never writes a larger frame. A receiver that reads a `frameLength` below 4 or above the maximum, a header that isn't a JSON object, or a body on a message that has none, sends `error` `bad_request` (id `null`) and closes the connection.
+- **Messages with a body:** `patch`, `snapshot.result`, `patch.ack` and `dirty` (unless `everything`). Every other message has an empty body.
+- **Headers** are written compact (no whitespace), keys in the order the tables below list them, optional fields omitted when absent. Receivers accept any key order and ignore keys they don't know (a later minor addition stays compatible within version 1). Compare headers as JSON values, not as bytes: number formatting differs between JSON libraries.
+- **Ordering:** TCP keeps frames in order. Each side sends messages in the order the events happen. The mod handles MCP requests strictly in arrival order, each finishing before the next starts: a `snapshot` or `hashes` request that arrives while a patch is still applying across ticks is answered after that patch's ack, so it sees the patch. `dirty` and `prompt` may interleave with responses.
+- **Request ids:** `volumes.extend`, `hashes`, `snapshot` and `patch` carry an `id` the MCP assigns from one counter per connection, starting at 1 and increasing by at least 1 per request (so patch ids increase, and patches apply in id order). Their responses (`hashes.result`, `snapshot.result`, `patch.ack`, or `error`) carry the same `id`. A `volumes.extend` that succeeds is answered by a `volumes` message (which has no id), and one that fails by an `error` with its id. `prompt` ids come from the mod's own counter, and `prompt.result` and `chat.request` refer to them.
+
+### Connection and handshake
+
+1. The mod starts listening when the server starts (singleplayer: when the world opens; dedicated: at startup), on the configured port or an ephemeral one, bound to `127.0.0.1` only, and writes the pairing file. It deletes the file when the server stops.
+2. The MCP reads the pairing file, checks `protocol`, connects to `host:port` and sends `hello` with the token and its volatile-key list.
+3. The mod checks, in order: the first frame is a `hello` (else `error` `not_ready`, close); `protocol` equals its own (else `error` `protocol_mismatch` carrying its own version in `protocol`, close); `token` equals its token, compared in constant time (else `error` `bad_token`, close). The handshake must finish within 10 seconds of connecting, or the mod closes the socket.
+4. The mod replies with its own `hello`, then immediately sends `volumes`.
+5. The MCP checks the mod's `hello`: on a `protocol` other than its own it reports the mismatch to the agent and closes. It never guesses around a mismatch (*Version check*). The `game.dataVersion` is the MCP's to compare with its documents.
+6. **One connection at a time.** When a new connection completes the handshake, the mod sends `error` `replaced` to the old one and closes it. A restarted MCP therefore takes over without waiting for the old socket to time out (M10).
+7. **Disconnect.** Either side may close at any time. The mod discards queued patches it hasn't started and finishes the one in progress (its ack is lost; the next sync reconciles). It keeps the volumes and the chunk tickets of the current link until the server stops or the player clears the work volume, so a reconnecting MCP finds the same volumes.
+
+The framing, the `hello` fields `type`, `protocol` and `token`, and the `error` message keep their meaning in every future protocol version, so a mismatch is always reported clearly.
+
+### Pairing file
+
+`<instance>/config/autosketch-bridge.toml`, where `<instance>` is the game directory (the server directory for a dedicated server). The mod writes it atomically (a temporary file, then a rename) and deletes it on server stop. A new token and, unless the port is configured, a new port on every start.
+
+```toml
+# Autosketch bridge pairing file. Written by the mod when the server starts, deleted when it stops.
+# Do not edit. The token lets a local Autosketch MCP server connect to this game.
+protocol = 1
+host = "127.0.0.1"
+port = 52817
+token = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+pid = 18320
+started = "2026-11-08T10:15:30Z"
+```
+
+| Key | Type | Meaning |
+|---|---|---|
+| `protocol` | integer | The mod's protocol version. The MCP refuses to connect on a mismatch and says which side to update. |
+| `host` | string | Always `127.0.0.1` in v1 (*Same machine only*). |
+| `port` | integer | The listening TCP port. |
+| `token` | string | 32 bytes from `SecureRandom`, as 64 lowercase hex digits. |
+| `pid` | integer, optional | The game's process id, for diagnostics. |
+| `started` | string, optional | ISO-8601 UTC time the server started, for diagnostics. |
+
+The file is a strict TOML subset: one `key = value` per line, values are integers or double-quoted strings with no escapes, `#` starts a comment line, blank lines are allowed. The MCP requires the first four keys and ignores any others. The mod's own settings (port, tick budget, context cap, alias) live in its NeoForge config, not in this file.
+
+### Block states
+
+Every block state on the wire, in either direction, is in this **canonical form**:
+
+```
+namespace:path[name=value,name=value,...]
+```
+
+- The namespace is always present (`minecraft:stone`, never `stone`).
+- Every property the block's state definition has is present, with its value as the game names it (`Property.getName(value)`), sorted by property name in ascending code-point order. No whitespace. A block without properties has no brackets.
+- `minecraft:cave_air` and `minecraft:void_air` are written as `minecraft:air`, on output and when comparing.
+
+The mod **prints** a world state this way (`BuiltInRegistries.BLOCK.getKey(block)`, then the sorted properties). It **compares** an expected state with the world by printing the world's state and comparing strings exactly. It **accepts** a new state only if the string is exactly the canonical printing of some state the game knows: an unknown block, an unknown property or value, a missing property, wrong order or stray whitespace all reject that position as `unknown_state`, and the mod never substitutes air or a default. The MCP never sends anything but this form; with a registry, the document's states already are (`core/blockstate.ts`, `01`).
+
+### NBT
+
+Block-entity NBT travels as **binary NBT**, uncompressed and big-endian, as `NbtIo.write(CompoundTag, DataOutput)` writes it: tag id `0x0A`, an empty name (u16 `0x0000`), the compound payload. Strings inside NBT (keys and string tags) are in Java's modified UTF-8 (`DataOutput.writeUTF`), unlike body strings. Two rules make the bytes deterministic, so both sides produce identical frames:
+
+- **Compound keys are written sorted**, recursively (including compounds inside lists), in UTF-16 code-unit order (Java's `String.compareTo`). `CompoundTag` iterates a `HashMap`, so the mod writes NBT with its own small writer rather than `NbtIo` (it needs that writer for hashing anyway). Readers accept any order.
+- **Empty lists** are written with element type End (`0x00`), as the game writes them.
+
+**What the compound holds:** the block entity as `BlockEntity.saveWithId(registries)` saves it, so it carries `id` (the block-entity type) and its data, but **without the top-level `x`, `y`, `z`**: the position is given by the message. This is the document's own representation of block-entity NBT (`04`). When the mod writes NBT from a patch, it loads it at the patch position (`BlockEntity.loadStatic(pos, state, tag, registries)`). Nothing is stripped other than `x`, `y`, `z`: volatile keys travel and are kept, and only hashing ignores them.
+
+In a body, each NBT compound is preceded by its varint byte length, so a reader can slice it out without parsing.
+
+### Binary bodies
+
+**Positions** in bodies are relative, never world coordinates: the header gives an `origin` (world position) and a `size` `[sx,sy,sz]`, the bounding box of every position the message lists, and each position is the linear index
+
+```
+index = dx + sx · (dz + sz · dy)        (dx, dy, dz) = position − origin
+```
+
+that is x fastest, then z, then y, the order of chunk sections, Litematica and `.bp` (`08`). A list of positions is written in ascending index order, each as a varint **gap** = index − previous index − 1, with the previous index starting at −1. Positions in one list are unique. When a message lists no positions, `origin` and `size` are `[0,0,0]`.
+
+- **Why relative:** offsets inside a small grid make short varints (a dense fill is one `0x00` byte per position), and an explicit origin in each message makes it self-contained: it never depends on the link's current volumes, which the player can change while a patch is in flight. **Why the tight bounding box** rather than the work volume's corner: the encoding then needs no link state at all, and both sides compute the same grid, so frames are byte-identical.
+- **Ordinals:** NBT lists and hash lists refer to entries of a position list by ordinal (0-based position in the ascending list), gap-coded the same way.
+- **Palettes** are tables of canonical state strings in **first-use order**: the order in which the encoder first meets each string while writing the message's entries in order (for a patch, each entry's expected state before its new state). Every palette entry is used.
+
+The sub-structures:
+
+```
+positions(N)  N × varint gap
+indices(N)    N × varint table index
+nbtList       varint E, then E × (varint ordinal gap, varint byteLength, NBT compound)
+hashList      varint H, then H × (varint ordinal gap, 8 bytes hash)
+blockList     table palette, varint N, positions(N), indices(N) states, nbtList
+```
+
+| Message | Body |
+|---|---|
+| `patch` | table palette · varint N · positions(N) · indices(N) **expected** states · indices(N) **new** states · hashList (expected NBT hashes) · nbtList (new NBT) |
+| `dirty` | blockList (the changed positions with their current state and NBT) |
+| `patch.ack` | blockList (**skipped**: actual state and NBT) · table reasons · varint R · positions(R) **rejected** · indices(R) reasons · varint M · positions(M) **normalized** · nbtList (normalized NBT; an entry without NBT means "no block entity") |
+| `snapshot.result` | table palette · for each region, in header order, every position of its box in index order: varint palette index · nbtList (ordinals run over all regions' positions concatenated, in header order) |
+
+For a `patch.ack` the grid covers the skipped, rejected and normalized positions together, and the reason table is in first-use order over the rejected list. A snapshot region's positions are its box's own grid (origin = box min); a snapshot carries no `origin` or `size`.
+
+A decoder checks every index against its grid and table, every count against its header, and that the body is fully consumed; anything else is `bad_request`.
+
+### Message schemas
+
+Every header has `type` first. "MCP → mod" and "mod → MCP" say who sends it.
+
+**`hello`**, MCP → mod
+
+| Key | Type | Meaning |
+|---|---|---|
+| `type` | `"hello"` | |
+| `protocol` | integer | `1` |
+| `token` | string | From the pairing file |
+| `client` | `{name, version}` | `{"name":"autosketch","version":"1.0.0"}` |
+| `volatile` | object | The volatile-key list (*Hashing*). May be `{}` |
+
+**`hello`**, mod → MCP
+
+| Key | Type | Meaning |
+|---|---|---|
+| `type` | `"hello"` | |
+| `protocol` | integer | `1` |
+| `mod` | `{version}` | The mod's version |
+| `game` | `{version, dataVersion, loader, loaderVersion}` | e.g. `"1.21.1"`, `3955`, `"neoforge"`, `"21.1.249"` |
+| `singleplayer` | boolean | True on the integrated server of a singleplayer world |
+| `host` | `{name, uuid}` or `null` | The singleplayer host (the allowlist default, *Allowed players*); `null` on a dedicated server |
+
+**`error`**, either direction
+
+| Key | Type | Meaning |
+|---|---|---|
+| `type` | `"error"` | |
+| `id` | integer or `null` | The request it answers, or `null` |
+| `code` | string | One of the codes below |
+| `message` | string | Human-readable detail, for logs and the agent |
+| `protocol` | integer, optional | Only with `protocol_mismatch`: the sender's own version |
+
+| Code | Sent by | Meaning | Connection |
+|---|---|---|---|
+| `protocol_mismatch` | mod | `hello.protocol` differs | closed |
+| `bad_token` | mod | wrong token | closed |
+| `not_ready` | mod | a message before the handshake finished | closed |
+| `bad_request` | both | a malformed frame (id `null`, closed) or a well-formed request with invalid fields (by id, stays open) | see left |
+| `unknown_type` | both | a well-formed frame of a type the receiver doesn't know; answered only if it carries an `id` | open |
+| `no_volumes` | mod | `hashes` or `snapshot` while no work volume is set | open |
+| `wrong_dimension` | mod | the request's dimension isn't the volumes' dimension | open |
+| `outside_volumes` | mod | a requested box or section lies outside the chunks the link keeps loaded (those under the work volume, its declared extension and the context volumes) | open |
+| `too_large` | mod | the result would exceed the maximum frame size; the MCP asks again for fewer boxes or sections | open |
+| `replaced` | mod | a newer connection took over | closed |
+| `stale_link` | mod | a `volumes.extend` for a `link` that isn't the current one, or while no work volume is set | open |
+| `bad_extension` | mod | a `volumes.extend` box that doesn't contain the player's work volume | open |
+
+**`volumes`**, mod → MCP: after `hello`, and whenever the work volume, the context or the dimension changes.
+
+| Key | Type | Meaning |
+|---|---|---|
+| `type` | `"volumes"` | |
+| `link` | integer | Link generation. Changes (to a value not used before on this connection) whenever the work volume or dimension changes, including when the work volume is cleared. Context-only changes keep it |
+| `dimension` | string | The dimension of both volumes. Absent when `work` is `null` |
+| `work` | Box or `null` | The work volume; `null` when none is set (unlinked) |
+| `context` | Box[] | The effective context boxes: by default one box, the work volume grown by 3; then whatever the player grew or added. Always includes a box covering the work volume grown by at least 1 (the seam, `11`). Clipped to the world's build height. Absent when `work` is `null` |
+| `extended` | Box, optional | The extended work volume the MCP declared with `volumes.extend` for this `link`, present while it is in force. `work` stays the player's own box |
+
+The MCP relinks (fresh journal, full snapshot) when `dimension` or `work` differs from what its document was linked to, and treats a `volumes` with only different `context` (or `extended`) as no relink (*Work and context volumes in-game*). It stamps each patch with the latest `link` it has received.
+
+**`volumes.extend`**, MCP → mod. When the player's work box cuts a door, bed, double chest or plugin multi-block, the MCP extends its work volume to include the whole block (*Model*) and declares the extension to the mod, so the mod's `outside_volumes` check lets those writes through. A plugin multi-block can reach past the one-block seam, and past the context, so the mod can't infer the extension itself.
+
+| Key | Type | Meaning |
+|---|---|---|
+| `type`, `id` | | |
+| `link` | integer | The current link. Otherwise refused with `error` `stale_link` |
+| `work` | Box | The extended work volume. Must contain the player's work volume; otherwise refused with `error` `bad_extension` |
+
+On success the mod:
+
+- uses the box as the work volume for the `outside_volumes` check and the change tracker, and keeps its chunks loaded with the link's ticket;
+- shows it in the work-volume outline and with an action-bar notice (for example `Autosketch: work volume extended to 34×27×32 to include whole blocks`), so the player sees the extension;
+- sends `volumes` again, with the same `link` and the box in `extended`. The `link` doesn't change, because the MCP caused the extension and its journal stays valid.
+
+A later `volumes.extend` replaces the earlier one. The extension is dropped when the player changes the work volume or dimension (a new `link`) or clears it. The MCP declares the extension before sending any patch that writes into it; requests are handled in arrival order, so a patch sent after `volumes.extend` sees it.
+
+**`hashes`**, MCP → mod
+
+| Key | Type | Meaning |
+|---|---|---|
+| `type`, `id` | | |
+| `dimension` | string | Must be the volumes' dimension |
+| `boxes` | Box[] | Non-empty; normally the work volume and every context box |
+
+**`hashes.result`**, mod → MCP
+
+| Key | Type | Meaning |
+|---|---|---|
+| `type`, `id` | | |
+| `sections` | `[sx, sy, sz, hash][]` | One entry per section that at least one box touches, ascending by `sy`, then `sz`, then `sx`. Each hash covers only the section's positions inside the union of the request's boxes (*Section hash*) |
+
+**`snapshot`**, MCP → mod. Exactly one of `boxes` or `sections`.
+
+| Key | Type | Meaning |
+|---|---|---|
+| `type`, `id` | | |
+| `dimension` | string | Must be the volumes' dimension |
+| `boxes` | Box[] | Read these boxes |
+| `sections` | `[sx, sy, sz][]` | Read these whole sections (each the full 16³ box, even where it extends past the volumes; the MCP keeps only the positions inside its volumes) |
+
+**`snapshot.result`**, mod → MCP, with a body
+
+| Key | Type | Meaning |
+|---|---|---|
+| `type`, `id` | | |
+| `dimension` | string | |
+| `regions` | Box[] | The boxes read, in request order (for `sections`, each section's box) |
+
+The body holds every position of every region, air included, as states, plus the NBT of every block entity in them. Regions may overlap (a context box overlapping the work volume); a position in two regions appears in both, with its NBT in both.
+
+**`patch`**, MCP → mod, with a body
+
+| Key | Type | Meaning |
+|---|---|---|
+| `type`, `id` | | `id` is the patch id |
+| `link` | integer | The `link` of the volumes the patch was built for |
+| `dimension` | string | |
+| `force` | `true`, optional | `overwriteHandEdits`: skip the precondition (*World undo and restore*). Omitted when false |
+| `origin`, `size` | `[x,y,z]` | The body's grid |
+| `count` | integer | Number of positions |
+
+Per position the body gives the expected state, the new state, optionally the expected NBT hash (sent when the cache's before-block has a block entity whose type isn't state only) and optionally the new NBT (when the new block has a block entity).
+
+**`patch.ack`**, mod → MCP, with a body
+
+| Key | Type | Meaning |
+|---|---|---|
+| `type`, `id` | | The patch id |
+| `applied` | integer | Positions written |
+| `overwritten` | integer | Of those, how many failed the precondition and were written anyway because of `force` (0 otherwise) |
+| `skipped` | integer | Positions whose precondition failed (never with `force`) |
+| `rejected` | integer | Positions refused (reasons below) |
+| `normalized` | integer | Applied positions listed in the normalized list |
+| `origin`, `size` | `[x,y,z]` | The body's grid |
+
+`applied + skipped + rejected` equals the patch's `count`. Reject reasons:
+
+| Reason | Meaning |
+|---|---|
+| `stale_link` | The patch's `link` isn't the current one (the work volume changed since the MCP built it), no work volume is set, or the patch's dimension isn't the volumes'. Every position is rejected with this reason |
+| `outside_volumes` | The position lies outside the work volume (or the extension declared with `volumes.extend`) and outside every context box |
+| `unknown_state` | The new state isn't the canonical form of a state the game knows (*Block states*) |
+| `bad_nbt` | The patch gives NBT, but the new block has no block entity, its `id` names another block-entity type, or the game can't load it |
+
+The **normalized** list closes a gap the precondition would otherwise open: the game rewrites block-entity NBT as it loads it (filling defaults, adding `components`), so the NBT the cache sent and the NBT the world now holds can differ even though nobody edited anything. For each applied position, the mod compares the NBT hash of the block entity now in the world with the hash of the NBT the patch sent ("none" counts as a value: a block entity created where the patch sent none, or none where it sent some). When they differ, it lists the position with the world's NBT (or none). State-only types are never listed. **Who acts on it:** the mod only reports. Writing the world's NBT into the cache is an MCP-side `world_sync` write through Q's sync primitive (`applyWorldState`), in the same `world_sync` entry as the skipped and rejected positions of that ack. P's ack handling hands the list over, and nothing about it is ever pushed back to the world.
+
+**`dirty`**, mod → MCP: at most one per server tick, sent at the end of a tick in which a tracked change happened.
+
+| Key | Type | Meaning |
+|---|---|---|
+| `type` | `"dirty"` | |
+| `everything` | boolean | True when more than 4,096 positions changed in the tick (or the tracker lost track): no body; the MCP compares section hashes |
+| `origin`, `size`, `count` | | Only when `everything` is false: the body's grid and number of positions |
+
+The **dirty cap is 4,096 positions** (one section's worth): a notice lists the changed positions with the state and NBT the world holds at the end of that tick, so small hand edits sync without a snapshot. Positions outside both volumes are never listed, and nor are the mod's own patch writes. Contents-only changes are not tracked (*World → agent*).
+
+**`prompt`**, mod → MCP
+
+| Key | Type | Meaning |
+|---|---|---|
+| `type`, `id` | | `id` from the mod's prompt counter |
+| `player` | `{name, uuid}` | Who asked |
+| `text` | string | The request text |
+| `context` | object | Game context, all world coordinates: |
+| `context.dimension` | string | The player's dimension |
+| `context.position` | `[x,y,z]` numbers | The player's feet (`Entity.position()`) |
+| `context.eye` | `[x,y,z]` numbers | `Entity.getEyePosition()` |
+| `context.yaw` | number | Degrees, the game's convention: 0 = facing south (+Z), 90 = west, ±180 = north, −90 = east; wrapped to [−180, 180) |
+| `context.pitch` | number | Degrees, −90 = straight up, 90 = straight down |
+| `context.facing` | string | The horizontal cardinal of the yaw (`Direction.fromYRot`): `north`, `south`, `west` or `east` |
+| `context.target` | `{pos, state, face}`, optional | The block under the crosshair within the configured reach: integer position, canonical state, the face looked at (`down`, `up`, `north`, `south`, `west`, `east`). Absent when the crosshair hits no block |
+| `context.focus` | Box, optional | The focus box, already clipped to the work and context volumes |
+| `context.focusClipped` | `true`, optional | The focus box was clipped |
+
+**`prompt.result`**, MCP → mod
+
+| Key | Type | Meaning |
+|---|---|---|
+| `type`, `id` | | The prompt's id |
+| `delivered` | boolean | |
+| `reason` | string | Only when not delivered: `no_link` (no linked document), `not_allowed` (not on `world.promptPlayers`), `no_listener` (no agent session will receive it) |
+
+When the mod has no connection at all, it tells the player `no_link` itself.
+
+**`notice`**, MCP → mod
+
+| Key | Type | Meaning |
+|---|---|---|
+| `type` | `"notice"` | |
+| `text` | string | Action-bar text |
+| `player` | UUID or `null` | One player, or `null` for every op with notices on |
+
+**`chat`**, MCP → mod
+
+| Key | Type | Meaning |
+|---|---|---|
+| `type` | `"chat"` | |
+| `request` | integer or `null` | The prompt id this belongs to, or `null` (work not prompted from the game) |
+| `player` | UUID or `null` | The requesting player, or `null` |
+| `kind` | `"activity"` or `"reply"` | Styled differently in chat |
+| `lines` | string[] | One chat line each |
+
+The mod shows a `chat` to the named player (a `reply` always; an `activity` unless their log setting is `off`), and to every other player whose log setting is `all`.
+
+### Applying a patch
+
+For each position, in index order, under the tick budget:
+
+1. The patch's `link` isn't the current link, or there are no volumes, or `dimension` isn't theirs: reject (`stale_link`) every position.
+2. Outside the work volume (or its declared extension, `volumes.extend`) and every context box: reject `outside_volumes`.
+3. The new state isn't canonical and known: reject `unknown_state`. NBT given but unusable for the new block: reject `bad_nbt`.
+4. **Precondition:** the canonical printing of the world's state equals the expected state, and, when an expected NBT hash is given, the world's block has a block entity whose NBT hash (*Hashing*, with the hello's volatile list) equals it. Not both: skip, recording the world's state and NBT. With `force`, write anyway and count it as overwritten.
+5. Write the new state without side effects (*Agent → world*), remove the old block entity, and load the patch's NBT when it gives some.
+6. Compare NBT hashes for the normalized list.
+
+Then send the `patch.ack`.
+
+### Hashing
+
+**Volatile-key list.** A JSON object sent in the MCP's `hello`. Each key is a block-entity type id (the NBT's `id`, e.g. `minecraft:furnace`) or `*` (every type). Each value is either a list of key paths to drop before hashing, or the string `"state_only"`, which means the NBT of that type is never compared and never hashed. A key path names a top-level key (`BurnTime`) or a nested compound key with `/` between the levels (`Network/Stress`); paths don't descend into lists, and keys containing `/` can't be named. For a given block entity, the paths of `*` and of its type both apply; `"state_only"` on either wins. The MCP's built-in default (`src/world/protocol/hash.ts`; silo R grows it from measurements):
+
+```json
+{ "minecraft:furnace":       ["BurnTime", "CookTime", "CookTimeTotal", "lit_time_remaining", "lit_total_time", "cooking_time_spent", "cooking_total_time"],
+  "minecraft:blast_furnace": ["BurnTime", "CookTime", "CookTimeTotal", "lit_time_remaining", "lit_total_time", "cooking_time_spent", "cooking_total_time"],
+  "minecraft:smoker":        ["BurnTime", "CookTime", "CookTimeTotal", "lit_time_remaining", "lit_total_time", "cooking_time_spent", "cooking_total_time"],
+  "minecraft:hopper":        ["TransferCooldown"],
+  "minecraft:brewing_stand": ["BrewTime"] }
+```
+
+Plugins add entries (`09`), merged as a union per type. The mod keeps no list of its own: it hashes with whatever the hello sent.
+
+**Canonical NBT** of a block entity's compound:
+
+1. If its type is state only, it has no canonical form and no hash.
+2. Remove the top-level `x`, `y`, `z` (nested keys named `x` stay).
+3. Remove every volatile key path that applies.
+4. Write it as binary NBT, with keys sorted recursively and empty lists of type End (*NBT*): `0x0A 0x00 0x00`, the sorted payload, `0x00`.
+
+**NBT hash** = the first 8 bytes of SHA-256 over the canonical bytes. The empty compound's canonical bytes are `0a 00 00 00`.
+
+**Section hash**, for a section and a set of boxes (the request's boxes):
+
+1. Take the section's positions that lie inside at least one box, in order y, then z, then x (ascending; x innermost). Positions outside every box are left out entirely. A section with no such position has no hash and isn't listed.
+2. For each, append to a byte stream: the canonical state as a body string (varint length, UTF-8), air included as `minecraft:air`; then `0x00` if the block has no block entity or a state-only one, or `0x01` followed by the 8-byte NBT hash.
+3. The section hash is the first 8 bytes of SHA-256 over the stream.
+
+Both sides compute it the same way: the mod over the world, the MCP over its cache (which holds exactly the positions inside its volumes). Because the boxes come from the request, a section only partly inside the volumes hashes only its inside part on both sides.
+
+**Why SHA-256 truncated to 64 bits:** both sides have it with no dependency (`MessageDigest.getInstance("SHA-256")`, `node:crypto`), it is fast enough (hashing a full section is about 80 KB of input), and 64 bits make an accidental collision between a cache and a world state negligible at the scale of a few thousand sections. Nothing measured called for something else.
+
+### Golden vectors
+
+`test/data/world-protocol/` holds one complete frame per file (`<name>.bin`, length prefix included) with a sidecar `<name>.json`:
+
+- `description`, `sender` (`"mcp"` or `"mod"`), and `header`, the frame's JSON header exactly.
+- `body`, for messages with a body: the decoded content in encoded order. Patches list `blocks` with world `pos`, `expected`, `expectedNbtHash`, `state` and `nbt`; acks list `skipped`, `rejected` (with `reason`) and `normalized`; dirty notices list `blocks`; snapshot results list each region's `states` (palette indices) and `blockEntities`. The `palette` (and `reasons`) tables are given too, in their encoded order. NBT is written as SNBT (the game's `TagParser.parseTag` reads it).
+- `generated`, instead of `body`, for `patch-large`: the rule that produces its blocks.
+
+There is a vector per message kind: `hello` both ways, `error` (including a refused extension), `volumes` (with and without a work volume, and with an extension in force), `volumes.extend`, `hashes` and its result, `snapshot` by boxes and by sections, `snapshot.result` (empty, one block, mixed palette with block entities and overlapping regions), `patch` (empty, one block, mixed palette given out of order, block entities with expected NBT hashes, forced, large), `patch.ack` (all applied, mixed, forced, stale), `dirty` (positions, everything), `prompt` (full and minimal), `prompt.result` (delivered, refused), `notice` and `chat` (activity, reply). Hash vectors: `hash-nbt.json` (compounds with their volatile lists, canonical bytes in hex and hash: empty, unordered keys, nested, every tag type, modified UTF-8, furnace with and without volatile keys, a nested path and `*`, state only) and `hash-sections.json` (sections with their boxes and blocks and expected hash: full, a single position, negative coordinates with partial overlapping boxes, block entities with volatile and state-only types).
+
+An implementation passes when it decodes every vector to its sidecar, re-encodes the sidecar to the same bytes (headers compared as JSON), and reproduces every hash. The vectors are synthetic, and they are frozen: a change to them is a protocol change.
+
+**Worked example** (`patch-one.bin`): one block at world (100, 64, −200), air to stone.
+
+```
+00 00 00 9c                       frameLength 156
+00 00 00 73                       headerLength 115
+7b 22 74 79 … 3a 31 7d            {"type":"patch","id":21,"link":3,"dimension":"minecraft:overworld",
+                                   "origin":[100,64,-200],"size":[1,1,1],"count":1}
+02                                palette: 2 strings
+0d 6d 69 6e … 61 69 72            "minecraft:air" (13 bytes)
+0f 6d 69 6e … 6e 65               "minecraft:stone" (15 bytes)
+01                                N = 1
+00                                gap 0 → index 0 → (100, 64, −200)
+00                                expected = palette[0], minecraft:air
+01                                new = palette[1], minecraft:stone
+00                                no expected NBT hashes
+00                                no NBT
+```
 
 ## Player feedback in-game
 
@@ -201,7 +620,11 @@ The player can ask the agent for something without leaving the game: stand in th
 
 ## Implementation status
 
-Not started. Work is split into silos in `docs/briefs/world/`. Suggested order: protocol, hashing and fake host (W9, W10), then the MCP side (W1–W8, W11) tested against the fake host, then the mod (M1–M13), then end-to-end tests in a Craftoria save.
+Work is split into silos in `docs/briefs/world/`. Suggested order: protocol, hashing and fake host (W9, W10), then the MCP side (W1–W8, W11) tested against the fake host, then the mod (M1–M13), then end-to-end tests in a Craftoria save.
+
+| Part | Silo | Status |
+|---|---|---|
+| Wire format, golden vectors, codec, hashing (W10), fake host (W9) | L | Done. *Wire format* above, including `volumes.extend` for the MCP's whole-block extension of the work volume; vectors and hash vectors in `test/data/world-protocol/` (regenerate with `npx tsx test/data/world-protocol/generate.ts` only for a protocol change); codec, frame reader, hashing and pairing file in `src/world/protocol/`; fake host in `test/support/fake-host.ts` (handshake, compare-and-set with NBT hashes, normalized list, dirty notices, section hashes, snapshots, prompts, `volumes.extend` (link and containment checks, reset on a new link), and hooks for player edits, ticks, volume changes, dropped connections and restarts; no tick budget or chunk loading). A one-million-block patch encodes in about 0.1 s to 3.0 MB. The volatile-key default is the small starting list; growing it stays open (*Volatile keys*). |
 
 ## Open questions
 

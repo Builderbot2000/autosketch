@@ -1,0 +1,28 @@
+{
+  "description": "One hash per section the boxes touch, ascending y, z, x (truncated list for the vector)",
+  "sender": "mod",
+  "header": {
+    "type": "hashes.result",
+    "id": 5,
+    "sections": [
+      [
+        6,
+        3,
+        -13,
+        "0123456789abcdef"
+      ],
+      [
+        7,
+        3,
+        -13,
+        "fedcba9876543210"
+      ],
+      [
+        6,
+        4,
+        -13,
+        "00000000000000ff"
+      ]
+    ]
+  }
+}

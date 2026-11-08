@@ -1,0 +1,22 @@
+{
+  "description": "A forced patch: both blocks applied, one over a hand edit",
+  "sender": "mod",
+  "header": {
+    "type": "patch.ack",
+    "id": 24,
+    "applied": 2,
+    "overwritten": 1,
+    "skipped": 0,
+    "rejected": 0,
+    "normalized": 0,
+    "origin": [0, 0, 0],
+    "size": [0, 0, 0]
+  },
+  "body": {
+    "palette": [],
+    "skipped": [],
+    "reasons": [],
+    "rejected": [],
+    "normalized": []
+  }
+}

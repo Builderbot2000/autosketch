@@ -1,0 +1,137 @@
+{
+  "description": "Section hash vectors. Positions not in `blocks` hold `fill`; only positions inside at least one box are hashed.",
+  "cases": [
+    {
+      "name": "air-full",
+      "description": "A section of air, fully inside the box",
+      "section": [0, 4, 0],
+      "boxes": [
+        {
+          "min": [0, 64, 0],
+          "max": [15, 79, 15]
+        }
+      ],
+      "volatile": {},
+      "fill": "minecraft:air",
+      "blocks": [],
+      "hash": "5080af33da780812"
+    },
+    {
+      "name": "air-one",
+      "description": "A single position of the section inside the box",
+      "section": [0, 4, 0],
+      "boxes": [
+        {
+          "min": [3, 70, 5],
+          "max": [3, 70, 5]
+        }
+      ],
+      "volatile": {},
+      "fill": "minecraft:air",
+      "blocks": [],
+      "hash": "d1ebd6a816fd3cdb"
+    },
+    {
+      "name": "mixed-partial",
+      "description": "Negative section coordinates, two overlapping boxes covering part of the section, mixed states, one block outside both boxes (ignored)",
+      "section": [-1, -4, -2],
+      "boxes": [
+        {
+          "min": [-16, -64, -32],
+          "max": [-9, -60, -25]
+        },
+        {
+          "min": [-12, -62, -28],
+          "max": [-1, -57, -20]
+        }
+      ],
+      "volatile": {},
+      "fill": "minecraft:stone",
+      "blocks": [
+        {
+          "pos": [-16, -64, -32],
+          "state": "minecraft:deepslate[axis=y]"
+        },
+        {
+          "pos": [-1, -57, -20],
+          "state": "minecraft:air"
+        },
+        {
+          "pos": [-10, -61, -26],
+          "state": "minecraft:oak_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]"
+        },
+        {
+          "pos": [-1, -49, -17],
+          "state": "minecraft:gold_block"
+        }
+      ],
+      "hash": "5e954c885a321440"
+    },
+    {
+      "name": "block-entities",
+      "description": "Block entities: a chest (hashed), a furnace (volatile keys dropped) and a state-only type (no hash, flag 0)",
+      "section": [6, 4, -13],
+      "boxes": [
+        {
+          "min": [100, 64, -200],
+          "max": [131, 87, -169]
+        }
+      ],
+      "volatile": {
+        "minecraft:furnace": [
+          "BurnTime",
+          "CookTime",
+          "CookTimeTotal",
+          "lit_time_remaining",
+          "lit_total_time",
+          "cooking_time_spent",
+          "cooking_total_time"
+        ],
+        "minecraft:blast_furnace": [
+          "BurnTime",
+          "CookTime",
+          "CookTimeTotal",
+          "lit_time_remaining",
+          "lit_total_time",
+          "cooking_time_spent",
+          "cooking_total_time"
+        ],
+        "minecraft:smoker": [
+          "BurnTime",
+          "CookTime",
+          "CookTimeTotal",
+          "lit_time_remaining",
+          "lit_total_time",
+          "cooking_time_spent",
+          "cooking_total_time"
+        ],
+        "minecraft:hopper": [
+          "TransferCooldown"
+        ],
+        "minecraft:brewing_stand": [
+          "BrewTime"
+        ],
+        "create:belt": "state_only"
+      },
+      "fill": "minecraft:air",
+      "blocks": [
+        {
+          "pos": [100, 64, -200],
+          "state": "minecraft:chest[facing=north,type=single,waterlogged=false]",
+          "nbt": "{Items:[{Slot:0b,count:3,id:\"minecraft:oak_planks\"},{Slot:13b,count:1,id:\"minecraft:lantern\"}],id:\"minecraft:chest\"}"
+        },
+        {
+          "pos": [101, 64, -200],
+          "state": "minecraft:furnace[facing=south,lit=true]",
+          "nbt": "{BurnTime:120s,CookTime:40s,CookTimeTotal:200s,Items:[{Slot:0b,count:5,id:\"minecraft:raw_iron\"}],RecipesUsed:{},id:\"minecraft:furnace\"}"
+        },
+        {
+          "pos": [102, 64, -200],
+          "state": "create:belt[casing=false,facing=east,part=middle,slope=horizontal]",
+          "nbt": "{id:\"create:belt\",Speed:1.0f}"
+        }
+      ],
+      "hash": "a446896e4f116727"
+    }
+  ]
+}

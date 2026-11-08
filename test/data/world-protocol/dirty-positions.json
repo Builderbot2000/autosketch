@@ -1,0 +1,33 @@
+{
+  "description": "Hand edits in one tick, with the states (and NBT) the world holds at the end of that tick",
+  "sender": "mod",
+  "header": {
+    "type": "dirty",
+    "everything": false,
+    "origin": [99, 64, -201],
+    "size": [7, 3, 7],
+    "count": 3
+  },
+  "body": {
+    "palette": [
+      "minecraft:chest[facing=west,type=single,waterlogged=false]",
+      "minecraft:air",
+      "minecraft:torch"
+    ],
+    "blocks": [
+      {
+        "pos": [99, 64, -201],
+        "state": "minecraft:chest[facing=west,type=single,waterlogged=false]",
+        "nbt": "{Items:[],id:\"minecraft:chest\"}"
+      },
+      {
+        "pos": [104, 66, -195],
+        "state": "minecraft:air"
+      },
+      {
+        "pos": [105, 66, -195],
+        "state": "minecraft:torch"
+      }
+    ]
+  }
+}

@@ -1,0 +1,163 @@
+{
+  "description": "NBT hash vectors: canonical bytes (hex) and hash (first 8 bytes of SHA-256, hex) of each compound under its volatile list. null = state only.",
+  "cases": [
+    {
+      "name": "empty",
+      "description": "An empty compound",
+      "snbt": "{}",
+      "volatile": {},
+      "canonical": "0a000000",
+      "hash": "075de2b906dbd706"
+    },
+    {
+      "name": "unordered",
+      "description": "Keys given out of order are sorted; position keys x, y, z are removed",
+      "snbt": "{z:5,id:\"minecraft:barrel\",y:64,Items:[],x:-3,CustomName:\"\\\"Stash\\\"\"}",
+      "volatile": {},
+      "canonical": "0a000008000a437573746f6d4e616d650007225374617368220900054974656d730000000000080002696400106d696e6563726166743a62617272656c00",
+      "hash": "7f7fcf0794997e39"
+    },
+    {
+      "name": "nested",
+      "description": "Nested compounds and a list of compounds sort their keys recursively; x inside a nested compound stays",
+      "snbt": "{id:\"test:machine\",b:{zeta:1b,alpha:{y:2s,x:1s}},a:[{k2:1,k1:2},{k1:3}]}",
+      "volatile": {},
+      "canonical": "0a0000090001610a000000020300026b31000000020300026b3200000001000300026b3100000003000a0001620a0005616c706861020001780001020001790002000100047a65746101000800026964000c746573743a6d616368696e6500",
+      "hash": "02eeb2eb08b562f5"
+    },
+    {
+      "name": "all-types",
+      "description": "Every tag type: byte, short, int, long, float, double, string, byte array, int array, long array, list of lists, empty list",
+      "snbt": "{id:\"test:all\",b:-5b,s:-300s,i:-70000,l:-5000000000L,big:9223372036854775807L,f:0.15625f,d:-2.5d,str:\"text\",ba:[B;1b,-1b],ia:[I;1,-2,3],la:[L;1L,-1L],lol:[[I;1,2],[I;3]],ll:[[1,2],[3s]],e:[]}",
+      "volatile": {},
+      "canonical": "0a000001000162fb07000262610000000201ff0400036269677fffffffffffffff06000164c004000000000000090001650000000000050001663e20000003000169fffeee900b000269610000000300000001fffffffe0000000308000269640008746573743a616c6c0400016cfffffffed5fa0e000c00026c61000000020000000000000001ffffffffffffffff0900026c6c090000000203000000020000000100000002020000000100030900036c6f6c0b00000002000000020000000100000002000000010000000302000173fed408000373747200047465787400",
+      "hash": "089510024537489b"
+    },
+    {
+      "name": "unicode",
+      "description": "Strings with an emoji and U+00E9 are written in Java modified UTF-8",
+      "snbt": "{id:\"minecraft:oak_sign\",text:\"café 😀\"}",
+      "volatile": {},
+      "canonical": "0a0000080002696400126d696e6563726166743a6f616b5f7369676e08000474657874000c636166c3a920eda0bdedb88000",
+      "hash": "4d632ee95ab56836"
+    },
+    {
+      "name": "furnace-default",
+      "description": "A furnace with the default volatile list: burn and cook times dropped, items and RecipesUsed kept",
+      "snbt": "{BurnTime:120s,CookTime:40s,CookTimeTotal:200s,Items:[{Slot:0b,count:5,id:\"minecraft:raw_iron\"}],RecipesUsed:{},id:\"minecraft:furnace\"}",
+      "volatile": {
+        "minecraft:furnace": [
+          "BurnTime",
+          "CookTime",
+          "CookTimeTotal",
+          "lit_time_remaining",
+          "lit_total_time",
+          "cooking_time_spent",
+          "cooking_total_time"
+        ],
+        "minecraft:blast_furnace": [
+          "BurnTime",
+          "CookTime",
+          "CookTimeTotal",
+          "lit_time_remaining",
+          "lit_total_time",
+          "cooking_time_spent",
+          "cooking_total_time"
+        ],
+        "minecraft:smoker": [
+          "BurnTime",
+          "CookTime",
+          "CookTimeTotal",
+          "lit_time_remaining",
+          "lit_total_time",
+          "cooking_time_spent",
+          "cooking_total_time"
+        ],
+        "minecraft:hopper": [
+          "TransferCooldown"
+        ],
+        "minecraft:brewing_stand": [
+          "BrewTime"
+        ]
+      },
+      "canonical": "0a00000900054974656d730a00000001010004536c6f7400030005636f756e7400000005080002696400126d696e6563726166743a7261775f69726f6e000a000b526563697065735573656400080002696400116d696e6563726166743a6675726e61636500",
+      "hash": "3e9ff6047144b2ed"
+    },
+    {
+      "name": "furnace-ticked",
+      "description": "The same furnace a few ticks later (only volatile keys changed): same hash as furnace-default",
+      "snbt": "{id:\"minecraft:furnace\",BurnTime:97s,CookTime:63s,CookTimeTotal:200s,RecipesUsed:{},Items:[{Slot:0b,id:\"minecraft:raw_iron\",count:5}]}",
+      "volatile": {
+        "minecraft:furnace": [
+          "BurnTime",
+          "CookTime",
+          "CookTimeTotal",
+          "lit_time_remaining",
+          "lit_total_time",
+          "cooking_time_spent",
+          "cooking_total_time"
+        ],
+        "minecraft:blast_furnace": [
+          "BurnTime",
+          "CookTime",
+          "CookTimeTotal",
+          "lit_time_remaining",
+          "lit_total_time",
+          "cooking_time_spent",
+          "cooking_total_time"
+        ],
+        "minecraft:smoker": [
+          "BurnTime",
+          "CookTime",
+          "CookTimeTotal",
+          "lit_time_remaining",
+          "lit_total_time",
+          "cooking_time_spent",
+          "cooking_total_time"
+        ],
+        "minecraft:hopper": [
+          "TransferCooldown"
+        ],
+        "minecraft:brewing_stand": [
+          "BrewTime"
+        ]
+      },
+      "canonical": "0a00000900054974656d730a00000001010004536c6f7400030005636f756e7400000005080002696400126d696e6563726166743a7261775f69726f6e000a000b526563697065735573656400080002696400116d696e6563726166743a6675726e61636500",
+      "hash": "3e9ff6047144b2ed"
+    },
+    {
+      "name": "furnace-no-volatile",
+      "description": "The same furnace with an empty volatile list: every key hashed",
+      "snbt": "{BurnTime:120s,CookTime:40s,CookTimeTotal:200s,Items:[{Slot:0b,count:5,id:\"minecraft:raw_iron\"}],RecipesUsed:{},id:\"minecraft:furnace\"}",
+      "volatile": {},
+      "canonical": "0a00000200084275726e54696d650078020008436f6f6b54696d65002802000d436f6f6b54696d65546f74616c00c80900054974656d730a00000001010004536c6f7400030005636f756e7400000005080002696400126d696e6563726166743a7261775f69726f6e000a000b526563697065735573656400080002696400116d696e6563726166743a6675726e61636500",
+      "hash": "576c8d579d1b15a6"
+    },
+    {
+      "name": "nested-path",
+      "description": "A nested volatile path (Network/Stress) and a key dropped for every type (*)",
+      "snbt": "{id:\"create:mechanical_press\",Speed:32.0f,Network:{Id:7L,Stress:12.5f},Owner:\"Kev\",LastTick:1234L}",
+      "volatile": {
+        "*": [
+          "LastTick"
+        ],
+        "create:mechanical_press": [
+          "Speed",
+          "Network/Stress"
+        ]
+      },
+      "canonical": "0a00000a00074e6574776f726b04000249640000000000000007000800054f776e657200034b6576080002696400176372656174653a6d656368616e6963616c5f707265737300",
+      "hash": "bafdbe40a0ff05fb"
+    },
+    {
+      "name": "state-only",
+      "description": "A state-only type has no NBT hash",
+      "snbt": "{id:\"create:belt\",Speed:1.0f}",
+      "volatile": {
+        "create:belt": "state_only"
+      },
+      "canonical": null,
+      "hash": null
+    }
+  ]
+}

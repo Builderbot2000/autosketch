@@ -1,0 +1,43 @@
+{
+  "description": "New block-entity NBT, and expected NBT hashes for replaced block entities (computed with the default volatile list)",
+  "sender": "mcp",
+  "header": {
+    "type": "patch",
+    "id": 23,
+    "link": 3,
+    "dimension": "minecraft:overworld",
+    "origin": [110, 70, -190],
+    "size": [3, 1, 1],
+    "count": 3
+  },
+  "body": {
+    "palette": [
+      "minecraft:air",
+      "minecraft:chest[facing=north,type=single,waterlogged=false]",
+      "minecraft:furnace[facing=south,lit=true]",
+      "minecraft:barrel[facing=up,open=false]",
+      "minecraft:oak_sign[rotation=8,waterlogged=false]"
+    ],
+    "blocks": [
+      {
+        "pos": [110, 70, -190],
+        "expected": "minecraft:air",
+        "state": "minecraft:chest[facing=north,type=single,waterlogged=false]",
+        "nbt": "{Items:[{Slot:0b,count:3,id:\"minecraft:oak_planks\"},{Slot:13b,count:1,id:\"minecraft:lantern\"}],id:\"minecraft:chest\"}"
+      },
+      {
+        "pos": [111, 70, -190],
+        "expected": "minecraft:furnace[facing=south,lit=true]",
+        "expectedNbtHash": "3e9ff6047144b2ed",
+        "state": "minecraft:barrel[facing=up,open=false]",
+        "nbt": "{Items:[],id:\"minecraft:barrel\"}"
+      },
+      {
+        "pos": [112, 70, -190],
+        "expected": "minecraft:oak_sign[rotation=8,waterlogged=false]",
+        "expectedNbtHash": "92cedbe740365c7d",
+        "state": "minecraft:air"
+      }
+    ]
+  }
+}

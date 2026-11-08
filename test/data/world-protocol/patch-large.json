@@ -1,0 +1,14 @@
+{
+  "description": "A large patch of 20480 blocks, described by a rule rather than listed",
+  "sender": "mcp",
+  "header": {
+    "type": "patch",
+    "id": 25,
+    "link": 3,
+    "dimension": "minecraft:overworld",
+    "origin": [100, 64, -200],
+    "size": [40, 16, 40],
+    "count": 20480
+  },
+  "generated": "For dy in 0..15, dz in 0..39, dx in 0..39 (y outermost, x innermost), skip when (dx + 3*dy + 7*dz) % 5 == 0; otherwise a block at (100+dx, 64+dy, -200+dz) with expected \"minecraft:air\" when dy < 8, else \"minecraft:stone\", and new state [\"minecraft:oak_planks\", \"minecraft:stone_bricks\", \"minecraft:oak_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]\", \"minecraft:glass\"][(dx + dy + dz) % 4]. No NBT, no expected NBT hashes."
+}

@@ -28,6 +28,74 @@ export interface WallRunOptions extends GenOptions {
   buttresses?: { every: number; depth?: number; side?: "left" | "right" | "both"; material?: MaterialExpr };
   /** A top course in another material (e.g. slabs or a wall block). */
   cap?: MaterialExpr;
+  /**
+   * How the path is read: polyline (default, straight segments), smooth (a Catmull-Rom curve
+   * through every point) or bezier (the points are the control points of one Bézier curve; it
+   * passes through the first and last).
+   */
+  curve?: "polyline" | "smooth" | "bezier";
+}
+
+type P3 = [number, number, number];
+
+/** Samples a curve through (smooth) or controlled by (bezier) the points, densely enough for blocks. */
+export function curvePoints(pts: Vec3[], curve: "smooth" | "bezier"): P3[] {
+  const len = pts.slice(1).reduce((s, p, i) => s + Math.hypot(p[0] - pts[i]![0], p[1] - pts[i]![1], p[2] - pts[i]![2]), 0);
+  const out: P3[] = [];
+  if (curve === "bezier") {
+    const n = Math.max(2, Math.ceil(len * 4));
+    for (let k = 0; k <= n; k++) {
+      // de Casteljau
+      const t = k / n;
+      let q: P3[] = pts.map((p) => [p[0], p[1], p[2]]);
+      while (q.length > 1) q = q.slice(1).map((b, i) => [0, 1, 2].map((a) => q[i]![a]! * (1 - t) + b[a]! * t) as P3);
+      out.push(q[0]!);
+    }
+    return out;
+  }
+  // Catmull-Rom (uniform), end points repeated so the curve starts and ends on them.
+  const P = (i: number) => pts[Math.max(0, Math.min(pts.length - 1, i))]!;
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const p0 = P(i - 1), p1 = P(i), p2 = P(i + 1), p3 = P(i + 2);
+    const n = Math.max(2, Math.ceil(Math.hypot(p2[0] - p1[0], p2[1] - p1[1], p2[2] - p1[2]) * 4));
+    for (let k = i === 0 ? 0 : 1; k <= n; k++) {
+      const t = k / n, t2 = t * t, t3 = t2 * t;
+      out.push([0, 1, 2].map((a) => 0.5 * (2 * p1[a]! + (-p0[a]! + p2[a]!) * t + (2 * p0[a]! - 5 * p1[a]! + 4 * p2[a]! - p3[a]!) * t2 + (-p0[a]! + 3 * p1[a]! - 3 * p2[a]! + p3[a]!) * t3)) as P3);
+    }
+  }
+  return out;
+}
+
+/** The path as blocks in walking order, each with the right-hand vector of its local direction. */
+function wallSteps(pts: Vec3[], curve: WallRunOptions["curve"]): { p: Vec3; right: Vec3 }[] {
+  const steps: { p: Vec3; right: Vec3 }[] = [];
+  const push = (a: Vec3, b: Vec3) => {
+    const dx = b[0] - a[0], dz = b[2] - a[2];
+    const fwd: Vec3 = Math.abs(dx) >= Math.abs(dz) ? [Math.sign(dx) || 1, 0, 0] : [0, 0, Math.sign(dz)];
+    const right: Vec3 = [-fwd[2], 0, fwd[0]];
+    for (const p of line(a, b)) if (!steps.length || steps[steps.length - 1]!.p.join() !== p.join()) steps.push({ p, right });
+  };
+  if (curve === undefined || curve === "polyline") {
+    for (let i = 0; i + 1 < pts.length; i++) push(pts[i]!, pts[i + 1]!);
+    return steps;
+  }
+  if (curve !== "smooth" && curve !== "bezier") throw new Error(`unknown curve "${curve}" (polyline, smooth, bezier)`);
+  // Round the samples to blocks, drop repeats, then join neighbours with lines so there are no gaps.
+  const blocks: Vec3[] = [];
+  for (const q of curvePoints(pts, curve)) {
+    const b: Vec3 = [Math.round(q[0]), Math.round(q[1]), Math.round(q[2])];
+    if (!blocks.length || blocks[blocks.length - 1]!.join() !== b.join()) blocks.push(b);
+  }
+  if (blocks.length === 1) blocks.push(blocks[0]!);
+  for (let i = 0; i + 1 < blocks.length; i++) {
+    // The local direction looks a few blocks ahead, so thickness follows the curve, not each stair-step.
+    const a = blocks[Math.max(0, i - 2)]!, b = blocks[Math.min(blocks.length - 1, i + 3)]!;
+    const dx = b[0] - a[0], dz = b[2] - a[2];
+    const fwd: Vec3 = Math.abs(dx) >= Math.abs(dz) ? [Math.sign(dx) || 1, 0, 0] : [0, 0, Math.sign(dz)];
+    const right: Vec3 = [-fwd[2], 0, fwd[0]];
+    for (const p of line(blocks[i]!, blocks[i + 1]!)) if (!steps.length || steps[steps.length - 1]!.p.join() !== p.join()) steps.push({ p, right });
+  }
+  return steps;
 }
 
 export function wallRun(doc: Document, env: OpEnv, material: MaterialExpr, opts: WallRunOptions): GenResult {
@@ -37,14 +105,7 @@ export function wallRun(doc: Document, env: OpEnv, material: MaterialExpr, opts:
   const height = checkInt(opts.height, "height", 1, 384);
   const t = checkInt(opts.thickness ?? 1, "thickness", 1, 16);
   // Rasterise in xz (y interpolated), recording each step's right-hand vector.
-  const steps: { p: Vec3; right: Vec3 }[] = [];
-  for (let i = 0; i + 1 < pts.length; i++) {
-    const a = pts[i]!, b = pts[i + 1]!;
-    const dx = b[0] - a[0], dz = b[2] - a[2];
-    const fwd: Vec3 = Math.abs(dx) >= Math.abs(dz) ? [Math.sign(dx) || 1, 0, 0] : [0, 0, Math.sign(dz)];
-    const right: Vec3 = [-fwd[2], 0, fwd[0]];
-    for (const p of line(a, b)) if (!steps.length || steps[steps.length - 1]!.p.join() !== p.join()) steps.push({ p, right });
-  }
+  const steps = wallSteps(pts, opts.curve);
   if (steps.length * t * height > 4_000_000) throw new Error("wall_run would place over 4,000,000 blocks; split it up");
   const cren = opts.crenellation === true ? {} : opts.crenellation || undefined;
   const every = cren ? checkInt(cren.every ?? 2, "crenellation.every", 2, 64) : 0;

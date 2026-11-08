@@ -134,6 +134,38 @@ describe("scope fork (11)", () => {
     expect(at(doc, 5, 1, 5)).toBe("oak_planks");
   });
 
+  it("restore across a lock is all or nothing: every step is checked first", () => {
+    const { doc, scopes } = setup();
+    doc.checkpoint("empty");
+    fill(doc, env, B([0, 0, 0], [3, 0, 3]), "stone"); // op 1: inside the future lock
+    fill(doc, env, B([20, 0, 20], [21, 0, 21]), "granite"); // op 2: far from it
+    doc.checkpoint("built");
+    const a = scopes.fork("base", { work: M([0, 0, 0], [7, 7, 7]), brief: "west tower", env }).scope;
+    fill(doc, env, B([24, 0, 24], [24, 0, 24]), "gold_block"); // op 3: after the fork, outside the lock
+    const head = doc.journal.headSeq;
+    // Restoring "empty" would undo op 3 and op 2 fine, then op 1 inside the lock: refused before any step.
+    const r = refused(() => doc.restore("empty"));
+    expect(r.code).toBe("lock_overlap");
+    expect(r.message).toMatch(/^restore "empty" refused: step 3 of 3 \(undo of op #1 fill/);
+    expect(r.message).toMatch(/locked by job s1 \("west tower"\)/);
+    expect(r.message).toMatch(/Nothing was changed; the document is still at op #3\.$/);
+    expect(doc.journal.headSeq).toBe(head);
+    expect(at(doc, 24, 0, 24)).toBe("gold_block");
+    expect(at(doc, 20, 0, 20)).toBe("granite");
+    // A restore whose steps all stay clear of the lock goes through.
+    expect(doc.restore("built")).toMatchObject({ steps: 1, direction: "undo" });
+    expect(at(doc, 24, 0, 24)).toBe("air");
+    // Redo direction is checked too: after the lock is gone, edits inside it are fine again.
+    scopes.abandon(a.id);
+    doc.restore("empty");
+    expect(doc.blockCount()).toBe(0);
+    scopes.fork("base", { work: M([0, 0, 0], [7, 7, 7]), brief: "again", env });
+    const rr = refused(() => doc.restore("built"));
+    expect(rr.code).toBe("lock_overlap");
+    expect(rr.message).toMatch(/step 1 of 2 \(redo of op #1/);
+    expect(doc.blockCount()).toBe(0);
+  });
+
   it("enforces the over-nesting limits with their refusal messages, and they are configurable", () => {
     const { doc, scopes } = setup([16, 16, 16]); // 4096 blocks: half is 2048
     fill(doc, env, B([0, 0, 0], [15, 0, 15]), "stone");

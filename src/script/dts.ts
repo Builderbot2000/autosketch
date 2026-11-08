@@ -28,8 +28,9 @@ type GenOpts = { as?: string; kind?: string; raw?: boolean };
 type RoofStyle = "gable" | "hip" | "pyramid" | "shed" | "mansard" | "dome" | "flat";
 type RoofOpts = GenOpts & { style?: RoofStyle; pitch?: number; overhang?: number; axis?: "x" | "z"; high?: "north" | "south" | "east" | "west"; break?: number; base?: number; stairs?: Material; slab?: Material; gables?: boolean | Material };
 type ArchOpts = GenOpts & { at: At; width: number; height?: number; axis?: "x" | "z"; style?: "round" | "pointed" | "segmental" | "flat"; ring?: number; depth?: number; jambs?: boolean; clear?: boolean };
-type StaircaseOpts = GenOpts & { from: At; dir?: "north" | "south" | "east" | "west"; height?: number; to?: At; width?: number; stairs?: Material; support?: "solid" | "none" };
-type WallRunOpts = GenOpts & { path: At[]; height: number; thickness?: number; crenellation?: boolean | { every?: number; height?: number; material?: Material }; buttresses?: { every: number; depth?: number; side?: "left" | "right" | "both"; material?: Material }; cap?: Material };
+type StaircaseOpts = GenOpts & { from: At; dir?: "north" | "south" | "east" | "west"; height?: number; to?: At; width?: number; stairs?: Material; support?: "solid" | "none"; shape?: "straight" | "spiral"; radius?: number; turn?: "cw" | "ccw"; steps_per_turn?: number };
+type WallRunOpts = GenOpts & { path: At[]; height: number; thickness?: number; crenellation?: boolean | { every?: number; height?: number; material?: Material }; buttresses?: { every: number; depth?: number; side?: "left" | "right" | "both"; material?: Material }; cap?: Material; curve?: "polyline" | "smooth" | "bezier" };
+type StampOpts = { at: At; anchor?: string; palette_remap?: Record<string, string>; include_air?: boolean; as?: string; rotate?: 0 | 90 | 180 | 270; mirror?: "x" | "z" };
 type TowerOpts = GenOpts & { at: At; shape?: "round" | "square" | number | [number, number][]; radius?: number; height: number; thickness?: number; floors?: { every: number; material?: Material }; roof?: false | RoofStyle | { style?: RoofStyle; material?: Material; pitch?: number; overhang?: number; stairs?: Material; slab?: Material } };
 type WindowOpts = GenOpts & { on: string; u?: number | string; v?: number | string; w?: number; h?: number; style?: "plain" | "arched" | "cross"; glass?: Material; frame?: Material; sill?: Material; depth?: number };
 type DoorOpts = GenOpts & { on: string; u?: number | string; v?: number | string; block?: string; w?: 1 | 2; h?: number; frame?: Material; depth?: number };
@@ -60,13 +61,17 @@ declare class Sel {
   info(): SelectionInfo; count(): number; positions(): Vec3[];
 }
 
+/** tag: "#ns:tag" (by "tag"); palette, role (by "role"); tolerance: CIELAB ΔE (by "colour", default 10). */
+type MatchOpts = { tag?: string; palette?: string; role?: string; tolerance?: number };
+type Match = "block" | "state" | "family" | "solid" | "air" | "tag" | "role" | "colour" | \`prop:\${string}\`;
+
 declare const sel: {
-  box(min: Vec3, max?: Vec3): Sel; readonly all: Sel; readonly last: Sel; named(name: string): Sel; component(id: string): Sel;
+  box(min: Vec3, max?: Vec3): Sel; readonly all: Sel; readonly last: Sel; named(name: string): Sel; component(id: string): Sel; kind(kind: string): Sel; tagged(tag: string): Sel;
   cylinder(center: Vec3, radius: number, height?: number, axis?: "x" | "y" | "z"): Sel; sphere(center: Vec3, radius: number): Sel; ellipsoid(center: Vec3, radii: Vec3): Sel;
   polygon(points: [number, number][], y0: number, y1?: number): Sel; plane(axis: "x" | "y" | "z", at: number, within?: SelLike): Sel;
   hull(points: Vec3[]): Sel; tube(path: Vec3[], radius: number): Sel;
-  connected(seed: Vec3, opts?: { match?: "block" | "state" | "family" | "solid" | "air"; connectivity?: 6 | 18 | 26; within?: SelLike }): Sel;
-  similar(seed: Vec3, opts?: { by?: "block" | "state" | "family"; within?: SelLike }): Sel;
+  connected(seed: Vec3, opts?: { match?: Match; connectivity?: 6 | 18 | 26; within?: SelLike } & MatchOpts): Sel;
+  similar(seed: Vec3, opts?: { by?: Match; within?: SelLike } & MatchOpts): Sel;
   union(...a: SelLike[]): Sel; intersect(...a: SelLike[]): Sel; subtract(...a: SelLike[]): Sel; xor(a: SelLike, b: SelLike): Sel; invert(a: SelLike, within?: SelLike): Sel;
   expand(a: SelLike, by?: number | Vec3 | Partial<Record<Direction, number>>): Sel; contract(a: SelLike, by?: number | Vec3 | Partial<Record<Direction, number>>): Sel;
   offset(a: SelLike, dx: number | Vec3, dy?: number, dz?: number): Sel; shell(a: SelLike, thickness?: number, opts?: { walls_only?: boolean }): Sel;

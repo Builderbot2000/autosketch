@@ -77,7 +77,10 @@ export class Document {
   readonly voxels: VoxelStore;
   /** Block entities by store position "x,y,z". */
   readonly blockEntities = new Map<string, Compound>();
-  /** Preserved verbatim on round-trip; not edited in v1. */
+  /**
+   * Entities (store coordinates in `Pos`), preserved verbatim on round-trip. Ops only add them
+   * (`Transaction.addEntity`, used by stamp); the list is journaled as a snapshot when it changes.
+   */
   entities: Compound[] = [];
   components = new Map<string, Component>();
   palettes: PaletteBook;
@@ -220,8 +223,9 @@ export class Document {
   private commit(op: string, summary: string, tx: Transaction): EditResult {
     const { positions, before, after, nbt } = tx.finish();
     const componentsChanged = tx.componentsBefore !== undefined;
+    const entitiesChanged = tx.entitiesBefore !== undefined;
     const n = before.length;
-    if (n === 0 && !componentsChanged) return { op, seq: this.journal.headSeq, changed: 0, warnings: tx.warnings };
+    if (n === 0 && !componentsChanged && !entitiesChanged) return { op, seq: this.journal.headSeq, changed: 0, warnings: tx.warnings };
 
     const boundsBefore = this.bounds && structuredClone(this.bounds);
     const originBefore: Vec3 = [...this.origin];
@@ -259,6 +263,7 @@ export class Document {
       ...(boundsBefore ? { boundsBefore } : {}),
       ...(this.bounds ? { boundsAfter: structuredClone(this.bounds) } : {}),
       ...(componentsChanged ? { componentsBefore: tx.componentsBefore, componentsAfter: cloneComponents(this.components.values()) } : {}),
+      ...(entitiesChanged ? { entitiesBefore: tx.entitiesBefore, entitiesAfter: this.entities.slice() } : {}),
     };
     const journalWarning = this.journal.push(entry); // never throws: disk failures come back as a warning (04)
     if (journalWarning) tx.warn(journalWarning);
@@ -315,6 +320,8 @@ export class Document {
     this.origin = [...(side === "before" ? e.originBefore : e.originAfter)];
     const comps = side === "before" ? e.componentsBefore : e.componentsAfter;
     if (comps) this.components = new Map(cloneComponents(comps).map((c) => [c.id, c]));
+    const ents = side === "before" ? e.entitiesBefore : e.entitiesAfter;
+    if (ents) this.entities = ents.slice();
     this.revision++;
   }
 
@@ -324,7 +331,11 @@ export class Document {
     if (this.events.enabled) this.events.emit({ kind: "doc.checkpoint", name, jseq: this.journal.headSeq });
   }
 
-  /** Undoes or redoes to a checkpoint; returns how many ops were stepped over and the net shift. */
+  /**
+   * Undoes or redoes to a checkpoint; returns how many ops were stepped over and the net shift.
+   * All or nothing: with a write guard (11: locks, sandbox rules), every step is checked before
+   * any is applied, and a refused step refuses the whole restore with nothing changed.
+   */
   restore(name: string): { steps: number; direction: "undo" | "redo" | "none"; shift?: Vec3 } {
     const cp = this.journal.checkpoints.get(name);
     if (!cp) throw new Error(`no checkpoint "${name}" (have: ${[...this.journal.checkpoints.keys()].join(", ") || "none"})`);
@@ -333,9 +344,33 @@ export class Document {
     const originBefore: Vec3 = [...this.origin];
     const steps = Math.abs(target - this.journal.position);
     const direction = target < this.journal.position ? "undo" : target > this.journal.position ? "redo" : "none";
+    if (this.guard && direction !== "none") this.checkRestore(name, target, direction);
     while (this.journal.position > target) this.undo();
     while (this.journal.position < target) this.redo();
     return { steps, direction, ...shiftOf(originBefore, this.origin) };
+  }
+
+  /** Runs the write guard over every step of a restore without applying any (see `restore`). */
+  private checkRestore(name: string, target: number, direction: "undo" | "redo"): void {
+    const pos = this.journal.position;
+    const from = Math.min(pos, target), to = Math.max(pos, target);
+    const entries = this.journal.peek(from, to); // memory or disk, without changing the window
+    if (entries.length !== to - from) throw new Error(`checkpoint "${name}" can't be restored: ${to - from - entries.length} of its ${to - from} ops can't be read from the journal`);
+    if (direction === "undo") entries.reverse();
+    const side = direction === "undo" ? "before" : "after";
+    entries.forEach((e, i) => {
+      // The origin each step would see: an undo starts from the entry's after side, a redo from its before.
+      const origin = side === "before" ? e.originAfter : e.originBefore;
+      try {
+        this.guard!(entryChanges(this, e, side, origin), direction);
+      } catch (err) {
+        const code = (err as { refusal?: unknown }).refusal;
+        throw Object.assign(
+          new Error(`restore "${name}" refused: step ${i + 1} of ${entries.length} (${direction} of op #${e.seq} ${e.summary}) is refused: ${(err as Error).message.replace(/ Nothing was written\.$/, "")} Nothing was changed; the document is still at op #${this.journal.headSeq}.`),
+          { refusal: typeof code === "string" && code ? code : "restore_refused" },
+        );
+      }
+    });
   }
 }
 
@@ -352,6 +387,8 @@ export class Transaction {
   private readonly nbtChanges = new Map<number, { before?: Compound; after?: Compound }>();
   readonly warnings: string[] = [];
   componentsBefore?: Component[];
+  /** The entity list before this op's first entity change. */
+  entitiesBefore?: Compound[];
   private readonly origin: Vec3;
 
   constructor(private readonly doc: Document) {
@@ -446,6 +483,7 @@ export class Transaction {
       } else this.nbtChanges.set(pi, { ...c });
     }
     if (child.componentsBefore) this.componentsBefore ??= child.componentsBefore;
+    if (child.entitiesBefore) this.entitiesBefore ??= child.entitiesBefore;
     for (const w of child.warnings) this.warn(w);
     return { changed, ...(box ? { box: this.doc.boxToLocal(box) } : {}), warnings: child.warnings };
   }
@@ -508,6 +546,16 @@ export class Transaction {
     });
   }
 
+  /**
+   * Adds an entity at a local position (block units, fractional). `nbt` carries the entity's `id`
+   * and data; its `Pos` is set here, in store coordinates. Compounds are never mutated afterwards.
+   */
+  addEntity(pos: Vec3, nbt: Compound): void {
+    this.entitiesBefore ??= this.doc.entities.slice();
+    const value = { ...nbt.value, Pos: { type: "list" as const, value: { type: "double" as const, value: [pos[0] + this.origin[0], pos[1] + this.origin[1], pos[2] + this.origin[2]] } } };
+    this.doc.entities = [...this.doc.entities, { type: "compound", value } as Compound];
+  }
+
   removeComponent(id: string): boolean {
     if (!this.doc.components.has(id)) return false;
     this.componentsBefore ??= cloneComponents(this.doc.components.values());
@@ -525,6 +573,7 @@ export class Transaction {
       else this.doc.blockEntities.delete(pk);
     }
     if (this.componentsBefore) this.doc.components = new Map(this.componentsBefore.map((c) => [c.id, c]));
+    if (this.entitiesBefore) this.doc.entities = this.entitiesBefore;
   }
 
   /** Compacts the diff, dropping positions that ended where they started. */
@@ -560,15 +609,14 @@ export class Transaction {
 }
 
 /** What undoing (`to` = "before") or redoing (`to` = "after") a journal entry would change. */
-function entryChanges(doc: Document, e: JournalEntry, to: "before" | "after"): PendingChanges {
+function entryChanges(doc: Document, e: JournalEntry, to: "before" | "after", origin: Vec3 = doc.origin): PendingChanges {
   const nbtAt = new Set((e.nbt ?? []).map((c) => c.index));
   const [from, into] = to === "before" ? [e.after, e.before] : [e.before, e.after];
   const comps = to === "before" ? [e.componentsAfter, e.componentsBefore] : [e.componentsBefore, e.componentsAfter];
   return {
     forEach: (fn) => {
       for (let i = 0; i < from.length; i++) {
-        const [x, y, z] = doc.toLocal(e.positions[i * 3]!, e.positions[i * 3 + 1]!, e.positions[i * 3 + 2]!);
-        fn(x, y, z, from[i]!, into[i]!, nbtAt.has(i));
+        fn(e.positions[i * 3]! - origin[0], e.positions[i * 3 + 1]! - origin[1], e.positions[i * 3 + 2]! - origin[2], from[i]!, into[i]!, nbtAt.has(i));
       }
     },
     ...(comps[0] && comps[1] ? { components: { before: comps[0], after: comps[1] } } : {}),

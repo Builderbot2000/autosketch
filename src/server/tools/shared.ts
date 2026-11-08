@@ -92,7 +92,8 @@ export const selSchema = z
   .describe(
     'Selection: {"min":[x,y,z],"max":[x,y,z]} box · "all" · "last" · "<name>" · {"component":"id"} · {"cylinder":{"center":[x,y,z],"radius":r,"height":h,"axis":"y"}} (center = base centre) · ' +
       '{"sphere":{"center","radius"}} · {"ellipsoid":{"center","radii"}} · {"polygon":{"points":[[x,z],...],"y":[y0,y1]}} · {"plane":{"axis","at","within"?}} · ' +
-      '{"connected":{"seed":[x,y,z],"match":"block|state|family|solid|air","connectivity":6|18|26,"within"?}} (flood fill) · {"similar":{"seed","by":"block|state|family","within"?}} · ' +
+      '{"connected":{"seed":[x,y,z],"match":"block|state|family|solid|air|tag|role|colour|prop:<name>","connectivity":6|18|26,"within"?}} (flood fill) · {"similar":{"seed","by":<as match>,"within"?}} ' +
+      '(by tag: "tag"? default the seed\'s most specific; role: "palette"?,"role"?; colour: "tolerance"? CIELAB ΔE, default 10) · {"kind":"tower"} {"tagged":"ruined"} (component boxes by kind or tag) · ' +
       '{"union":[a,b]} {"intersect":[a,b]} {"subtract":[a,b]} {"xor":[a,b]} {"invert":a,"within"?} · {"expand":a,"by":n|[dx,dy,dz]|{"up":n,...}} {"contract":a,"by":..} {"offset":a,"by":[dx,dy,dz]} · ' +
       '{"shell":a,"thickness"?,"walls_only"?} {"layer":a,"y":n|"min"|"max"} {"surface":a} {"bbox":a} {"filter":a,"block"?:"oak_planks|#tag|*","air"?:bool} · ' +
       '{"rotate":a,"turns":n,"pivot"?:[x,y,z]} (clockwise from above) {"mirror":a,"axis":"x|y|z","about"?:n} · ' +

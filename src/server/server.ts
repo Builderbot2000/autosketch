@@ -3,6 +3,7 @@ import type { z } from "zod";
 import type { InstanceContext } from "./context.js";
 import { INSTRUCTIONS } from "./instructions.js";
 import { noteError, observeCall } from "./observe-call.js";
+import { BASE } from "../scope/scopes.js";
 import { defaultWorkspace, Session } from "./session.js";
 import { TOOL_GROUPS } from "./tools/index.js";
 import { fail, scopeSchema, type ResourceFn, type Result, type ToolFn } from "./tools/shared.js";
@@ -56,7 +57,8 @@ export function createServer(ctx: Promise<InstanceContext>, opts: ServerOptions 
         }
         try {
           const scope = scoped ? ((args as { scope?: string }).scope ?? undefined) : undefined;
-          return await session.inScope(scope, mutating, () => run(c, args));
+          const call = { tool: name, scope: scope ?? BASE, doc: scoped, mutating };
+          return await session.inScope(scope, mutating, () => session.runCall(call, () => run(c, args)));
         } catch (e) {
           return noteError(fail((e as Error).message), e);
         }

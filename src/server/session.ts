@@ -1,8 +1,10 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { access, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { NO_EVENTS, type EventSink } from "../core/events.js";
+import { EventFanout, type EventListener } from "../core/fanout.js";
 import { toPublic, type Vec3 } from "../core/region.js";
 import { dataVersionFor } from "../core/version.js";
 import { Document, type Facing } from "../document/document.js";
@@ -10,6 +12,7 @@ import { loadNative, saveNative } from "../document/native.js";
 import type { PaletteBook } from "../palette/pick.js";
 import { BASE, refusal, ScopeManager } from "../scope/scopes.js";
 import type { ScopeLimits } from "../scope/settings.js";
+import type { WorldLink } from "../world/link.js";
 
 /**
  * One document per session (docs/design/04-document.md). Documents live in the workspace as
@@ -28,14 +31,45 @@ export function defaultWorkspace(env = process.env): string {
 const NAME = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
 export const AUTOSAVE_MS = 400;
 
+/** A tool call as call hooks see it. */
+export interface CallInfo {
+  tool: string;
+  /** The scope the call addresses ("base" or a scope id); "base" for tools that take no scope. */
+  scope: string;
+  /** Whether the tool works on a document (takes `scope`). */
+  doc: boolean;
+  mutating: boolean;
+}
+
+/**
+ * Runs around every tool call, inside the call's scope (13: the world link syncs a dirty cache
+ * before a call and adds the `world:` line to a result). Installed by layers the entry point wires
+ * in; a session without hooks runs tools exactly as before.
+ */
+export interface CallHook {
+  /** Before the tool runs; may throw (a refusal) to stop the call. */
+  before?(call: CallInfo): Promise<void> | void;
+  /** After the tool returned a result (not when it threw); may return a changed result. */
+  after?(call: CallInfo, result: CallToolResult): Promise<CallToolResult> | CallToolResult;
+}
+
 export class Session {
   doc?: Document;
-  /** Observability sink (12), handed to each document this session opens. Never read back. */
-  events: EventSink = NO_EVENTS;
-  /** Sinks for sandbox documents, tagged with their scope id (12). Defaults to `events`. */
-  eventsFor?: (doc: string) => EventSink;
+  /** The observability sinks set by the entry point (12); `events` hands out the fan-out over them. */
+  private observeSink: EventSink = NO_EVENTS;
+  private observeSinkFor?: (doc: string) => EventSink;
+  /**
+   * Every event the session's documents and tool calls publish, to the observability sink and to
+   * in-process listeners (`subscribe`; 13, *Event fan-out*). Without listeners it is the
+   * observability sink's behaviour exactly.
+   */
+  private readonly fanout = new EventFanout((d) => (d === BASE || !this.observeSinkFor ? this.observeSink : this.observeSinkFor(d)), (e) => this.log(`event listener failed: ${e.message}`));
   /** Open sandboxes (11). */
   readonly scopes: ScopeManager;
+  /** The live world link (13), when the entry point wired one in. Tools never use it. */
+  world?: WorldLink;
+  /** Hooks around each tool call, in order (see `CallHook`). */
+  readonly callHooks: CallHook[] = [];
   /** The scope the current tool call addresses ("base" outside any call). */
   private readonly addressed = new AsyncLocalStorage<string>();
   private savedRevision = -1;
@@ -49,8 +83,38 @@ export class Session {
   ) {
     this.scopes = new ScopeManager(() => this.doc, {
       ...(opts.scopeLimits ? { limits: opts.scopeLimits } : {}),
-      events: (d) => (d === BASE ? this.events : this.eventsFor ? this.eventsFor(d) : this.events),
+      events: (d) => this.fanout.sink(d),
     });
+  }
+
+  /** The base document's sink (12): handed to each document this session opens. Never read back by tools. */
+  get events(): EventSink {
+    return this.fanout.sink(BASE);
+  }
+
+  /** Sets the observability sink for the base document (and for sandboxes unless `eventsFor` is set). */
+  set events(sink: EventSink) {
+    this.observeSink = sink;
+  }
+
+  /** Sinks for sandbox documents, tagged with their scope id (12). */
+  get eventsFor(): (doc: string) => EventSink {
+    return (d) => this.fanout.sink(d);
+  }
+
+  /** Sets the observability sinks for sandbox documents. */
+  set eventsFor(fn: ((doc: string) => EventSink) | undefined) {
+    this.observeSinkFor = fn;
+  }
+
+  /**
+   * Listens to every event of the session (13, *Event fan-out*): the base document's and
+   * sandboxes' `doc.*` and `scope.*` events and the tool wrapper's `call.*` events, tagged with
+   * "base" or the scope id, live even with observability off. Listeners must return at once.
+   * Returns the unsubscribe function.
+   */
+  subscribe(fn: EventListener): () => void {
+    return this.fanout.subscribe(fn);
   }
 
   pathFor(name: string): string {
@@ -91,6 +155,15 @@ export class Session {
     }
     if (scope !== undefined && scope !== BASE) this.scopes.get(scope);
     return this.addressed.run(scope ?? BASE, run);
+  }
+
+  /** Runs a tool body through the call hooks (the `tool()` wrapper calls it inside `inScope`). */
+  async runCall(call: CallInfo, run: () => Promise<CallToolResult> | CallToolResult): Promise<CallToolResult> {
+    if (!this.callHooks.length) return run();
+    for (const h of this.callHooks) await h.before?.(call);
+    let result = await run();
+    for (const h of this.callHooks) if (h.after) result = await h.after(call, result);
+    return result;
   }
 
   /** Refuses to replace the base document while jobs forked from it are open. */

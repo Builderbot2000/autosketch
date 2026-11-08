@@ -77,7 +77,8 @@ describe("event log (12, phase 1)", () => {
     const s2 = new Session(workspace);
     s2.events = off.sink();
     const doc = await s2.create({ name: "b", mcVersion: "1.21.1", palettes: new PaletteBook() });
-    expect(doc.events).toBe(NO_EVENTS);
+    // The session's fan-out sink (13), which is off like NO_EVENTS while nothing listens.
+    expect(doc.events.enabled).toBe(false);
     fill(doc, {}, box([0, 0, 0], [1, 1, 1]), "minecraft:stone");
     await off.close();
     expect(existsSync(join(workspace, "b", "observe"))).toBe(false);

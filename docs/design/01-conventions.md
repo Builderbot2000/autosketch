@@ -64,6 +64,7 @@ When an established field already has an exact term for something here, we use i
 | try-lock, range lock | A fork's lock on its work volume: refused at once on overlap, never blocking (`11`) | Concurrency control |
 | snapshot isolation | A job reads its parent as of fork time and writes only what its lock covers (`11`) | Databases |
 | compare-and-set, precondition | A patch writes a block only where the world still holds the expected state (`13`) | Concurrency control; HTTP conditional requests |
+| near clip, section box, depth peeling, exploded view, turntable, cubemap | Render cameras (`06`, *Cameras*) | Computer graphics and CAD |
 
 **Close, but not exact.** Our own terms stay; these are for orientation only:
 
@@ -71,5 +72,6 @@ When an established field already has an exact term for something here, we use i
 - Section hashes ≈ one level of a Merkle tree (`13`).
 - A sandbox fork ≈ a sparse checkout of a branch (`11`).
 - Connection properties ≈ the states the game recomputes in a shape update (`05`).
+- The agent choosing its own cameras ≈ active perception, or next-best-view planning in robotics (`06`).
 
 **Collisions with Minecraft.** `sel.slab` is the geometric slab (the region between two parallel planes), not the slab block; `sel.plane` is a one-block slab. Tool descriptions say so. The chisel plugin's `chisel.pattern` (`09`) uses "pattern" in the Chipped and Rechiseled sense, a block variant within one material, because that is those mods' own term; its argument takes a variant name, not a pattern.

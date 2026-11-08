@@ -48,6 +48,20 @@ z↓   0123456789012345
 - **Styles:** `textured` (default, real models and textures from `02`), `flat` (mean colours, faster and clearer for structure), `depth` (shaded by distance, for reading 3D form), `xray` (translucent shell).
 - The renderer is a pure-JS software rasterizer: baked models → triangles → z-buffer → PNG via `pngjs`. Back-face and occlusion culling at block level.
 
+### Cameras (planned)
+
+Besides the named orthographic views, a render can take a camera. Each camera is a standard graphics or CAD device that re-presents the build so hidden shape becomes visible, interiors especially. None of them interprets anything (*measure, don't interpret*). The server ships no camera policy: skills in the library (`07`) describe when to reach for which, and the agent chooses.
+
+- **Perspective:** `{ eye: [x,y,z], target: pos | anchor | selection, fov?: 70 }`. The eye can sit anywhere, including inside an enclosed space, so an interior can be seen the way a player sees it. A selection target is framed.
+- **Saved cameras:** `camera({ name, ...camera })` stores one, and `views: [{ camera: "name" }]` reuses it. A linked document saves the requesting player's view as `player` (`13`, *Prompting from the game*).
+- **Near clip:** `near: n` drops everything closer than `n` blocks to the eye (for orthographic views, in front of the plane through `target`), so the front of the build falls away without the agent choosing a cut plane.
+- **Section box:** `section: box | selection` clips the scene to a box, as in Revit or SketchUp. It generalises the single-plane cutaway: remove one octant to expose a corner of the interior. Cut faces draw closed, as `region` already does.
+- **Depth peeling:** `peel: n` draws the n-th visible surface along each ray instead of the first (1 is a normal render). `peel: 2` shows what lies directly behind a façade, without a cut.
+- **Cubemap:** `views: [{ cubemap: pos }]` renders the six faces seen from one point as a labelled 3×2 contact sheet: a whole room at a glance.
+- **Exploded view:** `explode: { axis: "y", at: [y, …], gap }` splits the build at the given layers and spreads the bands apart in one image.
+- **Turntable:** `views: [{ turntable: target, steps?: 8, pitch? }]` renders a ring of views around a target as one contact sheet.
+- Every camera composes with the existing options: `region`, cutaways, styles, highlights, context ghosting and size. Every camera is stored for `raycast` and `view_box`/`view_lasso` like any render. Perspective images carry no axis ticks, since ticks wouldn't be uniform; the caption gives eye, target and fov, and `raycast` resolves any pixel to a block.
+
 ### Structural measurements (text, high value)
 
 `analyze({ component? | region? })` returns compact, objective measurements of the build:
@@ -101,6 +115,7 @@ Each tool's description carries its cost hint.
 | `render` highlight | A resolved mask (any selection; `{"changed":"op:-1"}` for a diff is the preferred form, `{since}` still works), tinted orange; highlighted air is drawn as wire cubes. The scene carries per-block flags; `CONTEXT` marks a sandbox's context volume. |
 | Context volume | `render({ context: "ghost"\|"normal"\|"hide" })` over `doc.context` (`11`). Ghosted blocks are a desaturated light grey at 30% opacity and never cull the faces of editable blocks behind them; the caption counts them. `view_slice` appends `\| ctx` to rows that are wholly context and `\| ctx x3..4` (column ranges) to rows that are partly context. |
 | `render` overlays | Component labels, opt-in. (Storey lines were removed with architectural labelling.) |
+| Cameras | Planned (2026-11-08), see *Cameras*. The renderer is orthographic only today: perspective needs a perspective divide and near-plane clipping in the rasterizer, depth peeling needs per-pixel layer counting in the z-buffer, and `raycast` and the view picks need perspective rays from the stored camera. |
 | `raycast` | Done. The cameras of the last 8 renders are kept per document (`perception/render/cameras.ts`, not saved); the render caption gives the id. Hits are voxel-level (the first non-air block in the drawn clip), with the face entered, and warn when the document changed since the render. |
 | Op `preview: true` | On `set_blocks`, `fill`, `clear`, `replace`, the transforms (`move`, `copy`, `rotate`, `mirror`) and the brushes (`hollow`, `paint`, `smooth`, `extrude`, `sweep`, `array`): one 512² iso view of the changed box plus 2 blocks, changes highlighted. |
 | `analyze` | Done (`perception/analyze.ts`): measurements only, see *Structural measurements*. Checked against three fixture buildings in `test/helpers/buildings.ts`. The earlier architectural labelling (footprint, walls, storeys, openings, roof type, rooms, issues, proposed components) was removed on 2026-11-07. |
@@ -110,5 +125,5 @@ Each tool's description carries its cost hint.
 
 ## Open questions
 
-- Is there a reliable heuristic for "iso view with the least occlusion of the region of interest"? (Auto-pick the camera.)
+- Is there a reliable heuristic for "iso view with the least occlusion of the region of interest"? (Auto-pick the camera.) Robotics calls this next-best-view planning. With cheap framing defaults on each camera, a skill may be enough.
 - Should the agent be able to register reference images (user sketches or photos) for side-by-side comparison? (Likely yes, as a library item.)

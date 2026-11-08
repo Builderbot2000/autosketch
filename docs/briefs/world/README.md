@@ -38,6 +38,7 @@ These are the seams between silos. The owner lands the contract in its first mer
 | Link object | P | Q (auto-sync, barrier) | `WorldLink` on the session: state, work and context volumes, `isDirty`, `syncNow()`, the bridge connection |
 | "Does not push" marker | P | Q | How the patch sender recognises entries it must not send (`world_sync` entries). P defines it; Q's entries carry it |
 | Mod skeleton | N | O, S | Gradle subproject, mod entry point, config, the message dispatch interface O and S register handlers on, a command hook S registers subcommands and the wand's focus mode on |
+| Saved cameras | T ([camera brief](../T-cameras.md), outside this set) | S | `saveCamera(doc, name, camera)` and `render({ views: [{ camera: "player" }] })` (`06`, *Cameras*). If T hasn't merged, S keeps the player's view on the link and switches later |
 | Event fan-out | P | S | A subscription to the base document's journal events and the `tool()` wrapper's `call.*` events, live even with observability off |
 
 ## Contested files

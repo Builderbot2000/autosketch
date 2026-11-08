@@ -13,6 +13,7 @@ One brief per silo of unfinished spec work, as of commit `5f94416` (2026-11-07).
 | G | [Observability](G-observability.md) | 1, then 3 | phases 3–5 after F |
 | H | [Formats and assets loose ends](H-formats-assets.md) | 1 | — |
 | I | [Test tiers](I-test-tiers.md) | 1, then 3 | eval tier last |
+| T | [Render cameras](T-cameras.md) | any (added 2026-11-08) | — (world silo S uses its saved cameras) |
 
 A wave starts when the previous wave's dependencies have merged. Within a wave, teams run in parallel.
 

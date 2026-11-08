@@ -110,6 +110,12 @@ export class Document {
   guard?: WriteGuard;
   /** In a sandbox (11): the read-only context volume, local. Renders ghost it and slices mark it. */
   context?: Mask;
+  /**
+   * Told when a `restore` starts stepping and when it has finished (13, *Agent → world*: the world
+   * link sends a restore's undo or redo steps as one patch). Not called when there is nothing to
+   * step or the restore is refused before any step. Listeners must not edit the document.
+   */
+  readonly restoreListeners = new Set<(phase: "start" | "end", checkpoint: string) => void>();
 
   constructor(
     public meta: DocMeta,
@@ -348,8 +354,13 @@ export class Document {
     const steps = Math.abs(target - this.journal.position);
     const direction = target < this.journal.position ? "undo" : target > this.journal.position ? "redo" : "none";
     if (this.guard && direction !== "none") this.checkRestore(name, target, direction);
-    while (this.journal.position > target) this.undo();
-    while (this.journal.position < target) this.redo();
+    if (direction !== "none") for (const fn of this.restoreListeners) fn("start", name);
+    try {
+      while (this.journal.position > target) this.undo();
+      while (this.journal.position < target) this.redo();
+    } finally {
+      if (direction !== "none") for (const fn of this.restoreListeners) fn("end", name);
+    }
     return { steps, direction, ...shiftOf(originBefore, this.origin) };
   }
 

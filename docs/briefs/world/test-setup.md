@@ -1,6 +1,6 @@
 # In-game test setup (for silo R)
 
-Steps the user runs once before silo R starts. Silos L to Q need none of this. Status: **pending** (as of 2026-11-08); the user will say when it's ready.
+Steps the user runs once before silo R starts. Silos L to Q need none of this. Status: **ready** (2026-11-08). Steps 1 and 2 are done; step 3 comes after silo R.
 
 The dev machine runs Minecraft (Craftoria) on Windows and the MCP in WSL2. v1 runs the MCP only on the same machine as the game.
 
@@ -23,6 +23,12 @@ The mod accepts connections only from the machine it runs on. With WSL's default
 5. Set `eula=true` in `eula.txt`. Leave the rest; silo R's script starts it. Expect about 8–10 GB of RAM; WSL has about 30 GB.
 
 Tell silo R the server path and the Craftoria version.
+
+Current install: `~/servers/craftoria`, Craftoria **1.37.0**, NeoForge **21.1.249**, Minecraft 1.21.1, 537 server-side mods. EULA accepted. The server needs Java 21: `openjdk-21-jdk-headless` from apt is installed and is the default `java` (`/usr/lib/jvm/java-21-openjdk-amd64`). Start it with:
+```
+cd ~/servers/craftoria && bash startserver.sh
+```
+Running `startserver.bat` on Windows inside the CurseForge Instances folder fails with "access denied"; use the WSL copy.
 
 ## 3. In-client check (last, by the user)
 

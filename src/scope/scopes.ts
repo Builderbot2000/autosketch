@@ -70,6 +70,19 @@ export interface Scope {
   merging?: boolean;
 }
 
+/**
+ * The root scope's volumes (docs/design/13-live-world.md, *Model*): the work and context volumes
+ * the player set in-game, which a linked base document holds. Local masks of the base document.
+ * Set by the world link (`ScopeManager.root`); undefined on an unlinked document, which keeps
+ * today's behaviour exactly.
+ */
+export interface RootVolumes {
+  /** The work volume the agent may write, already extended to whole blocks. */
+  work: Mask;
+  /** The read-only context volume (never overlapping `work`). */
+  context: Mask;
+}
+
 export interface ForkInput {
   /** Work volume, resolved in the parent's frame. */
   work: Mask;
@@ -133,6 +146,13 @@ const neg = (a: Vec3): Vec3 => [-a[0], -a[1], -a[2]];
 export class ScopeManager {
   readonly scopes = new Map<string, Scope>();
   limits: ScopeLimits;
+  /**
+   * The root scope's volumes while the base document is linked to the world (13): the base
+   * document then obeys the sandbox write rule (`outside_work_volume`), and forks from it must lie
+   * inside these volumes, as for any nested fork, with the ratio limit measured against its work
+   * volume.
+   */
+  root?: RootVolumes;
   private next = 1;
   private env: ConnectEnv = {};
   /** Connection-neutral content per state id, per state table (11: locks and checks ignore derived state). */
@@ -191,6 +211,8 @@ export class ScopeManager {
   fork(parentId: string, input: ForkInput): ForkResult {
     const parent = this.docOf(parentId);
     const ps = parentId === BASE ? undefined : this.get(parentId);
+    // The parent's own volumes: a sandbox's, or the root scope's on a linked base document (13).
+    const pv = ps ? { work: ps.workLocal, context: ps.contextLocal } : this.root;
     if (input.env) this.env = input.env;
     const plugins = (this.env.plugins ?? []) as readonly AutosketchPlugin[];
     if (!input.brief.trim()) throw new Error("brief is required: describe the job in a few sentences");
@@ -201,20 +223,23 @@ export class ScopeManager {
 
     if (input.work.isEmpty()) throw new Error("the work selection is empty");
     const { mask: work, added: extension } = extendWholeBlocks(parent, input.work, plugins);
-    if (ps) {
-      const outside = work.clone().subtract(ps.workLocal);
+    if (pv) {
+      const outside = work.clone().subtract(pv.work);
       if (!outside.isEmpty())
-        throw refusal("nest_outside", `A child's work volume must lie inside your own work volume ${formatBox(ps.workBoxLocal)}: ${outside.count()} of its blocks are outside (e.g. ${fmt(outside.positions()[0]!)}).`);
+        throw refusal(
+          "nest_outside",
+          `A child's work volume must lie inside ${ps ? "your own work volume" : "the work volume the player set in-game"} ${formatBox(ps ? ps.workBoxLocal : pv.work.bbox()!)}: ${outside.count()} of its blocks are outside (e.g. ${fmt(outside.positions()[0]!)}).`,
+        );
     }
     const n = work.count();
     if (n < this.limits.minWorkBlocks)
       throw refusal("nest_too_small", `Small enough to do directly. (The work volume has ${n.toLocaleString("en-US")} blocks; a fork needs at least ${this.limits.minWorkBlocks.toLocaleString("en-US")}.)`);
-    const parentVolume = ps ? ps.workLocal.count() : boxVolume(parent.localBounds() ?? { min: [0, 0, 0], max: [0, 0, 0] });
+    const parentVolume = pv ? pv.work.count() : boxVolume(parent.localBounds() ?? { min: [0, 0, 0], max: [0, 0, 0] });
     if (n > this.limits.maxWorkRatio * parentVolume)
       throw refusal(
         "nest_too_large",
         `This is most of your own job: do it yourself, or split it into smaller jobs. (The work volume has ${n.toLocaleString("en-US")} blocks, over ${Math.round(this.limits.maxWorkRatio * 100)}% of ` +
-          `${ps ? "your own work volume" : "the base document's bounds"} (${parentVolume.toLocaleString("en-US")}).)`,
+          `${ps ? "your own work volume" : pv ? "the work volume the player set in-game" : "the base document's bounds"} (${parentVolume.toLocaleString("en-US")}).)`,
       );
     for (const l of this.children(parentId)) {
       const overlap = l.work.clone().intersectWith(work);
@@ -226,8 +251,8 @@ export class ScopeManager {
     let context = input.context instanceof Mask ? input.context.clone() : dilate(work, input.context?.padding ?? DEFAULT_PADDING);
     context = extendWholeBlocks(parent, context, plugins).mask.subtract(work);
     let contextClipped = 0;
-    if (ps) {
-      const allowed = ps.workLocal.clone().unionWith(ps.contextLocal);
+    if (pv) {
+      const allowed = pv.work.clone().unionWith(pv.context);
       const before = context.count();
       context.intersectWith(allowed);
       contextClipped = before - context.count();
@@ -480,8 +505,10 @@ export class ScopeManager {
 
   private check(docId: string, changes: PendingChanges, op: string): void {
     const sandbox = docId === BASE ? undefined : this.scopes.get(docId);
+    const root = docId === BASE ? this.root : undefined;
     const locks = this.children(docId);
-    if (!sandbox && !locks.length) return;
+    if (!sandbox && !root && !locks.length) return;
+    const vol = sandbox ? { work: sandbox.workLocal, context: sandbox.contextLocal } : root;
     const doc = this.docOf(docId);
     let outside = 0;
     let firstOutside: Vec3 | undefined;
@@ -489,8 +516,8 @@ export class ScopeManager {
     const locked = new Map<Scope, { n: number; first: Vec3 }>();
     changes.forEach((x, y, z, before, after, nbt) => {
       const derived = !nbt && before !== after && this.neutralOf(doc.states, before) === this.neutralOf(doc.states, after);
-      if (sandbox && !sandbox.workLocal.has(x, y, z)) {
-        const ctx = sandbox.contextLocal.has(x, y, z);
+      if (vol && !vol.work.has(x, y, z)) {
+        const ctx = vol.context.has(x, y, z);
         if (!(derived && ctx)) {
           outside++;
           if (ctx) inContext++;
@@ -510,6 +537,12 @@ export class ScopeManager {
         "outside_work_volume",
         `${op} would change ${outside} block${outside === 1 ? "" : "s"} outside the work volume of scope ${sandbox.id} (e.g. ${fmt(firstOutside!)}${inContext ? `; ${inContext} in the read-only context` : ""}). ` +
           `The sandbox only holds its work volume ${formatBox(sandbox.workBoxLocal)} as editable space; the context is a read-only copy and nothing exists beyond it. Nothing was written.`,
+      );
+    if (root && outside)
+      throw refusal(
+        "outside_work_volume",
+        `${op} would change ${outside} block${outside === 1 ? "" : "s"} outside the work volume the player set in-game (e.g. ${fmt(firstOutside!)}${inContext ? `; ${inContext} in the read-only context` : ""}). ` +
+          `The linked document holds that work volume ${formatBox(root.work.bbox()!)} as editable space; the context is read-only and nothing exists beyond it. Nothing was written.`,
       );
     if (locked.size) {
       const [l, e] = [...locked][0]!;

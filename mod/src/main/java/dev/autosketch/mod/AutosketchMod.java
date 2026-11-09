@@ -40,7 +40,7 @@ public final class AutosketchMod {
         this.modBus = modBus;
         container.registerConfig(ModConfig.Type.COMMON, AutosketchConfig.SPEC);
         dispatcher = new Dispatcher(AutosketchMod::onServerThread);
-        bridge = new BridgeServer(dispatcher);
+        bridge = new BridgeServer(dispatcher, AutosketchMod::onServerThread);
         Autosketch.install(bridge, volumes, PatchStatus.NONE, List.of());
         modBus.addListener(this::commonSetup);
         NeoForge.EVENT_BUS.addListener(this::registerCommands);

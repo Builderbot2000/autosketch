@@ -22,7 +22,7 @@ import org.slf4j.Logger;
 /**
  * Hands inbound MCP messages to the registered {@link MessageHandler}s on the server thread, one at
  * a time in arrival order, each finishing before the next starts (13, *Wire format*, *Framing*,
- * "Ordering"). The socket thread {@link #submit}s frames; completion of an {@link Exchange} from any
+ * "Ordering"), with id-less messages allowed to bypass the request queue. The socket thread {@link #submit}s frames; completion of an {@link Exchange} from any
  * thread lets the next one run. When a connection closes, its queued messages are dropped
  * ({@link #discard}) while the one in progress runs to completion with its replies dropped.
  */
@@ -77,8 +77,19 @@ public final class Dispatcher implements MessageRegistry {
         return handlers.containsKey(type);
     }
 
-    /** Queues a frame from a paired connection. Any thread. */
+    /**
+     * Queues a frame from a paired connection. Any thread. Requests (frames with an id) run strictly
+     * in arrival order, each after the previous one completes; messages without an id
+     * ({@code notice}, {@code chat}, {@code prompt.result}) bypass that queue and run on the server
+     * thread as soon as it gets to them, in their own arrival order.
+     */
     public void submit(Connection connection, Frame frame) {
+        if (frame.id() == null) {
+            serverThread.execute(() -> {
+                if (connection.live()) run(new Pending(connection, frame), new ExchangeImpl(connection, null, false));
+            });
+            return;
+        }
         synchronized (lock) {
             queue.addLast(new Pending(connection, frame));
         }
@@ -119,7 +130,7 @@ public final class Dispatcher implements MessageRegistry {
                 synchronized (lock) {
                     if (open != null || queue.isEmpty()) return;
                     next = queue.pollFirst();
-                    ex = new ExchangeImpl(next.connection, next.frame.id());
+                    ex = new ExchangeImpl(next.connection, next.frame.id(), true);
                     open = ex;
                 }
                 run(next, ex);
@@ -146,17 +157,18 @@ public final class Dispatcher implements MessageRegistry {
             h.handle(new Inbound(p.frame, p.connection.session()), ex);
             if (!ex.deferred) ex.complete();
         } catch (ProtocolException e) {
-            ProtocolException withId = e.withId(ex.id);
-            ex.send(withId.toFrame());
-            if (withId.closes()) p.connection.close();
+            // A well-framed message with invalid fields or body is answered and the connection
+            // stays open, with or without an id (13, *Framing*); only undecodable framing closes.
+            ex.send(e.withId(ex.id).toFrame());
             ex.complete();
         } catch (RuntimeException e) {
             LOG.error("Autosketch handler for {} failed", type, e);
-            ex.error(ErrorCodes.BAD_REQUEST, "the mod failed handling " + type + ": " + e);
+            ex.error(ErrorCodes.INTERNAL, "the mod failed handling " + type + ": " + e);
         }
     }
 
     private void finished(ExchangeImpl ex) {
+        if (!ex.queued) return;
         synchronized (lock) {
             if (open != ex) return;
             open = null;
@@ -167,12 +179,14 @@ public final class Dispatcher implements MessageRegistry {
     private final class ExchangeImpl implements Exchange {
         private final Connection connection;
         private final @Nullable Long id;
+        private final boolean queued;
         private volatile boolean deferred;
         private volatile boolean done;
 
-        ExchangeImpl(Connection connection, @Nullable Long id) {
+        ExchangeImpl(Connection connection, @Nullable Long id, boolean queued) {
             this.connection = connection;
             this.id = id;
+            this.queued = queued;
         }
 
         @Override

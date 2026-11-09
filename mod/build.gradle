@@ -1,0 +1,116 @@
+// Autosketch companion mod (docs/design/13-live-world.md, *Companion mod requirements*).
+// Built from NeoForge's ModDevGradle MDK for 1.21.1. Server-side only: no registry content.
+plugins {
+    id 'java-library'
+    id 'net.neoforged.moddev' version '2.0.148'
+}
+
+version = mod_version
+group = mod_group_id
+
+base {
+    archivesName = mod_id
+}
+
+// Mojang ships Java 21 for 1.21.1. The foojay resolver (settings.gradle) downloads it if missing.
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+// GameTests (and their synthetic structure templates) live in their own source set, loaded as part
+// of the mod in dev runs but never packed into the jar.
+sourceSets {
+    gametest {
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+neoForge {
+    version = project.neo_version
+
+    parchment {
+        mappingsVersion = project.parchment_mappings_version
+        minecraftVersion = project.parchment_minecraft_version
+    }
+
+    runs {
+        client {
+            client()
+            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+        }
+        server {
+            server()
+            programArgument '--nogui'
+            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+        }
+        // Runs every registered GameTest headless, then exits (non-zero on failure).
+        gameTestServer {
+            type = 'gameTestServer'
+            sourceSet = sourceSets.gametest
+            gameDirectory = project.file('run/gametest')
+            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+        }
+        configureEach {
+            logLevel = org.slf4j.event.Level.INFO
+        }
+    }
+
+    mods {
+        "${mod_id}" {
+            sourceSet(sourceSets.main)
+            sourceSet(sourceSets.gametest)
+        }
+    }
+}
+
+neoForge.addModdingDependenciesTo(sourceSets.gametest)
+
+// Plain JUnit tests (codec, socket) see the game's classes without booting the game.
+neoForge.addModdingDependenciesTo(sourceSets.test)
+
+dependencies {
+    testImplementation platform('org.junit:junit-bom:5.11.4')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// The golden vectors shared with the TypeScript side (13, *Golden vectors*): the only files both
+// sides read. Tests find them through this property, so nothing is copied into mod/.
+def goldenDir = rootProject.file('../test/data/world-protocol').absolutePath
+
+tasks.named('test', Test) {
+    useJUnitPlatform()
+    systemProperty 'autosketch.goldenDir', goldenDir
+    inputs.dir(goldenDir).withPropertyName('goldenVectors').withPathSensitivity(PathSensitivity.RELATIVE)
+    testLogging {
+        events 'failed'
+        exceptionFormat 'full'
+    }
+}
+
+var generateModMetadata = tasks.register('generateModMetadata', ProcessResources) {
+    var replaceProperties = [
+            minecraft_version      : minecraft_version,
+            minecraft_version_range: minecraft_version_range,
+            neo_version            : neo_version,
+            loader_version_range   : loader_version_range,
+            mod_id                 : mod_id,
+            mod_name               : mod_name,
+            mod_license            : mod_license,
+            mod_version            : mod_version,
+    ]
+    inputs.properties replaceProperties
+    expand replaceProperties
+    from 'src/main/templates'
+    into 'build/generated/sources/modMetadata'
+}
+sourceSets.main.resources.srcDir generateModMetadata
+neoForge.ideSyncTask generateModMetadata
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.compilerArgs << '-Xlint:deprecation' << '-Xlint:unchecked'
+}

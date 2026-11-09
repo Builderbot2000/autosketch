@@ -13,6 +13,10 @@ conditional patches from the agent, and the player's hand edits reported back. S
 # Server-side only (M2): clients without the mod may join, and clients with it don't require it on the server.
 displayTest="IGNORE_ALL_VERSION"
 
+# Silo O: the change tracker's hook on chunk block writes (M9).
+[[mixins]]
+    config="autosketch.mixins.json"
+
 [[dependencies.${mod_id}]]
     modId="neoforge"
     type="required"

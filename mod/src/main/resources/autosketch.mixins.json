@@ -1,0 +1,9 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "dev.autosketch.mod.world.mixin",
+  "plugin": "dev.autosketch.mod.world.mixin.TrackerMixinPlugin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": ["LevelChunkMixin"],
+  "injectors": { "defaultRequire": 1 }
+}

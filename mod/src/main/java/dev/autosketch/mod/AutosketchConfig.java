@@ -37,6 +37,16 @@ public final class AutosketchConfig {
                     "The protocol caps it at 4096.")
             .defineInRange("dirtyCap", 4096, 1, 4096);
 
+    // Silo O (change tracker, M9).
+    public static final ModConfigSpec.ConfigValue<String> TRACKER = B
+            .comment("How block changes are detected: \"hook\" (a mixin on chunk block writes), \"scan\" (periodic comparison of the volumes' sections,",
+                    "for when the mixin conflicts with another mod; the mixin is then not applied at all, read at game start) or \"both\".")
+            .define("tracker", "hook", o -> o instanceof String s && (s.equals("hook") || s.equals("scan") || s.equals("both")));
+
+    public static final ModConfigSpec.IntValue SCAN_PERIOD = B
+            .comment("Ticks for the scan tracker to compare every section of the volumes once.")
+            .defineInRange("scanPeriod", 20, 1, 1200);
+
     static {
         B.pop().push("volumes");
     }

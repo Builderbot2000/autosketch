@@ -73,8 +73,12 @@ export interface WorldChanges {
    * A block without `nbt` has no block entity.
    */
   blocks?: readonly WorldBlock[];
-  /** Block entities only, the state unchanged: an ack's normalized list. No `nbt` means "no block entity". */
-  nbt?: readonly { pos: Vec3; nbt?: Compound }[];
+  /**
+   * Block entities only, the state unchanged: an ack's normalized list. No `nbt` means "no block
+   * entity". `sent`, with `reconcile`: the NBT the patch wrote there (null: none), when known; the
+   * position is reconciled only while the cache still holds it.
+   */
+  nbt?: readonly { pos: Vec3; nbt?: Compound; sent?: Compound | null }[];
 }
 
 export interface SyncOptions {
@@ -89,11 +93,20 @@ export interface SyncOptions {
   volatile?: VolatileList;
   /** Journal summary; default "world sync: <n> positions". */
   summary?: string;
+  /**
+   * Ack handling (13, *World undo and restore*, the redo-tail answer): the `nbt` list is the game's
+   * normalization of NBT the patch itself just wrote, not a world change. It is reconciled in place
+   * (`reconcileNbt`): no journal entry, so the redo tail survives and no barrier appears. The other
+   * forms (an ack's skipped blocks) still commit one `world_sync` entry as usual.
+   */
+  reconcile?: boolean;
 }
 
 export interface SyncResult extends EditResult {
   /** Components the sync changed blocks inside, with the count (13, *Metadata survives*). */
   components: { id: string; changed: number }[];
+  /** With `reconcile`: block entities reconciled in place. */
+  reconciled?: number;
 }
 
 /**
@@ -102,7 +115,7 @@ export interface SyncResult extends EditResult {
  * (`changed` 0, `seq` the current head).
  *
  * A sync is an edit, so committing it discards the redo tail, as any edit does (13, *World undo and
- * restore*, resolved).
+ * restore*, resolved). The exception is an ack's normalized NBT with `reconcile`, which adds no entry.
  */
 export function applyWorldState(doc: Document, changes: WorldChanges, opts: SyncOptions = {}): SyncResult {
   const [ox, oy, oz] = opts.origin ?? [0, 0, 0];
@@ -110,6 +123,14 @@ export function applyWorldState(doc: Document, changes: WorldChanges, opts: Sync
   const inside = (x: number, y: number, z: number) => !keep || keep.some((b) => x >= b.min[0] && x <= b.max[0] && y >= b.min[1] && y <= b.max[1] && z >= b.min[2] && z <= b.max[2]);
   const same = sameNbt(opts.volatile);
   attachSyncBarrier(doc);
+  let reconciled: number | undefined;
+  if (opts.reconcile && changes.nbt?.length) {
+    reconciled = reconcileNbt(doc, changes.nbt.filter((n) => inside(...n.pos)), [ox, oy, oz], same);
+    const { nbt: _nbt, ...rest } = changes;
+    changes = rest;
+    if (!changes.clear?.length && !changes.snapshot && !changes.blocks?.length)
+      return { op: WORLD_SYNC, seq: doc.journal.headSeq, changed: 0, warnings: [], components: [], reconciled };
+  }
 
   const r = doc.editUnguarded(WORLD_SYNC, opts.summary ?? describe(changes), (tx) => {
     /** Writes one world block at a world position, unless the cache already holds it. */
@@ -149,7 +170,49 @@ export function applyWorldState(doc: Document, changes: WorldChanges, opts: Sync
 
   const entry = r.changed ? lastEntry(doc, r.seq) : undefined;
   const { value: _value, ...edit } = r;
-  return { ...edit, components: entry ? componentDrift(doc, entry) : [] };
+  return { ...edit, components: entry ? componentDrift(doc, entry) : [], ...(reconciled !== undefined ? { reconciled } : {}) };
+}
+
+/**
+ * Takes the game's normalized form of NBT a patch just wrote into the cache without a journal
+ * entry (13, the redo-tail answer). The journal keeps block entities as shared compounds: the
+ * object an op wrote is the one its entry records as `after`, the next entry at that position
+ * records as `before`, and undo or redo put back. So every in-memory entry's reference to the
+ * cache's current compound at the position is replaced by the world's form (or removed, when the
+ * game kept no block entity): the history then says what the world holds, and undo and redo write
+ * the normalized NBT. Entries already in on-disk segments keep the sent form (segments are
+ * immutable); stepping onto them writes the sent NBT, and that patch's ack reconciles again.
+ *
+ * A position is skipped when `sent` is given and the cache no longer holds it (a newer edit is
+ * on its way to the world, and its own ack reports what the world keeps). Returns the count.
+ */
+function reconcileNbt(doc: Document, list: readonly { pos: Vec3; nbt?: Compound; sent?: Compound | null }[], origin: Vec3, same: (a: Compound | undefined, b: Compound | undefined) => boolean): number {
+  let n = 0;
+  for (const item of list) {
+    const local: Vec3 = [item.pos[0] - origin[0], item.pos[1] - origin[1], item.pos[2] - origin[2]];
+    const s = doc.toStore(...local);
+    const k = key(s);
+    const cur = doc.blockEntities.get(k);
+    if (item.sent !== undefined && !same(cur, item.sent ?? undefined)) continue;
+    if (same(cur, item.nbt)) continue;
+    if (cur)
+      for (const e of doc.journal.entries)
+        for (const c of e.nbt ?? []) {
+          const i = c.index * 3;
+          if (e.positions[i] !== s[0] || e.positions[i + 1] !== s[1] || e.positions[i + 2] !== s[2]) continue;
+          for (const side of ["before", "after"] as const)
+            if (c[side] === cur) {
+              if (item.nbt) c[side] = item.nbt;
+              else delete c[side];
+            }
+        }
+    if (item.nbt) doc.blockEntities.set(k, item.nbt);
+    else doc.blockEntities.delete(k);
+    doc.voxels.set(s[0], s[1], s[2], doc.voxels.get(s[0], s[1], s[2])); // same id: only invalidates the cache section hash
+    doc.revision++;
+    n++;
+  }
+  return n;
 }
 
 /** Default journal summary: what the world reported, e.g. "world sync: 3 blocks, 1 block entity". */

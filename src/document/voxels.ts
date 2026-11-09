@@ -71,6 +71,12 @@ export function indexInSection(x: number, y: number, z: number): number {
  */
 export class VoxelStore {
   private readonly sections = new Map<number, Section>();
+  /**
+   * Called on every `set`, before it applies, even when the id doesn't change (a transaction sets
+   * a position whose block entity alone changes the same way). The live world link keeps its
+   * cache section hashes with it (13, *Section hashes*; `world/sync.ts`). Undefined otherwise.
+   */
+  onWrite?: (x: number, y: number, z: number) => void;
 
   get(x: number, y: number, z: number): number {
     const s = this.sections.get(sectionKey(x >> 4, y >> 4, z >> 4));
@@ -80,6 +86,7 @@ export class VoxelStore {
   /** Sets a block, returning the previous state id. */
   set(x: number, y: number, z: number, id: number): number {
     if (Math.abs(x) > COORD_LIMIT || Math.abs(z) > COORD_LIMIT || Math.abs(y) > 1000) throw new Error(`position (${x},${y},${z}) is out of range (|x|,|z| ≤ ${COORD_LIMIT}, |y| ≤ 1000)`);
+    if (this.onWrite) this.onWrite(x, y, z);
     const key = sectionKey(x >> 4, y >> 4, z >> 4);
     let s = this.sections.get(key);
     if (!s) {

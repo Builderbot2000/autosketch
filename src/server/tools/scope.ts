@@ -96,6 +96,10 @@ export function registerScopeTools({ tool, session }: ToolDeps): void {
         lines.push(...formatDiff(d, { registry: c.registry, index: c.palette }).replace(/^diff since the last op \(1 op\): /, "changes: ").split("\n"));
       } else lines.push("no blocks changed");
       if (m.seam) lines.push(`seam: ${n(m.seam)} connection${m.seam === 1 ? "" : "s"} recomputed`);
+      if (m.synced) {
+        const shown = m.synced.slice(0, 8).map((p) => `(${p.join(",")})`).join(" ");
+        lines.push(`kept from the world: ${n(m.synced.length)} position${m.synced.length === 1 ? "" : "s"} changed in-game since the fork (hand edits win): ${shown}${m.synced.length > 8 ? " …" : ""}`);
+      }
       if (m.components.written.length || m.components.removed.length)
         lines.push(`components: ${[m.components.written.length ? `written ${m.components.written.join(", ")}` : "", m.components.removed.length ? `removed ${m.components.removed.join(", ")}` : ""].filter(Boolean).join("; ")}`);
       if (!a.render) return text(lines.join("\n"));

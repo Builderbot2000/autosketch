@@ -61,6 +61,8 @@ export interface Scope {
   workBoxLocal: Box;
   /** Hash of the parent's content in the work volume at fork, connection properties ignored. */
   contentHash: number;
+  /** The parent's journal position at fork, to find the world syncs since (13, *Scoped sessions*). */
+  forkPosition?: number;
   /** Components copied editable, and those copied as read-only references. */
   copied: Set<string>;
   external: Set<string>;
@@ -111,6 +113,12 @@ export interface MergeResult {
   /** Blocks whose connection properties the seam recompute changed. */
   seam: number;
   components: { written: string[]; removed: string[] };
+  /**
+   * Live world link (13, *Scoped sessions*): positions in the work volume (parent frame) that world
+   * syncs changed since the fork, mostly the player's hand edits. The merge leaves them as the world
+   * has them. Absent when there are none.
+   */
+  synced?: Vec3[];
 }
 
 export interface ScopeInfo {
@@ -338,6 +346,7 @@ export class ScopeManager {
       contextLocal,
       workBoxLocal,
       contentHash: this.contentHash(parent, work),
+      forkPosition: parent.journal.position,
       copied,
       external,
       reserved,
@@ -377,7 +386,10 @@ export class ScopeManager {
     const kids = this.children(id);
     if (kids.length) throw refusal("scope_children", `Job ${id} still has open child jobs (${kids.map((k) => k.id).join(", ")}): merge or abandon them first.`);
     const parent = this.docOf(s.parent);
-    if (this.contentHash(parent, s.work) !== s.contentHash)
+    // Live world link (13, *Scoped sessions*): the player ignores locks, and their edits reach the
+    // parent through world syncs. The check compares the parent as it would be without those syncs.
+    const synced = syncedSince(parent, s);
+    if (this.contentHash(parent, s.work, synced) !== s.contentHash)
       throw refusal("merge_check", `Merge sanity check failed: the parent's blocks inside job ${id}'s locked work volume ${formatBox(s.workBox)} changed since the fork. Locks should prevent this, so it is a bug; nothing was merged. Abandon the job or inspect the region.`);
 
     // Components: the sandbox's own (not external) ones, checked against the parent's ids again.
@@ -392,6 +404,7 @@ export class ScopeManager {
     try {
       edit = parent.edit("scope_merge", `merge ${id}: ${short(s.brief)}`, (tx) => {
         s.work.forEach((x, y, z) => {
+          if (synced.has(posKey(x, y, z))) return; // the world's block stays: the world is authoritative
           const [lx, ly, lz] = sub([x, y, z], s.offset);
           const want = s.doc.voxels.get(lx, ly, lz);
           const wantBe = s.doc.blockEntities.get(posKey(lx, ly, lz));
@@ -438,7 +451,8 @@ export class ScopeManager {
         changed: edit.changed,
       });
     }
-    return { scope: s, parent: s.parent, edit, seam, components: { written: mine.map((c) => c.id), removed } };
+    const kept = [...synced.keys()].map((k) => k.split(",").map(Number) as Vec3);
+    return { scope: s, parent: s.parent, edit, seam, components: { written: mine.map((c) => c.id), removed }, ...(kept.length ? { synced: kept } : {}) };
   }
 
   /** Discards a job and every job forked from it, releasing their locks. Returns the ids closed. */
@@ -485,12 +499,12 @@ export class ScopeManager {
     return v;
   }
 
-  /** Order-dependent hash of the connection-neutral content of `mask` in `doc`. */
-  private contentHash(doc: Document, mask: Mask): number {
+  /** Order-dependent hash of the connection-neutral content of `mask` in `doc`; `override` replaces the state id at some local positions. */
+  private contentHash(doc: Document, mask: Mask, override?: ReadonlyMap<string, number>): number {
     let h = 0x811c9dc5;
     const strHash = new Map<number, number>();
     mask.forEach((x, y, z) => {
-      const id = doc.voxels.get(...doc.toStore(x, y, z));
+      const id = (override?.size ? override.get(posKey(x, y, z)) : undefined) ?? doc.voxels.get(...doc.toStore(x, y, z));
       let v = strHash.get(id);
       if (v === undefined) strHash.set(id, (v = fnv(this.neutralOf(doc.states, id))));
       h = Math.imul(h ^ v, 0x01000193) >>> 0;
@@ -683,6 +697,30 @@ function sortByParent(list: Component[]): Component[] {
     out.push(c);
   };
   for (const c of list) visit(c, new Set());
+  return out;
+}
+
+/**
+ * Positions of a job's work volume (parent frame) that `world_sync` entries changed since the fork
+ * (op name from `world/sync.ts`, which this layer doesn't import), with the state id each held
+ * before the first of them: the parent's content had the player not edited it. Empty without a
+ * link, or when the journal can't show the entries since the fork (the strict check applies then).
+ */
+function syncedSince(parent: Document, s: Scope): Map<string, number> {
+  const out = new Map<string, number>();
+  const j = parent.journal;
+  if (s.forkPosition === undefined || j.position <= s.forkPosition) return out;
+  const entries = j.peek(s.forkPosition, j.position);
+  if (entries.length !== j.position - s.forkPosition) return out;
+  const [ox, oy, oz] = parent.origin;
+  for (const e of entries) {
+    if (e.op !== "world_sync") continue;
+    for (let i = 0; i < e.before.length; i++) {
+      const x = e.positions[i * 3]! - ox, y = e.positions[i * 3 + 1]! - oy, z = e.positions[i * 3 + 2]! - oz;
+      const k = posKey(x, y, z);
+      if (!out.has(k) && s.work.has(x, y, z)) out.set(k, e.before[i]!);
+    }
+  }
   return out;
 }
 

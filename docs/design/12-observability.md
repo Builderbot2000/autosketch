@@ -43,7 +43,7 @@ The server publishes typed events on an in-process bus. A buffered writer append
 | `scope.merge` | scope, report, diff stats, changed box (base frame), the parent's journal `seq` for the merge | `scope_merge` |
 | `scope.abandon` | scope, reason (`call`, `restart`) | `scope_abandon`, shutdown |
 | `call.start` / `call.end` | tool, scope, duration, ok, response size (text characters, image count and pixels) | server adapter |
-| `call.refused` | tool, scope, refusal code (`lock_overlap`, `nest_too_large`, `nest_too_small`, `nest_depth`, `outside_work_volume`, `scope_required`, …), message | server adapter |
+| `call.refused` | tool, scope, refusal code (`lock_overlap`, `nest_too_large`, `nest_too_small`, `nest_depth`, `outside_work_volume`, `scope_required`, `sync_barrier` (13), …), message | server adapter |
 | `render.produced` | view, size, scope, optional thumbnail path | perception |
 
 Locks are not separate events. A fork takes its lock and a merge or abandon releases it, so the lock set at any `seq` can be derived from the log.

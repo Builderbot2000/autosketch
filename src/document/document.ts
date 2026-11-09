@@ -65,6 +65,19 @@ export interface PendingChanges {
   forEach(fn: (x: number, y: number, z: number, before: number, after: number, nbt: boolean) => void): void;
   /** Set when components change: the list before and after (store coordinates). */
   components?: { before: readonly Component[]; after: readonly Component[] };
+  /** For an undo or redo (and each step of a restore): the journal entry being stepped over. */
+  entry?: JournalEntry;
+  /** The caller passed `overwriteHandEdits: true` (13, *World undo and restore*). */
+  overwriteHandEdits?: boolean;
+}
+
+/** Options of `undo`, `redo` and `restore`. */
+export interface StepOptions {
+  /**
+   * Cross the sync barrier and force the resulting patch (13, *World undo and restore*): only
+   * when the player asked to discard their hand edits. No effect on an unlinked document.
+   */
+  overwriteHandEdits?: boolean;
 }
 
 /** Throws to refuse a change; the edit is rolled back (or the undo/redo not applied). */
@@ -108,6 +121,16 @@ export class Document {
    * work volume; a parent refuses edits inside a held lock). Set by the scope layer.
    */
   guard?: WriteGuard;
+  /**
+   * More write guards, run in order before `guard` (13: the live link's sync barrier composes with
+   * the scope layer's guard instead of replacing it, and speaks first for a step over a sync). Empty on an unlinked document.
+   */
+  readonly guards: WriteGuard[] = [];
+  /**
+   * True while an undo, redo or restore called with `overwriteHandEdits` applies: commit listeners
+   * (the live link's patch sender) read it to mark the patch as forced (13). False otherwise.
+   */
+  overwriting = false;
   /** In a sandbox (11): the read-only context volume, local. Renders ghost it and slices mark it. */
   context?: Mask;
   /**
@@ -208,17 +231,28 @@ export class Document {
     return this.run(op, summary, body, true);
   }
 
+  /**
+   * Like `edit`, but the write guard doesn't run: for writing the world's states into a linked
+   * document's cache (13, *World → agent*; `world/sync.ts`). Locks and the work-volume rule bind
+   * agents, and the world is authoritative, so a sync writes wherever the world changed. Never
+   * joins a running `group`: a sync is always its own journal entry.
+   */
+  editUnguarded<T>(op: string, summary: string, body: (tx: Transaction) => T): EditResult & { value: T } {
+    if (this.open) throw new Error(`${op} can't run inside another edit`);
+    return this.run(op, summary, body, false, true);
+  }
+
   /** The transaction of the innermost running `group`, which nested edits join. */
   private open?: Transaction;
 
-  private run<T>(op: string, summary: string, body: (tx: Transaction) => T, group: boolean): EditResult & { value: T } {
+  private run<T>(op: string, summary: string, body: (tx: Transaction) => T, group: boolean, unguarded = false): EditResult & { value: T } {
     const parent = this.open;
     const tx = new Transaction(this);
     if (group) this.open = tx;
     let value: T;
     try {
       value = body(tx);
-      if (this.guard) this.guard(tx.pending(), op);
+      if (!unguarded && this.guarded) this.check(tx.pending(), op);
     } catch (e) {
       tx.rollback();
       throw e;
@@ -291,26 +325,52 @@ export class Document {
     };
   }
 
-  undo(): { entry: JournalEntry; shift?: Vec3 } | undefined {
+  /** Whether any write guard is installed. */
+  private get guarded(): boolean {
+    return this.guard !== undefined || this.guards.length > 0;
+  }
+
+  /** Runs every entry of `guards` in order, then `guard`; the first refusal throws. */
+  private check(changes: PendingChanges, op: string): void {
+    for (const g of this.guards) g(changes, op);
+    if (this.guard) this.guard(changes, op);
+  }
+
+  undo(opts: StepOptions = {}): { entry: JournalEntry; shift?: Vec3 } | undefined {
     this.journal.ensureUndo(); // loads an on-disk journal segment when undo reaches past memory (04)
     if (!this.journal.canUndo) return undefined;
     const e = this.journal.entries[this.journal.cursor - 1]!;
-    if (this.guard) this.guard(entryChanges(this, e, "before"), "undo");
+    if (this.guarded) this.check(entryChanges(this, e, "before", this.origin, opts), "undo");
     this.journal.cursor--;
-    this.apply(e, "before");
-    if (this.events.enabled) this.events.emit(stepEvent(this, "doc.undo", e));
+    this.stepping(opts, () => {
+      this.apply(e, "before");
+      if (this.events.enabled) this.events.emit(stepEvent(this, "doc.undo", e));
+    });
     return { entry: e, ...shiftOf(e.originAfter, e.originBefore) };
   }
 
-  redo(): { entry: JournalEntry; shift?: Vec3 } | undefined {
+  redo(opts: StepOptions = {}): { entry: JournalEntry; shift?: Vec3 } | undefined {
     this.journal.ensureRedo();
     if (!this.journal.canRedo) return undefined;
     const e = this.journal.entries[this.journal.cursor]!;
-    if (this.guard) this.guard(entryChanges(this, e, "after"), "redo");
+    if (this.guarded) this.check(entryChanges(this, e, "after", this.origin, opts), "redo");
     this.journal.cursor++;
-    this.apply(e, "after");
-    if (this.events.enabled) this.events.emit(stepEvent(this, "doc.redo", e));
+    this.stepping(opts, () => {
+      this.apply(e, "after");
+      if (this.events.enabled) this.events.emit(stepEvent(this, "doc.redo", e));
+    });
     return { entry: e, ...shiftOf(e.originBefore, e.originAfter) };
+  }
+
+  /** Runs `fn` with `overwriting` set when the step overwrites hand edits (nested calls keep it). */
+  private stepping(opts: StepOptions, fn: () => void): void {
+    if (!opts.overwriteHandEdits || this.overwriting) return fn();
+    this.overwriting = true;
+    try {
+      fn();
+    } finally {
+      this.overwriting = false;
+    }
   }
 
   private apply(e: JournalEntry, side: "before" | "after"): void {
@@ -345,7 +405,7 @@ export class Document {
    * All or nothing: with a write guard (11: locks, sandbox rules), every step is checked before
    * any is applied, and a refused step refuses the whole restore with nothing changed.
    */
-  restore(name: string): { steps: number; direction: "undo" | "redo" | "none"; shift?: Vec3 } {
+  restore(name: string, opts: StepOptions = {}): { steps: number; direction: "undo" | "redo" | "none"; shift?: Vec3 } {
     const cp = this.journal.checkpoints.get(name);
     if (!cp) throw new Error(`no checkpoint "${name}" (have: ${[...this.journal.checkpoints.keys()].join(", ") || "none"})`);
     const target = this.journal.cursorFor(cp);
@@ -353,19 +413,22 @@ export class Document {
     const originBefore: Vec3 = [...this.origin];
     const steps = Math.abs(target - this.journal.position);
     const direction = target < this.journal.position ? "undo" : target > this.journal.position ? "redo" : "none";
-    if (this.guard && direction !== "none") this.checkRestore(name, target, direction);
-    if (direction !== "none") for (const fn of this.restoreListeners) fn("start", name);
-    try {
-      while (this.journal.position > target) this.undo();
-      while (this.journal.position < target) this.redo();
-    } finally {
-      if (direction !== "none") for (const fn of this.restoreListeners) fn("end", name);
-    }
+    if (this.guarded && direction !== "none") this.checkRestore(name, target, direction, opts);
+    // `overwriting` holds from the start listener to the end one, so the coalesced patch is forced.
+    this.stepping(opts, () => {
+      if (direction !== "none") for (const fn of this.restoreListeners) fn("start", name);
+      try {
+        while (this.journal.position > target) this.undo(opts);
+        while (this.journal.position < target) this.redo(opts);
+      } finally {
+        if (direction !== "none") for (const fn of this.restoreListeners) fn("end", name);
+      }
+    });
     return { steps, direction, ...shiftOf(originBefore, this.origin) };
   }
 
-  /** Runs the write guard over every step of a restore without applying any (see `restore`). */
-  private checkRestore(name: string, target: number, direction: "undo" | "redo"): void {
+  /** Runs the write guards over every step of a restore without applying any (see `restore`). */
+  private checkRestore(name: string, target: number, direction: "undo" | "redo", opts: StepOptions): void {
     const pos = this.journal.position;
     const from = Math.min(pos, target), to = Math.max(pos, target);
     const entries = this.journal.peek(from, to); // memory or disk, without changing the window
@@ -376,7 +439,7 @@ export class Document {
       // The origin each step would see: an undo starts from the entry's after side, a redo from its before.
       const origin = side === "before" ? e.originAfter : e.originBefore;
       try {
-        this.guard!(entryChanges(this, e, side, origin), direction);
+        this.check(entryChanges(this, e, side, origin, opts), direction);
       } catch (err) {
         const code = (err as { refusal?: unknown }).refusal;
         throw Object.assign(
@@ -623,11 +686,13 @@ export class Transaction {
 }
 
 /** What undoing (`to` = "before") or redoing (`to` = "after") a journal entry would change. */
-function entryChanges(doc: Document, e: JournalEntry, to: "before" | "after", origin: Vec3 = doc.origin): PendingChanges {
+function entryChanges(doc: Document, e: JournalEntry, to: "before" | "after", origin: Vec3 = doc.origin, opts: StepOptions = {}): PendingChanges {
   const nbtAt = new Set((e.nbt ?? []).map((c) => c.index));
   const [from, into] = to === "before" ? [e.after, e.before] : [e.before, e.after];
   const comps = to === "before" ? [e.componentsAfter, e.componentsBefore] : [e.componentsBefore, e.componentsAfter];
   return {
+    entry: e,
+    ...(opts.overwriteHandEdits ? { overwriteHandEdits: true } : {}),
     forEach: (fn) => {
       for (let i = 0; i < from.length; i++) {
         fn(e.positions[i * 3]! - origin[0], e.positions[i * 3 + 1]! - origin[1], e.positions[i * 3 + 2]! - origin[2], from[i]!, into[i]!, nbtAt.has(i));

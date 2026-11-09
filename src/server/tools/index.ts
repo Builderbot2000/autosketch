@@ -12,6 +12,7 @@ import { registerQueryTools } from "./query.js";
 import { registerAnchorTools } from "./anchor.js";
 import { registerScriptTools } from "./script.js";
 import { registerScopeTools } from "./scope.js";
+import { registerWorldTools } from "./world.js";
 import { registerCameraTools } from "./camera.js";
 import type { ToolDeps } from "./shared.js";
 
@@ -39,4 +40,5 @@ export const TOOL_GROUPS: readonly ((deps: ToolDeps) => void)[] = [
   registerPluginTools,
   registerQueryTools,
   registerScopeTools,
+  registerWorldTools,
 ];

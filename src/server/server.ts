@@ -20,6 +20,11 @@ export interface ServerOptions {
    */
   hideTools?: Iterable<string>;
   log?: (msg: string) => void;
+  /**
+   * Declares the server a Claude Code channel (13, *Prompting from the game*): the experimental
+   * `claude/channel` capability, and these lines appended to the instructions.
+   */
+  channel?: { instructions: string };
 }
 
 /**
@@ -29,8 +34,10 @@ export interface ServerOptions {
  */
 export function createServer(ctx: Promise<InstanceContext>, opts: ServerOptions = {}): McpServer {
   const hidden = new Set(opts.hideTools ?? []);
-  const instructions = hidden.size ? `${INSTRUCTIONS}\n\nNot available in this session: ${[...hidden].sort().join(", ")}.` : INSTRUCTIONS;
-  const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION }, { instructions });
+  let instructions = hidden.size ? `${INSTRUCTIONS}\n\nNot available in this session: ${[...hidden].sort().join(", ")}.` : INSTRUCTIONS;
+  if (opts.channel) instructions += `\n\n${opts.channel.instructions}`;
+  const capabilities = opts.channel ? { capabilities: { experimental: { "claude/channel": {} } } } : {};
+  const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION }, { instructions, ...capabilities });
   const session = opts.session ?? new Session(defaultWorkspace());
   const seen = new Set<string>();
 

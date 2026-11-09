@@ -13,6 +13,7 @@ import type { PaletteBook } from "../palette/pick.js";
 import { BASE, refusal, ScopeManager } from "../scope/scopes.js";
 import type { ScopeLimits } from "../scope/settings.js";
 import type { LinkOpenOptions, WorldLink } from "../world/link.js";
+import type { InGameReplies } from "../world/prompt.js";
 
 /**
  * One document per session (docs/design/04-document.md). Documents live in the workspace as
@@ -68,6 +69,8 @@ export class Session {
   readonly scopes: ScopeManager;
   /** The live world link (13), when the entry point wired one in. Tools never use it. */
   world?: WorldLink;
+  /** Answers to in-game requests (13, *Prompting from the game*), for `world_reply`; set beside `world`. */
+  inGame?: InGameReplies;
   /** Hooks around each tool call, in order (see `CallHook`). */
   readonly callHooks: CallHook[] = [];
   /** The scope the current tool call addresses ("base" outside any call). */

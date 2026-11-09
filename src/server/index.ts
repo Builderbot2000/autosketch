@@ -29,7 +29,8 @@ import { SERVER_HIDE_TOOLS } from "./settings.js";
 import { defaultWorkspace, Session } from "./session.js";
 import { bakerFor } from "./tools/shared.js";
 import { LiveLink } from "../world/live-link.js";
-import { worldSettings } from "../world/settings.js";
+import { promptSettings, worldSettings } from "../world/settings.js";
+import { CHANNEL_INSTRUCTIONS, CHANNEL_METHOD, InGameRequests } from "../world/prompt.js";
 import { autoSyncHook, syncLink } from "../world/sync.js";
 
 const log = (msg: string) => process.stderr.write(`[autosketch] ${msg}\n`);
@@ -78,13 +79,32 @@ async function main(): Promise<void> {
   link.setSync(syncLink);
   session.world = link;
   session.callHooks.push(autoSyncHook(() => session.world));
-  const server = createServer(ctx, { session, hideTools, log });
+  const server = createServer(ctx, { session, hideTools, log, channel: { instructions: CHANNEL_INSTRUCTIONS } });
+  // In-game requests (13, *Prompting from the game*): pushed into the session as Claude Code channel
+  // events. Whether the session loaded the server as a channel can't be seen from here, so delivery
+  // is optimistic once a client has initialized.
+  let inGame: InGameRequests;
+  try {
+    inGame = new InGameRequests(link, {
+      ...promptSettings(settings),
+      subscribe: (fn) => session.subscribe(fn),
+      notify: (content, meta) => server.server.notification({ method: CHANNEL_METHOD, params: { content, meta } } as never),
+      listening: () => server.server.getClientCapabilities() !== undefined,
+      touch: () => session.touch(),
+      log,
+    });
+  } catch (e) {
+    log((e as Error).message);
+    process.exit(2);
+  }
+  session.inGame = inGame;
   const transport = new StdioServerTransport();
   // Save the open document before exiting, so a closed client never loses the last op.
   let closing = false;
   const shutdown = async (code: number) => {
     if (closing) return;
     closing = true;
+    inGame.close();
     link.close();
     await session.close();
     await observer.close();

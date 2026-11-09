@@ -47,16 +47,22 @@ export function registerDocumentTools({ tool, session }: ToolDeps): void {
       description:
         "Opens a saved document by name and makes it current (the previous one is saved and closed). With path, imports a schematic file instead " +
         "(.schem v1–v3, Axiom .bp, Create/structure .nbt, Litematica .litematic, legacy MCEdit .schematic, .autosketch) as a new workspace document named name (default: the file name). Unknown blocks and block-entity NBT are kept. " +
-        "Undo history of a saved document continues where it left off; an imported file starts fresh. Text.",
+        "Undo history of a saved document continues where it left off; an imported file starts fresh. " +
+        "With world:true, links to the world loaded in the game instead (Autosketch mod; the player marks a work and context volume with /autosketch wand): the document holds those volumes, re-origined to the work volume's corner, and every edit goes to the game as a patch that never overwrites the player's hand edits. Text.",
       inputSchema: {
         name: z.string().optional().describe("Workspace document name (required unless path is given)"),
         path: z.string().optional().describe("Schematic file to import"),
         front: z.enum(["north", "south", "east", "west"]).optional().describe("Front facade for an imported file (default south)"),
         overwrite: z.boolean().optional().describe("Replace an existing workspace document of that name when importing"),
+        world: z.boolean().optional().describe('Link to the live world: the player\'s work and context volumes (name defaults to "world")'),
       },
       readOnly: false,
     },
     async (c, a) => {
+      if (a.world) {
+        const r = await session.linkWorld({ instanceDir: c.info.root, plugins: c.plugins, palettes: c.book, ...(a.name ? { name: a.name } : {}), ...(a.overwrite ? { overwrite: true } : {}) });
+        return text(`${r.report}\n${formatInfo(r.doc, c.registry, session.path)}`);
+      }
       if (!a.path) {
         if (!a.name) throw new Error("Give name (a workspace document) or path (a file to import).");
         const doc = await session.open(a.name, c.book);

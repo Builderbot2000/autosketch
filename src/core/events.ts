@@ -43,7 +43,11 @@ export type ObserveEvent =
   // Scoped sessions (11): emitted by src/scope/scopes.ts through the parent document's sink.
   | { kind: "scope.fork"; scope: string; parent: string; depth: number; work: PublicBox; context: PublicBox; translation: [number, number, number]; brief: string; [extra: string]: unknown }
   | { kind: "scope.merge"; scope: string; report: string; box?: PublicBox; jseq: number; [extra: string]: unknown }
-  | { kind: "scope.abandon"; scope: string; reason: "call" | "restart" };
+  | { kind: "scope.abandon"; scope: string; reason: "call" | "restart" }
+  // Live world link (13): emitted by src/world/ through the base document's sink.
+  | { kind: "world.link"; state: "linked" | "relinked" | "unlinked" | "connected" | "disconnected"; dimension?: string; work?: PublicBox; extended?: number; context?: number; reason?: string }
+  | { kind: "world.patch"; patch: number; jseq: number[]; blocks: number; forced?: boolean; applied: number; skipped: number; rejected: number; overwritten: number; normalized: number; dropped?: string }
+  | { kind: "world.sync"; reason: "ack" | "context" | "dirty" | "reconnect" | "manual"; changed: number; jseq?: number };
 
 export type ObserveKind = ObserveEvent["kind"];
 

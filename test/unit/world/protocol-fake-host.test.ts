@@ -226,11 +226,13 @@ describe("fake host", () => {
       ],
     });
     expect(a.rejected).toEqual([
+      { pos: [-2, 64, 0], reason: "outside_volumes" }, // in the context: patches never write context
       { pos: [0, 64, 0], reason: "unknown_state" },
       { pos: [50, 64, 0], reason: "outside_volumes" },
       { pos: [0, 64, 1], reason: "unknown_state" },
     ]); // listed in grid order: x fastest, then z, then y
-    expect(a.applied).toBe(1); // (-2, 64, 0) is in the context, which the mod doesn't refuse
+    expect(a.applied).toBe(0);
+    expect(host.get([-2, 64, 0]).state).toBe("minecraft:air");
     expect(host.get([0, 64, 0]).state).toBe(STONE);
 
     host.set([3, 64, 3], PLANKS);
@@ -353,10 +355,42 @@ describe("fake host", () => {
     host.playerSet([6, 65, 5], STONE); // dirty interleaves while the patch is held
     expect((await client.next("dirty")).everything).toBe(false);
     expect(client.inbox.some((m) => m.type === "snapshot.result")).toBe(false);
+    client.send({ type: "notice", text: "not held", player: null }); // id-less messages don't wait behind the patch
+    await host.waitFor(() => host.notices.some((n) => n.text === "not held"));
+    expect(client.inbox.some((m) => m.type === "patch.ack")).toBe(false);
     release();
     await client.next("patch.ack");
     const snap = await client.next("snapshot.result");
     expect(snap.palette).toEqual([PLANKS]);
+  });
+
+  it("answers invalid messages by id and stays open; closes on an undecodable header", async () => {
+    const { client } = await setup();
+    const frame = (header: string) => {
+      const h = Buffer.from(header);
+      const out = Buffer.alloc(8 + h.length);
+      out.writeUInt32BE(4 + h.length, 0);
+      out.writeUInt32BE(h.length, 4);
+      h.copy(out, 8);
+      return out;
+    };
+    client.socket.write(frame('{"type":"hashes","id":40,"dimension":"minecraft:overworld"}'));
+    expect(await client.next("error", (m) => m.id === 40)).toMatchObject({ code: "bad_request" });
+    client.socket.write(frame('{"type":"notice","text":5,"player":null}'));
+    expect(await client.next("error", (m) => m.id === null)).toMatchObject({ code: "bad_request" });
+    expect(client.closed).toBe(false);
+    client.socket.write(frame("{not json"));
+    expect(await client.next("error", (m) => m.id === null)).toMatchObject({ code: "bad_request" });
+    await client.waitClosed();
+  });
+
+  it("reads positions outside the build height as air", async () => {
+    const { host, client } = await setup({ volumes: { work: { min: [0, 300, 0], max: [3, 319, 3] } } });
+    host.world.set("1,320,1", { state: STONE }); // can't exist in the game; the host must not report it
+    const id = client.id();
+    client.send({ type: "snapshot", id, dimension: OW, sections: [[0, 20, 0]] });
+    const snap = await client.next("snapshot.result", (m) => m.id === id);
+    expect(snap.palette).toEqual(["minecraft:air"]);
   });
 
   it("survives dropped connections, replacement and restarts", async () => {

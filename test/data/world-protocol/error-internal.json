@@ -1,0 +1,10 @@
+{
+  "description": "A valid request the mod failed to serve (its own fault, unlike bad_request); the connection stays open",
+  "sender": "mod",
+  "header": {
+    "type": "error",
+    "id": 13,
+    "code": "internal",
+    "message": "failed to read block entity at 104,66,-195"
+  }
+}

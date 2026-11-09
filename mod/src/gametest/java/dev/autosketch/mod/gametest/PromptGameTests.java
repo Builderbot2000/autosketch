@@ -24,6 +24,7 @@ import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.players.ServerOpListEntry;
 import net.minecraft.world.level.block.Blocks;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
@@ -222,11 +223,14 @@ public final class PromptGameTests {
         ServerPlayer asker = helper.makeMockServerPlayerInLevel();
         ServerPlayer watcher = helper.makeMockServerPlayerInLevel();
         ServerPlayer quiet = helper.makeMockServerPlayerInLevel();
-        for (ServerPlayer p : List.of(asker, watcher, quiet)) server.getPlayerList().op(p.getGameProfile());
+        // The GameTest server's default op level is 0, so op the players at level 2 explicitly.
+        for (ServerPlayer p : List.of(asker, watcher, quiet)) server.getPlayerList().getOps().add(new ServerOpListEntry(p.getGameProfile(), 2, false));
+        ServerPlayer stranger = helper.makeMockServerPlayerInLevel(); // not an op: never sees agent output
         Recorder out = new Recorder();
         with(new RecordingBridge(true), fixed(null), out, () -> {
             run(watcher, "autosketch log all");
             run(quiet, "autosketch log off");
+            InGamePrompts.setLogMode(stranger, LogMode.ALL); // as if set while still an op
             helper.assertTrue(InGamePrompts.logMode(asker) == LogMode.MINE, "mine by default");
             helper.assertTrue(InGamePrompts.logMode(watcher) == LogMode.ALL && InGamePrompts.logMode(quiet) == LogMode.OFF, "log commands set the mode");
             chat(server, 1L, asker.getUUID(), "activity", "fill: 1,204 blocks");
@@ -239,7 +243,8 @@ public final class PromptGameTests {
         helper.assertTrue(out.chatOf(watcher).size() == 6, "watcher (all) sees everything, the long reply wrapped: " + out.chatOf(watcher));
         helper.assertTrue(out.chatOf(watcher).get(2).equals("· render: 1 image"), "watcher sees unprompted activity");
         helper.assertTrue(out.chatOf(quiet).equals(List.of("Agent: " + "x".repeat(100), "Agent: " + "x".repeat(50))), "quiet (off) sees only replies to itself, wrapped: " + out.chatOf(quiet));
-        leave(asker, watcher, quiet);
+        helper.assertTrue(out.chatOf(stranger).isEmpty(), "a player who isn't an op sees nothing: " + out.chatOf(stranger));
+        leave(asker, watcher, quiet, stranger);
         helper.succeed();
     }
 

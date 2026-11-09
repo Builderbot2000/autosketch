@@ -20,6 +20,18 @@ The instance is a CurseForge instance folder (e.g. `.../curseforge/minecraft/Ins
 
 The first start indexes the instance (tens of seconds for a large modpack); later starts load from `~/.cache/autosketch` in a few seconds.
 
+### Requests from inside the game
+
+With the companion mod (`mod/`) and the live world link (`docs/design/13-live-world.md`), a player can type `/autosketch ask <request>` in the game while pointing at what they mean. The request reaches your running Claude Code session as a **channel** event, and the agent's activity and its `world_reply` answers appear in the game chat. Channels are a Claude Code research preview, so the session has to load the server as a channel. During the preview, a server that isn't on Claude Code's approved channel list loads with the development flag, which names the server as it is configured in `claude mcp` / `.mcp.json`:
+
+```
+claude --dangerously-load-development-channels server:autosketch
+```
+
+(`--channels server:autosketch` is the form for an approved channel.) This works only in interactive sessions. Without it, the world link still works, and in-game requests are dropped silently by Claude Code. The server can't detect that, so the player is told "delivered".
+
+**Who may ask.** A request turns into a prompt to an agent that can run commands on your machine, so the MCP checks every request against an allowlist before anything reaches the session. In singleplayer the host is always allowed. Anyone else, and everyone on a dedicated server, has to be listed by UUID (safer) or name: `--set world.promptPlayers=<uuid>,<name>`. Op level 2 is required in the game as well. Other settings: `world.promptIdleMs` (a request's chat stream closes after this long with no tool calls, default 5 minutes) and `world.activityMs` (at most one activity chat message per interval, default 2 s). In the game, `/autosketch log off|mine|all` picks what each player sees.
+
 ### Tools (so far)
 
 | Tool | What it does |

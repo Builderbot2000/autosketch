@@ -12,7 +12,7 @@ import { loadNative, saveNative } from "../document/native.js";
 import type { PaletteBook } from "../palette/pick.js";
 import { BASE, refusal, ScopeManager } from "../scope/scopes.js";
 import type { ScopeLimits } from "../scope/settings.js";
-import type { WorldLink } from "../world/link.js";
+import type { LinkOpenOptions, WorldLink } from "../world/link.js";
 
 /**
  * One document per session (docs/design/04-document.md). Documents live in the workspace as
@@ -210,7 +210,17 @@ export class Session {
   }
 
   /** Makes an imported document current and saves it under its name in the workspace. */
-  async adopt(doc: Document, opts: { overwrite?: boolean } = {}): Promise<Document> {
+  /**
+   * Opens the base document linked to the world (13, W2: `doc_open({ world: true })`), through the
+   * link the entry point wired in. Refused while scoped jobs are open, like any document switch.
+   */
+  async linkWorld(opts: LinkOpenOptions): Promise<{ doc: Document; report: string }> {
+    if (!this.world?.open) throw refusal("world_disconnected", "The live world link isn't available in this server.");
+    this.checkNoScopes("link the world");
+    return this.world.open(opts);
+  }
+
+  async adopt(doc: Document,opts: { overwrite?: boolean } = {}): Promise<Document> {
     checkName(doc.meta.name);
     this.checkNoScopes("import a document");
     if (!opts.overwrite && (await exists(this.pathFor(doc.meta.name)))) throw new Error(`a document named "${doc.meta.name}" already exists; pass another name or overwrite:true`);

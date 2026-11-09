@@ -132,6 +132,13 @@ export interface AutosketchPlugin {
    * undefined when the state is a single block. Sandbox forks extend volumes over them.
    */
   multiBlock?: { partners(state: string): [number, number, number][] | undefined };
+  /**
+   * Block-entity NBT that changes on its own while the game runs (13, *Hashing*, volatile keys):
+   * block-entity type id (or "*") → key paths to ignore when the live link compares NBT ("/"
+   * between nested compound keys), or "state_only" to never compare that type's NBT. Merged with
+   * the built-in list as a union per type and sent to the mod in the bridge hello.
+   */
+  volatileKeys?: Record<string, string[] | "state_only">;
   /** Markdown explaining the mod's building concepts (exposed as a knowledge resource). */
   docs?: string;
 }

@@ -28,6 +28,9 @@ import { createServer, SERVER_VERSION } from "./server.js";
 import { SERVER_HIDE_TOOLS } from "./settings.js";
 import { defaultWorkspace, Session } from "./session.js";
 import { bakerFor } from "./tools/shared.js";
+import { LiveLink } from "../world/live-link.js";
+import { worldSettings } from "../world/settings.js";
+import { autoSyncHook, syncLink } from "../world/sync.js";
 
 const log = (msg: string) => process.stderr.write(`[autosketch] ${msg}\n`);
 
@@ -63,6 +66,18 @@ async function main(): Promise<void> {
   if (settings.get(OBSERVE_OPEN)) void observer.ready.then((url) => url && openInBrowser(url, log));
   session.events = observer.sink("base");
   session.eventsFor = (doc) => observer.sink(doc);
+  // The live world link (13), wired in here like observe/: tools reach it only through the session.
+  // It connects on doc_open({world: true}); its call hook runs before the auto-sync hook.
+  let link: LiveLink;
+  try {
+    link = new LiveLink(session, { ...worldSettings(settings), log });
+  } catch (e) {
+    log((e as Error).message);
+    process.exit(2);
+  }
+  link.setSync(syncLink);
+  session.world = link;
+  session.callHooks.push(autoSyncHook(() => session.world));
   const server = createServer(ctx, { session, hideTools, log });
   const transport = new StdioServerTransport();
   // Save the open document before exiting, so a closed client never loses the last op.
@@ -70,6 +85,7 @@ async function main(): Promise<void> {
   const shutdown = async (code: number) => {
     if (closing) return;
     closing = true;
+    link.close();
     await session.close();
     await observer.close();
     process.exit(code);

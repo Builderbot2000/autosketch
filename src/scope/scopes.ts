@@ -186,6 +186,8 @@ export class ScopeManager {
   /** Installs the lock guard on a base document. */
   attach(doc: Document): void {
     doc.guard = this.guardFor(BASE);
+    // A newly opened base document starts unlinked; the world link sets `root` after it attaches (13).
+    this.root = undefined;
   }
 
   get(id: string): Scope {

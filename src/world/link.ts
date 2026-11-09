@@ -1,5 +1,7 @@
 import type { Vec3 } from "../core/region.js";
 import type { Document, EditResult } from "../document/document.js";
+import type { PaletteBook } from "../palette/pick.js";
+import type { AutosketchPlugin } from "../plugins/types.js";
 import type { BridgeConnection } from "./bridge.js";
 import type { VolatileList, WireBox, WorldBlock } from "./protocol/messages.js";
 
@@ -80,4 +82,22 @@ export interface WorldLink {
   toWorld(p: Vec3): Vec3;
   /** Document-local position of a world position (linked only). */
   toLocal(p: Vec3): Vec3;
+  /**
+   * Links the session's base document to the player's volumes (`doc_open({ world: true })`, W2):
+   * connects if needed, snapshots the volumes into a new document and makes it current. Resolves
+   * with the document and a short report for the tool result. Optional so test doubles needn't
+   * implement it.
+   */
+  open?(opts: LinkOpenOptions): Promise<{ doc: Document; report: string }>;
+}
+
+export interface LinkOpenOptions {
+  /** Workspace document name (default "world"). */
+  name?: string;
+  /** Replace an existing workspace document of that name that isn't a linked one. */
+  overwrite?: boolean;
+  /** The located instance folder (`02`); the pairing file is in it or its game subfolder. */
+  instanceDir: string;
+  plugins: readonly AutosketchPlugin[];
+  palettes: PaletteBook;
 }

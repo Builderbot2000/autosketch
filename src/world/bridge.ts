@@ -117,6 +117,7 @@ export class Bridge implements BridgeConnection {
    * a first success, lost connections are retried in the background unless `reconnect` is false.
    */
   async connect(): Promise<ModHello> {
+    if (this.connected) return this.hello!;
     this.closed = false;
     clearTimeout(this.retryTimer);
     let pairing: Pairing;
@@ -135,6 +136,20 @@ export class Bridge implements BridgeConnection {
       throw new BridgeError(DOWN, `The mod speaks bridge protocol ${pairing.protocol} and this Autosketch speaks ${PROTOCOL_VERSION}: update the ${pairing.protocol > PROTOCOL_VERSION ? "Autosketch MCP server" : "Autosketch mod"}.`);
     const socket = await this.open(pairing);
     return this.handshake(socket, pairing);
+  }
+
+  /** The volatile-key list the next hello sends (the mod hashes with the list of its current connection). */
+  setVolatile(v: VolatileList): void {
+    this.opts.volatile = v;
+  }
+
+  /** The game folder the next connection reads the pairing file from. */
+  setInstanceDir(dir: string): void {
+    this.opts.instanceDir = dir;
+  }
+
+  get instanceDir(): string {
+    return this.opts.instanceDir;
   }
 
   /** Closes the connection and stops reconnecting. */

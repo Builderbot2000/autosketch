@@ -295,6 +295,17 @@ describe("codec errors", () => {
     ).toThrow(/twice/);
   });
 
+  it("NBT readers refuse duplicate keys and End lists, accept typed empty lists, and writers refuse long strings", () => {
+    const dup = Buffer.from("0a0000" + "0100016101" + "0100016102" + "00", "hex");
+    expect(() => decodeNbt(dup)).toThrow(/twice/);
+    const endList = Buffer.from("0a0000" + "0900016c" + "00" + "00000001" + "00", "hex");
+    expect(() => decodeNbt(endList)).toThrow(/End/);
+    const typedEmpty = Buffer.from("0a0000" + "0900016c" + "0a" + "00000000" + "00", "hex");
+    expect(hex(encodeNbt(decodeNbt(typedEmpty)))).toBe("0a0000" + "0900016c" + "00" + "00000000" + "00");
+    expect(() => encodeNbt({ type: "compound", value: { s: { type: "string", value: "é".repeat(32768) } } })).toThrow(/65536 bytes, max 65535/);
+    expect(encodeNbt({ type: "compound", value: { s: { type: "string", value: "a".repeat(65535) } } }).length).toBe(3 + 3 + 1 + 2 + 65535 + 1);
+  });
+
   it("varints are minimal and bounded", () => {
     const w = new ByteWriter();
     for (const v of [0, 1, 127, 128, 300, 2 ** 31, 2 ** 53 - 1]) w.varint(v);

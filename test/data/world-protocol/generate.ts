@@ -70,6 +70,7 @@ vector("hello-mod-dedicated", "mod", "Mod hello from a dedicated server (no host
 });
 vector("error-protocol-mismatch", "mod", "The mod refuses a hello with another protocol version and closes", { type: "error", id: null, code: "protocol_mismatch", message: "mod speaks protocol 1, MCP sent 2", protocol: 1 });
 vector("error-request", "mod", "A request the mod can't serve, answered by id; the connection stays open", { type: "error", id: 12, code: "outside_volumes", message: "box 0,0,0..15,15,15 lies outside the linked volumes" });
+vector("error-internal", "mod", "A valid request the mod failed to serve (its own fault, unlike bad_request); the connection stays open", { type: "error", id: 13, code: "internal", message: "failed to read block entity at 104,66,-195" });
 vector("volumes", "mod", "Work volume and two context boxes: the default (work grown by 3) and a distant reference box", {
   type: "volumes",
   link: 3,

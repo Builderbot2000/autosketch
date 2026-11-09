@@ -13,7 +13,7 @@ export const PROTOCOL_VERSION = 1;
 export const MAX_FRAME = 256 * 1024 * 1024;
 /** Largest JSON header. */
 export const MAX_HEADER = 1024 * 1024;
-/** Most positions one `dirty` notice lists; more changes in one tick send `everything`. */
+/** Most positions one `dirty` notice may list; the mod may be configured lower, so never assume the exact cap. */
 export const DIRTY_CAP = 4096;
 /** Pairing file, relative to the instance (game) directory. */
 export const PAIRING_FILE = "config/autosketch-bridge.toml";
@@ -47,7 +47,7 @@ export type Cardinal = "north" | "south" | "west" | "east";
 export const REJECT_REASONS = ["unknown_state", "bad_nbt", "outside_volumes", "stale_link"] as const;
 export type RejectReason = (typeof REJECT_REASONS)[number];
 
-export const ERROR_CODES = ["protocol_mismatch", "bad_token", "not_ready", "bad_request", "unknown_type", "no_volumes", "wrong_dimension", "outside_volumes", "too_large", "replaced", "stale_link", "bad_extension"] as const;
+export const ERROR_CODES = ["protocol_mismatch", "bad_token", "not_ready", "bad_request", "unknown_type", "no_volumes", "wrong_dimension", "outside_volumes", "too_large", "replaced", "stale_link", "bad_extension", "internal"] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
 
 export const PROMPT_REFUSALS = ["no_link", "not_allowed", "no_listener"] as const;

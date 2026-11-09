@@ -165,6 +165,7 @@ function readPayload(r: ByteReader, type: string, depth: number): unknown {
         const t = NAMES[id];
         if (t === undefined) throw new Error(`unknown NBT tag ${id}`);
         const k = r.mutf8();
+        if (Object.hasOwn(out, k)) throw new Error(`NBT compound has the key "${k}" twice`);
         out[k] = { type: t, value: readPayload(r, t, depth + 1) } as Tag;
       }
     }

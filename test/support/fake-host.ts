@@ -81,6 +81,9 @@ interface Cell {
 }
 
 const AIR = "minecraft:air";
+/** The overworld's build height in 1.21.1. */
+const BUILD_MIN_Y = -64;
+const BUILD_MAX_Y = 319;
 const key = (p: Vec3) => `${p[0]},${p[1]},${p[2]}`;
 
 function inBox(b: WireBox, p: Vec3): boolean {
@@ -150,6 +153,7 @@ export class FakeHost {
   // ── world access ───────────────────────────────────────────────────────────────────────────
 
   get(pos: Vec3): WorldBlock {
+    if (pos[1] < BUILD_MIN_Y || pos[1] > BUILD_MAX_Y) return { pos, state: AIR }; // outside build height: air, as in the mod
     const c = this.world.get(key(pos));
     return c ? { pos, state: c.state, ...(c.nbt ? { nbt: c.nbt } : {}) } : { pos, state: AIR };
   }
@@ -258,6 +262,13 @@ export class FakeHost {
     return { work: v.work, context: v.context ?? [grow(v.work, 3)], dimension: v.dimension ?? "minecraft:overworld" };
   }
 
+  /** The effective work volume (work, or the declared extension): the only place patches may write. */
+  private inWork(p: Vec3): boolean {
+    const v = this.volumes;
+    return !!v && (inBox(v.work, p) || (this.extended !== null && inBox(this.extended, p)));
+  }
+
+  /** Work, extension or context: what the change tracker watches. */
   private inVolumes(p: Vec3): boolean {
     const v = this.volumes;
     return !!v && (inBox(v.work, p) || (this.extended !== null && inBox(this.extended, p)) || v.context.some((b) => inBox(b, p)));
@@ -347,14 +358,21 @@ export class FakeHost {
         try {
           m = decodeMessage(f, "mcp");
         } catch (e) {
+          // Undecodable framing or header: answer with id null and close. Otherwise answer (by id when there is one) and stay open.
+          if (!headerDecodes(f)) return refuse("bad_request", (e as Error).message);
+          const type = splitType(f);
+          const unknown = type !== undefined && !KNOWN.has(type);
           const id = splitId(f);
-          if (id === undefined) return refuse("bad_request", (e as Error).message);
-          this.send({ type: "error", id, code: splitType(f) && !KNOWN.has(splitType(f)!) ? "unknown_type" : "bad_request", message: (e as Error).message });
+          if (unknown && id === undefined) continue; // unknown_type is answered only when the message carries an id
+          this.send({ type: "error", id: id ?? null, code: unknown ? "unknown_type" : "bad_request", message: (e as Error).message });
           continue;
         }
         this.received.push(m);
         if (this.socket !== s) continue;
-        this.queue = this.queue.then(() => this.handle(m, s)).catch(() => {});
+        // Requests (messages with an id) run strictly in order; id-less messages don't wait behind a held patch.
+        if ("id" in m && m.type !== "prompt.result" && m.type !== "error") {
+          this.queue = this.queue.then(() => this.handle(m, s)).catch((e: unknown) => this.send({ type: "error", id: m.id as number, code: "internal", message: String(e) }, s));
+        } else void this.handle(m, s);
       }
     });
   }
@@ -467,7 +485,7 @@ export class FakeHost {
       ack.rejected = p.blocks.map((b) => ({ pos: b.pos, reason: "stale_link" }));
     } else {
       for (const b of p.blocks) {
-        if (!this.inVolumes(b.pos)) {
+        if (!this.inWork(b.pos)) {
           ack.rejected.push({ pos: b.pos, reason: "outside_volumes" });
           continue;
         }
@@ -523,5 +541,14 @@ function splitId(f: Uint8Array): number | undefined {
     return Number.isSafeInteger(id) && (id as number) >= 1 ? (id as number) : undefined;
   } catch {
     return undefined;
+  }
+}
+
+function headerDecodes(f: Uint8Array): boolean {
+  try {
+    splitFrame(f);
+    return true;
+  } catch {
+    return false;
   }
 }

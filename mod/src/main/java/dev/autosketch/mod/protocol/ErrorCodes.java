@@ -16,6 +16,8 @@ public final class ErrorCodes {
     public static final String REPLACED = "replaced";
     public static final String STALE_LINK = "stale_link";
     public static final String BAD_EXTENSION = "bad_extension";
+    /** A failure inside the mod while serving a valid request; the connection stays open. */
+    public static final String INTERNAL = "internal";
 
     /** Patch reject reasons ({@code patch.ack}). {@code stale_link} and {@code outside_volumes} double as reasons. */
     public static final String UNKNOWN_STATE = "unknown_state";

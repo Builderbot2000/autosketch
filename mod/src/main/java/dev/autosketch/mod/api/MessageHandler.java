@@ -14,8 +14,8 @@ import dev.autosketch.mod.protocol.ProtocolException;
  * with its ack when done, so a {@code snapshot} that arrived meanwhile sees the patch.
  *
  * <p><b>Failures:</b> throwing {@link ProtocolException} sends its {@code error} (by the request's
- * id) and completes the exchange; if {@link ProtocolException#closes()} the connection closes too.
- * Any other exception is logged and answered with {@code bad_request}.
+ * id, or null for an id-less message) and completes the exchange; the connection stays open.
+ * Any other exception is logged and answered with {@code internal}.
  */
 @FunctionalInterface
 public interface MessageHandler {

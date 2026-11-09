@@ -12,3 +12,4 @@ bin/
 .project
 .settings/
 !gradle/wrapper/gradle-wrapper.jar
+logs/

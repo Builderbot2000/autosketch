@@ -89,6 +89,15 @@ public final class ReadGameTests {
         Box ctx = work.grow(1);
         Messages.SnapshotRequest req = new Messages.SnapshotRequest(WorldTestKit.nextId(), dim(h), List.of(work, ctx), null);
         TestExchange ex = snapshot(req);
+        // The reference reading, in the same tick as the request (its capture fits one slice).
+        Map<BlockPos, String> wantState = new HashMap<>();
+        Map<BlockPos, CompoundTag> wantNbt = new HashMap<>();
+        for (Box b : List.of(work, ctx)) for (int y = b.minY(); y <= b.maxY(); y++) for (int z = b.minZ(); z <= b.maxZ(); z++) for (int x = b.minX(); x <= b.maxX(); x++) {
+            BlockPos p = new BlockPos(x, y, z);
+            wantState.put(p, print(level, p));
+            CompoundTag n = WorldBlocks.nbtAt(level, p);
+            if (n != null) wantNbt.put(p, n);
+        }
         await(h, ex, () -> {
             Messages.SnapshotResult r;
             try {
@@ -105,8 +114,8 @@ public final class ReadGameTests {
                 for (int y = b.minY(); y <= b.maxY(); y++) for (int z = b.minZ(); z <= b.maxZ(); z++) for (int x = b.minX(); x <= b.maxX(); x++) {
                     BlockPos p = new BlockPos(x, y, z);
                     String got = r.palette().get(reg.states()[i++]);
-                    if (!got.equals(print(level, p))) throw new GameTestAssertException("at " + p + ": " + got + " vs " + print(level, p));
-                    CompoundTag want = WorldBlocks.nbtAt(level, p);
+                    if (!got.equals(wantState.get(p))) throw new GameTestAssertException("at " + p + ": " + got + " vs " + wantState.get(p));
+                    CompoundTag want = wantNbt.get(p);
                     if (want == null ? bes.containsKey(p) : !want.equals(bes.get(p))) throw new GameTestAssertException("NBT at " + p);
                 }
             }
@@ -120,35 +129,37 @@ public final class ReadGameTests {
         ServerLevel level = h.getLevel();
         Box work = box(h, 0, 0, 0, 2, 2, 2);
         link(h, work);
-        put(level, h.absolutePos(new BlockPos(1, 1, 1)), "minecraft:furnace[facing=north,lit=true]", snbt("{id:\"minecraft:furnace\",BurnTime:99s}"));
+        put(level, h.absolutePos(new BlockPos(1, 1, 1)), "minecraft:furnace[facing=north,lit=false]", snbt("{id:\"minecraft:furnace\",CookTimeTotal:200s}"));
         put(level, h.absolutePos(new BlockPos(0, 1, 1)), "minecraft:stone", null);
         List<Box> boxes = List.of(work, work.grow(3));
+        // The reference reading happens in the same tick as the request, whose small capture fits
+        // one slice, so random ticks (grass spreading under the test) can't fall in between.
         TestExchange ex = hashes(new Messages.HashesRequest(WorldTestKit.nextId(), dim(h), boxes));
+        VolatileKeys keys = PatchGameTests.defaults();
+        List<Messages.SectionHash> want = new ArrayList<>();
+        java.util.TreeSet<String> seen = new java.util.TreeSet<>();
+        List<int[]> secs = new ArrayList<>();
+        for (Box b : boxes) for (int sy = b.minY() >> 4; sy <= b.maxY() >> 4; sy++) for (int sz = b.minZ() >> 4; sz <= b.maxZ() >> 4; sz++) for (int sx = b.minX() >> 4; sx <= b.maxX() >> 4; sx++)
+            if (seen.add(sx + "," + sy + "," + sz)) secs.add(new int[] {sx, sy, sz});
+        secs.sort((a, c) -> a[1] != c[1] ? Integer.compare(a[1], c[1]) : a[2] != c[2] ? Integer.compare(a[2], c[2]) : Integer.compare(a[0], c[0]));
+        for (int[] s : secs) {
+            Hashing.SectionHasher hs = new Hashing.SectionHasher();
+            for (int y = s[1] * 16; y < s[1] * 16 + 16; y++) for (int z = s[2] * 16; z < s[2] * 16 + 16; z++) for (int x = s[0] * 16; x < s[0] * 16 + 16; x++) {
+                boolean in = false;
+                for (Box b : boxes) in |= b.contains(x, y, z);
+                if (!in) continue;
+                BlockPos p = new BlockPos(x, y, z);
+                CompoundTag nbt = WorldBlocks.nbtAt(level, p);
+                hs.add(States.print(WorldBlocks.state(level, p)), nbt == null ? null : Hashing.nbtHash(nbt, keys));
+            }
+            want.add(new Messages.SectionHash(s[0], s[1], s[2], hs.finish()));
+        }
         await(h, ex, () -> {
             Messages.HashesResult r;
             try {
                 r = Messages.HashesResult.decode(ex.reply);
             } catch (ProtocolException e) {
                 throw new GameTestAssertException("bad hashes frame: " + ex.errorCode);
-            }
-            VolatileKeys keys = PatchGameTests.defaults();
-            List<Messages.SectionHash> want = new ArrayList<>();
-            java.util.TreeSet<String> seen = new java.util.TreeSet<>();
-            List<int[]> secs = new ArrayList<>();
-            for (Box b : boxes) for (int sy = b.minY() >> 4; sy <= b.maxY() >> 4; sy++) for (int sz = b.minZ() >> 4; sz <= b.maxZ() >> 4; sz++) for (int sx = b.minX() >> 4; sx <= b.maxX() >> 4; sx++)
-                if (seen.add(sx + "," + sy + "," + sz)) secs.add(new int[] {sx, sy, sz});
-            secs.sort((a, c) -> a[1] != c[1] ? Integer.compare(a[1], c[1]) : a[2] != c[2] ? Integer.compare(a[2], c[2]) : Integer.compare(a[0], c[0]));
-            for (int[] s : secs) {
-                Hashing.SectionHasher hs = new Hashing.SectionHasher();
-                for (int y = s[1] * 16; y < s[1] * 16 + 16; y++) for (int z = s[2] * 16; z < s[2] * 16 + 16; z++) for (int x = s[0] * 16; x < s[0] * 16 + 16; x++) {
-                    boolean in = false;
-                    for (Box b : boxes) in |= b.contains(x, y, z);
-                    if (!in) continue;
-                    BlockPos p = new BlockPos(x, y, z);
-                    CompoundTag nbt = WorldBlocks.nbtAt(level, p);
-                    hs.add(States.print(WorldBlocks.state(level, p)), nbt == null ? null : Hashing.nbtHash(nbt, keys));
-                }
-                want.add(new Messages.SectionHash(s[0], s[1], s[2], hs.finish()));
             }
             if (!want.equals(r.sections())) throw new GameTestAssertException("section hashes differ: " + r.sections() + " vs " + want);
         });

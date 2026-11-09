@@ -56,7 +56,7 @@ public final class PatchApplier implements PatchStatus {
     private static final Logger LOG = LogUtils.getLogger();
 
     /** {@code error} code for a valid request the mod failed to serve (13, *Message schemas*). */
-    public static final String INTERNAL = "internal";
+    public static final String INTERNAL = ErrorCodes.INTERNAL;
 
     private final LinkState link;
     private final Function<ResourceKey<Level>, @Nullable ServerLevel> levels;

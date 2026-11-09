@@ -185,7 +185,7 @@ bytes    body            frameLength − 4 − headerLength bytes; empty unless 
 4. The mod replies with its own `hello`, then immediately sends `volumes`.
 5. The MCP checks the mod's `hello`: on a `protocol` other than its own it reports the mismatch to the agent and closes. It never guesses around a mismatch (*Version check*). The `game.dataVersion` is the MCP's to compare with its documents.
 6. **One connection at a time.** When a new connection completes the handshake, the mod sends `error` `replaced` to the old one and closes it. A restarted MCP therefore takes over without waiting for the old socket to time out (M10).
-7. **Disconnect.** Either side may close at any time. The mod discards queued patches it hasn't started and finishes the one in progress (its ack is lost; the next sync reconciles). It keeps the volumes and the chunk tickets of the current link until the server stops or the player clears the work volume, so a reconnecting MCP finds the same volumes.
+7. **Disconnect.** Either side may close at any time. The mod discards queued patches it hasn't started and finishes the one in progress (its ack is lost; the next sync reconciles). It keeps the volumes of the current link until the server stops or the player clears the work volume, so a reconnecting MCP finds the same volumes. It releases the chunk tickets on disconnect and takes them again on reconnect (*Model*), so an unattended server doesn't keep chunks loaded.
 
 The framing, the `hello` fields `type`, `protocol` and `token`, and the `error` message keep their meaning in every future protocol version, so a mismatch is always reported clearly.
 

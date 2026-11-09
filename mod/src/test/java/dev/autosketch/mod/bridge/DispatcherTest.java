@@ -143,6 +143,44 @@ class DispatcherTest {
     }
 
     @Test
+    void idLessMessagesBypassADeferredRequest() {
+        Dispatcher d = new Dispatcher(Runnable::run);
+        List<String> log = new ArrayList<>();
+        d.register("patch", (m, ex) -> {
+            log.add("patch");
+            ex.defer();
+        });
+        d.register("notice", (m, ex) -> log.add("notice"));
+        d.register("hashes", (m, ex) -> log.add("hashes"));
+        d.freeze();
+        FakeConnection c = new FakeConnection();
+        d.submit(c, req("patch", 1));
+        d.submit(c, req("hashes", 2));
+        d.submit(c, new Frame(Json.header("notice")));
+        assertEquals(List.of("patch", "notice"), log, "the notice runs while the patch applies; the request waits");
+    }
+
+    @Test
+    void handlerCrashIsInternalAndStaysOpen() throws Exception {
+        Dispatcher d = new Dispatcher(Runnable::run);
+        d.register("snapshot", (m, ex) -> {
+            throw new IllegalStateException("boom");
+        });
+        d.register("notice", (m, ex) -> Json.reqString(m.header(), "text", null));
+        d.freeze();
+        FakeConnection c = new FakeConnection();
+        d.submit(c, req("snapshot", 5));
+        ErrorMessage e = ErrorMessage.decode(c.sent.get(0));
+        assertEquals("internal", e.code());
+        assertEquals(5L, e.id());
+        d.submit(c, new Frame(Json.header("notice")));
+        ErrorMessage e2 = ErrorMessage.decode(c.sent.get(1));
+        assertEquals("bad_request", e2.code());
+        assertEquals(null, e2.id());
+        assertFalse(c.closed, "an invalid message without an id stays open");
+    }
+
+    @Test
     void registrationRules() {
         Dispatcher d = new Dispatcher(Runnable::run);
         d.register("patch", (m, ex) -> {});

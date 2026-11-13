@@ -500,7 +500,8 @@ export class LiveLink implements WorldLink {
       await this.flush();
       await this.chain;
     }
-    const linkedCall = (call.doc && call.scope === "base") || call.tool === "doc_open";
+    // A merge names the job's scope, but its patch is the base document's: its result gets the line.
+    const linkedCall = (call.doc && call.scope === "base") || call.tool === "doc_open" || (call.tool === "scope_merge" && mine.length > 0);
     if (!linkedCall || this.running) return result;
     const line = this.takeLine();
     return line ? { ...result, content: [...result.content, { type: "text", text: line }] } : result;

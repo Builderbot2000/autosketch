@@ -399,6 +399,10 @@ export class LiveLink implements WorldLink {
         const r = await this.doOpen(this.openedWith!, true);
         this.note(`world: ${r.report.split("\n")[0]}`);
       } catch (e) {
+        // The player may have moved on while this relink ran (two corners marked in quick
+        // succession): follow the latest volumes rather than unlinking over a stale box.
+        const latest = this.bridge.volumes;
+        if (latest && latest !== m && this.bridge.connected) return this.followVolumes(latest);
         this.unlink(`relinking failed: ${(e as Error).message}`);
       }
       return;

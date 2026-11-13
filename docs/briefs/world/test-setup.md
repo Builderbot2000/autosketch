@@ -1,6 +1,6 @@
 # In-game test setup (for silo R)
 
-Steps the user runs once before silo R starts. Silos L to Q need none of this. Status: **ready** (2026-11-08). Steps 1 and 2 are done; step 3 comes after silo R.
+Steps the user runs once before silo R starts. Silos L to Q need none of this. Status: **ready** (2026-11-08). Steps 1 and 2 are done; step 3, the in-client checklist, is ready for the user (2026-11-13).
 
 The dev machine runs Minecraft (Craftoria) on Windows and the MCP in WSL2. v1 runs the MCP only on the same machine as the game.
 
@@ -32,5 +32,22 @@ Running `startserver.bat` on Windows inside the CurseForge Instances folder fail
 
 ## 3. In-client check (last, by the user)
 
-6. When silo R's automated scenarios pass, it hands over the mod jar and a checklist.
-7. Copy the jar into the Craftoria instance's `mods/` folder, open a test world with cheats on, and check the wand, region outline, action-bar notices, and a hand edit with Axiom.
+Silo R's automated scenarios pass on the headless Craftoria server (2026-11-13; `docs/design/13-live-world.md`, *Implementation status*). What only a player can check:
+
+**Setup**
+1. Build the jar (`cd mod && JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 ./gradlew build`) and copy `mod/build/libs/autosketch-0.1.0.jar` into the Craftoria instance's `mods/` folder (`C:\Users\kevin\curseforge\minecraft\Instances\Craftoria\mods`).
+2. Start Craftoria, create or open a test world (Creative, cheats on), and check that `config/autosketch-bridge.toml` appears in the instance folder.
+3. In WSL, start Claude Code with the Autosketch server as a development channel, from the repository (the server must be configured as `autosketch` in `claude mcp` / `.mcp.json`, with the Craftoria instance):
+   ```
+   claude --dangerously-load-development-channels server:autosketch
+   ```
+
+**Checks**
+4. **Wand and modes.** `/autosketch wand` gives a blaze rod named "Autosketch wand". Left-click a block, then right-click another: the action bar shows the corners, then `work volume W×H×D (link N)`. Press F (swap hands) with the wand: the mode cycles work → context → focus, shown on the action bar. `/autosketch mode context` sets it directly.
+5. **Outline particles.** While holding the wand, the work volume is outlined in green, context boxes in blue, the focus box in gold. Put the wand away: the outlines stop; `/autosketch show` brings them back.
+6. **Link and action bar.** Ask the agent in the terminal to `doc_open({world: true})` and fill a few blocks: the blocks appear, and the action bar shows `Autosketch: N placed, 0 skipped`. `/autosketch status` shows `MCP connected`, the link and the last patch.
+7. **Hand edit with Axiom.** With Axiom, change a few blocks inside the work volume (a fill or paste), then ask the agent for any call on the document (e.g. `history`). It should show a `world sync` entry with your edit, within about a second (the default tracker is `both`; Axiom is believed to bypass the hook, so the scan finds it). Then ask the agent to fill over the area: your Axiom blocks are replaced only where the agent saw them, never silently. Also edit a chest's contents by hand and ask the agent to fill over the chest: the result says `1 skipped (hand-edited)`.
+8. **In-game request.** Mark a focus box (wand in focus mode), look at a block, and type `/autosketch ask put a lantern on top of this`. The action bar says it was delivered; the Claude Code session receives the request; activity lines (dimmed) and the agent's `world_reply` (prominent) appear in chat. Ask the agent to `render({views: [{camera: "player"}]})`: the image should show roughly what you were looking at.
+9. **Vanilla client join.** Install a plain NeoForge 21.1.249 server with only this jar in `mods/` (accept that server's EULA yourself; the Craftoria server pack can't be used here, since its other mods are required on the client), start it (`test/e2e/world/server.sh start <its folder>` works for any NeoForge server folder), and join it with a vanilla 1.21.1 client (no NeoForge). The mod registers no content, so the join should succeed, and `/autosketch wand` gives that client an ordinary blaze rod. Note any disconnect message.
+
+Report anything that looks wrong with the step number.

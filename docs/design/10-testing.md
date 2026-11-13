@@ -22,6 +22,14 @@ Three tiers, all run through `vitest`. Only the eval tier needs network access o
 
 Runs the asset pipeline against a real instance (Craftoria). It checks index time, registry size, unknown-model rate, and that palette families and sheets are produced. It is skipped in CI because the instance can't be redistributed.
 
+### Optional e2e world tier: `AUTOSKETCH_E2E_SERVER` set
+
+End-to-end tests of the live world link (`13`) against a running NeoForge server with the companion mod: the real MCP server code, wired as `server/index.ts` wires it, connects through the server's pairing file and drives tool calls; RCON plays the player (hand edits with `setblock`, volumes with the mod's console form of `/autosketch pos1|pos2 <x y z>`), and the mod's own snapshots read the world back to compare with the cache. Skipped unless `AUTOSKETCH_E2E_SERVER` (the server folder) and an instance (`AUTOSKETCH_E2E_INSTANCE` or `AUTOSKETCH_INSTANCE`, for the registry) are set; it can't run in CI.
+
+- `test/e2e/world/server.sh start|stop|wait <server dir>` copies the built mod jar into `mods/`, turns RCON on and starts the server with Java 21. It never accepts a EULA.
+- `scenarios.test.ts`: the scenarios of silo R's brief (`docs/briefs/world/R-end-to-end.md`), each in its own work volume of a flat world. The last one kills and restarts the server.
+- `measure.ts throughput|snapshot|tracker` and `volatile.ts`: the measurements behind `13`, *Measured on Craftoria*. They print JSON; they aren't pass/fail tests.
+
 ## Tier 3: agent evaluation (`test/eval/`, opt-in, costs tokens)
 
 This measures whether the perception and palette design actually help the agent. It is the core claim of the project.
@@ -57,6 +65,7 @@ npm run test:golden # tier 2 only
 npm run golden:update   # rewrite goldens after an intentional change; review the diff
 npm run golden:instance -- <dir>   # write the synthetic instance somewhere to inspect it
 npm run test:local  # + real-instance tier (needs AUTOSKETCH_INSTANCE)
+npm run test:e2e-world  # e2e world tier (needs AUTOSKETCH_E2E_SERVER, a running server and an instance)
 npm run eval        # tier 3 (needs ANTHROPIC_API_KEY and an instance); -- --dry-run prints the plan only
 ```
 
@@ -76,6 +85,7 @@ npm run eval        # tier 3 (needs ANTHROPIC_API_KEY and an instance); -- --dry
 | Golden update command | Done: `npm run golden:update` (`UPDATE_GOLDEN=1`) | `test/golden/harness.ts` |
 | Tier 2 in `npm test` and CI speed | Done; the whole golden tier runs in under 1 s | `vitest.config.ts` (unchanged: it already includes `test/**`) |
 | Optional local tier | Done (before this work) | `test/local/` |
+| Optional e2e world tier | Done on the Craftoria server (8 scenarios, measurement scripts); no vanilla NeoForge server run (EULA) | `test/e2e/world/` |
 | Tier 3: runner, scripted driver, Agent SDK driver | Built. The SDK driver has not yet run against the real SDK or API (no tokens spent so far), so expect small fixes on the first real run | `test/eval/runner.ts`, `test/eval/drivers/`, `test/eval/host.ts` |
 | Tier 3: benchmark set (20 prompts, 3 seeds) | Done | `test/eval/prompts.ts`, `test/eval/seeds.ts` |
 | Tier 3: automatic checks, rubric, cost | Done (the rubric is wired and parsed, but no judge has run yet) | `test/eval/checks.ts`, `rubric.ts`, `cost.ts` |

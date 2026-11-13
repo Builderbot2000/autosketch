@@ -12,6 +12,7 @@
     "golden:update": "UPDATE_GOLDEN=1 vitest run test/golden",
     "golden:instance": "tsx scripts/gen-golden-instance.ts",
     "test:local": "vitest run test/local",
+    "test:e2e-world": "vitest run test/e2e/world",
     "eval": "tsx test/eval/cli.ts",
     "dev": "tsx src/server/index.ts",
     "start": "node dist/server/index.js"

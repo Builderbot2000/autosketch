@@ -60,11 +60,11 @@ public final class WorldModule {
             return server == null ? null : server.getLevel(key);
         };
         PatchApplier patches = new PatchApplier(Autosketch.link(), levels,
-                () -> budgetOverride > 0 ? budgetOverride : config(AutosketchConfig.TICK_BUDGET::get, 10_000));
+                () -> budgetOverride > 0 ? budgetOverride : config(AutosketchConfig.TICK_BUDGET::get, 20_000));
         WorldReads reads = new WorldReads(Autosketch.link(), levels, Util.backgroundExecutor());
         ChangeTracker tracker = new ChangeTracker(Autosketch.link(), levels,
                 () -> config(AutosketchConfig.DIRTY_CAP::get, Messages.Dirty.CAP),
-                () -> modeOverride != null ? modeOverride : ChangeTracker.Mode.valueOf(config(AutosketchConfig.TRACKER::get, "hook").toUpperCase(Locale.ROOT)),
+                () -> modeOverride != null ? modeOverride : ChangeTracker.Mode.valueOf(config(AutosketchConfig.TRACKER::get, "both").toUpperCase(Locale.ROOT)),
                 () -> config(AutosketchConfig.SCAN_PERIOD::get, 20),
                 frame -> Autosketch.bridge().send(frame));
         services = new Services(patches, reads, tracker);

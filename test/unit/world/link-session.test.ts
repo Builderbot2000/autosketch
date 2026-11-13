@@ -93,4 +93,16 @@ describe("session fan-out and call hooks", () => {
     ]);
     await session.close();
   });
+
+  it("runs after hooks when a call fails, so hooks counting running calls unwind (silo R)", async () => {
+    const session = new Session(tempWorkspace());
+    let running = 0;
+    session.callHooks.push({ before: () => void running++, after: (_c, r) => (running--, r) });
+    const client = await connect(fixtureContext(), session);
+    await client.callTool({ name: "doc_new", arguments: { name: "t" } });
+    const bad = await client.callTool({ name: "fill", arguments: { box: { min: [0, 0, 0], max: [1, 1, 1] }, pattern: "no_such_block_xyz" } });
+    expect(bad.isError).toBe(true);
+    expect(running).toBe(0);
+    await session.close();
+  });
 });

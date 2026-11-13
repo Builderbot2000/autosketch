@@ -26,7 +26,7 @@ public final class AutosketchConfig {
 
     public static final ModConfigSpec.IntValue TICK_BUDGET = B
             .comment("Most blocks a patch writes per server tick; larger patches continue on the next ticks (M7).")
-            .defineInRange("tickBudget", 10_000, 1, 10_000_000);
+            .defineInRange("tickBudget", 20_000, 1, 10_000_000);
 
     static {
         B.pop().push("tracking");
@@ -39,9 +39,9 @@ public final class AutosketchConfig {
 
     // Silo O (change tracker, M9).
     public static final ModConfigSpec.ConfigValue<String> TRACKER = B
-            .comment("How block changes are detected: \"hook\" (a mixin on chunk block writes), \"scan\" (periodic comparison of the volumes' sections,",
-                    "for when the mixin conflicts with another mod; the mixin is then not applied at all, read at game start) or \"both\".")
-            .define("tracker", "hook", o -> o instanceof String s && (s.equals("hook") || s.equals("scan") || s.equals("both")));
+            .comment("How block changes are detected: \"hook\" (a mixin on chunk block writes, immediate), \"scan\" (periodic comparison of the volumes' sections, which also sees writers that bypass the hook, such as Axiom,",
+                    "for when the mixin conflicts with another mod; the mixin is then not applied at all, read at game start) or \"both\" (the default: measured on Craftoria, see 13).")
+            .define("tracker", "both", o -> o instanceof String s && (s.equals("hook") || s.equals("scan") || s.equals("both")));
 
     public static final ModConfigSpec.IntValue SCAN_PERIOD = B
             .comment("Ticks for the scan tracker to compare every section of the volumes once.")

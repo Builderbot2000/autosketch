@@ -164,7 +164,15 @@ export class Session {
   async runCall(call: CallInfo, run: () => Promise<CallToolResult> | CallToolResult): Promise<CallToolResult> {
     if (!this.callHooks.length) return run();
     for (const h of this.callHooks) await h.before?.(call);
-    let result = await run();
+    let result: CallToolResult;
+    try {
+      result = await run();
+    } catch (e) {
+      // A refused or failed call still ends: hooks that count running calls (the world link) must
+      // unwind, or every later result loses its `world:` line. Their output is dropped with the error.
+      for (const h of this.callHooks) if (h.after) await Promise.resolve(h.after(call, { content: [], isError: true })).catch(() => {});
+      throw e;
+    }
     for (const h of this.callHooks) if (h.after) result = await h.after(call, result);
     return result;
   }

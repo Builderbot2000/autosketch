@@ -399,6 +399,10 @@ export class LiveLink implements WorldLink {
         const r = await this.doOpen(this.openedWith!, true);
         this.note(`world: ${r.report.split("\n")[0]}`);
       } catch (e) {
+        // The player may have moved on while this relink ran (two corners marked in quick
+        // succession): follow the latest volumes rather than unlinking over a stale box.
+        const latest = this.bridge.volumes;
+        if (latest && latest !== m && this.bridge.connected) return this.followVolumes(latest);
         this.unlink(`relinking failed: ${(e as Error).message}`);
       }
       return;
@@ -496,7 +500,8 @@ export class LiveLink implements WorldLink {
       await this.flush();
       await this.chain;
     }
-    const linkedCall = (call.doc && call.scope === "base") || call.tool === "doc_open";
+    // A merge names the job's scope, but its patch is the base document's: its result gets the line.
+    const linkedCall = (call.doc && call.scope === "base") || call.tool === "doc_open" || (call.tool === "scope_merge" && mine.length > 0);
     if (!linkedCall || this.running) return result;
     const line = this.takeLine();
     return line ? { ...result, content: [...result.content, { type: "text", text: line }] } : result;

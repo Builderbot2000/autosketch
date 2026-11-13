@@ -33,6 +33,11 @@ import net.minecraft.world.item.ItemStack;
  * Silo N's subcommands (13, *Work and context volumes in-game*, *Player feedback in-game*; M3):
  * {@code wand}, {@code mode}, {@code pos1}, {@code pos2}, {@code show}, {@code clear},
  * {@code status}, {@code notices on|off}, {@code context add|grow <n>|clear}.
+ *
+ * <p>From a source that isn't a player (the server console, RCON, a command block), {@code mode
+ * work|context}, {@code pos1|pos2 <x y z>} and {@code context add} work too, with one shared set of
+ * corners for every such source, in the source's dimension. That lets a server admin or a script
+ * (the end-to-end tests, silo R) set the volumes without a player online.
  */
 public final class VolumeCommands implements CommandExtension {
     private final VolumeManager volumes;
@@ -43,6 +48,9 @@ public final class VolumeCommands implements CommandExtension {
     private final Bridge bridge;
     private final Supplier<List<WandMode>> modes;
     private final Supplier<PatchStatus> patches;
+    /** Corners and mode for sources that aren't players (console, RCON, command blocks). */
+    private final PlayerStates.State console = new PlayerStates.State();
+    private boolean consoleContextMode;
 
     public VolumeCommands(VolumeManager volumes, PlayerStates players, WandEvents wand, VolumeModes.Context contextMode, Feedback feedback,
             Bridge bridge, Supplier<List<WandMode>> modes, Supplier<PatchStatus> patches) {
@@ -99,17 +107,39 @@ public final class VolumeCommands implements CommandExtension {
     }
 
     private int mode(CommandContext<CommandSourceStack> c) throws CommandSyntaxException {
-        ServerPlayer p = c.getSource().getPlayerOrException();
         String name = StringArgumentType.getString(c, "mode");
+        if (!c.getSource().isPlayer()) {
+            if (!name.equals("work") && !name.equals("context")) return refused(c, "only the work and context modes work without a player");
+            consoleContextMode = name.equals("context");
+            return ok(c, name + " mode");
+        }
+        ServerPlayer p = c.getSource().getPlayerOrException();
         if (!wand.select(p, name)) return refused(c, "no wand mode \"" + name + "\" (modes: " + String.join(", ", modes.get().stream().map(WandMode::name).toList()) + ")");
         feedback.actionBar(p, Component.literal("Autosketch wand: " + name + " mode"));
         return ok(c, name + " mode");
     }
 
     private int pos(CommandContext<CommandSourceStack> c, int corner, BlockPos pos) throws CommandSyntaxException {
+        if (!c.getSource().isPlayer()) return consolePos(c, corner, pos);
         ServerPlayer p = c.getSource().getPlayerOrException();
         wand.mode(p).setCorner(p, corner, pos);
         return 1;
+    }
+
+    /** {@code pos1|pos2 <x y z>} from a source that isn't a player: the shared console corners. */
+    private int consolePos(CommandContext<CommandSourceStack> c, int corner, BlockPos pos) {
+        var level = c.getSource().getLevel();
+        PlayerStates.Corners k = consoleContextMode ? console.context : console.work;
+        if (!k.set(level.dimension(), corner, pos)) return ok(c, (consoleContextMode ? "context" : "work") + " corner " + corner + " at " + pos.toShortString());
+        Box b = Box.of(k.first, k.second);
+        if (consoleContextMode) return ok(c, "context box " + VolumeModes.size(b) + " marked; /autosketch context add adds it");
+        k.clear(); // each pos1 + pos2 pair names one box, so a script never makes an in-between volume
+        try {
+            volumes.setWork(level, b);
+        } catch (VolumeManager.Refused e) {
+            return refused(c, e.getMessage());
+        }
+        return ok(c, "work volume " + VolumeModes.size(volumes.work()) + " (link " + volumes.link() + ")");
     }
 
     private int show(CommandContext<CommandSourceStack> c) throws CommandSyntaxException {
@@ -130,6 +160,19 @@ public final class VolumeCommands implements CommandExtension {
     }
 
     private int contextAdd(CommandContext<CommandSourceStack> c) throws CommandSyntaxException {
+        if (!c.getSource().isPlayer()) {
+            PlayerStates.Corners k = console.context;
+            if (k.first == null || k.second == null || !c.getSource().getLevel().dimension().equals(k.dimension))
+                return refused(c, "mark a box first (/autosketch mode context, then pos1 and pos2 with coordinates)");
+            Box b = Box.of(k.first, k.second);
+            try {
+                volumes.contextAdd(c.getSource().getLevel(), b);
+            } catch (VolumeManager.Refused e) {
+                return refused(c, e.getMessage());
+            }
+            k.clear();
+            return ok(c, "context box " + VolumeModes.size(b) + " added (" + volumes.current().context().size() + " boxes)");
+        }
         ServerPlayer p = c.getSource().getPlayerOrException();
         Box b = contextMode.marked(p);
         if (b == null) return refused(c, "mark a box in context mode first (/autosketch mode context, then left and right click)");

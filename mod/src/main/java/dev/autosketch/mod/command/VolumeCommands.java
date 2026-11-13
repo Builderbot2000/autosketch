@@ -133,6 +133,7 @@ public final class VolumeCommands implements CommandExtension {
         if (!k.set(level.dimension(), corner, pos)) return ok(c, (consoleContextMode ? "context" : "work") + " corner " + corner + " at " + pos.toShortString());
         Box b = Box.of(k.first, k.second);
         if (consoleContextMode) return ok(c, "context box " + VolumeModes.size(b) + " marked; /autosketch context add adds it");
+        k.clear(); // each pos1 + pos2 pair names one box, so a script never makes an in-between volume
         try {
             volumes.setWork(level, b);
         } catch (VolumeManager.Refused e) {

@@ -22,6 +22,19 @@ export const DEFAULT_VOLATILE: VolatileList = {
   "minecraft:smoker": ["BurnTime", "CookTime", "CookTimeTotal", "lit_time_remaining", "lit_total_time", "cooking_time_spent", "cooking_total_time"],
   "minecraft:hopper": ["TransferCooldown"],
   "minecraft:brewing_stand": ["BrewTime"],
+  "minecraft:campfire": ["CookingTimes"],
+  "minecraft:soul_campfire": ["CookingTimes"],
+  // Measured on Craftoria 1.37.0 (silo R, 13 *Volatile keys*): Create's kinetic network state
+  // changes whenever a connected source or load changes, without any edit to the block itself, and
+  // the game adds NeedsSpeedUpdate as a kinetic block entity loads; the millstone's Timer counts
+  // processing progress.
+  "*": ["NeedsSpeedUpdate"],
+  "create:simple_kinetic": ["Speed", "Network", "Source"],
+  "create:motor": ["Speed", "Network", "Source"],
+  "create:encased_fan": ["Speed", "Network", "Source"],
+  "create:gearbox": ["Speed", "Network", "Source"],
+  "create:mechanical_press": ["Speed", "Network", "Source", "Running", "Finished", "Ticks"],
+  "create:millstone": ["Speed", "Network", "Source", "Timer"],
 };
 
 /** Union of volatile lists (plugin entries on top of the default); `state_only` wins. */

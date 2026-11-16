@@ -682,7 +682,7 @@ Work is split into silos in `docs/briefs/world/`. Suggested order: protocol, has
 
 ## Backlog
 
-From the first in-world test on Craftoria (2026-11-15). Not started; each item needs its design settled before it is built.
+From the first in-world test on Craftoria (2026-11-15). Designs settled with the user (*Decisions*), not started. Points marked *to confirm* are checked while building; numbers marked as defaults are measured on Craftoria before they are fixed.
 
 - **B1. The wand is any blaze rod, as WorldEdit's is any wooden axe.** WorldEdit's model: the wand is a configured item type (`wand-item`, default `minecraft:wooden_axe`), and any stack of that type is the wand, with no marker. While a player with the selection permission holds it in the main hand, left-clicking a block sets pos1 and right-clicking a block sets pos2. Both clicks are cancelled, so the axe never breaks the block, strips a log or opens the block. `//wand` only hands out the item. Follow it:
   - The wand item comes from config (`wandItem`, default `minecraft:blaze_rod`). Any stack of it is the wand; the `custom_data` marker and `/autosketch wand` go.
@@ -758,3 +758,4 @@ Settled with the user on 2026-11-15 (Backlog):
 - **Memory is Claude Code's auto memory, pointed at one shared directory** (B5), not an autosketch format.
 - **`/autosketch scan` sets volumes with no accept step** (B4): an optional radius in chunks, wide by default because scan gathers background; the player refines and proceeds when happy.
 - **Requests carry a mode named by the subcommand** (B6): `ask`, `scan`, `plan`, `build`, enforced by the MCP, not advisory.
+- **No playback pacing.** Patches keep applying as fast as `tickBudget` allows; they are not slowed down to show an action building up. Reason: each action already reaches the world as its own patch, and pacing would only add wall time: syncs and snapshots queue behind a paced patch (a half-written section can't be read as the truth), and acks would miss the call that caused them. Steps inside one action (a script's loop) would need partial patches mid-op, an engine change not worth making.

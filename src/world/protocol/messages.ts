@@ -8,7 +8,13 @@ import type { Vec3 } from "../../core/region.js";
  * only describe the encoding (origin, size, counts) are produced and checked by the codec.
  */
 
-export const PROTOCOL_VERSION = 1;
+/** The protocol version this side speaks natively (`N`). */
+export const PROTOCOL_VERSION = 2;
+/**
+ * Every version the MCP speaks: its own and the one before (`N`, `N−1`; `14`, *Version skew between
+ * mod and MCP*). Everything version 2 adds is optional on the wire, so one codec reads both.
+ */
+export const SUPPORTED_PROTOCOLS: readonly number[] = [PROTOCOL_VERSION, PROTOCOL_VERSION - 1];
 /** Largest frame length value (bytes after the 4-byte length prefix). */
 export const MAX_FRAME = 256 * 1024 * 1024;
 /** Largest JSON header. */
@@ -24,6 +30,12 @@ export const HELLO_TIMEOUT_MS = 10_000;
 export interface WireBox {
   min: Vec3;
   max: Vec3;
+}
+
+/** Inclusive area of block columns, `[x, z]` world coordinates (`snapshot` kind `surface`, the scan grant). */
+export interface WireArea {
+  min: [number, number];
+  max: [number, number];
 }
 
 /** 64-bit hash as 16 lowercase hex digits. */
@@ -47,11 +59,22 @@ export type Cardinal = "north" | "south" | "west" | "east";
 export const REJECT_REASONS = ["unknown_state", "bad_nbt", "outside_volumes", "stale_link"] as const;
 export type RejectReason = (typeof REJECT_REASONS)[number];
 
-export const ERROR_CODES = ["protocol_mismatch", "bad_token", "not_ready", "bad_request", "unknown_type", "no_volumes", "wrong_dimension", "outside_volumes", "too_large", "replaced", "stale_link", "bad_extension", "internal"] as const;
+export const ERROR_CODES = ["protocol_mismatch", "bad_token", "not_ready", "bad_request", "unknown_type", "no_volumes", "wrong_dimension", "outside_volumes", "too_large", "replaced", "stale_link", "bad_extension", "bad_volumes", "internal"] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
 
-export const PROMPT_REFUSALS = ["no_link", "not_allowed", "no_listener"] as const;
+export const PROMPT_REFUSALS = ["no_link", "not_allowed", "no_listener", "unsupported_mode"] as const;
 export type PromptRefusal = (typeof PROMPT_REFUSALS)[number];
+
+/** Request modes, named by the player's subcommand (`13`, B6). */
+export const REQUEST_MODES = ["ask", "scan", "plan", "build"] as const;
+export type RequestMode = (typeof REQUEST_MODES)[number];
+
+/**
+ * Optional capabilities a mod's `hello` lists in `features` (*Versions and features*). The MCP uses
+ * an addition only when the mod lists it, never because of the protocol number.
+ */
+export const MOD_FEATURES = ["modes", "scan", "volumes.set"] as const;
+export type ModFeature = (typeof MOD_FEATURES)[number];
 
 /** A world block as the mod reports it: canonical state, block-entity NBT when it has one. */
 export interface WorldBlock {
@@ -66,6 +89,8 @@ export interface ClientHello {
   token: string;
   client: { name: string; version: string };
   volatile: VolatileList;
+  /** Request modes the MCP enforces; the mod never sends another. Absent (protocol 1) means `["build"]`. */
+  modes?: RequestMode[];
 }
 
 export interface ModHello {
@@ -75,6 +100,8 @@ export interface ModHello {
   game: { version: string; dataVersion: number; loader: string; loaderVersion: string };
   singleplayer: boolean;
   host: PlayerRef | null;
+  /** Optional capabilities (`MOD_FEATURES`; unknown names are kept and ignored). Absent (protocol 1) means none. */
+  features?: string[];
 }
 
 export interface ErrorMessage {
@@ -96,6 +123,8 @@ export type VolumesMessage =
       context: WireBox[];
       /** The MCP-declared extended work volume (whole blocks) in force for this link, if any. */
       extended?: WireBox;
+      /** Only on the `volumes` that confirms a `volumes.set`: that request's id. */
+      id?: number;
     }
   | { type: "volumes"; link: number; work: null };
 
@@ -106,6 +135,16 @@ export interface VolumesExtend {
   link: number;
   /** The extended work volume; must contain the player's work volume. */
   work: WireBox;
+}
+
+/** The MCP sets the work and context volumes, as if the player had marked them (*Wire format*, `volumes.set`; `13`, B4). */
+export interface VolumesSet {
+  type: "volumes.set";
+  id: number;
+  dimension: string;
+  work: WireBox;
+  /** Context boxes; absent means the default context (the work volume grown by 3). */
+  context?: WireBox[];
 }
 
 export interface HashesRequest {
@@ -127,6 +166,44 @@ export interface HashesResult {
 }
 
 export type SnapshotRequest = { type: "snapshot"; id: number; dimension: string; boxes: WireBox[] } | { type: "snapshot"; id: number; dimension: string; sections: Vec3[] };
+
+/** A surface snapshot (`snapshot` kind `surface`): per column, the topmost non-air block, and optionally the ceiling above `ceiling`. */
+export interface SurfaceRequest {
+  type: "snapshot";
+  id: number;
+  dimension: string;
+  kind: "surface";
+  columns: WireArea;
+  /** When given, each column also reports the lowest non-air block at or above this y. */
+  ceiling?: number;
+}
+
+/**
+ * One value per column of the area, x fastest, then z. `heights[i]` is 0 when the column has no
+ * such block (all air, or its chunk is missing), else the block's y is `minY + heights[i] − 1`;
+ * `states[i]` is its palette index (0, and not encoded, when `heights[i]` is 0).
+ */
+export interface SurfaceLayer {
+  heights: Uint32Array;
+  states: Uint32Array;
+}
+
+export interface SurfaceResult {
+  type: "snapshot.result";
+  id: number;
+  dimension: string;
+  kind: "surface";
+  columns: WireArea;
+  /** The dimension's lowest build y. */
+  minY: number;
+  ceiling?: number;
+  /** Chunks `[cx, cz]` of the area that aren't generated, ascending by cz, then cx. */
+  missing: [number, number][];
+  palette: string[];
+  surface: SurfaceLayer;
+  /** Present exactly when `ceiling` is. */
+  ceilings?: SurfaceLayer;
+}
 
 export interface SnapshotRegion {
   box: WireBox;
@@ -186,12 +263,28 @@ export interface GameContext {
   focusClipped?: boolean;
 }
 
+/** What a `scan` request lets the MCP read (`13`, B4): the mod sizes it from its config. */
+export interface ScanGrant {
+  /** Radius in chunks around the player's chunk, after clipping to the mod's maximum. */
+  radius: number;
+  /** The player asked for a larger radius. */
+  clipped?: boolean;
+  /** Block columns of the chunks within the radius: readable as a surface snapshot. */
+  columns: WireArea;
+  /** The full-block box around the player: readable as a blocks snapshot. */
+  box: WireBox;
+}
+
 export interface PromptMessage {
   type: "prompt";
   id: number;
   player: PlayerRef;
   text: string;
   context: GameContext;
+  /** The player's subcommand (B6); absent (a mod without the `modes` feature) means `build`. */
+  mode?: RequestMode;
+  /** Only with mode `scan`. */
+  scan?: ScanGrant;
 }
 
 export type PromptResult = { type: "prompt.result"; id: number; delivered: true } | { type: "prompt.result"; id: number; delivered: false; reason: PromptRefusal };
@@ -211,8 +304,18 @@ export interface ChatMessage {
 }
 
 /** Messages the MCP sends. */
-export type McpMessage = ClientHello | ErrorMessage | VolumesExtend | HashesRequest | SnapshotRequest | PatchMessage | PromptResult | NoticeMessage | ChatMessage;
+export type McpMessage = ClientHello | ErrorMessage | VolumesExtend | VolumesSet | HashesRequest | SnapshotRequest | SurfaceRequest | PatchMessage | PromptResult | NoticeMessage | ChatMessage;
 /** Messages the mod sends. */
-export type ModMessage = ModHello | ErrorMessage | VolumesMessage | HashesResult | SnapshotResult | PatchAck | DirtyMessage | PromptMessage;
+export type ModMessage = ModHello | ErrorMessage | VolumesMessage | HashesResult | SnapshotResult | SurfaceResult | PatchAck | DirtyMessage | PromptMessage;
 export type Message = McpMessage | ModMessage;
 export type Sender = "mcp" | "mod";
+
+/** Whether the mod's hello lists a feature (*Versions and features*: features gate on hellos, never on protocol numbers). */
+export function modHas(hello: ModHello | undefined, feature: ModFeature): boolean {
+  return hello?.features?.includes(feature) ?? false;
+}
+
+/** The modes an MCP hello lists; absent means `build` only. */
+export function helloModes(hello: Pick<ClientHello, "modes">): readonly RequestMode[] {
+  return hello.modes ?? ["build"];
+}

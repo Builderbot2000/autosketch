@@ -1,0 +1,17 @@
+{
+  "description": "A patch with no blocks (an entry that changed nothing the world holds)",
+  "sender": "mcp",
+  "header": {
+    "type": "patch",
+    "id": 20,
+    "link": 3,
+    "dimension": "minecraft:overworld",
+    "origin": [0, 0, 0],
+    "size": [0, 0, 0],
+    "count": 0
+  },
+  "body": {
+    "palette": [],
+    "blocks": []
+  }
+}

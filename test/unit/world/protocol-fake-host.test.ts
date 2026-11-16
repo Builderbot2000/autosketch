@@ -102,14 +102,14 @@ function cacheFrom(snap: SnapshotResult) {
 describe("fake host", () => {
   it("runs the happy path: hello, volumes, snapshot, patch with one skip, ack, dirty", async () => {
     const { host, client, hello, volumes } = await setup();
-    expect(hello).toMatchObject({ protocol: 1, singleplayer: true, game: { dataVersion: 3955 } });
+    expect(hello).toMatchObject({ protocol: 2, singleplayer: true, game: { dataVersion: 3955 } });
     expect(volumes).toEqual({ type: "volumes", link: 1, dimension: OW, work, context: [{ min: [-3, 61, -3], max: [10, 70, 10] }] });
     expect(host.volatile).toEqual(DEFAULT_VOLATILE);
 
     const v = volumes as Extract<VolumesMessage, { dimension: string }>;
     const sid = client.id();
     client.send({ type: "snapshot", id: sid, dimension: OW, boxes: [v.work, ...v.context] });
-    const snap = await client.next("snapshot.result", (m) => m.id === sid);
+    const snap = (await client.next("snapshot.result", (m) => m.id === sid)) as SnapshotResult;
     expect(snap.regions.map((r) => r.box)).toEqual([v.work, ...v.context]);
     const cache = cacheFrom(snap);
     expect(cache.get("3,64,3")!.state).toBe(STONE);
@@ -147,9 +147,9 @@ describe("fake host", () => {
     clients.push(bad);
     expect(await bad.next("error")).toMatchObject({ code: "bad_token", id: null });
     await bad.waitClosed();
-    const old = await Client.open(host, { protocol: 2 });
+    const old = await Client.open(host, { protocol: 1 });
     clients.push(old);
-    expect(await old.next("error")).toMatchObject({ code: "protocol_mismatch", protocol: 1 });
+    expect(await old.next("error")).toMatchObject({ code: "protocol_mismatch", protocol: 2 });
     await old.waitClosed();
     expect(host.connected).toBe(false);
   });
@@ -161,7 +161,7 @@ describe("fake host", () => {
     const boxes = [v.work, ...v.context];
     const sid = client.id();
     client.send({ type: "snapshot", id: sid, dimension: OW, boxes });
-    const cache = cacheFrom(await client.next("snapshot.result"));
+    const cache = cacheFrom((await client.next("snapshot.result")) as SnapshotResult);
     const mine = sectionHashes(boxes, (x, y, z) => cache.get(`${x},${y},${z}`) ?? { state: "minecraft:air" }, DEFAULT_VOLATILE);
 
     const hid = client.id();

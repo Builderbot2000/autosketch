@@ -93,10 +93,16 @@ describe("bridge client (13, W1)", () => {
     expect((unreachable as Error).message).toContain("networkingMode=mirrored");
   });
 
-  it("reports a protocol mismatch without guessing around it", async () => {
-    host = await FakeHost.start({ protocol: 2 });
-    const msg = await new Bridge({ instanceDir: host.instanceDir, volatile: {}, reconnect: false }).connect().catch((e: Error) => e.message);
-    expect(msg).toContain("protocol 2");
-    expect(msg).toContain("update the Autosketch MCP server");
+  it("reports a protocol mismatch without guessing around it, naming the older side", async () => {
+    host = await FakeHost.start({ protocol: 3 });
+    const newer = await new Bridge({ instanceDir: host.instanceDir, volatile: {}, reconnect: false }).connect().catch((e: BridgeError) => e);
+    expect((newer as BridgeError).refusal).toBe("protocol_mismatch");
+    expect((newer as Error).message).toBe("The mod speaks bridge protocol 3 and this Autosketch speaks 1 and 2: the Autosketch MCP server is older; update the Autosketch MCP server.");
+    // The MCP still said hello, in its own version, so the mod could tell the player too.
+    expect(host.received[0]).toMatchObject({ type: "hello", protocol: 2 });
+    await host.close();
+    host = await FakeHost.start({ protocol: 0 });
+    const older = await new Bridge({ instanceDir: host.instanceDir, volatile: {}, reconnect: false }).connect().catch((e: Error) => e.message);
+    expect(older).toBe("The mod speaks bridge protocol 0 and this Autosketch speaks 1 and 2: the Autosketch mod is older; update the Autosketch mod.");
   });
 });

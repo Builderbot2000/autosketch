@@ -1,0 +1,14 @@
+{
+  "description": "Surface snapshot of a scan's columns (B4): topmost non-air block per column",
+  "sender": "mcp",
+  "header": {
+    "type": "snapshot",
+    "id": 40,
+    "dimension": "minecraft:overworld",
+    "kind": "surface",
+    "columns": {
+      "min": [-2, 30],
+      "max": [1, 32]
+    }
+  }
+}

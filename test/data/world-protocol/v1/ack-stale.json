@@ -1,0 +1,33 @@
+{
+  "description": "A patch built for an older work volume: every position rejected",
+  "sender": "mod",
+  "header": {
+    "type": "patch.ack",
+    "id": 26,
+    "applied": 0,
+    "overwritten": 0,
+    "skipped": 0,
+    "rejected": 2,
+    "normalized": 0,
+    "origin": [100, 64, -200],
+    "size": [2, 1, 1]
+  },
+  "body": {
+    "palette": [],
+    "skipped": [],
+    "reasons": [
+      "stale_link"
+    ],
+    "rejected": [
+      {
+        "pos": [100, 64, -200],
+        "reason": "stale_link"
+      },
+      {
+        "pos": [101, 64, -200],
+        "reason": "stale_link"
+      }
+    ],
+    "normalized": []
+  }
+}

@@ -2,23 +2,30 @@ import { connect as netConnect, type Socket } from "node:net";
 import { decodeMessage, encodeMessage } from "./protocol/codec.js";
 import { FrameReader } from "./protocol/frame.js";
 import {
+  modHas,
   PROTOCOL_VERSION,
+  SUPPORTED_PROTOCOLS,
   type ChatMessage,
   type ErrorMessage,
   type HashesRequest,
   type HashesResult,
   type McpMessage,
+  type ModFeature,
   type ModHello,
   type ModMessage,
   type NoticeMessage,
   type PatchAck,
   type PatchMessage,
   type PromptResult,
+  type RequestMode,
   type SnapshotRequest,
   type SnapshotResult,
+  type SurfaceRequest,
+  type SurfaceResult,
   type VolatileList,
   type VolumesExtend,
   type VolumesMessage,
+  type VolumesSet,
 } from "./protocol/messages.js";
 import { pairingPath, readPairing, type Pairing } from "./protocol/pairing.js";
 
@@ -31,9 +38,13 @@ import { pairingPath, readPairing, type Pairing } from "./protocol/pairing.js";
  * Nothing is queued across a disconnect (`13`, *Lifecycle*): requests in flight reject with
  * `world_disconnected`, and sending while down rejects at once. The link decides what a reconnect
  * means (a section-hash sync).
+ *
+ * Versions (`13`, *Versions and features*; `14`, *Version skew between mod and MCP*): the bridge
+ * speaks protocol `N` and `N−1`, choosing the mod's version from the pairing file. Additions are
+ * used only when the mod's hello lists them in `features` (`supports`), never by version number.
  */
 
-/** An error with a refusal code (main briefs README): `world_disconnected`, or the mod's error code. */
+/** An error with a refusal code (main briefs README): `world_disconnected`, `world_mod_outdated`, or the mod's error code. */
 export class BridgeError extends Error {
   constructor(
     readonly refusal: string,
@@ -54,12 +65,23 @@ export interface BridgeConnection {
   readonly hello: ModHello | undefined;
   /** The latest `volumes` the mod sent on the current connection (it sends one right after hello). */
   readonly volumes: VolumesMessage | undefined;
-  /** Sends a request with a fresh id and resolves with its response; rejects with a `BridgeError`. */
+  /** The request modes this MCP's hello lists (B6); the mod sends no other. */
+  readonly modes: readonly RequestMode[];
+  /** Whether the connected mod's hello lists a feature. False while disconnected. */
+  supports(feature: ModFeature): boolean;
+  /**
+   * Sends a request with a fresh id and resolves with its response; rejects with a `BridgeError`.
+   * A request needing a feature the mod doesn't list rejects with `world_mod_outdated` unsent.
+   */
   request(m: Req<HashesRequest>): Promise<HashesResult>;
+  /** Needs the `scan` feature. */
+  request(m: Req<SurfaceRequest>): Promise<SurfaceResult>;
   request(m: Req<SnapshotRequest>): Promise<SnapshotResult>;
   request(m: Req<PatchMessage>): Promise<PatchAck>;
   /** Resolves with the `volumes` message that confirms the extension. */
   request(m: Req<VolumesExtend>): Promise<VolumesMessage>;
+  /** Resolves with the `volumes` message carrying the request's id. Needs the `volumes.set` feature. */
+  request(m: Req<VolumesSet>): Promise<VolumesMessage>;
   /** Fire-and-forget messages; dropped while disconnected. */
   send(m: NoticeMessage | ChatMessage | PromptResult): void;
   /** Listens to one message type from the mod. Returns the unsubscribe function. */
@@ -73,6 +95,11 @@ export interface BridgeOptions {
   instanceDir: string;
   volatile: VolatileList;
   client?: { name: string; version: string };
+  /**
+   * Request modes the hello lists (`13`, B6): only modes this MCP enforces, since the mod refuses
+   * the others itself. Default `["ask", "plan", "build"]`: `scan` is listed once B4 can serve it.
+   */
+  modes?: RequestMode[];
   /** Reconnect after a lost connection (default true), with backoff from `minMs` to `maxMs`. */
   reconnect?: boolean;
   backoff?: { minMs: number; maxMs: number };
@@ -88,6 +115,9 @@ interface Pending {
 }
 
 const DOWN = "world_disconnected";
+const OUTDATED = "world_mod_outdated";
+/** Modes listed when the options name none: a mode is listed only once the MCP enforces it. */
+const DEFAULT_MODES: readonly RequestMode[] = ["ask", "plan", "build"];
 
 export class Bridge implements BridgeConnection {
   hello: ModHello | undefined;
@@ -111,6 +141,14 @@ export class Bridge implements BridgeConnection {
     return this.hello !== undefined && this.socket !== undefined && !this.socket.destroyed;
   }
 
+  get modes(): readonly RequestMode[] {
+    return this.opts.modes ?? DEFAULT_MODES;
+  }
+
+  supports(feature: ModFeature): boolean {
+    return this.connected && modHas(this.hello, feature);
+  }
+
   /**
    * Connects once and resolves with the mod's hello, or rejects with a message the agent can act
    * on (no pairing file, port unreachable with the WSL hint, version mismatch, wrong token). After
@@ -132,8 +170,6 @@ export class Bridge implements BridgeConnection {
           : `Can't read the pairing file ${pairingPath(this.opts.instanceDir)}: ${(e as Error).message}`,
       );
     }
-    if (pairing.protocol !== PROTOCOL_VERSION)
-      throw new BridgeError(DOWN, `The mod speaks bridge protocol ${pairing.protocol} and this Autosketch speaks ${PROTOCOL_VERSION}: update the ${pairing.protocol > PROTOCOL_VERSION ? "Autosketch MCP server" : "Autosketch mod"}.`);
     const socket = await this.open(pairing);
     return this.handshake(socket, pairing);
   }
@@ -160,11 +196,15 @@ export class Bridge implements BridgeConnection {
   }
 
   request(m: Req<HashesRequest>): Promise<HashesResult>;
+  request(m: Req<SurfaceRequest>): Promise<SurfaceResult>;
   request(m: Req<SnapshotRequest>): Promise<SnapshotResult>;
   request(m: Req<PatchMessage>): Promise<PatchAck>;
   request(m: Req<VolumesExtend>): Promise<VolumesMessage>;
-  request(m: Req<HashesRequest | SnapshotRequest | PatchMessage | VolumesExtend>): Promise<ModMessage> {
+  request(m: Req<VolumesSet>): Promise<VolumesMessage>;
+  request(m: Req<HashesRequest | SurfaceRequest | SnapshotRequest | PatchMessage | VolumesExtend | VolumesSet>): Promise<ModMessage> {
     if (!this.connected) return Promise.reject(new BridgeError(DOWN, "The game isn't connected (the world link is down); nothing was sent."));
+    const needs: ModFeature | undefined = m.type === "volumes.set" ? "volumes.set" : m.type === "snapshot" && "kind" in m ? "scan" : undefined;
+    if (needs && !this.supports(needs)) return Promise.reject(new BridgeError(OUTDATED, outdated(this.hello!, needs)));
     const id = this.nextId++;
     const expect: ModType = m.type === "hashes" ? "hashes.result" : m.type === "snapshot" ? "snapshot.result" : m.type === "patch" ? "patch.ack" : "volumes";
     return new Promise<ModMessage>((resolve, reject) => {
@@ -213,6 +253,9 @@ export class Bridge implements BridgeConnection {
 
   private handshake(s: Socket, p: Pairing): Promise<ModHello> {
     const reader = new FrameReader();
+    // The mod's own version when this MCP speaks it (N or N−1). Otherwise our own: the mod refuses it
+    // with protocol_mismatch, and that hello is how it learns which side to tell the player to update.
+    const version = SUPPORTED_PROTOCOLS.includes(p.protocol) ? p.protocol : PROTOCOL_VERSION;
     return new Promise<ModHello>((resolve, reject) => {
       let done = false;
       const fail = (e: Error) => {
@@ -240,9 +283,9 @@ export class Bridge implements BridgeConnection {
             continue;
           }
           if (!done) {
-            if (m.type === "error") return fail(new BridgeError(m.code === "protocol_mismatch" ? "protocol_mismatch" : DOWN, handshakeError(m)));
+            if (m.type === "error") return fail(handshakeError(m, version));
             if (m.type !== "hello") return fail(new BridgeError(DOWN, `The mod answered the hello with ${m.type}.`));
-            if (m.protocol !== PROTOCOL_VERSION) return fail(new BridgeError("protocol_mismatch", `The mod speaks bridge protocol ${m.protocol} and this Autosketch speaks ${PROTOCOL_VERSION}: update the ${m.protocol > PROTOCOL_VERSION ? "Autosketch MCP server" : "Autosketch mod"}.`));
+            if (m.protocol !== version) return fail(mismatch(m.protocol, version));
             done = true;
             this.socket = s;
             this.hello = m;
@@ -259,7 +302,7 @@ export class Bridge implements BridgeConnection {
         if (!done) return fail(new BridgeError(DOWN, "The mod closed the connection during the handshake."));
         if (this.socket === s) this.lost("connection closed");
       });
-      this.writeTo(s, { type: "hello", protocol: PROTOCOL_VERSION, token: p.token, client: this.opts.client ?? { name: "autosketch", version: "1.0.0" }, volatile: this.opts.volatile });
+      this.writeTo(s, { type: "hello", protocol: version, token: p.token, client: this.opts.client ?? { name: "autosketch", version: "1.0.0" }, volatile: this.opts.volatile, modes: [...this.modes] });
     });
   }
 
@@ -279,12 +322,19 @@ export class Bridge implements BridgeConnection {
         // Another Autosketch took the connection over: don't fight it for the socket.
         if (m.code === "replaced") this.closed = true;
       }
+    } else if (m.type === "volumes" && m.work !== null && m.id !== undefined) {
+      // Confirms a volumes.set by id.
+      const p = this.pending.get(m.id);
+      if (p && p.expect === "volumes") {
+        this.pending.delete(m.id);
+        p.resolve(m);
+      }
     } else if (m.type === "volumes" && m.work !== null && m.extended && this.extending.length) {
       const id = this.extending.shift()!;
       const p = this.pending.get(id);
       this.pending.delete(id);
       p?.resolve(m);
-    } else if ("id" in m && m.type !== "prompt") {
+    } else if ("id" in m && m.type !== "prompt" && m.type !== "volumes") {
       const p = this.pending.get(m.id);
       if (p && p.expect === m.type) {
         this.pending.delete(m.id);
@@ -334,10 +384,30 @@ function unreachable(p: Pairing, instanceDir: string, why: string): BridgeError 
   );
 }
 
-function handshakeError(m: ErrorMessage): string {
-  if (m.code === "bad_token") return "The mod refused the pairing token: the pairing file is stale (the game restarted?). Try again.";
-  if (m.code === "protocol_mismatch") return `The mod speaks bridge protocol ${m.protocol ?? "?"} and this Autosketch speaks ${PROTOCOL_VERSION}: update the older side.`;
-  return `The mod refused the connection (${m.code}): ${m.message}`;
+function handshakeError(m: ErrorMessage, sent: number): BridgeError {
+  if (m.code === "bad_token") return new BridgeError(DOWN, "The mod refused the pairing token: the pairing file is stale (the game restarted?). Try again.");
+  if (m.code === "protocol_mismatch") return mismatch(m.protocol, sent);
+  return new BridgeError(DOWN, `The mod refused the connection (${m.code}): ${m.message}`);
+}
+
+const SPOKEN = [...SUPPORTED_PROTOCOLS].sort((a, b) => a - b).join(" and ");
+
+/**
+ * A version mismatch, saying which side is older and what to update (`14`, *Version skew*). A mod
+ * version this MCP speaks can only differ from the hello's after the game restarted with another
+ * mod (a stale pairing file), so that one is retried rather than reported.
+ */
+function mismatch(mod: number | undefined, sent: number): BridgeError {
+  if (mod === undefined) return new BridgeError("protocol_mismatch", `The mod refused bridge protocol ${sent} without saying its own; this Autosketch speaks ${SPOKEN}: update the older side.`);
+  if (SUPPORTED_PROTOCOLS.includes(mod)) return new BridgeError(DOWN, `The mod speaks bridge protocol ${mod}, not the ${sent} its pairing file announced: the pairing file is stale (the game restarted?). Try again.`);
+  const older = mod > PROTOCOL_VERSION ? "Autosketch MCP server" : "Autosketch mod";
+  return new BridgeError("protocol_mismatch", `The mod speaks bridge protocol ${mod} and this Autosketch speaks ${SPOKEN}: the ${older} is older; update the ${older}.`);
+}
+
+const FEATURE_NAMES: Record<ModFeature, string> = { modes: "request modes", scan: "scanning (surface snapshots)", "volumes.set": "setting the volumes" };
+
+function outdated(hello: ModHello, f: ModFeature): string {
+  return `The Autosketch mod ${hello.mod.version} doesn't support ${FEATURE_NAMES[f]} (its hello doesn't list "${f}"): the Autosketch mod is older; update the Autosketch mod.`;
 }
 
 function safe(fn: () => void, log?: (msg: string) => void): void {

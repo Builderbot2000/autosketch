@@ -1,6 +1,7 @@
 import type { ObserveEvent } from "../core/events.js";
 import type { EventListener } from "../core/fanout.js";
-import type { ChatMessage, PlayerRef } from "./protocol/messages.js";
+import { READ_ONLY_MODES } from "./modes.js";
+import type { ChatMessage, PlayerRef, RequestMode } from "./protocol/messages.js";
 
 /**
  * What streams back to the game chat (docs/design/13-live-world.md, *Prompting from the game*,
@@ -15,7 +16,9 @@ import type { ChatMessage, PlayerRef } from "./protocol/messages.js";
  *   for it. A message carries at most `MAX_LINES` lines, the rest summed into a last one.
  * - **Request streams:** while an in-game request is open, `chat` carries its id and player, so the
  *   mod shows activity to that player (log `mine`, the default). It closes on `done` or after
- *   `idleMs` with no tool calls, or when the next request opens. Outside a request, `chat` carries
+ *   `idleMs` with no tool calls, or when the next request opens. A request in a read-only mode
+ *   (`ask`, `plan`, `scan`) doesn't close on idle time, since its mode is enforced while it is
+ *   open (B6, `modes.ts`). Outside a request, `chat` carries
  *   no request or player, and only players with log `all` see it.
  *
  * The stream reads measurements only (counts of blocks, images, patch results); it says nothing
@@ -25,6 +28,8 @@ import type { ChatMessage, PlayerRef } from "./protocol/messages.js";
 export interface OpenRequest {
   id: number;
   player: PlayerRef;
+  /** The request's mode (B6); absent means `build`. */
+  mode?: RequestMode;
 }
 
 export interface ActivityStreamOptions {
@@ -237,6 +242,7 @@ export class ActivityStream {
   private touch(): void {
     if (!this.request) return;
     clearTimeout(this.idleTimer);
+    if (this.request.mode && READ_ONLY_MODES.has(this.request.mode)) return; // closes on done, the next request or a disconnect
     this.idleTimer = setTimeout(() => this.closeRequest(), this.opts.idleMs);
     this.idleTimer.unref?.();
   }

@@ -155,6 +155,8 @@ async function main(): Promise<void> {
     process.exit(2);
   }
   session.inGame = inGame;
+  // Request modes (13, B6): while an ask, plan or scan request is open, edits on the linked document are refused.
+  session.callHooks.push(inGame.modeRule);
   // Once an instance loads (at startup, or later in place).
   if (autoLink) void session.whenInstance().then((c) => link.autoLink({ instanceDir: c.info.root, plugins: c.plugins, palettes: c.book }));
   const transport = new StdioServerTransport();

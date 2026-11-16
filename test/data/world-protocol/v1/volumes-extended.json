@@ -1,0 +1,23 @@
+{
+  "description": "The mod accepted the extension: same link, the player's work box unchanged, the extension in force",
+  "sender": "mod",
+  "header": {
+    "type": "volumes",
+    "link": 3,
+    "dimension": "minecraft:overworld",
+    "work": {
+      "min": [100, 64, -200],
+      "max": [131, 87, -169]
+    },
+    "context": [
+      {
+        "min": [97, 61, -203],
+        "max": [134, 90, -166]
+      }
+    ],
+    "extended": {
+      "min": [98, 64, -200],
+      "max": [131, 90, -169]
+    }
+  }
+}

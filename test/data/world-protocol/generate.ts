@@ -1,14 +1,16 @@
 /**
- * Regenerates the golden vectors in this folder (docs/design/13-live-world.md, *Wire format*,
- * *Golden vectors*). Run: `npx tsx test/data/world-protocol/generate.ts`. All content is synthetic.
- * The vectors are frozen: regenerate only for a protocol change, and say so in the commit.
+ * Regenerates the golden vectors of the current protocol version (2) in this folder
+ * (docs/design/13-live-world.md, *Wire format*, *Golden vectors*). Run:
+ * `npx tsx test/data/world-protocol/generate.ts`. All content is synthetic. The vectors are frozen:
+ * regenerate only for a protocol change, and say so in the commit. The previous version's vectors
+ * live in `v1/`, copied unchanged when version 2 was cut; this script never writes there.
  */
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { decodeFrame, encodeMessage } from "../../../src/world/protocol/codec.js";
 import { canonicalNbt, DEFAULT_VOLATILE, nbtHash, sectionHash } from "../../../src/world/protocol/hash.js";
-import type { Message, PatchBlock, Sender, VolatileList, WireBox } from "../../../src/world/protocol/messages.js";
+import { MOD_FEATURES, REQUEST_MODES, type Message, type PatchBlock, type Sender, type VolatileList, type WireBox } from "../../../src/world/protocol/messages.js";
 import { bytesToHex } from "../../../src/world/protocol/bytes.js";
 import { parseSnbt, toSnbt as snbtOf } from "../../../src/world/protocol/snbt.js";
 import { sidecarOf } from "./sidecar.js";
@@ -45,30 +47,41 @@ function vector(name: string, sender: Sender, description: string, m: Message, e
 mkdirSync(dir, { recursive: true });
 
 // ── handshake and control ──────────────────────────────────────────────────────────────────────
-vector("hello-mcp", "mcp", "MCP hello: protocol, pairing token, client, volatile-key list (the built-in default plus one plugin entry and one state-only type)", {
+vector("hello-mcp", "mcp", "MCP hello: protocol, pairing token, client, volatile-key list (the built-in default plus one plugin entry and one state-only type), and every request mode", {
   type: "hello",
-  protocol: 1,
+  protocol: 2,
   token: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
   client: { name: "autosketch", version: "1.0.0" },
   volatile: { ...DEFAULT_VOLATILE, "create:mechanical_press": ["Speed", "Network/Stress"], "create:belt": "state_only" },
+  modes: [...REQUEST_MODES],
 });
-vector("hello-mod-singleplayer", "mod", "Mod hello from the integrated server of a singleplayer world", {
+vector("hello-mcp-build-only", "mcp", "MCP hello listing only the build mode: the mod refuses ask, scan and plan requests itself (unsupported_mode)", {
   type: "hello",
-  protocol: 1,
-  mod: { version: "0.1.0" },
+  protocol: 2,
+  token: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+  client: { name: "autosketch", version: "1.1.0" },
+  volatile: {},
+  modes: ["build"],
+});
+vector("hello-mod-singleplayer", "mod", "Mod hello from the integrated server of a singleplayer world, listing every version-2 feature", {
+  type: "hello",
+  protocol: 2,
+  mod: { version: "0.2.0" },
   game: { version: "1.21.1", dataVersion: 3955, loader: "neoforge", loaderVersion: "21.1.249" },
   singleplayer: true,
   host: { name: "Kev", uuid: UUID_KEV },
+  features: [...MOD_FEATURES],
 });
-vector("hello-mod-dedicated", "mod", "Mod hello from a dedicated server (no host player)", {
+vector("hello-mod-dedicated", "mod", "Mod hello from a dedicated server (no host player), listing only some features", {
   type: "hello",
-  protocol: 1,
-  mod: { version: "0.1.0" },
+  protocol: 2,
+  mod: { version: "0.2.0" },
   game: { version: "1.21.1", dataVersion: 3955, loader: "neoforge", loaderVersion: "21.1.249" },
   singleplayer: false,
   host: null,
+  features: ["modes", "volumes.set"],
 });
-vector("error-protocol-mismatch", "mod", "The mod refuses a hello with another protocol version and closes", { type: "error", id: null, code: "protocol_mismatch", message: "mod speaks protocol 1, MCP sent 2", protocol: 1 });
+vector("error-protocol-mismatch", "mod", "The mod refuses a hello with another protocol version and closes (the MCP sent a newer one: the mod tells the player to update the mod)", { type: "error", id: null, code: "protocol_mismatch", message: "mod speaks protocol 2, MCP sent 3", protocol: 2 });
 vector("error-request", "mod", "A request the mod can't serve, answered by id; the connection stays open", { type: "error", id: 12, code: "outside_volumes", message: "box 0,0,0..15,15,15 lies outside the linked volumes" });
 vector("error-internal", "mod", "A valid request the mod failed to serve (its own fault, unlike bad_request); the connection stays open", { type: "error", id: 13, code: "internal", message: "failed to read block entity at 104,66,-195" });
 vector("volumes", "mod", "Work volume and two context boxes: the default (work grown by 3) and a distant reference box", {
@@ -93,6 +106,28 @@ vector("volumes-extended", "mod", "The mod accepted the extension: same link, th
   extended: { min: [98, 64, -200], max: [131, 90, -169] },
 });
 vector("error-bad-extension", "mod", "An extension that doesn't contain the player's work volume is refused; the connection stays open", { type: "error", id: 4, code: "bad_extension", message: "the extended work volume must contain the player's work volume" });
+vector("volumes-set", "mcp", "The agent sets the work volume and two context boxes (B4): the default-style seam box and a reference box", {
+  type: "volumes.set",
+  id: 30,
+  dimension: OW,
+  work,
+  context: [ctx, { min: [300, 60, -40], max: [340, 110, 0] }],
+});
+vector("volumes-set-default", "mcp", "The agent sets only the work volume: the mod gives it the default context, as when the player marks one", {
+  type: "volumes.set",
+  id: 31,
+  dimension: OW,
+  work: { min: [-20, 60, 40], max: [11, 83, 71] },
+});
+vector("volumes-set-confirmed", "mod", "The mod confirms volumes.set 31 with a volumes message carrying its id: a new link, the default context", {
+  type: "volumes",
+  id: 31,
+  link: 5,
+  dimension: OW,
+  work: { min: [-20, 60, 40], max: [11, 83, 71] },
+  context: [{ min: [-23, 57, 37], max: [14, 86, 74] }],
+});
+vector("error-bad-volumes", "mod", "volumes.set refused: the context exceeds the mod's contextCap; the connection stays open", { type: "error", id: 30, code: "bad_volumes", message: "the context holds 5000000 blocks, more than the cap of 4194304" });
 vector("volumes-none", "mod", "No work volume (cleared, or never set): unlinked", { type: "volumes", link: 4, work: null });
 vector("hashes", "mcp", "Section hashes over the work and context boxes", { type: "hashes", id: 5, dimension: OW, boxes: [work, ctx] });
 vector("hashes-result", "mod", "One hash per section the boxes touch, ascending y, z, x (truncated list for the vector)", {
@@ -106,6 +141,47 @@ vector("hashes-result", "mod", "One hash per section the boxes touch, ascending 
 });
 vector("snapshot-boxes", "mcp", "Full snapshot of the work and context boxes (linking)", { type: "snapshot", id: 6, dimension: OW, boxes: [work, ctx] });
 vector("snapshot-sections", "mcp", "Snapshot of the sections whose hashes differ", { type: "snapshot", id: 7, dimension: OW, sections: [[6, 4, -13], [7, 5, -12]] });
+
+vector("snapshot-surface", "mcp", "Surface snapshot of a scan's columns (B4): topmost non-air block per column", { type: "snapshot", id: 40, dimension: OW, kind: "surface", columns: { min: [-2, 30], max: [1, 32] } });
+vector("snapshot-surface-ceiling", "mcp", "Surface snapshot with the ceiling above y 20 (the player is underground)", { type: "snapshot", id: 41, dimension: OW, kind: "surface", columns: { min: [-2, 30], max: [1, 32] }, ceiling: 20 });
+{
+  // 4 × 3 columns, x fastest, then z. minY −64, so y = −64 + h − 1. Chunk [-1, 2] (x −16…−1, z 32…47) isn't generated.
+  const pal = ["minecraft:grass_block[snowy=false]", "minecraft:water[level=0]", "minecraft:oak_leaves[distance=1,persistent=false,waterlogged=false]", "minecraft:stone"];
+  const h = (y: number) => y + 64 + 1;
+  vector("snapshot-result-surface", "mod", "Surface result: grass, water, leaves; the columns of a missing (ungenerated) chunk read as none", {
+    type: "snapshot.result",
+    id: 40,
+    dimension: OW,
+    kind: "surface",
+    columns: { min: [-2, 30], max: [1, 32] },
+    minY: -64,
+    missing: [[-1, 2]],
+    palette: pal,
+    surface: {
+      heights: Uint32Array.of(h(70), h(70), h(71), h(62), h(70), h(77), h(62), h(62), 0, 0, h(-64), h(62)),
+      states: Uint32Array.of(0, 0, 0, 1, 0, 2, 1, 1, 0, 0, 3, 1),
+    },
+  });
+  vector("snapshot-result-surface-ceiling", "mod", "Surface result with ceilings above y 20: a cave roof over some columns, open to the surface over others (none), none in the missing chunk", {
+    type: "snapshot.result",
+    id: 41,
+    dimension: OW,
+    kind: "surface",
+    columns: { min: [-2, 30], max: [1, 32] },
+    minY: -64,
+    ceiling: 20,
+    missing: [[-1, 2]],
+    palette: pal,
+    surface: {
+      heights: Uint32Array.of(h(70), h(70), h(71), h(62), h(70), h(77), h(62), h(62), 0, 0, h(-64), h(62)),
+      states: Uint32Array.of(0, 0, 0, 1, 0, 2, 1, 1, 0, 0, 3, 1),
+    },
+    ceilings: {
+      heights: Uint32Array.of(h(24), h(24), h(25), h(62), h(23), h(70), h(62), h(62), 0, 0, 0, h(62)),
+      states: Uint32Array.of(3, 3, 3, 1, 3, 0, 1, 1, 0, 0, 0, 1),
+    },
+  });
+}
 
 // ── snapshot results ───────────────────────────────────────────────────────────────────────────
 vector("snapshot-result-empty", "mod", "Snapshot result with no regions", { type: "snapshot.result", id: 8, dimension: OW, palette: [], regions: [] });
@@ -252,21 +328,35 @@ vector("prompt", "mod", "An in-game request with full game context", {
     target: { pos: [110, 66, -190], state: "minecraft:oak_planks", face: "south" },
     focus: { min: [108, 66, -191], max: [112, 68, -190] },
   },
+  mode: "build",
 });
-vector("prompt-minimal", "mod", "A request looking at nothing, no focus box", {
+vector("prompt-minimal", "mod", "An ask request looking at nothing, no focus box", {
   type: "prompt",
   id: 2,
   player: { name: "Alex", uuid: UUID_ALEX },
-  text: "match the tower over there",
+  text: "what is the tower over there made of?",
   context: { dimension: OW, position: [0.5, 70, 0.5], eye: [0.5, 71.62, 0.5], yaw: -90.5, pitch: -30.75, facing: "east" },
+  mode: "ask",
+});
+vector("prompt-scan", "mod", "A scan request (/autosketch scan 20 the tower and the courtyard): radius clipped to 12 chunks, the columns and full-block box the mod grants for the probe", {
+  type: "prompt",
+  id: 3,
+  player: { name: "Kev", uuid: UUID_KEV },
+  text: "the tower and the courtyard",
+  context: { dimension: OW, position: [-40.5, 68, 23.5], eye: [-40.5, 69.62, 23.5], yaw: 45, pitch: 10, facing: "west" },
+  mode: "scan",
+  scan: { radius: 12, clipped: true, columns: { min: [-240, -176], max: [159, 223] }, box: { min: [-144, 36, -80], max: [62, 132, 126] } },
 });
 vector("prompt-result-delivered", "mcp", "Request delivered to the agent session", { type: "prompt.result", id: 1, delivered: true });
 vector("prompt-result-refused", "mcp", "Request refused: the player isn't on the allowlist", { type: "prompt.result", id: 2, delivered: false, reason: "not_allowed" });
+vector("prompt-result-unsupported-mode", "mcp", "Request refused: its mode isn't one the MCP's hello listed (the mod should have refused it itself)", { type: "prompt.result", id: 3, delivered: false, reason: "unsupported_mode" });
 vector("notice", "mcp", "Action-bar text for every player with notices on", { type: "notice", text: "Autosketch: 1,204 placed, 3 skipped", player: null });
 vector("chat-activity", "mcp", "Activity lines following a request, to the requesting player", { type: "chat", request: 1, player: UUID_KEV, kind: "activity", lines: ["fill: 1,204 blocks", "world: 1,204 placed, 3 skipped (hand-edited), 0 rejected"] });
 vector("chat-reply", "mcp", "The agent's reply closing a request", { type: "chat", request: 1, player: UUID_KEV, kind: "reply", lines: ["Balcony added on the south face, 5 wide.", "Tell me if you want railings."] });
 
 // ── hashing ────────────────────────────────────────────────────────────────────────────────────
+/** The starting default list the hash vectors were cut with; pinned so the frozen hash vectors don't follow later growth of `DEFAULT_VOLATILE`. */
+const STARTING_VOLATILE: VolatileList = Object.fromEntries(["minecraft:furnace", "minecraft:blast_furnace", "minecraft:smoker", "minecraft:hopper", "minecraft:brewing_stand"].map((k) => [k, DEFAULT_VOLATILE[k]!]));
 interface NbtCase {
   name: string;
   description: string;
@@ -284,8 +374,8 @@ const nbtCases: NbtCase[] = [
     volatile: {},
   },
   { name: "unicode", description: "Strings with an emoji and U+00E9 are written in Java modified UTF-8", snbt: '{id:"minecraft:oak_sign",text:"café \u{1F600}"}', volatile: {} },
-  { name: "furnace-default", description: "A furnace with the default volatile list: burn and cook times dropped, items and RecipesUsed kept", snbt: snbtOf(FURNACE), volatile: DEFAULT_VOLATILE },
-  { name: "furnace-ticked", description: "The same furnace a few ticks later (only volatile keys changed): same hash as furnace-default", snbt: '{id:"minecraft:furnace",BurnTime:97s,CookTime:63s,CookTimeTotal:200s,RecipesUsed:{},Items:[{Slot:0b,id:"minecraft:raw_iron",count:5}]}', volatile: DEFAULT_VOLATILE },
+  { name: "furnace-default", description: "A furnace with the default volatile list: burn and cook times dropped, items and RecipesUsed kept", snbt: snbtOf(FURNACE), volatile: STARTING_VOLATILE },
+  { name: "furnace-ticked", description: "The same furnace a few ticks later (only volatile keys changed): same hash as furnace-default", snbt: '{id:"minecraft:furnace",BurnTime:97s,CookTime:63s,CookTimeTotal:200s,RecipesUsed:{},Items:[{Slot:0b,id:"minecraft:raw_iron",count:5}]}', volatile: STARTING_VOLATILE },
   { name: "furnace-no-volatile", description: "The same furnace with an empty volatile list: every key hashed", snbt: snbtOf(FURNACE), volatile: {} },
   { name: "nested-path", description: "A nested volatile path (Network/Stress) and a key dropped for every type (*)", snbt: '{id:"create:mechanical_press",Speed:32.0f,Network:{Id:7L,Stress:12.5f},Owner:"Kev",LastTick:1234L}', volatile: { "*": ["LastTick"], "create:mechanical_press": ["Speed", "Network/Stress"] } },
   { name: "state-only", description: "A state-only type has no NBT hash", snbt: '{id:"create:belt",Speed:1.0f}', volatile: { "create:belt": "state_only" } },
@@ -333,7 +423,7 @@ const sectionCases: SectionCase[] = [
     description: "Block entities: a chest (hashed), a furnace (volatile keys dropped) and a state-only type (no hash, flag 0)",
     section: [6, 4, -13],
     boxes: [work],
-    volatile: { ...DEFAULT_VOLATILE, "create:belt": "state_only" },
+    volatile: { ...STARTING_VOLATILE, "create:belt": "state_only" },
     fill: AIR,
     blocks: [
       { pos: [100, 64, -200], state: "minecraft:chest[facing=north,type=single,waterlogged=false]", nbt: snbtOf(CHEST) },

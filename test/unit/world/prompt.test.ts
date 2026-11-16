@@ -15,8 +15,10 @@ import type { InstanceContext } from "../../../src/server/context.js";
 import { createServer } from "../../../src/server/server.js";
 import { Session } from "../../../src/server/session.js";
 import { LiveLink } from "../../../src/world/live-link.js";
+import { Document } from "../../../src/document/document.js";
+import { RequestModeRule } from "../../../src/world/modes.js";
 import { CHANNEL_INSTRUCTIONS, CHANNEL_METHOD, handoff, InGameRequests, promptAllowed } from "../../../src/world/prompt.js";
-import type { ChatMessage, PlayerRef, WireBox } from "../../../src/world/protocol/messages.js";
+import type { ChatMessage, PlayerRef, RequestMode, WireBox } from "../../../src/world/protocol/messages.js";
 import { autoSyncHook, syncLink } from "../../../src/world/sync.js";
 import { FakeHost } from "../../support/fake-host.js";
 import { solidPng } from "../../helpers/fixtures.js";
@@ -74,6 +76,7 @@ async function setup(opts: { promptPlayers?: string[]; singleplayer?: boolean; a
     touch: () => session.touch(),
   });
   session.inGame = inGame;
+  session.callHooks.push(inGame.modeRule);
   if (opts.auto) {
     await session.create({ name: "tower", mcVersion: "1.21.1", palettes: new PaletteBook() });
     link.autoLink({ instanceDir: host.instanceDir, plugins: [], palettes: new PaletteBook() });
@@ -130,7 +133,7 @@ describe("delivery (W11)", () => {
     await host.waitFor(() => events.length === 1);
     expect(events[0]!.meta).toEqual({ request: "1", player: "Dev" });
     expect(events[0]!.content).toBe(
-      'In-game request from Dev: "put a balcony here". Work volume 16×16×16, context +3 (scope "base"). ' +
+      'In-game build request from Dev: "put a balcony here". Build mode: you may edit the linked document. Work volume 16×16×16, context +3 (scope "base"). ' +
         'Looking at minecraft:oak_planks (south face), saved as "target". Focus box 5×3×2, saved as "focus". ' +
         'Standing at (10, 5, 8) facing north; your view is saved as camera "player". ' +
         "Answer the player with world_reply (request 1); pass done: true when finished.",
@@ -266,6 +269,135 @@ describe("streams back (W11)", () => {
   });
 });
 
+describe("request modes, enforced (13, B6)", () => {
+  const FILL = { box: { min: [1, 0, 1], max: [2, 1, 2] }, pattern: "stone" };
+  const refusalText = (mode: string, id: number, tool: string) =>
+    `The open in-game ${mode} request (request ${id} from Dev) allows ${mode === "ask" ? "reading and looking only" : mode === "plan" ? "looking and proposing only" : "looking and setting the volumes only"}, ` +
+    `so ${tool} can't edit the linked document. Nothing was written. To have it built, the player sends /autosketch build <text>. ` +
+    `Answer with world_reply. Only if the user at the terminal asked for this, close the request first with world_reply({ request: ${id}, lines: […], done: true }).`;
+
+  it("an ask request opens with its mode; fill is refused with request_mode and nothing reaches the world; looking still works", async () => {
+    const { client, host, events, session } = await setup();
+    expect(await host.playerAsk(HOST, "what is this?", {}, { mode: "ask" })).toMatchObject({ delivered: true });
+    await host.waitFor(() => events.length === 1);
+    expect(events[0]!.content.startsWith('In-game ask request from Dev: "what is this?". Ask mode: read and look only; edits and volume changes are refused while this request is open. Work volume 16×16×16')).toBe(true);
+    const seq = session.doc!.journal.headSeq;
+    const r = await client.callTool({ name: "fill", arguments: FILL });
+    expect(r.isError).toBe(true);
+    expect(texts(r)[0]).toBe(refusalText("ask", 1, "fill"));
+    expect(session.doc!.journal.headSeq).toBe(seq);
+    expect(host.get(w([1, 0, 1])).state).toBe("minecraft:air");
+    expect(host.patchLog).toHaveLength(0);
+    // Looking, and saving selections and cameras, are not edits.
+    for (const [name, args] of [
+      ["view_slice", { axis: "y", at: 0 }],
+      ["select", { sel: { min: [0, 0, 0], max: [3, 3, 3] }, name: "spot" }],
+      ["doc_info", {}],
+      ["checkpoint", { name: "look" }],
+    ] as const)
+      expect((await client.callTool({ name, arguments: args })).isError, name).toBeFalsy();
+    // The refusal shows in the player's activity as such.
+    inGame!.stream.flush();
+    await host.waitFor(() => chats(host, "activity").some((c) => c.lines.some((l) => l === "fill refused: request_mode")));
+  });
+
+  it("refuses edits made any way, undo and scripts included, in plan mode", async () => {
+    const { client, host, session } = await setup();
+    expect((await client.callTool({ name: "fill", arguments: FILL })).isError).toBeFalsy(); // terminal work before the request
+    await host.playerAsk(HOST, "how would you roof this?", {}, { mode: "plan" });
+    await host.waitFor(() => inGame!.current?.id === 1);
+    const seq = session.doc!.journal.headSeq;
+    const undo = await client.callTool({ name: "undo", arguments: {} });
+    expect(texts(undo)[0]).toBe(refusalText("plan", 1, "undo"));
+    const script = await client.callTool({ name: "run_script", arguments: { source: 'fill(sel.box([5, 0, 5], [5, 0, 5]), "stone");' } });
+    expect(script.isError).toBe(true);
+    expect(texts(script).join("\n")).toContain("The open in-game plan request (request 1 from Dev) allows looking and proposing only");
+    expect(session.doc!.journal.headSeq).toBe(seq);
+    expect(host.get(w([1, 0, 1])).state).toBe("minecraft:stone");
+    expect(host.get(w([5, 0, 5])).state).toBe("minecraft:air");
+  });
+
+  it("ends with world_reply done, or the next request, after which edits pass again", async () => {
+    const { client, host } = await setup();
+    await host.playerAsk(HOST, "what is this?", {}, { mode: "ask" });
+    await host.waitFor(() => inGame!.current?.id === 1);
+    expect((await client.callTool({ name: "fill", arguments: FILL })).isError).toBe(true);
+    await client.callTool({ name: "world_reply", arguments: { lines: ["It's a wall."], done: true } });
+    expect(inGame!.current).toBeUndefined();
+    expect((await client.callTool({ name: "fill", arguments: FILL })).isError).toBeFalsy(); // terminal work again
+    await host.playerAsk(HOST, "and this?", {}, { mode: "ask" });
+    await host.waitFor(() => inGame!.current?.id === 2);
+    expect((await client.callTool({ name: "clear", arguments: { sel: { min: [1, 0, 1], max: [1, 0, 1] } } })).isError).toBe(true);
+    await host.playerAsk(HOST, "now build it", {}, { mode: "build" });
+    await host.waitFor(() => inGame!.current?.id === 3);
+    const r = await client.callTool({ name: "clear", arguments: { sel: { min: [1, 0, 1], max: [1, 0, 1] } } });
+    expect(r.isError).toBeFalsy();
+    await host.waitFor(() => host.get(w([1, 0, 1])).state === "minecraft:air");
+  });
+
+  it("a read-only request does not close on idle time; a build request does", async () => {
+    const { client, host } = await setup({ idleMs: 50 });
+    await host.playerAsk(HOST, "look", {}, { mode: "ask" });
+    await host.waitFor(() => inGame!.current?.id === 1);
+    await sleep(120);
+    expect(inGame!.current?.id).toBe(1);
+    expect((await client.callTool({ name: "fill", arguments: FILL })).isError).toBe(true);
+    await host.playerAsk(HOST, "build", {}, { mode: "build" });
+    await host.waitFor(() => inGame!.current?.id === 2);
+    await sleep(120);
+    expect(inGame!.current).toBeUndefined();
+  });
+
+  it("ends when the game disconnects", async () => {
+    const { host } = await setup();
+    await host.playerAsk(HOST, "look", {}, { mode: "ask" });
+    await host.waitFor(() => inGame!.current?.id === 1);
+    host.dropConnection();
+    await host.waitFor(() => inGame!.current === undefined);
+  });
+});
+
+describe("request mode rule (13, B6), unit", () => {
+  const doc = () => new Document({ name: "t", front: "south", dataVersion: 3955, seed: 1, createdAt: "" });
+  const req = (mode: RequestMode) => ({ id: 7, player: HOST, mode });
+
+  it("volume tools pass in scan and build only; scan refuses edits", () => {
+    let current: ReturnType<typeof req> | undefined = req("ask");
+    const d = doc();
+    const rule = new RequestModeRule(() => current, () => d);
+    expect(() => rule.before({ tool: "world_volumes" })).toThrow(
+      "The open in-game ask request (request 7 from Dev) allows reading and looking only, so world_volumes can't change the volumes. Nothing was sent. To have the agent set them, the player sends /autosketch scan [radius] [text]. " +
+        "Answer with world_reply. Only if the user at the terminal asked for this, close the request first with world_reply({ request: 7, lines: […], done: true }).",
+    );
+    current = req("plan");
+    expect(() => rule.before({ tool: "world_volumes" })).toThrow(expect.objectContaining({ refusal: "request_mode" }) as never);
+    current = req("scan");
+    rule.before({ tool: "world_volumes" });
+    rule.before({ tool: "fill" }); // the hook doesn't judge tools; the guard judges edits
+    expect(() => d.edit("fill", "fill", (tx) => tx.set(0, 0, 0, "minecraft:stone"))).toThrow(/scan request \(request 7 from Dev\) allows looking and setting the volumes only, so fill can't edit/);
+    current = req("build");
+    rule.before({ tool: "world_volumes" });
+    expect(d.edit("fill", "fill", (tx) => tx.set(0, 0, 0, "minecraft:stone")).changed).toBe(1);
+    current = undefined;
+    rule.before({ tool: "world_volumes" });
+  });
+
+  it("guards only the linked document, and world syncs pass", () => {
+    const linked = doc(), other = doc();
+    let now: Document | undefined = linked;
+    const rule = new RequestModeRule(() => req("ask"), () => now);
+    rule.attach(linked);
+    rule.attach(other);
+    rule.attach(linked); // idempotent
+    expect(linked.guards).toHaveLength(1);
+    expect(() => linked.edit("fill", "fill", (tx) => tx.set(0, 0, 0, "minecraft:stone"))).toThrow(/request_mode|ask request/);
+    expect(other.edit("fill", "fill", (tx) => tx.set(0, 0, 0, "minecraft:stone")).changed).toBe(1);
+    expect(linked.editUnguarded("world_sync", "sync", (tx) => tx.set(0, 0, 0, "minecraft:stone")).changed).toBe(1);
+    now = undefined; // unlinked: the old document is no longer the world's
+    expect(linked.edit("fill", "fill", (tx) => tx.set(1, 0, 0, "minecraft:stone")).changed).toBe(1);
+  });
+});
+
 describe("no change without requests", () => {
   it("leaves tool results unchanged with in-game requests wired in and no document linked", async () => {
     const run = async (wire: boolean) => {
@@ -278,6 +410,7 @@ describe("no change without requests", () => {
         s.callHooks.push(autoSyncHook(() => s.world));
         g = new InGameRequests(l, { promptPlayers: [], idleMs: 1000, activityMs: 0, subscribe: (fn) => s.subscribe(fn), notify: async () => {}, listening: () => true });
         s.inGame = g;
+        s.callHooks.push(g.modeRule);
       }
       const server = createServer(fixtureContext("/fixture"), { session: s, ...(wire ? { channel: { instructions: CHANNEL_INSTRUCTIONS } } : {}) });
       const [a, b] = InMemoryTransport.createLinkedPair();

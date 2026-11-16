@@ -1,0 +1,30 @@
+{
+  "description": "An in-game request with full game context",
+  "sender": "mod",
+  "header": {
+    "type": "prompt",
+    "id": 1,
+    "player": {
+      "name": "Kev",
+      "uuid": "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+    },
+    "text": "put a balcony here",
+    "context": {
+      "dimension": "minecraft:overworld",
+      "position": [110.5, 64, -185.25],
+      "eye": [110.5, 65.62, -185.25],
+      "yaw": 172.5,
+      "pitch": 12.25,
+      "facing": "north",
+      "target": {
+        "pos": [110, 66, -190],
+        "state": "minecraft:oak_planks",
+        "face": "south"
+      },
+      "focus": {
+        "min": [108, 66, -191],
+        "max": [112, 68, -190]
+      }
+    }
+  }
+}

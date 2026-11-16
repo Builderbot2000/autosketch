@@ -1,17 +1,20 @@
 import type { Vec3 } from "../../core/region.js";
-import { decodeAckBody, decodeDirtyBody, decodePatchBody, decodeSnapshotBody, encodeAckBody, encodeDirtyBody, encodePatchBody, encodeSnapshotBody, type Grid } from "./body.js";
+import { decodeAckBody, decodeDirtyBody, decodePatchBody, decodeSnapshotBody, decodeSurfaceBody, encodeAckBody, encodeDirtyBody, encodePatchBody, encodeSnapshotBody, encodeSurfaceBody, type Grid } from "./body.js";
 import {
   ERROR_CODES,
   MAX_FRAME,
   MAX_HEADER,
   PROMPT_REFUSALS,
+  REQUEST_MODES,
   type GameContext,
   type Message,
   type McpMessage,
   type ModMessage,
   type PlayerRef,
   type Sender,
+  type ScanGrant,
   type VolatileList,
+  type WireArea,
   type WireBox,
 } from "./messages.js";
 
@@ -33,6 +36,10 @@ function box(b: WireBox): WireBox {
   return { min: [b.min[0], b.min[1], b.min[2]], max: [b.max[0], b.max[1], b.max[2]] };
 }
 
+function area(a: WireArea): WireArea {
+  return { min: [a.min[0], a.min[1]], max: [a.max[0], a.max[1]] };
+}
+
 function grid(g: Grid): { origin: Vec3; size: Vec3 } {
   return { origin: g.origin, size: g.size };
 }
@@ -42,7 +49,11 @@ function split(m: Message): { header: Record<string, unknown>; body: Uint8Array 
   const none = new Uint8Array(0);
   switch (m.type) {
     case "hello":
-      if ("token" in m) return { header: { type: m.type, protocol: m.protocol, token: m.token, client: { name: m.client.name, version: m.client.version }, volatile: m.volatile }, body: none };
+      if ("token" in m)
+        return {
+          header: { type: m.type, protocol: m.protocol, token: m.token, client: { name: m.client.name, version: m.client.version }, volatile: m.volatile, ...(m.modes ? { modes: [...m.modes] } : {}) },
+          body: none,
+        };
       return {
         header: {
           type: m.type,
@@ -51,6 +62,7 @@ function split(m: Message): { header: Record<string, unknown>; body: Uint8Array 
           game: { version: m.game.version, dataVersion: m.game.dataVersion, loader: m.game.loader, loaderVersion: m.game.loaderVersion },
           singleplayer: m.singleplayer,
           host: m.host && player(m.host),
+          ...(m.features ? { features: [...m.features] } : {}),
         },
         body: none,
       };
@@ -58,17 +70,30 @@ function split(m: Message): { header: Record<string, unknown>; body: Uint8Array 
       return { header: { type: m.type, id: m.id, code: m.code, message: m.message, ...(m.protocol !== undefined ? { protocol: m.protocol } : {}) }, body: none };
     case "volumes":
       if (m.work === null) return { header: { type: m.type, link: m.link, work: null }, body: none };
-      return { header: { type: m.type, link: m.link, dimension: m.dimension, work: box(m.work), context: m.context.map(box), ...(m.extended ? { extended: box(m.extended) } : {}) }, body: none };
+      return {
+        header: { type: m.type, ...(m.id !== undefined ? { id: m.id } : {}), link: m.link, dimension: m.dimension, work: box(m.work), context: m.context.map(box), ...(m.extended ? { extended: box(m.extended) } : {}) },
+        body: none,
+      };
     case "volumes.extend":
       return { header: { type: m.type, id: m.id, link: m.link, work: box(m.work) }, body: none };
+    case "volumes.set":
+      return { header: { type: m.type, id: m.id, dimension: m.dimension, work: box(m.work), ...(m.context ? { context: m.context.map(box) } : {}) }, body: none };
     case "hashes":
       return { header: { type: m.type, id: m.id, dimension: m.dimension, boxes: m.boxes.map(box) }, body: none };
     case "hashes.result":
       return { header: { type: m.type, id: m.id, sections: m.sections.map((s) => [s.section[0], s.section[1], s.section[2], s.hash]) }, body: none };
     case "snapshot":
+      if ("kind" in m) return { header: { type: m.type, id: m.id, dimension: m.dimension, kind: m.kind, columns: area(m.columns), ...(m.ceiling !== undefined ? { ceiling: m.ceiling } : {}) }, body: none };
       if ("boxes" in m) return { header: { type: m.type, id: m.id, dimension: m.dimension, boxes: m.boxes.map(box) }, body: none };
       return { header: { type: m.type, id: m.id, dimension: m.dimension, sections: m.sections.map((s) => [s[0], s[1], s[2]]) }, body: none };
     case "snapshot.result":
+      if ("kind" in m) {
+        if ((m.ceiling === undefined) !== (m.ceilings === undefined)) throw new ProtocolError("surface result: ceilings must be given exactly when ceiling is");
+        return {
+          header: { type: m.type, id: m.id, dimension: m.dimension, kind: m.kind, columns: area(m.columns), minY: m.minY, ...(m.ceiling !== undefined ? { ceiling: m.ceiling } : {}), missing: m.missing.map((c) => [c[0], c[1]]) },
+          body: encodeSurfaceBody(m),
+        };
+      }
       return { header: { type: m.type, id: m.id, dimension: m.dimension, regions: m.regions.map((r) => box(r.box)) }, body: encodeSnapshotBody(m.palette, m.regions) };
     case "patch": {
       const e = encodePatchBody(m.blocks);
@@ -88,7 +113,10 @@ function split(m: Message): { header: Record<string, unknown>; body: Uint8Array 
       return { header: { type: m.type, everything: false, ...grid(e.grid), count: m.blocks.length }, body: e.body };
     }
     case "prompt":
-      return { header: { type: m.type, id: m.id, player: player(m.player), text: m.text, context: context(m.context) }, body: none };
+      return {
+        header: { type: m.type, id: m.id, player: player(m.player), text: m.text, context: context(m.context), ...(m.mode ? { mode: m.mode } : {}), ...(m.scan ? { scan: scanGrant(m.scan) } : {}) },
+        body: none,
+      };
     case "prompt.result":
       return { header: m.delivered ? { type: m.type, id: m.id, delivered: true } : { type: m.type, id: m.id, delivered: false, reason: m.reason }, body: none };
     case "notice":
@@ -100,6 +128,10 @@ function split(m: Message): { header: Record<string, unknown>; body: Uint8Array 
 
 function player(p: PlayerRef): PlayerRef {
   return { name: p.name, uuid: p.uuid };
+}
+
+function scanGrant(g: ScanGrant): ScanGrant {
+  return { radius: g.radius, ...(g.clipped ? { clipped: true } : {}), columns: area(g.columns), box: box(g.box) };
 }
 
 function context(c: GameContext): GameContext {
@@ -171,7 +203,7 @@ export function decodeFrame(frame: Uint8Array, sender: Sender): Message {
   return decodeMessage(frame.subarray(4), sender);
 }
 
-const MCP_TYPES = new Set(["hello", "error", "volumes.extend", "hashes", "snapshot", "patch", "prompt.result", "notice", "chat"]);
+const MCP_TYPES = new Set(["hello", "error", "volumes.extend", "volumes.set", "hashes", "snapshot", "patch", "prompt.result", "notice", "chat"]);
 const MOD_TYPES = new Set(["hello", "error", "volumes", "hashes.result", "snapshot.result", "patch.ack", "dirty", "prompt"]);
 const BODY_TYPES = new Set(["snapshot.result", "patch", "patch.ack", "dirty"]);
 
@@ -182,7 +214,8 @@ function decode(type: string, v: Fields, body: Uint8Array, sender: Sender): Mess
     case "hello":
       if (sender === "mcp") {
         const client = v.obj("client");
-        return { type, protocol: v.int("protocol"), token: v.str("token"), client: { name: client.str("name"), version: client.str("version") }, volatile: volatile(v.raw("volatile")) };
+        const modes = v.has("modes") ? { modes: v.arr("modes").map((_, i) => v.oneOfAt("modes", i, REQUEST_MODES)) } : {};
+        return { type, protocol: v.int("protocol"), token: v.str("token"), client: { name: client.str("name"), version: client.str("version") }, volatile: volatile(v.raw("volatile")), ...modes };
       } else {
         const game = v.obj("game");
         return {
@@ -192,6 +225,7 @@ function decode(type: string, v: Fields, body: Uint8Array, sender: Sender): Mess
           game: { version: game.str("version"), dataVersion: game.int("dataVersion"), loader: game.str("loader"), loaderVersion: game.str("loaderVersion") },
           singleplayer: v.bool("singleplayer"),
           host: v.nullable("host") ? playerRef(v.obj("host")) : null,
+          ...(v.has("features") ? { features: v.strings("features") } : {}),
         };
       }
     case "error": {
@@ -204,10 +238,15 @@ function decode(type: string, v: Fields, body: Uint8Array, sender: Sender): Mess
       const link = v.int("link");
       if (!v.nullable("work")) return { type, link, work: null };
       const extended = v.has("extended") ? { extended: v.box("extended") } : {};
-      return { type, link, dimension: v.str("dimension"), work: v.box("work"), context: v.arr("context").map((_, i) => v.boxAt("context", i)), ...extended };
+      const id = v.has("id") ? { id: v.id("id") } : {};
+      return { type, ...id, link, dimension: v.str("dimension"), work: v.box("work"), context: v.arr("context").map((_, i) => v.boxAt("context", i)), ...extended };
     }
     case "volumes.extend":
       return { type, id: v.id("id"), link: v.int("link"), work: v.box("work") };
+    case "volumes.set": {
+      const id = v.id("id"), dimension = v.str("dimension"), work = v.box("work");
+      return { type, id, dimension, work, ...(v.has("context") ? { context: v.boxes("context") } : {}) };
+    }
     case "hashes":
       return { type, id: v.id("id"), dimension: v.str("dimension"), boxes: v.boxes("boxes") };
     case "hashes.result":
@@ -221,11 +260,27 @@ function decode(type: string, v: Fields, body: Uint8Array, sender: Sender): Mess
       };
     case "snapshot": {
       const id = v.id("id"), dimension = v.str("dimension");
+      const kind = v.has("kind") ? v.oneOf("kind", ["blocks", "surface"]) : "blocks";
+      if (kind === "surface") {
+        if (v.has("boxes") || v.has("sections")) throw new ProtocolError("a surface snapshot takes columns, not boxes or sections");
+        return { type, id, dimension, kind, columns: v.area("columns"), ...(v.has("ceiling") ? { ceiling: v.y("ceiling") } : {}) };
+      }
+      if (v.has("columns") || v.has("ceiling")) throw new ProtocolError("columns and ceiling belong to a surface snapshot");
       if (v.has("boxes") === v.has("sections")) throw new ProtocolError("snapshot takes exactly one of boxes or sections");
       if (v.has("boxes")) return { type, id, dimension, boxes: v.boxes("boxes") };
       return { type, id, dimension, sections: v.arr("sections").map((_, i) => v.vec3At("sections", i)) };
     }
     case "snapshot.result": {
+      const kind = v.has("kind") ? v.oneOf("kind", ["blocks", "surface"]) : "blocks";
+      if (kind === "surface") {
+        const id = v.id("id"), dimension = v.str("dimension"), columns = v.area("columns"), minY = v.y("minY");
+        const ceiling = v.has("ceiling") ? v.y("ceiling") : undefined;
+        const missing = v.arr("missing").map((c, i) => {
+          if (!Array.isArray(c) || c.length !== 2 || !c.every(Number.isSafeInteger)) throw new ProtocolError(`missing[${i}] must be [cx, cz] integers`);
+          return [c[0], c[1]] as [number, number];
+        });
+        return { type, id, dimension, kind, columns, minY, ...(ceiling !== undefined ? { ceiling } : {}), missing, ...decodeSurfaceBody(body, columns, ceiling !== undefined) };
+      }
       const regions = v.boxes("regions", true);
       return { type, id: v.id("id"), dimension: v.str("dimension"), ...decodeSnapshotBody(body, regions) };
     }
@@ -257,7 +312,14 @@ function decode(type: string, v: Fields, body: Uint8Array, sender: Sender): Mess
       }
       if (c.has("focus")) ctx.focus = c.box("focus");
       if (c.has("focusClipped") && c.bool("focusClipped")) ctx.focusClipped = true;
-      return { type, id: v.id("id"), player: playerRef(v.obj("player")), text: v.str("text"), context: ctx };
+      const mode = v.has("mode") ? { mode: v.oneOf("mode", REQUEST_MODES) } : {};
+      let scan: { scan?: ScanGrant } = {};
+      if (v.has("scan")) {
+        if (mode.mode !== "scan") throw new ProtocolError("scan is sent only with mode scan");
+        const g = v.obj("scan");
+        scan = { scan: { radius: g.int("radius"), ...(g.has("clipped") && g.bool("clipped") ? { clipped: true } : {}), columns: g.area("columns"), box: g.box("box") } };
+      }
+      return { type, id: v.id("id"), player: playerRef(v.obj("player")), text: v.str("text"), context: ctx, ...mode, ...scan };
     }
     case "prompt.result": {
       const id = v.id("id");
@@ -364,6 +426,35 @@ class Fields {
     const v = this.o[k];
     if (!values.includes(v as T)) this.fail(k, `one of ${values.join(", ")}`);
     return v as T;
+  }
+
+  oneOfAt<T extends string>(k: string, i: number, values: readonly T[]): T {
+    const v = this.arr(k)[i];
+    if (!values.includes(v as T)) throw new ProtocolError(`${this.name(k)}[${i}] must be one of ${values.join(", ")} (got ${JSON.stringify(v)})`);
+    return v as T;
+  }
+
+  strings(k: string): string[] {
+    return this.arr(k).map((s, i) => {
+      if (typeof s !== "string") throw new ProtocolError(`${this.name(k)}[${i}] must be a string`);
+      return s;
+    });
+  }
+
+  /** A y coordinate (may be negative). */
+  y(k: string): number {
+    const v = this.o[k];
+    if (!Number.isSafeInteger(v)) this.fail(k, "an integer");
+    return v as number;
+  }
+
+  area(k: string): WireArea {
+    const o = this.o[k] as { min?: unknown; max?: unknown } | null;
+    const pair = (p: unknown): p is [number, number] => Array.isArray(p) && p.length === 2 && p.every(Number.isSafeInteger);
+    if (typeof o !== "object" || o === null || !pair(o.min) || !pair(o.max)) this.fail(k, '{"min": [x, z], "max": [x, z]}');
+    const { min, max } = o as WireArea;
+    if (min[0] > max[0] || min[1] > max[1]) throw new ProtocolError(`${this.name(k)}: min must not exceed max on either axis`);
+    return { min: [min[0], min[1]], max: [max[0], max[1]] };
   }
 
   obj(k: string): Fields {

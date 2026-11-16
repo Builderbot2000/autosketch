@@ -1,0 +1,21 @@
+{
+  "description": "A request looking at nothing, no focus box",
+  "sender": "mod",
+  "header": {
+    "type": "prompt",
+    "id": 2,
+    "player": {
+      "name": "Alex",
+      "uuid": "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+    },
+    "text": "match the tower over there",
+    "context": {
+      "dimension": "minecraft:overworld",
+      "position": [0.5, 70, 0.5],
+      "eye": [0.5, 71.62, 0.5],
+      "yaw": -90.5,
+      "pitch": -30.75,
+      "facing": "east"
+    }
+  }
+}

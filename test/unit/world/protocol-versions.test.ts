@@ -161,7 +161,7 @@ describe("bridge and fake host, protocol 1 (N−1)", () => {
     const { host, bridge, hello } = await pair({ protocol: 1, volumes: { work: WORK } });
     expect(hello.protocol).toBe(1);
     expect(hello.features).toBeUndefined();
-    expect(host.received[0]).toMatchObject({ type: "hello", protocol: 1, modes: ["build"] });
+    expect(host.received[0]).toMatchObject({ type: "hello", protocol: 1, modes: ["ask", "plan", "build"] });
     host.set([1, 64, 1], "minecraft:stone");
     const snap = await bridge.request({ type: "snapshot", dimension: OW, boxes: [{ min: [1, 64, 1], max: [1, 64, 1] }] });
     expect(snap.palette).toEqual(["minecraft:stone"]);
@@ -207,8 +207,8 @@ describe("bridge and fake host, protocol 2", () => {
   it("pairs in protocol 2 and sees every feature the hello lists", async () => {
     const { host, bridge, hello } = await pair({ volumes: { work: WORK } });
     expect(hello).toMatchObject({ protocol: PROTOCOL_VERSION, features: ["modes", "scan", "volumes.set"] });
-    expect(host.received[0]).toMatchObject({ type: "hello", protocol: 2, modes: ["build"] });
-    expect(host.mcpModes).toEqual(["build"]);
+    expect(host.received[0]).toMatchObject({ type: "hello", protocol: 2, modes: ["ask", "plan", "build"] });
+    expect(host.mcpModes).toEqual(["ask", "plan", "build"]);
     for (const f of MOD_FEATURES) expect(bridge.supports(f)).toBe(true);
     bridge.close();
     expect(bridge.supports("scan")).toBe(false); // nothing while disconnected
@@ -278,9 +278,8 @@ describe("bridge and fake host, protocol 2", () => {
 
 describe("the mode gate (13, B6, Compatibility)", () => {
   it("a mode the MCP's hello doesn't list is refused by the mod itself, and nothing is sent", async () => {
-    const { host } = await pair({ volumes: { work: WORK } }); // the bridge lists only build
+    const { host } = await pair({ volumes: { work: WORK } }); // the bridge lists ask, plan and build: not scan
     expect(await host.playerAsk(HOST, "scan here", {}, { mode: "scan" })).toEqual({ type: "prompt.result", id: 1, delivered: false, reason: "unsupported_mode", local: true });
-    expect(await host.playerAsk(HOST, "what is this?", {}, { mode: "ask" })).toMatchObject({ reason: "unsupported_mode" });
     expect(host.sent.some((m) => m.type === "prompt")).toBe(false);
     void host.playerAsk(HOST, "build it", {}, { mode: "build" });
     expect(await host.waitFor(() => host.sent.find((m) => m.type === "prompt"))).toMatchObject({ mode: "build" });
@@ -306,7 +305,7 @@ describe("the mode gate (13, B6, Compatibility)", () => {
     const link = { bridge, state: "unlinked", doc: undefined, volumes: undefined } as unknown as WorldLink;
     const inGame = new InGameRequests(link, { promptPlayers: [], idleMs: 60_000, activityMs: 0, subscribe: () => () => {}, notify: async () => {}, listening: () => true });
     try {
-      expect(await host.playerAsk(HOST, "what is this?", {}, { mode: "ask" })).toEqual({ type: "prompt.result", id: 1, delivered: false, reason: "unsupported_mode" });
+      expect(await host.playerAsk(HOST, "scan here", {}, { mode: "scan" })).toEqual({ type: "prompt.result", id: 1, delivered: false, reason: "unsupported_mode" });
       // A build request passes the gate (and stops at the link here).
       expect(await host.playerAsk(HOST, "build it", {}, { mode: "build" })).toMatchObject({ reason: "no_link" });
       // So does a prompt without a mode (a mod without the modes feature).

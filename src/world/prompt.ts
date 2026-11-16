@@ -4,6 +4,7 @@ import { lookTarget, removeCamera, saveCamera } from "../document/cameras.js";
 import type { Document } from "../document/document.js";
 import { ActivityStream, type OpenRequest } from "./chat-stream.js";
 import type { LinkVolumes, WorldLink } from "./link.js";
+import { MODE_ALLOWS, modeOf, RequestModeRule } from "./modes.js";
 import type { GameContext, ModHello, PlayerRef, PromptMessage, PromptRefusal, WireBox } from "./protocol/messages.js";
 import type { PromptSettings } from "./settings.js";
 
@@ -28,8 +29,9 @@ import type { PromptSettings } from "./settings.js";
  *    replaces them; one it doesn't carry is removed, so a stale handle is never mistaken for a new
  *    one. Outside both volumes they are reported, not saved; in the context volume they are saved
  *    and the text says they are read-only there.
- * 5. **One channel event** with the fixed text shape `13` shows, opening with the handoff facts,
- *    then `prompt.result` delivered, and the request's chat stream opens.
+ * 5. **One channel event** with the fixed text shape `13` shows, opening with the mode and what it
+ *    allows, then the handoff facts; then `prompt.result` delivered, and the request's chat stream
+ *    opens. While it is open, its mode is enforced (`modes.ts`, `modeRule`).
  */
 
 /** Claude Code's channel notification (Claude Code docs, *Channels reference*). */
@@ -39,7 +41,7 @@ export const CHANNEL_CAPABILITY = "claude/channel";
 /** Appended to the server instructions when the channel is declared (Claude Code recommends saying what events mean and how to answer). */
 export const CHANNEL_INSTRUCTIONS =
   'In-game requests from the linked Minecraft world arrive as <channel source="autosketch" request="…" player="…">: the player\'s words, the work volume, and handles for what they point at ' +
-  '(selections "focus" and "target", camera "player"). Do the work on the linked document as usual, and answer the player with world_reply (done: true when finished); they only see what you send through it.';
+  '(selections "focus" and "target", camera "player"). The request names its mode (ask, plan, scan or build), and edits the mode doesn\'t allow are refused while it is open. Do the work on the linked document as usual, and answer the player with world_reply (done: true when finished); they only see what you send through it.';
 
 /** Answers to in-game requests, as the `world_reply` tool reaches them (through `Session.inGame`). */
 export interface InGameReplies {
@@ -78,6 +80,11 @@ export function promptAllowed(player: PlayerRef, list: readonly string[], hello:
 
 export class InGameRequests implements InGameReplies {
   readonly stream: ActivityStream;
+  /**
+   * The request mode rule (B6): a call hook for `Session.callHooks` (the entry point installs it)
+   * and the write guard it attaches to the linked document. Refuses with `request_mode`.
+   */
+  readonly modeRule: RequestModeRule;
   private readonly offs: (() => void)[] = [];
 
   constructor(
@@ -85,6 +92,13 @@ export class InGameRequests implements InGameReplies {
     private readonly opts: InGameRequestsOptions,
   ) {
     this.stream = new ActivityStream({ subscribe: opts.subscribe, send: (m) => link.bridge.send(m), linked: () => link.state === "linked", activityMs: opts.activityMs, idleMs: opts.idleMs });
+    this.modeRule = new RequestModeRule(
+      () => {
+        const r = this.stream.current;
+        return r && { id: r.id, player: r.player, mode: modeOf(r) };
+      },
+      () => (link.state === "linked" ? link.doc : undefined),
+    );
     this.offs.push(link.bridge.on("prompt", (m) => void this.onPrompt(m)));
     // The activity stream listens only while a game is connected, so an unlinked session pays nothing.
     this.offs.push(link.bridge.onConnection((s) => (s === "up" ? this.stream.start() : this.stream.stop())));
@@ -128,8 +142,9 @@ export class InGameRequests implements InGameReplies {
       this.opts.log?.(`channel notification failed: ${(e as Error).message}`);
       return refuse("no_listener");
     }
+    this.modeRule.attach(doc);
     this.link.bridge.send({ type: "prompt.result", id: m.id, delivered: true });
-    this.stream.open({ id: m.id, player: m.player });
+    this.stream.open({ id: m.id, player: m.player, mode: modeOf(m) });
   }
 }
 
@@ -151,7 +166,8 @@ type Where = "work" | "context" | "outside";
 export function requestText(doc: Document, v: LinkVolumes, m: PromptMessage): string {
   const ctx = m.context;
   const sameDim = ctx.dimension === v.dimension;
-  const out: string[] = [`In-game request from ${m.player.name}: ${JSON.stringify(m.text)}.`, handoff(v)];
+  const mode = modeOf(m);
+  const out: string[] = [`In-game ${mode} request from ${m.player.name}: ${JSON.stringify(m.text)}.`, MODE_ALLOWS[mode], handoff(v)];
   out.push(saveTarget(doc, v, ctx, sameDim));
   const focus = saveFocus(doc, v, ctx, sameDim);
   if (focus) out.push(focus);

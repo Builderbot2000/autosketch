@@ -1,0 +1,106 @@
+import type { Document, WriteGuard } from "../document/document.js";
+import { refusal } from "../scope/scopes.js";
+import type { PlayerRef, RequestMode } from "./protocol/messages.js";
+
+/**
+ * Request modes, enforced (docs/design/13-live-world.md, *Backlog* B6, *Request modes, enforced*).
+ *
+ * The player's subcommand names what the agent may do while the request is open. This is a
+ * permission the player grants over their world, not advice, so the MCP refuses with
+ * `request_mode` instead of warning:
+ *
+ * - **Edits** are journal entries on the linked document: every `doc.edit`, `group`, undo, redo and
+ *   restore step that runs its write guards, whatever tool or script makes it (`world_sync` entries
+ *   bring the world in and run no guards). They are refused in `ask`, `plan` and `scan`. Only
+ *   journal entries on the linked document reach the world, so this is exactly "nothing happens to
+ *   the world". Saved selections, cameras, checkpoints, exports, the library and sandboxes forked
+ *   from the linked document are not edits on it; merging a sandbox is.
+ * - **Volume changes** are the volume tools (`VOLUME_TOOLS`, B4's `world_volumes`): refused in `ask`
+ *   and `plan`, allowed in `scan` and `build`.
+ *
+ * The rule holds while the request is open (`InGameRequests.current`): from delivery until the
+ * agent's `world_reply` with `done`, the next delivered request, or the game disconnecting. A
+ * read-only request does not close on idle time, so a slow turn can't outlast the permission.
+ */
+
+/** Modes that allow no edits on the linked document. */
+export const READ_ONLY_MODES: ReadonlySet<RequestMode> = new Set(["ask", "plan", "scan"]);
+/** Modes that allow volume changes. */
+export const VOLUME_MODES: ReadonlySet<RequestMode> = new Set(["scan", "build"]);
+/** Tools that change the player's volumes (B4). */
+export const VOLUME_TOOLS: ReadonlySet<string> = new Set(["world_volumes"]);
+
+/** The line the channel event gives each mode, right after the request (B6). */
+export const MODE_ALLOWS: Record<RequestMode, string> = {
+  ask: "Ask mode: read and look only; edits and volume changes are refused while this request is open.",
+  plan: "Plan mode: look, then propose what you would build in a world_reply; edits and volume changes are refused while this request is open.",
+  scan: "Scan mode: look around and set the volumes with world_volumes; edits are refused while this request is open.",
+  build: "Build mode: you may edit the linked document.",
+};
+
+/** What a mode allows, as the refusal names it. */
+const ALLOWS: Record<RequestMode, string> = {
+  ask: "reading and looking only",
+  plan: "looking and proposing only",
+  scan: "looking and setting the volumes only",
+  build: "everything",
+};
+
+/** An open request as the mode rule sees it. */
+export interface ModeRequest {
+  id: number;
+  player: PlayerRef;
+  mode: RequestMode;
+}
+
+/** The mode an open request runs in, for the rule: absent means `build`. */
+export const modeOf = (r: { mode?: RequestMode } | undefined): RequestMode => r?.mode ?? "build";
+
+/**
+ * The `request_mode` refusal: names the mode, what it allows, the subcommand the player would use
+ * instead, and how terminal work gets past an open request (only the user can ask for that).
+ */
+export function requestModeRefusal(r: ModeRequest, attempt: { edit: string } | { volumes: string }): Error & { refusal: string } {
+  const head = `The open in-game ${r.mode} request (request ${r.id} from ${r.player.name}) allows ${ALLOWS[r.mode]}`;
+  const what =
+    "edit" in attempt
+      ? `, so ${attempt.edit} can't edit the linked document. Nothing was written. To have it built, the player sends /autosketch build <text>.`
+      : `, so ${attempt.volumes} can't change the volumes. Nothing was sent. To have the agent set them, the player sends /autosketch scan [radius] [text].`;
+  const close = ` Answer with world_reply. Only if the user at the terminal asked for this, close the request first with world_reply({ request: ${r.id}, lines: […], done: true }).`;
+  return refusal("request_mode", head + what + close);
+}
+
+/**
+ * The mode rule over the linked document and the tool calls (B6). `attach` installs the write guard
+ * on a linked document (idempotent); `before` is the session call hook: it attaches the guard to
+ * whatever document is linked now, so a relink during a request is covered, and refuses the volume
+ * tools in modes without volume changes.
+ */
+export class RequestModeRule {
+  private readonly attached = new WeakSet<Document>();
+
+  constructor(
+    private readonly current: () => ModeRequest | undefined,
+    private readonly linkedDoc: () => Document | undefined,
+  ) {}
+
+  /** Installs the guard on `doc`, which refuses edits only while `doc` is the linked document. */
+  attach(doc: Document): void {
+    if (this.attached.has(doc)) return;
+    this.attached.add(doc);
+    const guard: WriteGuard = (_changes, op) => {
+      const r = this.current();
+      if (!r || !READ_ONLY_MODES.has(r.mode) || this.linkedDoc() !== doc) return;
+      throw requestModeRefusal(r, { edit: op });
+    };
+    doc.guards.push(guard);
+  }
+
+  /** The call hook (`Session.callHooks`). */
+  before(call: { tool: string }): void {
+    const doc = this.linkedDoc();
+    if (doc) this.attach(doc);
+    const r = this.current();
+    if (r && VOLUME_TOOLS.has(call.tool) && !VOLUME_MODES.has(r.mode)) throw requestModeRefusal(r, { volumes: call.tool });
+  }
+}

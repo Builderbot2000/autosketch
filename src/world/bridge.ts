@@ -97,7 +97,7 @@ export interface BridgeOptions {
   client?: { name: string; version: string };
   /**
    * Request modes the hello lists (`13`, B6): only modes this MCP enforces, since the mod refuses
-   * the others itself. Default `["build"]` (no read-only mode is enforced yet).
+   * the others itself. Default `["ask", "plan", "build"]`: `scan` is listed once B4 can serve it.
    */
   modes?: RequestMode[];
   /** Reconnect after a lost connection (default true), with backoff from `minMs` to `maxMs`. */
@@ -117,7 +117,7 @@ interface Pending {
 const DOWN = "world_disconnected";
 const OUTDATED = "world_mod_outdated";
 /** Modes listed when the options name none: a mode is listed only once the MCP enforces it. */
-const DEFAULT_MODES: readonly RequestMode[] = ["build"];
+const DEFAULT_MODES: readonly RequestMode[] = ["ask", "plan", "build"];
 
 export class Bridge implements BridgeConnection {
   hello: ModHello | undefined;

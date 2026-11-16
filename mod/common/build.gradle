@@ -1,0 +1,101 @@
+// The common module (14, *Build layout*): every class that uses only vanilla types, compiled into
+// each loader's jar. It compiles against vanilla Minecraft alone (NeoForm, no loader), so a loader
+// import here fails the build.
+plugins {
+    id 'java-library'
+    id 'net.neoforged.moddev'
+}
+
+apply from: rootProject.file('gradle/java.gradle')
+
+base {
+    // Never shipped on its own: the loader modules compile these sources into their jars.
+    archivesName = "${mod_id}-common-${minecraft_version}"
+}
+
+neoForge {
+    neoFormVersion = project.neo_form_version
+
+    parchment {
+        mappingsVersion = project.parchment_mappings_version
+        minecraftVersion = project.parchment_minecraft_version
+    }
+}
+
+// Plain JUnit tests (codec, socket, config) see the game's classes without booting the game.
+neoForge.addModdingDependenciesTo(sourceSets.test)
+
+dependencies {
+    // The change tracker's mixin (13, M9) and its config plugin; the loader provides Mixin at runtime.
+    compileOnly "net.fabricmc:sponge-mixin:${mixin_version}"
+    compileOnly "org.ow2.asm:asm-tree:${asm_version}"
+    compileOnly "org.jetbrains:annotations:${jetbrains_annotations_version}"
+    // Cloth Config's AutoConfig API (14, *Config across loaders*). Its classes are the same on every
+    // loader; the loader module depends on that loader's Cloth Config jar.
+    compileOnly "me.shedaniel.cloth:cloth-config-neoforge:${cloth_config_version}"
+    testImplementation "me.shedaniel.cloth:cloth-config-neoforge:${cloth_config_version}"
+    testCompileOnly "org.jetbrains:annotations:${jetbrains_annotations_version}"
+
+    testImplementation platform('org.junit:junit-bom:5.11.4')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// The build check that the common module stays loader-free (14, *Build layout*). Compiling against
+// NeoForm already fails on a NeoForge class; this also catches a loader name in any form (an
+// import, a fully qualified name, the tests) and says which file, before anything compiles.
+def commonSources = files(sourceSets.main.java.srcDirs, sourceSets.test.java.srcDirs).asFileTree.matching { include '**/*.java' }
+def checkNoLoaderImports = tasks.register('checkNoLoaderImports') {
+    group = 'verification'
+    description = 'Fails if the common module refers to a mod loader (NeoForge, Forge, Fabric).'
+    inputs.files(commonSources).withPropertyName('sources').withPathSensitivity(PathSensitivity.RELATIVE)
+    def marker = layout.buildDirectory.file('checkNoLoaderImports/ok')
+    outputs.file(marker)
+    doLast {
+        def loader = ~/\bnet\.(neoforged|minecraftforge|fabricmc)\./
+        def offenders = []
+        commonSources.each { f ->
+            f.readLines('UTF-8').eachWithIndex { line, i -> if (line =~ loader) offenders << "${f}:${i + 1}: ${line.trim()}" }
+        }
+        if (offenders) throw new GradleException('The common module must use vanilla types only (14, Build layout). Move these to the loader module:\n' + offenders.join('\n'))
+        def out = marker.get().asFile
+        out.parentFile.mkdirs()
+        out.text = 'ok'
+    }
+}
+tasks.named('compileJava') { dependsOn checkNoLoaderImports }
+tasks.named('check') { dependsOn checkNoLoaderImports }
+
+// The golden vectors shared with the TypeScript side (13, *Golden vectors*): the only files both
+// sides read. Tests find them through this property, so nothing is copied into mod/.
+def goldenDir = rootProject.file('../test/data/world-protocol').absolutePath
+
+tasks.named('test', Test) {
+    useJUnitPlatform()
+    systemProperty 'autosketch.goldenDir', goldenDir
+    inputs.dir(goldenDir).withPropertyName('goldenVectors').withPathSensitivity(PathSensitivity.RELATIVE)
+    testLogging {
+        events 'failed'
+        exceptionFormat 'full'
+    }
+}
+
+// The loader modules compile these sources and resources into their own jar (the MultiLoader
+// template's pattern), so the common module never ships as a jar of its own.
+configurations {
+    commonJava {
+        canBeResolved = false
+        canBeConsumed = true
+    }
+    commonResources {
+        canBeResolved = false
+        canBeConsumed = true
+    }
+}
+
+// Stonecutter gives each version's project the module's src/ plus its own versions/<v>/src/ for
+// files only that version has; both go to the loader modules when present.
+artifacts {
+    sourceSets.main.java.srcDirs.findAll { it.exists() }.each { commonJava it }
+    sourceSets.main.resources.srcDirs.findAll { it.exists() }.each { commonResources it }
+}

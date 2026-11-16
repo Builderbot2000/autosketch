@@ -2,11 +2,33 @@ pluginManagement {
     repositories {
         gradlePluginPortal()
     }
+    plugins {
+        id 'net.neoforged.moddev' version '2.0.148'
+    }
 }
 
 plugins {
     // Provisions JDK 21 through Gradle toolchains when the machine has none.
     id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
+    // Version-conditional lines in one source tree, one subproject per Minecraft version
+    // (docs/design/14-distribution.md, *Build layout*).
+    id 'dev.kikugie.stonecutter' version '0.9.8'
 }
 
 rootProject.name = 'autosketch-mod'
+
+// The MultiLoader layout (14, *Build layout*): `common` holds every class that uses only vanilla
+// types and is compiled into each loader's jar; `neoforge` is the thin NeoForge module (entry point,
+// events, GameTests). Stonecutter makes each a branch of one tree, so both share the versions and
+// the active version (stonecutter.gradle).
+stonecutter {
+    create(rootProject) {
+        // One target for now: Craftoria's profile (14, *Range*). Add a version here, a properties file
+        // under versions/<version>/, and version-conditional lines where the code differs.
+        versions '1.21.1'
+        vcsVersion = '1.21.1'
+        kotlinController = false
+        branch 'common'
+        branch 'neoforge'
+    }
+}

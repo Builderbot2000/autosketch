@@ -1,0 +1,31 @@
+// Settings shared by every module's per-version project (applied from common/build.gradle and
+// neoforge/build.gradle). Stonecutter builds each module once per Minecraft version, as
+// `:<module>:<version>` in <module>/versions/<version>/ (14, *Build layout*).
+
+// The version's properties (minecraft, loader and library versions): one file per Minecraft
+// version, shared by all modules.
+def versionProperties = new Properties()
+rootProject.file("versions/${stonecutter.current.project}/gradle.properties").withInputStream { versionProperties.load(it) }
+versionProperties.each { key, value -> project.ext.set(key as String, value) }
+
+version = mod_version
+// Every module's per-version project is named after the version, so the group carries the module
+// name; otherwise :neoforge:1.21.1 and :common:1.21.1 share a capability and resolve to each other.
+group = "${mod_group_id}.${project.parent.name}"
+
+// Mojang ships Java 21 for 1.21.1. The foojay resolver (settings.gradle) downloads it if missing.
+java.toolchain.languageVersion = JavaLanguageVersion.of(java_version as int)
+
+repositories {
+    mavenCentral()
+    // Cloth Config (14, *Config across loaders*).
+    maven {
+        url = 'https://maven.shedaniel.me/'
+        content { includeGroup 'me.shedaniel.cloth' }
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.compilerArgs << '-Xlint:deprecation' << '-Xlint:unchecked'
+}

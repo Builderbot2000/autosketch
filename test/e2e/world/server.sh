@@ -7,7 +7,7 @@
 #   test/e2e/world/server.sh stop  <server dir>
 #   test/e2e/world/server.sh wait  <server dir> [seconds]   # until "Done (" and the pairing file
 #
-# start: copies the mod jar (default mod/build/libs/autosketch-*.jar) into <server dir>/mods,
+# start: copies the mod jar (default mod/neoforge/versions/1.21.1/build/libs/autosketch-neoforge-*.jar) into <server dir>/mods,
 # makes sure RCON is on in server.properties (port 25575, password autosketch-e2e unless set), and
 # launches the server in the background with Java 21, logging to <server dir>/logs/e2e-console.log.
 # It never touches eula.txt: the user accepts the EULA for each server themselves.
@@ -38,7 +38,7 @@ start)
     echo "already running (pid $(cat "$pidfile"))"; exit 0
   fi
   grep -qs '^eula=true' "$dir/eula.txt" || { echo "eula.txt in $dir is not accepted; the user must accept it" >&2; exit 3; }
-  if [[ -z "$jar" ]]; then jar=$(ls "$repo"/mod/build/libs/autosketch-*.jar 2>/dev/null | head -1 || true); fi
+  if [[ -z "$jar" ]]; then jar=$(ls "$repo"/mod/neoforge/versions/1.21.1/build/libs/autosketch-neoforge-*.jar 2>/dev/null | head -1 || true); fi
   [[ -f "$jar" ]] || { echo "mod jar not found; build it with (cd mod && ./gradlew build)" >&2; exit 2; }
   mkdir -p "$dir/mods" "$dir/logs"
   rm -f "$dir"/mods/autosketch-*.jar

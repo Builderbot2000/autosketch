@@ -1,0 +1,117 @@
+// The NeoForge module (14, *Build layout*): the entry point, NeoForge's events and the GameTests,
+// with the common module's sources and resources compiled into the same jar. Built from NeoForge's
+// ModDevGradle MDK for 1.21.1. Server-side only: no registry content.
+plugins {
+    id 'java-library'
+    id 'net.neoforged.moddev'
+}
+
+apply from: rootProject.file('gradle/java.gradle')
+
+base {
+    // MultiLoader convention: <mod id>-<loader>-<minecraft version>-<mod version>.jar (14, *Release naming*).
+    archivesName = "${mod_id}-neoforge-${minecraft_version}"
+}
+
+// GameTests (and their synthetic structure templates) live in their own source set, loaded as part
+// of the mod in dev runs but never packed into the jar.
+sourceSets {
+    gametest {
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+
+configurations {
+    commonJava {
+        canBeResolved = true
+        canBeConsumed = false
+    }
+    commonResources {
+        canBeResolved = true
+        canBeConsumed = false
+    }
+    gametestImplementation.extendsFrom implementation
+}
+
+dependencies {
+    // The common module's project for the same Minecraft version.
+    def common = ":common:${stonecutter.current.project}".toString()
+    compileOnly project(common)
+    commonJava project(path: common, configuration: 'commonJava')
+    commonResources project(path: common, configuration: 'commonResources')
+
+    implementation "me.shedaniel.cloth:cloth-config-neoforge:${cloth_config_version}"
+}
+
+tasks.named('compileJava', JavaCompile) {
+    dependsOn configurations.commonJava
+    source configurations.commonJava
+}
+
+tasks.named('processResources', ProcessResources) {
+    dependsOn configurations.commonResources
+    from configurations.commonResources
+}
+
+neoForge {
+    version = project.neo_version
+
+    parchment {
+        mappingsVersion = project.parchment_mappings_version
+        minecraftVersion = project.parchment_minecraft_version
+    }
+
+    runs {
+        client {
+            client()
+            gameDirectory = rootProject.file('run')
+            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+        }
+        server {
+            server()
+            gameDirectory = rootProject.file('run')
+            programArgument '--nogui'
+            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+        }
+        // Runs every registered GameTest headless, then exits (non-zero on failure).
+        gameTestServer {
+            type = 'gameTestServer'
+            sourceSet = sourceSets.gametest
+            gameDirectory = rootProject.file('run/gametest')
+            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+        }
+        configureEach {
+            logLevel = org.slf4j.event.Level.INFO
+        }
+    }
+
+    mods {
+        "${mod_id}" {
+            sourceSet(sourceSets.main)
+            sourceSet(sourceSets.gametest)
+        }
+    }
+}
+
+neoForge.addModdingDependenciesTo(sourceSets.gametest)
+
+var generateModMetadata = tasks.register('generateModMetadata', ProcessResources) {
+    var replaceProperties = [
+            minecraft_version         : minecraft_version,
+            minecraft_version_range   : minecraft_version_range,
+            neo_version               : neo_version,
+            loader_version_range      : loader_version_range,
+            cloth_config_version_range: cloth_config_version_range,
+            mod_id                    : mod_id,
+            mod_name                  : mod_name,
+            mod_license               : mod_license,
+            mod_version               : mod_version,
+    ]
+    inputs.properties replaceProperties
+    expand replaceProperties
+    from project.parent.file('src/main/templates')
+    into 'build/generated/sources/modMetadata'
+}
+sourceSets.main.resources.srcDir generateModMetadata
+neoForge.ideSyncTask generateModMetadata

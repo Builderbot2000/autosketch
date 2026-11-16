@@ -68,6 +68,10 @@ public final class AutosketchConfig implements ConfigData {
     @ConfigEntry.Gui.TransitiveObject
     public Prompts prompts = new Prompts();
 
+    @ConfigEntry.Category("discovery")
+    @ConfigEntry.Gui.TransitiveObject
+    public Discovery discovery = new Discovery();
+
     public static final class Bridge {
         @ConfigEntry.Gui.Tooltip(count = 2)
         public int port = 0;
@@ -103,6 +107,11 @@ public final class AutosketchConfig implements ConfigData {
         public String askAlias = "";
         @ConfigEntry.Gui.Tooltip
         public double targetReach = 64.0;
+    }
+
+    public static final class Discovery {
+        @ConfigEntry.Gui.Tooltip(count = 2)
+        public boolean pointer = true;
     }
 
     // ── keys: file layout, comments, ranges ───────────────────────────────────────────────────
@@ -156,6 +165,12 @@ public final class AutosketchConfig implements ConfigData {
                     "1.0 ~ 512.0", c -> c.prompts.targetReach, (c, v) -> {
                         if (v instanceof Double d && !d.isNaN()) c.prompts.targetReach = Math.max(1.0, Math.min(512.0, d));
                         else if (v instanceof Long l) c.prompts.targetReach = Math.max(1.0, Math.min(512.0, l));
+                    }),
+            new Key("discovery", "pointer", List.of(
+                    "Whether the server writes a pointer file, <user.home>/.autosketch/games/<hash>.toml, naming this game folder and its pairing file,",
+                    "so a local Autosketch MCP can find this game (14, *Instance discovery*). Off: no file is written and this game's old one is removed."),
+                    null, c -> c.discovery.pointer, (c, v) -> {
+                        if (v instanceof Boolean b) c.discovery.pointer = b;
                     }));
 
     static boolean validTracker(String s) {

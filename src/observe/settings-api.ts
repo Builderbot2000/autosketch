@@ -76,6 +76,7 @@ export class SettingsApi {
   /** JSON of each value as read at startup (what `restart` settings are running with). */
   private readonly running = new Map<string, string>();
   private watching = false;
+  private readonly reloadListeners = new Set<() => void>();
 
   constructor(
     private readonly settings: Settings,
@@ -88,8 +89,17 @@ export class SettingsApi {
   /** Re-reads config.toml and swaps it into `Settings` when its hash changed. */
   refresh(): ConfigSnapshot {
     const snap = readConfig(this.path);
-    if (snap.hash !== this.settings.config?.hash) this.settings.reload(snap);
+    if (snap.hash !== this.settings.config?.hash) {
+      this.settings.reload(snap);
+      for (const fn of this.reloadListeners) fn();
+    }
     return snap;
+  }
+
+  /** Calls `fn` after each reload of a changed config.toml (by the watch or a request). Returns an unsubscribe. */
+  onReload(fn: () => void): () => void {
+    this.reloadListeners.add(fn);
+    return () => this.reloadListeners.delete(fn);
   }
 
   /** Watches config.toml (polling: it is replaced by rename, and may not exist yet). */

@@ -93,6 +93,8 @@ export interface ObserveHttpOptions {
   configPath?: string;
   /** Appends an event to the session's log (the `otel` events of `/v1/logs`); absent for a finished log. */
   publish?: (e: ObserveEvent) => void;
+  /** How often config.toml is polled for changes (default 1000 ms; tests shorten it). */
+  configPollMs?: number;
   /** The per-launch write token; random by default. */
   token?: string;
   /** The session's instance, discovery and link: enables the Instance tab's endpoints (15). */
@@ -196,11 +198,16 @@ export class ObserveHttp {
       for (const c of this.clients) if (!c.lagging) c.res.write(": ping\n\n");
     }, 15_000);
     this.ping.unref();
-    this.settingsApi?.watch();
+    this.settingsApi?.watch(this.opts.configPollMs);
     this.opts.log?.(`observe: viewer at ${this.pageUrl}`);
     const current = this.opts.tables.current;
     if (current) void this.writeUrl(current);
     return this.pageUrl;
+  }
+
+  /** Calls `fn` each time a changed config.toml is reloaded into the settings; a no-op without settings. */
+  onSettingsReload(fn: () => void): () => void {
+    return this.settingsApi?.onReload(fn) ?? (() => {});
   }
 
   async close(): Promise<void> {

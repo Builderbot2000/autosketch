@@ -6,3 +6,5 @@ coverage/
 .env
 test/eval/results/
 test/golden/__output__/
+build/
+*.tgz

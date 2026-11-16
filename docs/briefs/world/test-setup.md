@@ -35,7 +35,7 @@ Running `startserver.bat` on Windows inside the CurseForge Instances folder fail
 Silo R's automated scenarios pass on the headless Craftoria server (2026-11-13; `docs/design/13-live-world.md`, *Implementation status*). What only a player can check:
 
 **Setup**
-1. Build the jar (`cd mod && JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 ./gradlew build`) and copy `mod/build/libs/autosketch-neoforge-1.21.1-0.1.0.jar` into the Craftoria instance's `mods/` folder (`C:\Users\kevin\curseforge\minecraft\Instances\Craftoria\mods`).
+1. Build the jar (`cd mod && JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 ./gradlew build`) and copy `mod/neoforge/versions/1.21.1/build/libs/autosketch-neoforge-1.21.1-0.1.0.jar` into the Craftoria instance's `mods/` folder (`C:\Users\kevin\curseforge\minecraft\Instances\Craftoria\mods`), with Cloth Config (already in Craftoria).
 2. Start Craftoria, create or open a test world (Creative, cheats on), and check that `config/autosketch-bridge.toml` appears in the instance folder.
 3. In WSL, start Claude Code with the Autosketch server as a development channel, from the repository (the server must be configured as `autosketch` in `claude mcp` / `.mcp.json`, with the Craftoria instance):
    ```

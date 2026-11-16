@@ -1,10 +1,10 @@
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { autosketchHome } from "../../core/config.js";
 import { readAtLauncher } from "./atlauncher.js";
 import { checkInstance } from "./check.js";
 import { readCurseForge } from "./curseforge.js";
-import { isDir } from "./fsutil.js";
+import { folderKey, isDir } from "./fsutil.js";
 import { readGdLauncher } from "./gdlauncher.js";
 import { openReadOnly, readModrinth, type OpenDb } from "./modrinth.js";
 import { readPointers } from "./pointer.js";
@@ -17,6 +17,7 @@ import { slug } from "./versions.js";
 export type { Candidate, InstanceCheck, LauncherId } from "./types.js";
 export { LAUNCHER_NAMES } from "./types.js";
 export { checkInstance } from "./check.js";
+export { chooseInstance, findCandidate, InstanceChoiceError, type InstanceChoice } from "./choose.js";
 export { formatPointer, gameFolderHash, parsePointer, POINTER_FORMAT, windowsFormOfWslPath, type Pointer } from "./pointer.js";
 
 /**
@@ -103,27 +104,10 @@ export async function discover(opts: DiscoverOptions = {}): Promise<Discovery> {
   return { candidates, warnings };
 }
 
-/** Folders compared without case on Windows drives (`/mnt/c/…`, `C:\…`). */
-const folderKey = (p: string): string => {
-  const r = resolve(p).replace(/\\/g, "/").replace(/\/+$/, "");
-  return /^(\/mnt\/[a-z]\/|[a-zA-Z]:\/)/i.test(r) ? r.toLowerCase() : r;
-};
-
 function uniqueId(c: Candidate, taken: Set<string>): string {
   const base = slug(c.name);
   let id = taken.has(base) ? `${base}-${c.launcher}` : base;
   for (let i = 2; taken.has(id); i++) id = `${base}-${c.launcher}-${i}`;
   taken.add(id);
   return id;
-}
-
-/**
- * The candidate `setup --instance <id | path>` names: an id from the list, else a candidate whose
- * folder or game folder is that path. Undefined when neither matches (a path is then used as given).
- */
-export function findCandidate(candidates: readonly Candidate[], idOrPath: string): Candidate | undefined {
-  const byId = candidates.find((c) => c.id === idOrPath);
-  if (byId) return byId;
-  const key = folderKey(idOrPath);
-  return candidates.find((c) => folderKey(c.folder) === key || folderKey(c.gameDir) === key);
 }

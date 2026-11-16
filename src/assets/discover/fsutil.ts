@@ -1,5 +1,11 @@
 import { readdir, readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+
+/** A folder for comparing: resolved, `/` separators, no trailing `/`, and lower-cased on Windows drives (`/mnt/c/…`, `C:\…`). */
+export const folderKey = (p: string): string => {
+  const r = resolve(p).replace(/\\/g, "/").replace(/\/+$/, "");
+  return /^(\/mnt\/[a-z]\/|[a-zA-Z]:\/)/i.test(r) ? r.toLowerCase() : r;
+};
 
 /** Small tolerant file helpers for the launcher readers: a missing or unreadable file is `undefined`, never a throw. */
 

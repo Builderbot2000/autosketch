@@ -1,7 +1,8 @@
 import { defaultCacheDir } from "../assets/cache.js";
 import { biomeClimate } from "../assets/biomes.js";
 import { MOD_ORDER, TINT_BIOME } from "../assets/settings.js";
-import { Settings } from "../core/settings.js";
+import { expandHome, type ConfigSnapshot } from "../core/config.js";
+import { Settings, type SettingSource, type SourcedText } from "../core/settings.js";
 import { locateInstance, type InstanceInfo, type LocateOptions } from "../assets/locate.js";
 import { openStack, type PackStack } from "../assets/pack.js";
 import { loadRegistry, type Registry } from "../assets/registry.js";
@@ -27,10 +28,14 @@ export interface InstanceContext {
   timings: Record<string, number>;
   /** Biome for colormapped tints (02); undefined = plains. */
   tintBiome?: string;
+  /** Which source named the instance (`ServerConfig.instanceSource`). */
+  instanceSource?: SettingSource;
 }
 
 export interface ServerConfig extends LocateOptions {
   instance: string;
+  /** Which source named the instance (`config.toml`, `--instance`, `AUTOSKETCH_INSTANCE`); `instance_info` reports it. */
+  instanceSource?: SettingSource;
   /** Folder for documents (default ~/autosketch). */
   workspace?: string;
   /** Biome for grass/foliage tints in renders, sheets and colour stats (default plains). */
@@ -38,31 +43,75 @@ export interface ServerConfig extends LocateOptions {
 }
 
 /**
- * Reads config from CLI args (--instance, --version, --base-jar, --workspace) and env (AUTOSKETCH_*).
- * modOrder and tintBiome are settings (`assets/settings.ts`): `--set modOrder=a,b` or the older
- * `--mod-order a,b` / `AUTOSKETCH_MOD_ORDER`, likewise `tintBiome`.
+ * A startup argument resolved like a setting (`15`, *Settings tab*; `14`, *Setup*): config.toml, then
+ * `--<flag>`, then `AUTOSKETCH_<NAME>`. `overrides` is the launch value config.toml beat, if any.
  */
-export function configFromEnv(argv = process.argv.slice(2), env = process.env): ServerConfig | undefined {
+export interface StartupArg {
+  value: string;
+  source: SettingSource;
+  overrides?: SourcedText;
+}
+
+/**
+ * The instance or workspace: config.toml's `instance` / `workspace` (with `~` expanded) first, then
+ * the launch `--instance` / `--workspace`, then `AUTOSKETCH_INSTANCE` / `AUTOSKETCH_WORKSPACE`, else
+ * undefined (`14`, *Setup*: config.toml has priority, launch options fill what it leaves unset).
+ */
+export function startupArg(name: "instance" | "workspace", argv: readonly string[], env: Readonly<Record<string, string | undefined>>, file?: ConfigSnapshot): StartupArg | undefined {
+  const i = argv.indexOf(`--${name}`);
+  const envKey = `AUTOSKETCH_${name.toUpperCase()}`;
+  const launch: SourcedText[] = [];
+  const flagValue = i >= 0 ? argv[i + 1] : undefined;
+  if (flagValue) launch.push({ source: { kind: "flag", label: `--${name}` }, raw: flagValue });
+  if (env[envKey]) launch.push({ source: { kind: "env", label: envKey }, raw: env[envKey]! });
+  const saved = file?.config[name];
+  if (saved) return { value: expandHome(saved), source: { kind: "config", label: "config.toml" }, ...(launch[0] ? { overrides: launch[0] } : {}) };
+  return launch[0] && { value: launch[0].raw, source: launch[0].source };
+}
+
+/**
+ * Reads config from config.toml when given (`instance`, `workspace`, `[settings]`: core/config.ts),
+ * then CLI args (--instance, --version, --base-jar, --workspace) and env (AUTOSKETCH_*).
+ * modOrder and tintBiome are settings (`assets/settings.ts`): `--set modOrder=a,b` or the older
+ * `--mod-order a,b` / `AUTOSKETCH_MOD_ORDER`, likewise `tintBiome`. The launch `--version` and
+ * `--base-jar` describe the launch instance, so they are dropped when config.toml names a different one.
+ */
+export function configFromEnv(argv = process.argv.slice(2), env = process.env, file?: ConfigSnapshot): ServerConfig | undefined {
   const arg = (name: string) => {
     const i = argv.indexOf(`--${name}`);
     return i >= 0 ? argv[i + 1] : undefined;
   };
-  const instance = arg("instance") ?? env.AUTOSKETCH_INSTANCE;
+  const instance = startupArg("instance", argv, env, file);
   if (!instance) return undefined;
-  const cfg: ServerConfig = { instance };
-  const version = arg("version") ?? env.AUTOSKETCH_VERSION;
-  const baseJar = arg("base-jar") ?? env.AUTOSKETCH_BASE_JAR;
-  if (version) cfg.version = version;
-  if (baseJar) cfg.baseJar = baseJar;
-  // Settings (core/settings.ts): --set key=value, the flag alias, then AUTOSKETCH_<KEY>.
-  const settings = Settings.from(argv, env);
+  const cfg: ServerConfig = { instance: instance.value, instanceSource: instance.source };
+  if (!instance.overrides || instance.overrides.raw === instance.value) {
+    const version = arg("version") ?? env.AUTOSKETCH_VERSION;
+    const baseJar = arg("base-jar") ?? env.AUTOSKETCH_BASE_JAR;
+    if (version) cfg.version = version;
+    if (baseJar) cfg.baseJar = baseJar;
+  }
+  // Settings (core/settings.ts): config.toml, --set key=value, the flag alias, then AUTOSKETCH_<KEY>.
+  const settings = Settings.from(argv, env, file);
   const modOrder = settings.get(MOD_ORDER);
   if (modOrder) cfg.modOrder = modOrder;
   const tintBiome = settings.get(TINT_BIOME);
   if (tintBiome) cfg.tintBiome = tintBiome;
-  const workspace = arg("workspace") ?? env.AUTOSKETCH_WORKSPACE;
-  if (workspace) cfg.workspace = workspace;
+  const workspace = startupArg("workspace", argv, env, file);
+  if (workspace) cfg.workspace = workspace.value;
   return cfg;
+}
+
+/** Startup log lines for an instance or workspace config.toml overrides (`15`: a launch value is never ignored silently). */
+export function startupArgNotes(argv: readonly string[], env: Readonly<Record<string, string | undefined>>, file?: ConfigSnapshot): string[] {
+  const out: string[] = [];
+  for (const name of ["instance", "workspace"] as const) {
+    const a = startupArg(name, argv, env, file);
+    if (a?.overrides && a.overrides.raw !== a.value) {
+      const how = a.overrides.source.kind === "flag" ? `${a.overrides.source.label} ${a.overrides.raw}` : `${a.overrides.source.label}=${a.overrides.raw}`;
+      out.push(`${name}: launch value ${how} ignored; config.toml says ${a.value}`);
+    }
+  }
+  return out;
 }
 
 export async function loadInstanceContext(cfg: ServerConfig, log: (msg: string) => void = () => {}): Promise<InstanceContext> {
@@ -98,5 +147,6 @@ export async function loadInstanceContext(cfg: ServerConfig, log: (msg: string) 
     warnings: [...warnings, ...registry.data.warnings, ...extra.warnings, ...merged.warnings],
     timings,
     ...tint,
+    ...(cfg.instanceSource ? { instanceSource: cfg.instanceSource } : {}),
   };
 }

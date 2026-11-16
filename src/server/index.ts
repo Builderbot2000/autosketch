@@ -3,7 +3,8 @@
  * Autosketch MCP server (stdio).
  *
  *   autosketch --instance "/path/to/instance" [--version 1.21.1] [--base-jar client.jar] [--workspace ~/autosketch]
- *   (or AUTOSKETCH_INSTANCE / AUTOSKETCH_VERSION / AUTOSKETCH_BASE_JAR / AUTOSKETCH_WORKSPACE)
+ *   (or AUTOSKETCH_INSTANCE / AUTOSKETCH_VERSION / AUTOSKETCH_BASE_JAR / AUTOSKETCH_WORKSPACE);
+ *   ~/.autosketch/config.toml (instance, workspace, [settings]) beats all of these, see core/config.ts
  *   settings: --set observe.log=false (or AUTOSKETCH_OBSERVE_LOG=false), see core/settings.ts
  *   viewer:   on by default on a free port (--set observe.http=<port> to pin one, =false to turn it
  *             off); the URL is printed to stderr and opened in the browser on the first tool call (--set observe.open=false)
@@ -23,7 +24,8 @@ import { serveLog } from "../observe/offline.js";
 import { openInBrowser } from "../observe/open.js";
 import { OBSERVE_OPEN } from "../observe/settings.js";
 import { scopeLimits } from "../scope/settings.js";
-import { configFromEnv, loadInstanceContext } from "./context.js";
+import { readConfig } from "../core/config.js";
+import { configFromEnv, loadInstanceContext, startupArgNotes } from "./context.js";
 import { createServer, SERVER_VERSION } from "./server.js";
 import { SERVER_HIDE_TOOLS } from "./settings.js";
 import { defaultWorkspace, Session } from "./session.js";
@@ -36,18 +38,29 @@ import { autoSyncHook, syncLink } from "../world/sync.js";
 const log = (msg: string) => process.stderr.write(`[autosketch] ${msg}\n`);
 
 async function main(): Promise<void> {
-  const cfg = configFromEnv();
+  // The user's saved choices come first (core/config.ts; 15, *Settings tab*), read once here.
+  const file = readConfig();
+  const argv = process.argv.slice(2);
+  let settings: Settings;
+  let cfg: ReturnType<typeof configFromEnv>;
+  try {
+    settings = Settings.from(argv, process.env, file);
+    cfg = configFromEnv(argv, process.env, file);
+  } catch (e) {
+    log((e as Error).message);
+    process.exit(2);
+  }
+  // One line per launch value config.toml overrides, and per problem in the file: logged, never in a tool result.
+  for (const line of [...settings.notes(), ...startupArgNotes(argv, process.env, file)]) log(line);
   if (!cfg) {
-    log('no instance configured: pass --instance "<path to Minecraft instance>" or set AUTOSKETCH_INSTANCE');
+    log(`no instance configured: pass --instance "<path to Minecraft instance>", set AUTOSKETCH_INSTANCE, or set instance in ${file.path}`);
     process.exit(2);
   }
   const ctx = loadInstanceContext(cfg, log);
   ctx.catch((e: Error) => log(`failed to load instance: ${e.message}`));
   const workspace = cfg.workspace ?? defaultWorkspace();
-  let settings: Settings;
   let session: Session;
   try {
-    settings = Settings.from();
     session = new Session(workspace, log, { scopeLimits: scopeLimits(settings) });
   } catch (e) {
     log((e as Error).message);
@@ -147,7 +160,7 @@ async function observeCommand(args: string[]): Promise<void> {
     log("--port must be 0..65535");
     process.exit(2);
   }
-  const cfg = configFromEnv(args);
+  const cfg = configFromEnv(args, process.env, readConfig());
   let getBaker;
   if (cfg) {
     const ctx = loadInstanceContext(cfg, log);

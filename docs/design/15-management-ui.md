@@ -2,7 +2,7 @@
 
 The live viewer (`12`) grows into the user's general UI for the MCP: one localhost page with tabs for watching a build, changing settings, managing the library (`07`) and choosing the instance, including first-run setup (`14`). Players who aren't developers can then run Autosketch without editing environment variables or JSON.
 
-Status: designed, settled with the user 2026-11-16; not built. Which settings become live is decided per setting while building (open questions).
+Status: designed, settled with the user 2026-11-16; the `config.toml` settings layer is built (*Implementation status*), the UI is not. Which settings become live is decided per setting while building (open questions).
 
 ## Principles
 
@@ -52,7 +52,7 @@ instance = "C:/Users/me/curseforge/minecraft/Instances/Craftoria"
 "library.roots" = ["~/autosketch/library", "~/shared/castle-kit"]
 ```
 
-Values are stored as text and go through each setting's own `parse`, so a hand-edited file and the UI agree on what's valid. An invalid value in the file is reported in the UI and the server log and the default is used, as with an invalid environment value.
+Values are stored as text and go through each setting's own `parse`, so a hand-edited file and the UI agree on what's valid. A number, boolean or list in the file is read as the text a launch value would carry (a list becomes `a, b`). An invalid value in the file is reported in the UI and the server log and skipped, so the next source applies: the launch value if there is one, else the default. Reason: a hand-editing mistake should fall back to what the user had before saving, not to a value nobody chose. (An invalid launch value still stops the server, as before: it is a mistake in the MCP client's config, which the user sees at once.)
 
 **Generated, not hand-written.** Each `setting(…)` gains three optional fields, and the tab is built from the registry, so a new setting appears in the UI with no UI change:
 
@@ -155,6 +155,15 @@ DELETE /api/instance                          unlink: remove `instance` from con
 | U5 | `autosketch ui` |
 
 U4 depends on `14`'s `config.toml` and discovery, so it lands with or after them.
+
+## Implementation status
+
+| Piece | Status |
+|---|---|
+| U2: `config.toml` `[settings]` layer | Done (the server side): `src/core/settings.ts` reads `config.toml [settings]` (`src/core/config.ts`, `14`, *Implementation status*) before `--set`, the flag alias and `AUTOSKETCH_<KEY>`. `Settings.from(argv, env, readConfig())`; `resolve(setting)` returns the value, its `source` (`kind` and the label shown: `config.toml`, `--set`, `--mod-order`, `AUTOSKETCH_…`, `default`), the `raw` text, the launch value it `overrides`, an `invalid` config value, or an `error` for an invalid launch value (which `get` still throws); it never throws itself. `resolveAll()` covers every registered setting, `notes()` gives the startup lines (one per overridden launch value whose meaning differs, per invalid or unknown `config.toml` key, per read problem), and `reload(snapshot)` swaps in a newer read for `live` settings. An invalid `config.toml` value is skipped and the next source applies (the launch value if any, else the default). No tool result changed. |
+| U2: `summary`, `group`, `applies` | Done as optional fields on `setting(…)`, with `settingGroup()` (default: the key's first segment, capitalised) and `settingApplies()` (default `restart`). `setting(…)` registers the key for `registeredSettings()`; declaring a key again replaces it. No setting sets them yet. |
+| U2: Settings tab, file watching | Not built (silo K) |
+| U1, U3–U5 | Not built |
 
 ## Open questions
 

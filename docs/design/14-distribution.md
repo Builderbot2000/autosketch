@@ -201,6 +201,17 @@ Deferred by the user until later development. What was found, for when it comes 
 - Models differ in judging renders and in long tool sessions, which no harness changes. The eval harness's model driver (`10`, `test/eval/drivers/`) is where to measure that before claiming support.
 - Until this resumes, B3 and B5 in `13` stay as settled.
 
+## Implementation status
+
+| Piece | Status |
+|---|---|
+| `config.toml` store | Done: `src/core/config.ts` (`readConfig`, `parseConfig`, `writeConfig`, `formatConfig`, `configPath`, `autosketchHome`). Reads `~/.autosketch/config.toml`, or `$AUTOSKETCH_HOME/config.toml`: `instance`, `workspace` and `[settings]` (numbers, booleans and lists turned into the text a launch value would carry; tables and dates warned about and left out); unknown top-level keys are kept and written back. Unreadable TOML is an empty config with a warning. Writes are whole-file through a temp file and rename, refused with `ConfigConflictError` when the file's sha256 differs from the snapshot the caller edited (`ABSENT` for "no file yet"). A write drops comments in a hand-edited file. TOML parsing is `smol-toml` (pure JS, no dependencies). Tests set `AUTOSKETCH_HOME` to a temp folder (`vitest.config.ts`), so spawned servers never read the user's file. |
+| Priority over the launch command | Done: `config.toml` `instance` and `workspace` beat `--instance` / `--workspace` and `AUTOSKETCH_INSTANCE` / `AUTOSKETCH_WORKSPACE` (`startupArg` in `server/context.ts`, `~` expanded). The launch `--version` and `--base-jar` are dropped when `config.toml` names a different instance, since they describe the launch one. Settings: `15`, *Implementation status*. Each overridden launch value is one stderr line at startup. `instance_info` says which source chose the instance (`chosen by config.toml`, `command line (--instance)`, `environment (AUTOSKETCH_INSTANCE)`). |
+| `autosketch instances`, `setup`, `config` | Not built (wave 1) |
+| Not-configured start | Not built (wave 1): with no instance anywhere the server still exits with a message, now naming `config.toml` too |
+| Instance discovery, pointer files, WSL | Not built (wave 1) |
+| Packaging and listings | Not built (wave 2) |
+
 ## Open questions
 
 - The launcher readers above come from source and docs; only CurseForge, Prism and vanilla were seen on a real machine. Check the others on a machine that has them.

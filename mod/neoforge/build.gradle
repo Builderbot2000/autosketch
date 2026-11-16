@@ -35,9 +35,11 @@ configurations {
 }
 
 dependencies {
-    compileOnly project(':common')
-    commonJava project(path: ':common', configuration: 'commonJava')
-    commonResources project(path: ':common', configuration: 'commonResources')
+    // The common module's project for the same Minecraft version.
+    def common = ":common:${stonecutter.current.project}".toString()
+    compileOnly project(common)
+    commonJava project(path: common, configuration: 'commonJava')
+    commonResources project(path: common, configuration: 'commonResources')
 
     implementation "me.shedaniel.cloth:cloth-config-neoforge:${cloth_config_version}"
 }
@@ -108,7 +110,7 @@ var generateModMetadata = tasks.register('generateModMetadata', ProcessResources
     ]
     inputs.properties replaceProperties
     expand replaceProperties
-    from 'src/main/templates'
+    from project.parent.file('src/main/templates')
     into 'build/generated/sources/modMetadata'
 }
 sourceSets.main.resources.srcDir generateModMetadata

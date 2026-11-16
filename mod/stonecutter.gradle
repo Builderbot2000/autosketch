@@ -1,0 +1,7 @@
+// Stonecutter's controller (14, *Build layout*): the version the source tree is currently set to.
+// `./gradlew "Set active project to <version>"` switches it and rewrites version-conditional lines.
+plugins {
+    id 'dev.kikugie.stonecutter'
+}
+
+stonecutter.active '1.21.1'

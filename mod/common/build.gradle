@@ -8,6 +8,11 @@ plugins {
 
 apply from: rootProject.file('gradle/java.gradle')
 
+base {
+    // Never shipped on its own: the loader modules compile these sources into their jars.
+    archivesName = "${mod_id}-common-${minecraft_version}"
+}
+
 neoForge {
     neoFormVersion = project.neo_form_version
 
@@ -63,7 +68,9 @@ configurations {
     }
 }
 
+// Stonecutter gives each version's project the module's src/ plus its own versions/<v>/src/ for
+// files only that version has; both go to the loader modules when present.
 artifacts {
-    commonJava sourceSets.main.java.sourceDirectories.singleFile
-    commonResources sourceSets.main.resources.sourceDirectories.singleFile
+    sourceSets.main.java.srcDirs.findAll { it.exists() }.each { commonJava it }
+    sourceSets.main.resources.srcDirs.findAll { it.exists() }.each { commonResources it }
 }

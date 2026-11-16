@@ -1,6 +1,7 @@
 // Autosketch companion mod (docs/design/13-live-world.md, *Companion mod requirements*), in the
-// MultiLoader layout (docs/design/14-distribution.md, *Build layout*). Server-side only: no registry
-// content. The modules' own build files are common/build.gradle and neoforge/build.gradle.
-plugins {
-    id 'net.neoforged.moddev' version '2.0.148' apply false
-}
+// MultiLoader layout with Stonecutter (docs/design/14-distribution.md, *Build layout*). The root's
+// own build file is stonecutter.gradle; this script builds the root branch's per-version projects
+// (`:1.21.1`), which hold nothing. The modules are common/build.gradle and neoforge/build.gradle.
+
+// Stonecutter applies the Java plugin to these projects; there is nothing to pack.
+tasks.matching { it.name == 'jar' }.configureEach { enabled = false }

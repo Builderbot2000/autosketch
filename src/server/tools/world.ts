@@ -20,7 +20,7 @@ export function registerWorldTools({ tool, session }: ToolDeps): void {
     async () => {
       const link = session.world;
       if (!link || link.state !== "linked")
-        return fail(`No linked world document${link ? ` (link: ${link.state})` : ""}. Open the base document with the world link, and set a work volume in-game with the /autosketch wand.`);
+        return fail(`No linked world document${link ? ` (link: ${link.state})` : ""}. Open the base document with the world link, and set a work volume in-game with the wand (a blaze rod).`);
       const r = await link.syncNow("manual");
       const doc = link.doc ?? session.require();
       if (!r) return text("ok · world_sync · the cache already matches the world");

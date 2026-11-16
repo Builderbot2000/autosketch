@@ -16,6 +16,8 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -114,8 +116,8 @@ public final class VolumeGameTests {
     @GameTest(template = "empty", batch = "autosketch_wand")
     public static void wandClicksAndSwapHands(GameTestHelper h) {
         ServerPlayer p = op(h);
-        p.setItemInHand(InteractionHand.MAIN_HAND, Wand.create());
-        h.assertTrue(Wand.isWand(p.getMainHandItem()), "the wand carries its marker");
+        p.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.BLAZE_ROD));
+        h.assertTrue(Wand.isWand(p.getMainHandItem()), "any plain blaze rod is the wand (B1)");
         run(p, "autosketch mode work");
 
         BlockPos a = h.absolutePos(new BlockPos(0, 1, 0)), b = h.absolutePos(new BlockPos(2, 1, 2));
@@ -138,6 +140,48 @@ public final class VolumeGameTests {
         String third = AutosketchMod.internals().wand().mode(p).name();
         h.assertTrue(!third.equals("context"), "and on (" + third + ")");
         done(h, p);
+    }
+
+    /** B1: a non-op's rod, or a rod in the off hand, is a plain blaze rod; the wand never opens a block. */
+    @GameTest(template = "empty", batch = "autosketch_wand_rules")
+    public static void wandIsMainHandAndOpOnly(GameTestHelper h) {
+        ServerPlayer op = op(h);
+        ServerPlayer guest = h.makeMockServerPlayerInLevel();
+        BlockPos a = h.absolutePos(new BlockPos(0, 1, 0)), b = h.absolutePos(new BlockPos(2, 1, 2));
+        h.setBlock(new BlockPos(1, 1, 1), Blocks.BREWING_STAND);
+        BlockPos stand = h.absolutePos(new BlockPos(1, 1, 1));
+        var wand = AutosketchMod.internals().wand();
+
+        guest.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.BLAZE_ROD));
+        var left = new PlayerInteractEvent.LeftClickBlock(guest, a, Direction.UP, PlayerInteractEvent.LeftClickBlock.Action.START);
+        NeoForge.EVENT_BUS.post(left);
+        h.assertFalse(left.isCanceled(), "a non-op's left click with a rod is untouched");
+        h.assertTrue(useOn(guest, stand).consumesAction() && guest.containerMenu != guest.inventoryMenu, "a non-op's rod opens the brewing stand as usual");
+        guest.closeContainer();
+        h.assertTrue(Autosketch.link().current() == null, "and sets no corner");
+
+        op.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY);
+        op.setItemInHand(InteractionHand.OFF_HAND, new ItemStack(Items.BLAZE_ROD));
+        h.assertFalse(wand.leftClick(op, a, true), "a rod in the off hand isn't the wand");
+        h.assertFalse(wand.rightClick(op, b, false), "nor for a right click");
+        h.assertTrue(Autosketch.link().current() == null, "no corner set from the off hand");
+
+        op.setItemInHand(InteractionHand.OFF_HAND, ItemStack.EMPTY);
+        op.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.BLAZE_ROD));
+        run(op, "autosketch mode work");
+        h.assertTrue(wand.leftClick(op, a, true), "an op's main-hand rod sets corner 1");
+        useOn(op, stand);
+        h.assertTrue(op.containerMenu == op.inventoryMenu, "clicking the brewing stand with the wand doesn't open it");
+        LinkVolumes v = Autosketch.link().current();
+        h.assertTrue(v != null && v.work().equals(Box.of(a, stand)), "it sets corner 2 instead: " + v);
+        h.getLevel().getServer().getPlayerList().remove(guest);
+        done(h, op);
+    }
+
+    /** A right click on a block with the main hand, through the game's own interaction path (which posts the event). */
+    static net.minecraft.world.InteractionResult useOn(ServerPlayer p, BlockPos pos) {
+        var hit = new net.minecraft.world.phys.BlockHitResult(Vec3.atCenterOf(pos), Direction.UP, pos, false);
+        return p.gameMode.useItemOn(p, p.level(), p.getMainHandItem(), InteractionHand.MAIN_HAND, hit);
     }
 
     @GameTest(template = "empty", batch = "autosketch_extend")

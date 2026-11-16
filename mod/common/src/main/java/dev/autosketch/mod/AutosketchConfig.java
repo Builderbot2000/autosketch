@@ -95,6 +95,18 @@ public final class AutosketchConfig implements ConfigData {
     public static final class Volumes {
         @ConfigEntry.Gui.Tooltip
         public long contextCap = 4_194_304L;
+        // Silo Y (B1): the wand is any stack of this item.
+        @ConfigEntry.Gui.Tooltip(count = 2)
+        public String wandItem = DEFAULT_WAND;
+    }
+
+    public static final String DEFAULT_WAND = "minecraft:blaze_rod";
+
+    /** An item id with its namespace ({@code blaze_rod} → {@code minecraft:blaze_rod}), or null when it isn't a valid id. */
+    public static @Nullable String itemId(@Nullable String s) {
+        if (s == null) return null;
+        net.minecraft.resources.ResourceLocation id = net.minecraft.resources.ResourceLocation.tryParse(s.trim());
+        return id == null ? null : id.toString();
     }
 
     public static final class Feedback {
@@ -153,6 +165,12 @@ public final class AutosketchConfig implements ConfigData {
                     "1 ~ " + (1L << 40), c -> c.volumes.contextCap, (c, v) -> {
                         if (v instanceof Long l) c.volumes.contextCap = Math.max(1L, Math.min(1L << 40, l));
                     }),
+            new Key("volumes", "wandItem", List.of(
+                    "The wand: any stack of this item, held in the main hand by an op, sets corners (left click corner 1, right click corner 2) and never uses the item or the block.",
+                    "An item id, e.g. \"minecraft:blaze_rod\" (the default)."),
+                    null, c -> c.volumes.wandItem, (c, v) -> {
+                        if (v instanceof String s && itemId(s) != null) c.volumes.wandItem = itemId(s);
+                    }),
             new Key("feedback", "noticesDefault", List.of("Whether action-bar notices are on for a player who hasn't set /autosketch notices."),
                     null, c -> c.feedback.noticesDefault, (c, v) -> {
                         if (v instanceof Boolean b) c.feedback.noticesDefault = b;
@@ -187,6 +205,7 @@ public final class AutosketchConfig implements ConfigData {
         }
         if (tracking.tracker == null || !validTracker(tracking.tracker)) tracking.tracker = defaults.tracking.tracker;
         if (prompts.askAlias == null) prompts.askAlias = defaults.prompts.askAlias;
+        volumes.wandItem = itemId(volumes.wandItem) == null ? defaults.volumes.wandItem : itemId(volumes.wandItem);
     }
 
     /** A config with the values {@code text} sets; keys it lacks or can't read keep their defaults. */

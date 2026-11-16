@@ -1,35 +1,35 @@
 package dev.autosketch.mod.volume;
 
-import net.minecraft.core.component.DataComponents;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.network.chat.Component;
+import dev.autosketch.mod.AutosketchConfig;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.item.component.CustomData;
 
 /**
- * The wand (13, *Work and context volumes in-game*): a vanilla blaze rod marked with
- * {@code custom_data {autosketch_wand:1b}}, so it needs no registered item (M2) and doesn't clash with
- * WorldEdit's wooden axe or Axiom's tools. Any item carrying the marker works as the wand.
+ * The wand (13, B1): as WorldEdit's wand is any wooden axe, ours is any stack of the configured item
+ * ({@code wandItem}, default {@code minecraft:blaze_rod}), with no marker and no command to hand it
+ * out. It needs no registered item (M2); who may use it and with which hand is {@link WandControl}'s.
  */
 public final class Wand {
     private Wand() {}
 
-    public static final String MARKER = "autosketch_wand";
-
-    public static ItemStack create() {
-        ItemStack stack = new ItemStack(Items.BLAZE_ROD);
-        CompoundTag tag = new CompoundTag();
-        tag.putBoolean(MARKER, true);
-        stack.set(DataComponents.CUSTOM_DATA, CustomData.of(tag));
-        stack.set(DataComponents.CUSTOM_NAME, Component.literal("Autosketch wand"));
-        stack.set(DataComponents.ENCHANTMENT_GLINT_OVERRIDE, true);
-        return stack;
+    /** The configured wand item's id, with its namespace. */
+    public static String itemId() {
+        String id = AutosketchConfig.itemId(AutosketchConfig.get().volumes.wandItem);
+        return id == null ? AutosketchConfig.DEFAULT_WAND : id;
     }
 
+    /** A plain stack of the wand item (the default blaze rod when the configured id names no item). */
+    public static ItemStack create() {
+        ResourceLocation id = ResourceLocation.tryParse(itemId());
+        var item = id == null ? Items.BLAZE_ROD : BuiltInRegistries.ITEM.getOptional(id).orElse(Items.BLAZE_ROD);
+        return new ItemStack(item);
+    }
+
+    /** Whether the stack is the wand item: any stack of it, whatever its components. */
     public static boolean isWand(ItemStack stack) {
         if (stack.isEmpty()) return false;
-        CustomData data = stack.get(DataComponents.CUSTOM_DATA);
-        return data != null && data.contains(MARKER);
+        return BuiltInRegistries.ITEM.getKey(stack.getItem()).toString().equals(itemId());
     }
 }

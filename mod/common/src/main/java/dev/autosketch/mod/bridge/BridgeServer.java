@@ -52,6 +52,19 @@ public final class BridgeServer implements Bridge {
 
         /** The current {@code volumes} message. */
         Frame volumes();
+
+        /**
+         * An MCP said hello in another protocol version and was refused (13, *Connection and
+         * handshake*, step 3): the host tells ops on the action bar which side is older
+         * ({@link #mismatchText}).
+         */
+        default void protocolMismatch(int mcpProtocol) {}
+    }
+
+    /** The action-bar text for a refused hello in {@code mcpProtocol}, naming the older side and what to update. */
+    public static String mismatchText(int mcpProtocol) {
+        String older = mcpProtocol < Messages.PROTOCOL_VERSION ? "the Autosketch MCP server is older; update it." : "this mod is older; update the Autosketch mod.";
+        return "Autosketch: the MCP server speaks bridge protocol " + mcpProtocol + " and this mod speaks " + Messages.PROTOCOL_VERSION + ": " + older;
     }
 
     private final Dispatcher dispatcher;
@@ -338,6 +351,8 @@ public final class BridgeServer implements Bridge {
                 LOG.info("Autosketch bridge: MCP speaks protocol {}, the mod {}", protocol, Messages.PROTOCOL_VERSION);
                 sendRaw(new ErrorMessage(null, ErrorCodes.PROTOCOL_MISMATCH, "mod speaks protocol " + Messages.PROTOCOL_VERSION + ", MCP sent " + protocol, Messages.PROTOCOL_VERSION).encode());
                 close();
+                Host h = host;
+                if (h != null) serverThread.execute(() -> h.protocolMismatch(protocol));
                 return false;
             }
             Object t = f.header().get("token");
@@ -347,7 +362,7 @@ public final class BridgeServer implements Bridge {
                 return false;
             }
             McpHello hello = McpHello.decode(f);
-            session = new BridgeSession(serials.incrementAndGet(), hello.clientName(), hello.clientVersion(), hello.volatileKeys());
+            session = new BridgeSession(serials.incrementAndGet(), hello.clientName(), hello.clientVersion(), hello.volatileKeys(), hello.effectiveModes());
             paired = true;
             serverThread.execute(() -> promote(this));
             return true;

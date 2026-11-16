@@ -37,6 +37,7 @@ class BridgeServerTest {
     ExecutorService serverThread;
     BridgeServer bridge;
     final List<String> events = new CopyOnWriteArrayList<>();
+    final List<Integer> mismatches = new CopyOnWriteArrayList<>();
 
     @BeforeEach
     void start() throws IOException {
@@ -66,6 +67,11 @@ class BridgeServerTest {
             @Override
             public Frame volumes() {
                 return Messages.Volumes.none(7).encode();
+            }
+
+            @Override
+            public void protocolMismatch(int mcpProtocol) {
+                mismatches.add(mcpProtocol);
             }
         });
     }
@@ -99,7 +105,7 @@ class BridgeServerTest {
         }
 
         Client paired() throws Exception {
-            hello(bridge.token(), 1);
+            hello(bridge.token(), Messages.PROTOCOL_VERSION);
             assertEquals("hello", read().type());
             assertEquals("volumes", read().type());
             return this;
@@ -124,7 +130,7 @@ class BridgeServerTest {
     @Test
     void pairingFileNamesPortAndToken() throws IOException {
         String text = Files.readString(config.resolve("autosketch-bridge.toml"), StandardCharsets.UTF_8);
-        assertTrue(text.contains("protocol = 1\n"));
+        assertTrue(text.contains("protocol = 2\n"));
         assertTrue(text.contains("host = \"127.0.0.1\"\n"));
         assertTrue(text.contains("port = " + bridge.port() + "\n"));
         assertTrue(text.contains("token = \"" + bridge.token() + "\"\n"));
@@ -135,7 +141,7 @@ class BridgeServerTest {
     @Test
     void pairsThenSendsHelloAndVolumes() throws Exception {
         try (Client c = new Client()) {
-            c.hello(bridge.token(), 1);
+            c.hello(bridge.token(), Messages.PROTOCOL_VERSION);
             Messages.ModHello h = Messages.ModHello.decode(c.read());
             assertEquals("21.1.249", h.loaderVersion());
             Messages.Volumes v = Messages.Volumes.decode(c.read());
@@ -157,7 +163,7 @@ class BridgeServerTest {
     @Test
     void refusesABadToken() throws Exception {
         try (Client c = new Client()) {
-            c.hello("0".repeat(64), 1);
+            c.hello("0".repeat(64), Messages.PROTOCOL_VERSION);
             ErrorMessage e = ErrorMessage.decode(c.read());
             assertEquals("bad_token", e.code());
             assertTrue(c.closedByPeer());
@@ -168,12 +174,24 @@ class BridgeServerTest {
     @Test
     void reportsAProtocolMismatchWithItsVersion() throws Exception {
         try (Client c = new Client()) {
-            c.hello(bridge.token(), 2);
+            c.hello(bridge.token(), Messages.PROTOCOL_VERSION + 1);
             ErrorMessage e = ErrorMessage.decode(c.read());
             assertEquals("protocol_mismatch", e.code());
-            assertEquals(1, e.protocol());
+            assertEquals(Messages.PROTOCOL_VERSION, e.protocol());
             assertTrue(c.closedByPeer());
         }
+        try (Client c = new Client()) {
+            c.hello(bridge.token(), Messages.PROTOCOL_VERSION - 1);
+            assertEquals("protocol_mismatch", ErrorMessage.decode(c.read()).code());
+        }
+        // Both reach the host, which tells ops on the action bar which side is older (13, step 3).
+        long deadline = System.currentTimeMillis() + 2000;
+        while (mismatches.size() < 2 && System.currentTimeMillis() < deadline) Thread.sleep(10);
+        assertEquals(List.of(Messages.PROTOCOL_VERSION + 1, Messages.PROTOCOL_VERSION - 1), mismatches);
+        assertEquals("Autosketch: the MCP server speaks bridge protocol 1 and this mod speaks 2: the Autosketch MCP server is older; update it.",
+                BridgeServer.mismatchText(1));
+        assertEquals("Autosketch: the MCP server speaks bridge protocol 3 and this mod speaks 2: this mod is older; update the Autosketch mod.",
+                BridgeServer.mismatchText(3));
     }
 
     @Test

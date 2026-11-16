@@ -27,8 +27,16 @@ final class Golden {
 
     /** Names of every frame vector (a {@code .bin} with its {@code .json} sidecar). */
     static List<String> frameNames() {
-        try (Stream<Path> s = Files.list(dir())) {
-            return s.map(p -> p.getFileName().toString()).filter(n -> n.endsWith(".bin")).map(n -> n.substring(0, n.length() - 4)).sorted().toList();
+        return frameNames("");
+    }
+
+    /**
+     * Names of the frame vectors in a subfolder ({@code "v1/"} for the frozen version-1 frames),
+     * prefixed with it so {@link #bin} and {@link #json} find them.
+     */
+    static List<String> frameNames(String sub) {
+        try (Stream<Path> s = Files.list(dir().resolve(sub.isEmpty() ? "." : sub))) {
+            return s.map(p -> p.getFileName().toString()).filter(n -> n.endsWith(".bin")).map(n -> sub + n.substring(0, n.length() - 4)).sorted().toList();
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

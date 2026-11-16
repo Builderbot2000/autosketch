@@ -8,6 +8,7 @@ import dev.autosketch.mod.protocol.BodyTypes.AckLists;
 import dev.autosketch.mod.protocol.BodyTypes.Encoded;
 import dev.autosketch.mod.protocol.BodyTypes.PatchBlock;
 import dev.autosketch.mod.protocol.BodyTypes.SnapshotRegion;
+import dev.autosketch.mod.protocol.BodyTypes.SurfaceLayer;
 import dev.autosketch.mod.protocol.BodyTypes.WorldBlock;
 import java.util.ArrayList;
 import java.util.List;
@@ -25,7 +26,14 @@ import org.jetbrains.annotations.Nullable;
 public final class Messages {
     private Messages() {}
 
-    public static final int PROTOCOL_VERSION = 1;
+    /** The one protocol version the mod speaks (13, *Versions and features*). */
+    public static final int PROTOCOL_VERSION = 2;
+
+    /** Request modes (13, B6), named by the player's subcommand. */
+    public static final List<String> REQUEST_MODES = List.of("ask", "scan", "plan", "build");
+
+    /** Optional mod capabilities a mod hello lists in {@code features} (13, *Versions and features*). */
+    public static final String FEATURE_MODES = "modes", FEATURE_SCAN = "scan", FEATURE_VOLUMES_SET = "volumes.set";
 
     private static final Pattern HASH = Pattern.compile("[0-9a-f]{16}");
 
@@ -75,8 +83,21 @@ public final class Messages {
 
     // ── handshake ─────────────────────────────────────────────────────────────────────────────
 
-    /** {@code hello}, MCP → mod. {@code volatileKeys} is the volatile-key list (*Hashing*), possibly empty. */
-    public record McpHello(int protocol, String token, String clientName, String clientVersion, JsonObject volatileKeys) {
+    /**
+     * {@code hello}, MCP → mod. {@code volatileKeys} is the volatile-key list (*Hashing*), possibly
+     * empty. {@code modes} (protocol 2) the request modes the MCP enforces; null when absent, which
+     * means {@code ["build"]} ({@link #effectiveModes}).
+     */
+    public record McpHello(int protocol, String token, String clientName, String clientVersion, JsonObject volatileKeys, @Nullable List<String> modes) {
+        public McpHello(int protocol, String token, String clientName, String clientVersion, JsonObject volatileKeys) {
+            this(protocol, token, clientName, clientVersion, volatileKeys, null);
+        }
+
+        /** The modes the hello lists, or {@code ["build"]} when it lists none. */
+        public List<String> effectiveModes() {
+            return modes == null ? List.of("build") : modes;
+        }
+
         public Frame encode() {
             JsonObject h = Json.header("hello");
             h.addProperty("protocol", protocol);
@@ -86,6 +107,7 @@ public final class Messages {
             client.addProperty("version", clientVersion);
             h.add("client", client);
             h.add("volatile", volatileKeys);
+            if (modes != null) h.add("modes", Json.strings(modes));
             return new Frame(h);
         }
 
@@ -99,7 +121,8 @@ public final class Messages {
             JsonObject h = f.header();
             JsonObject client = Json.reqObject(h, "client", null);
             return new McpHello(Json.reqInt(h, "protocol", null), Json.reqString(h, "token", null),
-                    Json.reqString(client, "name", null), Json.reqString(client, "version", null), Json.reqObject(h, "volatile", null));
+                    Json.reqString(client, "name", null), Json.reqString(client, "version", null), Json.reqObject(h, "volatile", null),
+                    Json.optStrings(h, "modes", null));
         }
 
         /** The {@code protocol} field alone, the part every protocol version keeps. */
@@ -108,9 +131,16 @@ public final class Messages {
         }
     }
 
-    /** {@code hello}, mod → MCP. {@code host} is the singleplayer host, null on a dedicated server. */
+    /**
+     * {@code hello}, mod → MCP. {@code host} is the singleplayer host, null on a dedicated server.
+     * {@code features} (protocol 2) the optional capabilities the mod has; null when absent (none).
+     */
     public record ModHello(String modVersion, String gameVersion, int dataVersion, String loader, String loaderVersion,
-            boolean singleplayer, @Nullable Player host) {
+            boolean singleplayer, @Nullable Player host, @Nullable List<String> features) {
+        public ModHello(String modVersion, String gameVersion, int dataVersion, String loader, String loaderVersion, boolean singleplayer, @Nullable Player host) {
+            this(modVersion, gameVersion, dataVersion, loader, loaderVersion, singleplayer, host, null);
+        }
+
         public Frame encode() {
             JsonObject h = Json.header("hello");
             h.addProperty("protocol", PROTOCOL_VERSION);
@@ -125,6 +155,7 @@ public final class Messages {
             h.add("game", game);
             h.addProperty("singleplayer", singleplayer);
             h.add("host", host == null ? JsonNull.INSTANCE : host.toJson());
+            if (features != null) h.add("features", Json.strings(features));
             return new Frame(h);
         }
 
@@ -137,7 +168,8 @@ public final class Messages {
                     Json.reqString(game, "version", null), Json.reqInt(game, "dataVersion", null),
                     Json.reqString(game, "loader", null), Json.reqString(game, "loaderVersion", null),
                     Json.reqBool(h, "singleplayer", null),
-                    host.isJsonNull() ? null : Player.fromJson(Json.reqObject(h, "host", null), null));
+                    host.isJsonNull() ? null : Player.fromJson(Json.reqObject(h, "host", null), null),
+                    Json.optStrings(h, "features", null));
         }
     }
 
@@ -145,15 +177,26 @@ public final class Messages {
 
     /**
      * {@code volumes}, mod → MCP. With {@code work} null (unlinked) only {@code link} is sent;
-     * otherwise {@code dimension}, {@code context} and, while in force, {@code extended}.
+     * otherwise {@code dimension}, {@code context} and, while in force, {@code extended}. {@code id}
+     * (protocol 2) only on the {@code volumes} that confirms a {@code volumes.set}.
      */
-    public record Volumes(long link, @Nullable String dimension, @Nullable Box work, List<Box> context, @Nullable Box extended) {
+    public record Volumes(@Nullable Long id, long link, @Nullable String dimension, @Nullable Box work, List<Box> context, @Nullable Box extended) {
+        public Volumes(long link, @Nullable String dimension, @Nullable Box work, List<Box> context, @Nullable Box extended) {
+            this(null, link, dimension, work, context, extended);
+        }
+
         public static Volumes none(long link) {
             return new Volumes(link, null, null, List.of(), null);
         }
 
+        /** The same message confirming the {@code volumes.set} with this id. */
+        public Volumes confirming(long requestId) {
+            return new Volumes(requestId, link, dimension, work, context, extended);
+        }
+
         public Frame encode() {
             JsonObject h = Json.header("volumes");
+            if (id != null) h.addProperty("id", id);
             h.addProperty("link", link);
             if (work == null) {
                 h.add("work", JsonNull.INSTANCE);
@@ -169,11 +212,12 @@ public final class Messages {
         public static Volumes decode(Frame f) throws ProtocolException {
             expectType(f, "volumes");
             JsonObject h = f.header();
+            Long id = h.has("id") ? Json.reqLong(h, "id", null) : null;
             long link = Json.reqLong(h, "link", null);
             JsonElement work = Json.req(h, "work", null);
-            if (work.isJsonNull()) return none(link);
+            if (work.isJsonNull()) return new Volumes(id, link, null, null, List.of(), null);
             Box ext = h.has("extended") ? Box.fromJson(h.get("extended"), "extended", null) : null;
-            return new Volumes(link, Json.reqString(h, "dimension", null), Box.fromJson(work, "work", null), Json.reqBoxes(h, "context", null), ext);
+            return new Volumes(id, link, Json.reqString(h, "dimension", null), Box.fromJson(work, "work", null), Json.reqBoxes(h, "context", null), ext);
         }
     }
 
@@ -191,6 +235,29 @@ public final class Messages {
             expectType(f, "volumes.extend");
             long id = reqId(f);
             return new VolumesExtend(id, Json.reqLong(f.header(), "link", id), Box.fromJson(Json.req(f.header(), "work", id), "work", id));
+        }
+    }
+
+    /**
+     * {@code volumes.set}, MCP → mod, protocol 2 (feature {@code volumes.set}; 13, B4): the agent sets
+     * the volumes as if the player had marked them. {@code context} null means the default context.
+     */
+    public record VolumesSet(long id, String dimension, Box work, @Nullable List<Box> context) {
+        public Frame encode() {
+            JsonObject h = Json.header("volumes.set");
+            h.addProperty("id", id);
+            h.addProperty("dimension", dimension);
+            h.add("work", work.toJson());
+            if (context != null) h.add("context", Json.boxes(context));
+            return new Frame(h);
+        }
+
+        public static VolumesSet decode(Frame f) throws ProtocolException {
+            expectType(f, "volumes.set");
+            long id = reqId(f);
+            JsonObject h = f.header();
+            List<Box> context = h.has("context") ? Json.reqBoxes(h, "context", id) : null;
+            return new VolumesSet(id, Json.reqString(h, "dimension", id), Box.fromJson(Json.req(h, "work", id), "work", id), context);
         }
     }
 
@@ -287,6 +354,8 @@ public final class Messages {
             long id = reqId(f);
             JsonObject h = f.header();
             String dim = Json.reqString(h, "dimension", id);
+            String kind = Json.optString(h, "kind", id);
+            if (kind != null && !kind.equals("blocks")) throw ProtocolException.badRequest(id, "not a blocks snapshot (kind " + kind + ")");
             boolean hasBoxes = h.has("boxes"), hasSections = h.has("sections");
             if (hasBoxes == hasSections) throw ProtocolException.badRequest(id, "snapshot needs exactly one of boxes or sections");
             if (hasBoxes) return new SnapshotRequest(id, dim, Json.reqBoxes(h, "boxes", id), null);
@@ -318,6 +387,86 @@ public final class Messages {
             List<Box> boxes = Json.reqBoxes(f.header(), "regions", id);
             Bodies.SnapshotBody body = Bodies.decodeSnapshot(f.body(), boxes);
             return new SnapshotResult(id, Json.reqString(f.header(), "dimension", id), body.palette(), body.regions());
+        }
+    }
+
+    /** The snapshot kind a {@code snapshot} request asks for: {@code blocks} (the default) or {@code surface} (protocol 2). */
+    public static String snapshotKind(Frame f) throws ProtocolException {
+        String kind = Json.optString(f.header(), "kind", f.id());
+        return kind == null ? "blocks" : kind;
+    }
+
+    /**
+     * {@code snapshot} kind {@code surface}, MCP → mod, protocol 2 (feature {@code scan}; 13, B4): per
+     * column of {@code columns}, the topmost non-air block, and with {@code ceiling} also the lowest
+     * non-air block at or above that y.
+     */
+    public record SurfaceRequest(long id, String dimension, Area columns, @Nullable Integer ceiling) {
+        public Frame encode() {
+            JsonObject h = Json.header("snapshot");
+            h.addProperty("id", id);
+            h.addProperty("dimension", dimension);
+            h.addProperty("kind", "surface");
+            h.add("columns", columns.toJson());
+            if (ceiling != null) h.addProperty("ceiling", ceiling);
+            return new Frame(h);
+        }
+
+        public static SurfaceRequest decode(Frame f) throws ProtocolException {
+            expectType(f, "snapshot");
+            long id = reqId(f);
+            JsonObject h = f.header();
+            if (!"surface".equals(Json.optString(h, "kind", id))) throw ProtocolException.badRequest(id, "not a surface snapshot");
+            Integer ceiling = h.has("ceiling") ? Json.reqInt(h, "ceiling", id) : null;
+            return new SurfaceRequest(id, Json.reqString(h, "dimension", id), Area.fromJson(Json.req(h, "columns", id), "columns", id), ceiling);
+        }
+    }
+
+    /** A chunk by chunk coordinates, for {@code missing}. */
+    public record ChunkXZ(int cx, int cz) {}
+
+    /**
+     * {@code snapshot.result} kind {@code surface}, mod → MCP, protocol 2. The layers' states index
+     * {@code palette}; {@code ceilings} is present exactly when {@code ceiling} is. {@code missing}
+     * ascending by cz, then cx.
+     */
+    public record SurfaceResult(long id, String dimension, Area columns, int minY, @Nullable Integer ceiling, List<ChunkXZ> missing,
+            List<String> palette, SurfaceLayer surface, @Nullable SurfaceLayer ceilings) {
+        public Frame encode() {
+            if ((ceiling == null) != (ceilings == null)) throw new IllegalArgumentException("ceilings go with ceiling");
+            JsonObject h = Json.header("snapshot.result");
+            h.addProperty("id", id);
+            h.addProperty("dimension", dimension);
+            h.addProperty("kind", "surface");
+            h.add("columns", columns.toJson());
+            h.addProperty("minY", minY);
+            if (ceiling != null) h.addProperty("ceiling", ceiling);
+            JsonArray m = new JsonArray(missing.size());
+            for (ChunkXZ c : missing) {
+                JsonArray e = new JsonArray(2);
+                e.add(c.cx());
+                e.add(c.cz());
+                m.add(e);
+            }
+            h.add("missing", m);
+            return new Frame(h, Bodies.encodeSurface(palette, columns.columns(), surface, ceilings));
+        }
+
+        public static SurfaceResult decode(Frame f) throws ProtocolException {
+            expectType(f, "snapshot.result");
+            long id = reqId(f);
+            JsonObject h = f.header();
+            if (!"surface".equals(Json.optString(h, "kind", id))) throw ProtocolException.badRequest(id, "not a surface result");
+            Area columns = Area.fromJson(Json.req(h, "columns", id), "columns", id);
+            Integer ceiling = h.has("ceiling") ? Json.reqInt(h, "ceiling", id) : null;
+            List<ChunkXZ> missing = new ArrayList<>();
+            for (JsonElement e : Json.reqArray(h, "missing", id)) {
+                int[] c = Area.pair(e, "missing", id);
+                missing.add(new ChunkXZ(c[0], c[1]));
+            }
+            Bodies.SurfaceBody body = Bodies.decodeSurface(f.body(), columns.columns(), ceiling != null);
+            return new SurfaceResult(id, Json.reqString(h, "dimension", id), columns, Json.reqInt(h, "minY", id), ceiling, missing,
+                    body.palette(), body.surface(), body.ceilings());
         }
     }
 
@@ -400,6 +549,75 @@ public final class Messages {
             JsonObject h = f.header();
             if (Json.reqBool(h, "everything", null)) return all();
             return new Dirty(false, Bodies.decodeDirty(f.body(), Grid.readFrom(h, null), Json.reqCount(h, "count", null)));
+        }
+    }
+
+    // ── prompt ────────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * The scan grant (13, *Message schemas*, {@code prompt}, {@code scan}; protocol 2): what the mod lets
+     * the MCP read for a {@code scan} request.
+     */
+    public record ScanGrant(int radius, boolean clipped, Area columns, Box box) {
+        public JsonObject toJson() {
+            JsonObject o = new JsonObject();
+            o.addProperty("radius", radius);
+            if (clipped) o.addProperty("clipped", true);
+            o.add("columns", columns.toJson());
+            o.add("box", box.toJson());
+            return o;
+        }
+
+        public static ScanGrant fromJson(JsonObject o, @Nullable Long id) throws ProtocolException {
+            if (o.has("clipped") && !Json.reqBool(o, "clipped", id)) throw ProtocolException.badRequest(id, "clipped is true or omitted");
+            return new ScanGrant(Json.reqInt(o, "radius", id), o.has("clipped"), Area.fromJson(Json.req(o, "columns", id), "scan.columns", id),
+                    Box.fromJson(Json.req(o, "box", id), "scan.box", id));
+        }
+    }
+
+    /**
+     * {@code prompt}, mod → MCP: an in-game request. {@code context} is the game context object
+     * ({@code prompt}'s {@code context.*} rows), built by the prompt package. {@code mode} (protocol 2,
+     * feature {@code modes}) and {@code scan} (only with mode {@code scan}) are null when absent.
+     */
+    public record Prompt(long id, Player player, String text, JsonObject context, @Nullable String mode, @Nullable ScanGrant scan) {
+        public Frame encode() {
+            JsonObject h = Json.header("prompt");
+            h.addProperty("id", id);
+            h.add("player", player.toJson());
+            h.addProperty("text", text);
+            h.add("context", context);
+            if (mode != null) h.addProperty("mode", mode);
+            if (scan != null) h.add("scan", scan.toJson());
+            return new Frame(h);
+        }
+
+        public static Prompt decode(Frame f) throws ProtocolException {
+            expectType(f, "prompt");
+            long id = reqId(f);
+            JsonObject h = f.header();
+            String mode = Json.optString(h, "mode", id);
+            ScanGrant scan = h.has("scan") ? ScanGrant.fromJson(Json.reqObject(h, "scan", id), id) : null;
+            return new Prompt(id, Player.fromJson(Json.reqObject(h, "player", id), id), Json.reqString(h, "text", id), Json.reqObject(h, "context", id), mode, scan);
+        }
+    }
+
+    /** {@code prompt.result}, MCP → mod. {@code reason} only when not delivered (protocol 2 adds {@code unsupported_mode}). */
+    public record PromptResult(long id, boolean delivered, @Nullable String reason) {
+        public Frame encode() {
+            JsonObject h = Json.header("prompt.result");
+            h.addProperty("id", id);
+            h.addProperty("delivered", delivered);
+            if (reason != null) h.addProperty("reason", reason);
+            return new Frame(h);
+        }
+
+        public static PromptResult decode(Frame f) throws ProtocolException {
+            expectType(f, "prompt.result");
+            long id = reqId(f);
+            JsonObject h = f.header();
+            boolean delivered = Json.reqBool(h, "delivered", id);
+            return new PromptResult(id, delivered, delivered ? null : Json.optString(h, "reason", id));
         }
     }
 

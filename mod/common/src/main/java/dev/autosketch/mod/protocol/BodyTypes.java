@@ -58,6 +58,21 @@ public final class BodyTypes {
     /** The skipped, rejected and normalized lists of a {@code patch.ack}. */
     public record AckLists(List<WorldBlock> skipped, List<Rejected> rejected, List<Normalized> normalized) {}
 
+    /**
+     * One layer of a surface snapshot (protocol 2, B4): per column in index order ({@code dx + sizeX · dz}),
+     * a height code (0 = none, else {@code y − minY + 1}) and, where the code isn't 0, an index into the
+     * enclosing message's palette (ignored where the code is 0).
+     */
+    public record SurfaceLayer(int[] heights, int[] states) {
+        public SurfaceLayer {
+            if (heights.length != states.length) throw new IllegalArgumentException("surface layer: " + heights.length + " heights, " + states.length + " states");
+        }
+
+        public static SurfaceLayer of(int columns) {
+            return new SurfaceLayer(new int[columns], new int[columns]);
+        }
+    }
+
     /** An encoded body and the grid its positions are relative to. */
     public record Encoded(Grid grid, byte[] body) {}
 }

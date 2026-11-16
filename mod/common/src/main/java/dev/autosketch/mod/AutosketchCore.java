@@ -146,6 +146,11 @@ public final class AutosketchCore {
                 public Frame volumes() {
                     return volumes.volumesFrame();
                 }
+
+                @Override
+                public void protocolMismatch(int mcpProtocol) {
+                    feedback.notice(server, null, BridgeServer.mismatchText(mcpProtocol));
+                }
             });
         } catch (IOException e) {
             LOG.error("Autosketch bridge failed to start (port {})", port, e);
@@ -169,6 +174,9 @@ public final class AutosketchCore {
         Platform platform = Platform.get();
         return new Messages.ModHello(modVersion, SharedConstants.getCurrentVersion().getName(), SharedConstants.getCurrentVersion().getDataVersion().getVersion(),
                 platform.loader(), platform.loaderVersion(), !server.isDedicatedServer(),
-                host == null || host.getId() == null ? null : new Messages.Player(host.getName(), host.getId()));
+                host == null || host.getId() == null ? null : new Messages.Player(host.getName(), host.getId()), FEATURES);
     }
+
+    /** The protocol-2 features this build implements (13, *Versions and features*). */
+    static final List<String> FEATURES = List.of();
 }

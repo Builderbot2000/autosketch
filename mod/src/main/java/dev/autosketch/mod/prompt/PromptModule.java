@@ -96,7 +96,7 @@ public final class PromptModule {
                 return 1;
             }));
         r.root().then(log);
-        alias(r.dispatcher(), AutosketchConfig.ASK_ALIAS.get().trim());
+        alias(r.dispatcher(), AutosketchConfig.get().prompts.askAlias.trim());
     }
 
     /** Registers the configured short alias for {@code ask}, unless it is empty, malformed or already a command. */

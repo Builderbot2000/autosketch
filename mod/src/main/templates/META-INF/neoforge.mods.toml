@@ -30,3 +30,12 @@ displayTest="IGNORE_ALL_VERSION"
     versionRange="${minecraft_version_range}"
     ordering="NONE"
     side="BOTH"
+
+# The config file and the client's config screen (14, *Config across loaders*). Required wherever
+# this mod is installed; vanilla clients joining a server are unaffected.
+[[dependencies.${mod_id}]]
+    modId="cloth_config"
+    type="required"
+    versionRange="${cloth_config_version_range}"
+    ordering="NONE"
+    side="BOTH"

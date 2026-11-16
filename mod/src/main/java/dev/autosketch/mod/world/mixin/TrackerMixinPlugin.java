@@ -13,10 +13,11 @@ import org.spongepowered.asm.mixin.extensibility.IMixinConfigPlugin;
 import org.spongepowered.asm.mixin.extensibility.IMixinInfo;
 
 /**
- * Leaves the tracker's mixin out entirely when {@code config/autosketch-common.toml} sets
+ * Leaves the tracker's mixin out entirely when {@code config/autosketch.toml} sets
  * {@code tracker = "scan"}, so a conflict with another mod's mixin (13, *Open questions*, change
- * tracking) can be avoided by config. Mixins apply before NeoForge loads configs, so this reads the
- * file as text; a missing or unreadable file keeps the default (the mixin applies).
+ * tracking) can be avoided by config. Mixins apply before the mod loads its config, so this reads the
+ * file as text; a missing or unreadable file keeps the default (the mixin applies). Until the first
+ * start migrates it, an older build's {@code config/autosketch-common.toml} is read instead.
  */
 public final class TrackerMixinPlugin implements IMixinConfigPlugin {
     private static final Pattern TRACKER = Pattern.compile("(?m)^\\s*tracker\\s*=\\s*\"(\\w+)\"");
@@ -25,7 +26,8 @@ public final class TrackerMixinPlugin implements IMixinConfigPlugin {
     @Override
     public void onLoad(String mixinPackage) {
         try {
-            Path file = Path.of("config", "autosketch-common.toml");
+            Path file = Path.of("config", "autosketch.toml");
+            if (!Files.exists(file)) file = Path.of("config", "autosketch-common.toml");
             if (Files.isReadable(file)) {
                 Matcher m = TRACKER.matcher(Files.readString(file, StandardCharsets.UTF_8));
                 if (m.find() && m.group(1).equals("scan")) apply = false;

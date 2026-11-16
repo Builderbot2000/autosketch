@@ -146,7 +146,7 @@ public final class InGamePrompts {
             return 0;
         }
         PENDING.put(id, player.getUUID());
-        if (!bridge.send(prompt(id, player, text, AutosketchConfig.TARGET_REACH.get()))) {
+        if (!bridge.send(prompt(id, player, text, AutosketchConfig.get().prompts.targetReach))) {
             PENDING.remove(id);
             out.actionBar(player, refusal("no_link"));
             return 0;

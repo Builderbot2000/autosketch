@@ -28,7 +28,6 @@ import net.minecraft.server.MinecraftServer;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
-import net.neoforged.fml.config.ModConfig;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.neoforged.fml.loading.FMLPaths;
 import net.neoforged.neoforge.common.NeoForge;
@@ -74,11 +73,11 @@ public final class AutosketchMod {
         instance = this;
         this.modBus = modBus;
         modVersion = container.getModInfo().getVersion().toString();
-        container.registerConfig(ModConfig.Type.COMMON, AutosketchConfig.SPEC);
+        AutosketchConfig.register(FMLPaths.CONFIGDIR.get());
         dispatcher = new Dispatcher(AutosketchMod::onServerThread);
         bridge = new BridgeServer(dispatcher, AutosketchMod::onServerThread);
-        volumes = new VolumeManager(holder, bridge, tickets, AutosketchConfig.CONTEXT_CAP::get);
-        feedback = new Feedback(players, AutosketchConfig.NOTICES_DEFAULT::get, Autosketch::wandModes, Autosketch::patchStatus);
+        volumes = new VolumeManager(holder, bridge, tickets, () -> AutosketchConfig.get().volumes.contextCap);
+        feedback = new Feedback(players, () -> AutosketchConfig.get().feedback.noticesDefault, Autosketch::wandModes, Autosketch::patchStatus);
         wand = new WandEvents(players, Autosketch::wandModes, feedback);
         Autosketch.install(bridge, holder, PatchStatus.NONE, List.of());
 
@@ -143,11 +142,12 @@ public final class AutosketchMod {
 
     private void serverStarted(ServerStartedEvent event) {
         MinecraftServer server = event.getServer();
+        AutosketchConfig.reload();
         players.clear();
         feedback.serverStarted();
         volumes.serverStarted(server);
         try {
-            bridge.start(FMLPaths.CONFIGDIR.get(), AutosketchConfig.PORT.get(), new BridgeServer.Host() {
+            bridge.start(FMLPaths.CONFIGDIR.get(), AutosketchConfig.get().bridge.port, new BridgeServer.Host() {
                 @Override
                 public Messages.ModHello hello() {
                     return modHello(server);
@@ -159,7 +159,7 @@ public final class AutosketchMod {
                 }
             });
         } catch (IOException e) {
-            LOG.error("Autosketch bridge failed to start (port {})", AutosketchConfig.PORT.get(), e);
+            LOG.error("Autosketch bridge failed to start (port {})", AutosketchConfig.get().bridge.port, e);
         }
     }
 

@@ -10,7 +10,6 @@ import dev.autosketch.mod.protocol.Messages;
 import dev.autosketch.mod.protocol.ProtocolException;
 import java.util.Locale;
 import java.util.function.Function;
-import java.util.function.Supplier;
 import net.minecraft.Util;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
@@ -60,12 +59,12 @@ public final class WorldModule {
             return server == null ? null : server.getLevel(key);
         };
         PatchApplier patches = new PatchApplier(Autosketch.link(), levels,
-                () -> budgetOverride > 0 ? budgetOverride : config(AutosketchConfig.TICK_BUDGET::get, 20_000));
+                () -> budgetOverride > 0 ? budgetOverride : AutosketchConfig.get().patches.tickBudget);
         WorldReads reads = new WorldReads(Autosketch.link(), levels, Util.backgroundExecutor());
         ChangeTracker tracker = new ChangeTracker(Autosketch.link(), levels,
-                () -> config(AutosketchConfig.DIRTY_CAP::get, Messages.Dirty.CAP),
-                () -> modeOverride != null ? modeOverride : ChangeTracker.Mode.valueOf(config(AutosketchConfig.TRACKER::get, "both").toUpperCase(Locale.ROOT)),
-                () -> config(AutosketchConfig.SCAN_PERIOD::get, 20),
+                () -> AutosketchConfig.get().tracking.dirtyCap,
+                () -> modeOverride != null ? modeOverride : ChangeTracker.Mode.valueOf(AutosketchConfig.get().tracking.tracker.toUpperCase(Locale.ROOT)),
+                () -> AutosketchConfig.get().tracking.scanPeriod,
                 frame -> Autosketch.bridge().send(frame));
         services = new Services(patches, reads, tracker);
 
@@ -99,13 +98,5 @@ public final class WorldModule {
             keysSession = s;
         }
         return keys;
-    }
-
-    private static <T> T config(Supplier<T> value, T fallback) {
-        try {
-            return value.get();
-        } catch (RuntimeException e) {
-            return fallback; // config not loaded yet
-        }
     }
 }

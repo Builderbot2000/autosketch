@@ -1,0 +1,11 @@
+{
+  "description": "The mod refuses a hello with another protocol version and closes",
+  "sender": "mod",
+  "header": {
+    "type": "error",
+    "id": null,
+    "code": "protocol_mismatch",
+    "message": "mod speaks protocol 1, MCP sent 2",
+    "protocol": 1
+  }
+}

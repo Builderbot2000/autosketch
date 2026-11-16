@@ -1,0 +1,26 @@
+{
+  "description": "One block: air to stone at a world position (the worked example in the spec)",
+  "sender": "mcp",
+  "header": {
+    "type": "patch",
+    "id": 21,
+    "link": 3,
+    "dimension": "minecraft:overworld",
+    "origin": [100, 64, -200],
+    "size": [1, 1, 1],
+    "count": 1
+  },
+  "body": {
+    "palette": [
+      "minecraft:air",
+      "minecraft:stone"
+    ],
+    "blocks": [
+      {
+        "pos": [100, 64, -200],
+        "expected": "minecraft:air",
+        "state": "minecraft:stone"
+      }
+    ]
+  }
+}

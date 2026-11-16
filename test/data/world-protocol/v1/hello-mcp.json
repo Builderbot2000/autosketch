@@ -1,0 +1,53 @@
+{
+  "description": "MCP hello: protocol, pairing token, client, volatile-key list (the built-in default plus one plugin entry and one state-only type)",
+  "sender": "mcp",
+  "header": {
+    "type": "hello",
+    "protocol": 1,
+    "token": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    "client": {
+      "name": "autosketch",
+      "version": "1.0.0"
+    },
+    "volatile": {
+      "minecraft:furnace": [
+        "BurnTime",
+        "CookTime",
+        "CookTimeTotal",
+        "lit_time_remaining",
+        "lit_total_time",
+        "cooking_time_spent",
+        "cooking_total_time"
+      ],
+      "minecraft:blast_furnace": [
+        "BurnTime",
+        "CookTime",
+        "CookTimeTotal",
+        "lit_time_remaining",
+        "lit_total_time",
+        "cooking_time_spent",
+        "cooking_total_time"
+      ],
+      "minecraft:smoker": [
+        "BurnTime",
+        "CookTime",
+        "CookTimeTotal",
+        "lit_time_remaining",
+        "lit_total_time",
+        "cooking_time_spent",
+        "cooking_total_time"
+      ],
+      "minecraft:hopper": [
+        "TransferCooldown"
+      ],
+      "minecraft:brewing_stand": [
+        "BrewTime"
+      ],
+      "create:mechanical_press": [
+        "Speed",
+        "Network/Stress"
+      ],
+      "create:belt": "state_only"
+    }
+  }
+}

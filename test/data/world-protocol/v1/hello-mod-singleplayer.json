@@ -1,0 +1,22 @@
+{
+  "description": "Mod hello from the integrated server of a singleplayer world",
+  "sender": "mod",
+  "header": {
+    "type": "hello",
+    "protocol": 1,
+    "mod": {
+      "version": "0.1.0"
+    },
+    "game": {
+      "version": "1.21.1",
+      "dataVersion": 3955,
+      "loader": "neoforge",
+      "loaderVersion": "21.1.249"
+    },
+    "singleplayer": true,
+    "host": {
+      "name": "Kev",
+      "uuid": "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "description": "Activity lines following a request, to the requesting player",
+  "sender": "mcp",
+  "header": {
+    "type": "chat",
+    "request": 1,
+    "player": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    "kind": "activity",
+    "lines": [
+      "fill: 1,204 blocks",
+      "world: 1,204 placed, 3 skipped (hand-edited), 0 rejected"
+    ]
+  }
+}

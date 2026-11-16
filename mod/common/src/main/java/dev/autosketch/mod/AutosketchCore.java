@@ -156,9 +156,10 @@ public final class AutosketchCore {
         volumes.serverStopping();
     }
 
-    /** End of a server tick: outlines and notices. */
+    /** End of a server tick: outlines and notices, and once a second a look at the config file. */
     public void tickEnd(MinecraftServer server) {
         feedback.tick(server);
+        if (server.getTickCount() % 20 == 0) AutosketchConfig.reloadIfChanged();
     }
 
     private Messages.ModHello modHello(MinecraftServer server) {

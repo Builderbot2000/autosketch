@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.FileTime;
 import java.util.List;
 import java.util.Map;
 import java.util.function.BiConsumer;
@@ -24,7 +25,8 @@ import org.slf4j.Logger;
  * The mod's settings, in {@code config/autosketch.toml} (not the pairing file, which the mod writes
  * itself: 13, *Pairing file*), through Cloth Config's AutoConfig so every loader reads the same file
  * and clients get a config screen (14, *Config across loaders*). Loaded when the mod is constructed,
- * so the bridge can read the port before a world loads, and read again on every server start.
+ * so the bridge can read the port before a world loads, and read again on every server start and
+ * whenever the file changes while a server runs (as NeoForge's config watcher did).
  *
  * <p>The file keeps the sections and keys of the {@code ModConfigSpec} file older builds wrote
  * ({@code config/autosketch-common.toml}). On the first start without {@code autosketch.toml} that
@@ -187,7 +189,7 @@ public final class AutosketchConfig implements ConfigData {
     static String write(AutosketchConfig c) {
         AutosketchConfig defaults = new AutosketchConfig();
         StringBuilder sb = new StringBuilder();
-        sb.append("# Autosketch companion mod (docs/design/13-live-world.md). Read at game start and on every server start.\n\n");
+        sb.append("# Autosketch companion mod (docs/design/13-live-world.md). Read at game start, on every server start, and when this file changes.\n\n");
         String section = null;
         for (Key k : KEYS) {
             if (!k.section().equals(section)) {
@@ -220,12 +222,37 @@ public final class AutosketchConfig implements ConfigData {
     public static void register(Path configDir) {
         if (holder != null) return;
         holder = AutoConfig.register(AutosketchConfig.class, (definition, type) -> new Serializer(configDir));
+        file = configDir.resolve(FILE);
+        lastModified = modified(file);
+    }
+
+    private static volatile @Nullable Path file;
+    private static volatile @Nullable FileTime lastModified;
+
+    private static @Nullable FileTime modified(@Nullable Path f) {
+        try {
+            return f == null ? null : Files.getLastModifiedTime(f);
+        } catch (IOException e) {
+            return null;
+        }
     }
 
     /** Reads the file again (on server start), so edits made while the game ran take effect. */
     public static void reload() {
         ConfigHolder<AutosketchConfig> h = holder;
-        if (h != null) h.load();
+        if (h == null) return;
+        lastModified = modified(file);
+        h.load();
+    }
+
+    /**
+     * Reads the file again if it changed since it was last read or written, as NeoForge's config
+     * watcher did for the {@code ModConfigSpec} file. Called about once a second from the server tick.
+     */
+    public static void reloadIfChanged() {
+        FileTime now = modified(file);
+        if (holder == null || now == null || now.equals(lastModified)) return;
+        reload();
     }
 
     /** The current settings; the defaults before {@link #register}. */

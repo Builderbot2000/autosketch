@@ -14,6 +14,7 @@ import dev.autosketch.mod.protocol.BodyTypes.PatchBlock;
 import dev.autosketch.mod.protocol.BodyTypes.Rejected;
 import dev.autosketch.mod.protocol.BodyTypes.SnapshotRegion;
 import dev.autosketch.mod.protocol.BodyTypes.SurfaceLayer;
+import dev.autosketch.mod.protocol.BodyTypes.UpgradeData;
 import dev.autosketch.mod.protocol.BodyTypes.WorldBlock;
 import dev.autosketch.mod.protocol.Messages.Dirty;
 import dev.autosketch.mod.protocol.Messages.HashesRequest;
@@ -28,6 +29,10 @@ import dev.autosketch.mod.protocol.Messages.SnapshotResult;
 import dev.autosketch.mod.protocol.Messages.ChunkXZ;
 import dev.autosketch.mod.protocol.Messages.Prompt;
 import dev.autosketch.mod.protocol.Messages.PromptResult;
+import dev.autosketch.mod.protocol.Messages.RegistryRequest;
+import dev.autosketch.mod.protocol.Messages.RegistryResult;
+import dev.autosketch.mod.protocol.Messages.UpgradeRequest;
+import dev.autosketch.mod.protocol.Messages.UpgradeResult;
 import dev.autosketch.mod.protocol.Messages.SurfaceRequest;
 import dev.autosketch.mod.protocol.Messages.SurfaceResult;
 import dev.autosketch.mod.protocol.Messages.VolumesSet;
@@ -51,7 +56,8 @@ class GoldenVectorsTest {
     @Test
     void everyMessageKindHasAVector() {
         List<String> names = Golden.frameNames();
-        assertTrue(names.size() >= 48, "found " + names.size() + " vectors in " + Golden.dir());
+        assertTrue(names.size() >= 57, "found " + names.size() + " vectors in " + Golden.dir());
+        assertTrue(Golden.frameNames("v2/").size() >= 48, "the frozen version-2 vectors");
         assertTrue(Golden.frameNames("v1/").size() >= 36, "the frozen version-1 vectors");
     }
 
@@ -60,7 +66,13 @@ class GoldenVectorsTest {
         return Golden.frameNames().stream().map(name -> DynamicTest.dynamicTest(name, () -> check(name)));
     }
 
-    /** The version-1 frames still decode and re-encode unchanged (13, *Versions and features*: every addition is optional). */
+    /** The version-2 frames (the MCP's N−1) still decode and re-encode unchanged (13, *Versions and features*: every addition is optional). */
+    @TestFactory
+    Stream<DynamicTest> version2Vectors() {
+        return Golden.frameNames("v2/").stream().map(name -> DynamicTest.dynamicTest(name, () -> check(name)));
+    }
+
+    /** The version-1 frames, no longer spoken, kept as a check that the codec only grew additively. */
     @TestFactory
     Stream<DynamicTest> version1Vectors() {
         return Golden.frameNames("v1/").stream().map(name -> DynamicTest.dynamicTest(name, () -> check(name)));
@@ -79,7 +91,7 @@ class GoldenVectorsTest {
             assertFalse(frame.hasBody());
             return; // chat: a header-only message the in-game requests package reads with Json
         }
-        // The mod speaks one version, its own, so its typed hello always says 2: a version-1 mod
+        // The mod speaks one version, its own, so its typed hello always says 3: an older mod
         // hello only has to decode.
         if (decoded instanceof ModHello && Json.reqInt(frame.header(), "protocol", null) != Messages.PROTOCOL_VERSION) return;
         assertArrayEquals(bin, FrameCodec.encode(encodeTyped(decoded)), "typed message re-encodes byte for byte");
@@ -106,6 +118,10 @@ class GoldenVectorsTest {
             case "patch.ack" -> PatchAck.decode(f);
             case "dirty" -> Dirty.decode(f);
             case "notice" -> Notice.decode(f);
+            case "registry" -> RegistryRequest.decode(f);
+            case "registry.result" -> RegistryResult.decode(f);
+            case "upgrade" -> UpgradeRequest.decode(f);
+            case "upgrade.result" -> UpgradeResult.decode(f);
             default -> null;
         };
     }
@@ -130,6 +146,10 @@ class GoldenVectorsTest {
             case PatchAck x -> x.encode();
             case Dirty x -> x.encode();
             case Notice x -> x.encode();
+            case RegistryRequest x -> x.encode();
+            case RegistryResult x -> x.encode();
+            case UpgradeRequest x -> x.encode();
+            case UpgradeResult x -> x.encode();
             default -> throw new IllegalArgumentException(m.toString());
         };
     }
@@ -145,9 +165,23 @@ class GoldenVectorsTest {
             case "patch.ack" -> new PatchAck(h.get("id").getAsLong(), h.get("applied").getAsInt(), h.get("overwritten").getAsInt(), ackLists(body));
             case "dirty" -> h.get("everything").getAsBoolean() ? Dirty.all() : new Dirty(false, worldBlocks(body.getAsJsonArray("blocks")));
             case "snapshot.result" -> h.has("kind") ? surfaceResult(h, body) : snapshotResult(h, body);
+            case "registry.result" -> new RegistryResult(h.get("id").getAsLong(), Long.parseUnsignedLong(h.get("hash").getAsString(), 16), h.get("dataVersion").getAsInt(),
+                    body == null ? null : java.util.Base64.getDecoder().decode(body.get("bytes").getAsString()));
+            case "upgrade" -> new UpgradeRequest(h.get("id").getAsLong(), h.get("from").getAsInt(), upgradeData(h, body));
+            case "upgrade.result" -> new UpgradeResult(h.get("id").getAsLong(), h.get("to").getAsInt(), h.has("failed") ? h.get("failed").getAsInt() : 0, upgradeData(h, body));
             // Header-only messages: the typed decoder applied to the sidecar's header.
             default -> decodeTyped(new Frame(h), sender);
         };
+    }
+
+    private static UpgradeData upgradeData(JsonObject h, JsonObject body) {
+        if (h.get("kind").getAsString().equals("structure")) return UpgradeData.structure(Golden.snbt(body.get("structure").getAsString()));
+        List<String> states = new ArrayList<>();
+        for (JsonElement e : body.getAsJsonArray("states")) states.add(e.getAsString());
+        List<CompoundTag> bes = new ArrayList<>(), ents = new ArrayList<>();
+        for (JsonElement e : body.getAsJsonArray("blockEntities")) bes.add(Golden.snbt(e.getAsString()));
+        for (JsonElement e : body.getAsJsonArray("entities")) ents.add(Golden.snbt(e.getAsString()));
+        return UpgradeData.elements(states, bes, ents);
     }
 
     private static List<PatchBlock> patchBlocks(JsonObject body) {
@@ -236,6 +270,14 @@ class GoldenVectorsTest {
     }
 
     private static void assertSameContent(Object expected, Object actual) {
+        if (expected instanceof RegistryResult e && actual instanceof RegistryResult a) {
+            assertEquals(e.id(), a.id());
+            assertEquals(e.hash(), a.hash());
+            assertEquals(e.dataVersion(), a.dataVersion());
+            assertEquals(e.report() == null, a.report() == null);
+            if (e.report() != null) assertArrayEquals(e.report(), a.report(), "report bytes");
+            return;
+        }
         if (expected instanceof SurfaceResult e && actual instanceof SurfaceResult a) {
             assertEquals(e.id(), a.id());
             assertEquals(e.columns(), a.columns());

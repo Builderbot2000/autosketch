@@ -28,14 +28,14 @@ The server is pure JavaScript: rendering is software, the script sandbox is wasm
 
 Settled: one-command install is the goal; listings on these platforms are for credibility.
 
-### Setup (settled: command-line options only)
+### Setup (settled: command-line options, plus the management UI)
 
-The MCP client starts the server and owns its stdin and stdout, so the server can never show a prompt of its own. Setup is command-line options, the way `claude mcp add` works: no interactive wizard and no graphical one.
+The MCP client starts the server and owns its stdin and stdout, so the server can never show a prompt of its own. Setup is command-line options, the way `claude mcp add` works, with no interactive terminal wizard. The management UI (`15`) can also make the first choice: an unconfigured server opens it on its Instance tab, and choosing there writes the same `config.toml` as `setup` (settled 2026-11-16, replacing the earlier "no graphical wizard").
 
 - **`npx autosketch instances`** lists what discovery found, one line per instance with a short id, the pack's name, Minecraft version, loader, launcher and folder.
 - **`npx autosketch setup --instance <id | path>`** saves the choice to `~/.autosketch/config.toml`, with optional `--workspace`, `--version` and `--base-jar` (as the server takes today). `--client claude` also registers the server with that agent client, printing the exact command it runs (`claude mcp add …`).
 - **The server command line still takes the same options** and they override the config, so `claude mcp add autosketch -- npx -y autosketch --instance <path>` works with no setup step at all.
-- **An unconfigured server still starts.** Every tool except `instance_info` answers `not_configured` with the discovered instances and the exact `setup` command for each, so the agent can tell the user what to run instead of failing silently.
+- **An unconfigured server still starts.** Every tool except `instance_info` answers `not_configured` with the discovered instances, the exact `setup` command for each and the management UI's URL (`15`), so the agent can tell the user what to run instead of failing silently.
 - Reason: the audience already works in a terminal, since the agent CLI runs there, and options can be scripted, documented in one line and pasted from a README.
 
 ### Instance discovery
@@ -204,7 +204,7 @@ Deferred by the user until later development. What was found, for when it comes 
 
 ## Decisions
 
-- **Setup by command-line options only** (settled). No interactive or graphical wizard; `autosketch instances` lists candidates and `autosketch setup --instance` picks one.
+- **Setup by command-line options, or the management UI** (settled; the UI part added 2026-11-16, `15`). `autosketch instances` lists candidates and `autosketch setup --instance` picks one. The UI can pick on first run too, and the command line keeps priority.
 - **Discovery reads launchers' own instance records first** (from the dev machine's CurseForge, Prism and vanilla files). Reason: they already hold folder, version and loader and follow moved folders, so nothing is guessed.
 - **One-command install, with platform listings for credibility** (settled). Reason: the barrier for players is setup, and listings are where players judge trust.
 - **No free-ranging search of the user's files** (settled). Reason: users don't want a tool roaming their home folder. Known locations, launcher configs and the mod's pointer cover the real cases.

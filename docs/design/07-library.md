@@ -96,6 +96,8 @@ Library roots are searched in order, and the first root holding a name wins, so 
 2. The starter library shipped in the repo (`library/`), read-only.
 3. **Axiom blueprints:** a read-only root over `<instance>/config/axiom/blueprints`. Every `.bp` below it is a prefab named `axiom/<path>`, with the blueprint's own name, tags and thumbnail. This resolves the former open question: no shared format is needed, because `.bp` already carries what a prefab needs except anchors and roles, which default (minimum corner; roles from block families at stamp time).
 
+Managing the library from a UI (roots, rename, copy to your library, hide, recoverable delete) and the proposed `library.roots`, `library.starter`, `library.axiom` and `library.hidden` settings are in `15`, *Library tab*.
+
 Thumbnails rendered for read-only prefabs go to the cache folder (`$AUTOSKETCH_CACHE/prefab-thumbs/`), never into the starter library or the instance. In a writable root they are written as `thumb.png` beside the prefab.
 
 ## Implementation status
@@ -119,5 +121,5 @@ Thumbnails rendered for read-only prefabs go to the cache folder (`$AUTOSKETCH_C
 
 ## Open questions
 
-- How should the library be versioned and shared? (Folders plus git are probably enough; nothing in the format prevents it.)
+- How should the library be versioned and shared? (Folders plus git are probably enough; nothing in the format prevents it.) Library management itself is designed in `15`.
 - Should starter palettes carry reference colours so missing families get suggestions? Colours measured from game textures would be derived from game assets (`02`, *Legal stance*), so the starter palette has none for now.

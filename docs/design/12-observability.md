@@ -5,7 +5,7 @@ Shows the user what the agents are doing while they work: which jobs are open, w
 ## Principles
 
 1. **For the human, never the model.** Scoped sessions keep block detail out of model attention, and nothing here undoes that. No tool reads the event log or the viewer, and nothing shown in the viewer is returned to an agent. Agents keep using `scope_list`, reports and renders.
-2. **Read-only.** Observability subscribes to the document and server layers. It never mutates a document, takes a lock or changes a tool result.
+2. **Read-only.** Observability subscribes to the document and server layers. It never mutates a document, takes a lock or changes a tool result. (The management UI's Settings, Library and Instance tabs, served from the same page, do write, through their own guarded endpoints: `15`.)
 3. **Never slows the build.** Ops emit an event and return. Writing, serving and rendering for the viewer happen off the tool-call path. When a consumer falls behind, it gets dropped and resyncs from a snapshot. Ops never wait for it.
 4. **One frame.** Every box and position in an event is given in the base document's coordinates, so one view can place every job. Local sandbox coordinates are included as well, for drill-in.
 5. **One source of truth.** The live viewer, replay, time-lapse and eval metrics all read the same event stream.
@@ -130,7 +130,7 @@ The server never sees model tokens. It records response sizes, and the eval runn
 | `scope.minWorkBlocks` | 512 | Smallest work volume a fork may take (`11`) |
 | `scope.maxDepth` | 3 | Deepest fork below the base build (`11`) |
 
-Settings are one server-wide system (`src/core/settings.ts`), not specific to observability. Every setting is read, highest priority first, from `--set <key>=<value>`, then a flag alias if the setting declares one, then `AUTOSKETCH_<KEY>` (key upper-cased, `.` and camel-case humps become `_`), then its default. Each area declares its keys next to the code that uses them. A flag alias exists only to keep a flag that predates the module working; new settings don't add one. The settings outside this doc:
+Settings are one server-wide system (`src/core/settings.ts`), not specific to observability. Every setting is read, highest priority first, from `--set <key>=<value>`, then a flag alias if the setting declares one, then `AUTOSKETCH_<KEY>` (key upper-cased, `.` and camel-case humps become `_`), then its default. `15` proposes a `config.toml` layer between the environment and the default, written by the management UI. Each area declares its keys next to the code that uses them. A flag alias exists only to keep a flag that predates the module working; new settings don't add one. The settings outside this doc:
 
 | Setting | Aliases | Declared in | Doc |
 |---|---|---|---|
@@ -201,5 +201,5 @@ Decisions made while building phase 5:
 
 - **Large documents in the browser.** At what size does the 3D view need chunked meshing with level of detail, or should it switch to the top-down map automatically? It should be measured on a large Craftoria build before deciding.
 - **Many concurrent jobs.** If a session ever has dozens of open scopes, the scope tree and overlays need grouping (by parent, by brief). Doc 11 expects few concurrent jobs, so this waits until a log shows otherwise.
-- **Claude Code panel.** A side pane next to the chat (scope tree plus the latest snapshot) could reuse `/events`. Is that worth maintaining alongside the web viewer?
+- **Claude Code panel.** Answered by `15`: the viewer becomes the one management UI, rather than a second surface to maintain.
 - **In-game preview.** Superseded by the live world link (`13`): agent edits are written into the loaded world as conditional patches that never overwrite a hand edit without an explicit request, which is the non-destructive condition this question set. A ghost preview (showing a merge before it lands) remains a possible addition to the companion mod.

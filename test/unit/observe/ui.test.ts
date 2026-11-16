@@ -56,12 +56,12 @@ function send(url: string, opts: { method?: string; headers?: Record<string, str
   });
 }
 
-async function settingsServer(argv: string[] = [], env: Record<string, string> = {}) {
+async function settingsServer(argv: string[] = [], env: Record<string, string> = {}, configPollMs?: number) {
   const dir = temp();
   const path = join(dir, "config.toml");
   writeFileSync(path, '[settings]\n"scope.maxDepth" = 2\n');
   const settings = Settings.from(argv, env, readConfig(path));
-  const http = new ObserveHttp({ bus: new EventBus(), tables: new LogTables(() => {}), sessionId: "s", dirFor: () => dir, docFor: () => undefined, port: 0, settings });
+  const http = new ObserveHttp({ bus: new EventBus(), tables: new LogTables(() => {}), sessionId: "s", dirFor: () => dir, docFor: () => undefined, port: 0, settings, ...(configPollMs ? { configPollMs } : {}) });
   const page = await http.start();
   const base = page.replace(/#.*$/, "");
   const origin = base.replace(/\/$/, "");
@@ -203,11 +203,12 @@ describe("Settings tab endpoints (15, *Settings tab*)", () => {
   });
 
   it("reloads Settings when config.toml changes on disk, with no request", async () => {
-    const { http, path, settings } = await settingsServer();
+    const { http, path, settings } = await settingsServer([], {}, 50);
+    // Waits for the watch's own reload (no request is made), however long the poll takes under load.
+    const reloaded = new Promise<void>((r) => http.onSettingsReload(r));
     const snap = readConfig(path);
     writeConfig({ ...snap.config, settings: { "scope.maxDepth": "6" } }, snap.hash, path);
-    const until = Date.now() + 5000;
-    while (settings.get(SCOPE_MAX_DEPTH) !== 6 && Date.now() < until) await new Promise((r) => setTimeout(r, 100));
+    await reloaded;
     expect(settings.get(SCOPE_MAX_DEPTH)).toBe(6);
     await http.close();
   });

@@ -2,7 +2,7 @@ import { defaultCacheDir } from "../../assets/cache.js";
 import { dataVersionFor } from "../../core/version.js";
 import { documentFromSnapshot } from "../../formats/snapshot.js";
 import { Library } from "../../library/index.js";
-import { libraryRoots, type LibraryRoot } from "../../library/roots.js";
+import { libraryRoots, librarySettings, type LibraryRoot } from "../../library/roots.js";
 import { renderDocument } from "../../perception/render/render.js";
 import type { InstanceContext } from "../context.js";
 import type { Session } from "../session.js";
@@ -13,9 +13,10 @@ import { bakerFor } from "./shared.js";
  * palette tools can use it without importing the library tool module.
  */
 
-/** Library roots for this server: AUTOSKETCH_LIBRARY or <workspace>/library, the starter library, and the instance's Axiom blueprints. */
+/** Library roots for this server: library.roots (or AUTOSKETCH_LIBRARY), else <workspace>/library, the starter library, and the instance's Axiom blueprints. */
 export function rootsFor(session: Session, c?: InstanceContext): LibraryRoot[] {
-  return libraryRoots({ workspace: session.workspace, env: process.env, ...(c?.info.root ? { instanceRoot: c.info.root } : {}) });
+  // library.* settings are read on each call (config.toml as it is now), so the Settings tab's changes apply at once.
+  return libraryRoots({ workspace: session.workspace, env: process.env, settings: librarySettings(), ...(c?.info.root ? { instanceRoot: c.info.root } : {}) });
 }
 
 const libraries = new WeakMap<InstanceContext, Library>();

@@ -92,11 +92,11 @@ summary: Pointed arches, verticality, buttresses, tracery, steep roofs.
 
 Library roots are searched in order, and the first root holding a name wins, so a user's entries shadow the starter library's:
 
-1. User roots: `AUTOSKETCH_LIBRARY` (several paths, separated by the platform path delimiter), else `<workspace>/library` (`~/autosketch/library`). The first one is writable: `prefab_save` and `palette_save` write there.
+1. User roots: the `library.roots` setting (`15`), else `AUTOSKETCH_LIBRARY` (several paths, separated by the platform path delimiter), else `<workspace>/library` (`~/autosketch/library`). The first one is writable: `prefab_save` and `palette_save` write there.
 2. The starter library shipped in the repo (`library/`), read-only.
 3. **Axiom blueprints:** a read-only root over `<instance>/config/axiom/blueprints`. Every `.bp` below it is a prefab named `axiom/<path>`, with the blueprint's own name, tags and thumbnail. This resolves the former open question: no shared format is needed, because `.bp` already carries what a prefab needs except anchors and roles, which default (minimum corner; roles from block families at stamp time).
 
-Managing the library from a UI (roots, rename, copy to your library, hide, recoverable delete) and the proposed `library.roots`, `library.starter`, `library.axiom` and `library.hidden` settings are in `15`, *Library tab*.
+Managing the library from a UI (roots, rename, copy to your library, hide, recoverable delete) and the `library.roots`, `library.starter`, `library.axiom` and `library.hidden` settings are in `15`, *Library tab*. The settings are read on each library call. Names starting with a dot are never entries, so a root's `.trash/` never shows in a listing.
 
 Thumbnails rendered for read-only prefabs go to the cache folder (`$AUTOSKETCH_CACHE/prefab-thumbs/`), never into the starter library or the instance. In a writable root they are written as `thumb.png` beside the prefab.
 

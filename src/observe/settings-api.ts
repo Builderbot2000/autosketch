@@ -76,20 +76,30 @@ export class SettingsApi {
   /** JSON of each value as read at startup (what `restart` settings are running with). */
   private readonly running = new Map<string, string>();
   private watching = false;
+  private readonly reloadListeners = new Set<() => void>();
 
   constructor(
     private readonly settings: Settings,
     readonly path: string,
-    private readonly opts: { log?: (msg: string) => void } = {},
+    private readonly opts: { log?: (msg: string) => void; /** No server runs here (`autosketch ui`): nothing is "restart needed". */ standalone?: boolean } = {},
   ) {
-    for (const r of settings.resolveAll()) this.running.set(r.setting.key, json(r.value));
+    if (!opts.standalone) for (const r of settings.resolveAll()) this.running.set(r.setting.key, json(r.value));
   }
 
   /** Re-reads config.toml and swaps it into `Settings` when its hash changed. */
   refresh(): ConfigSnapshot {
     const snap = readConfig(this.path);
-    if (snap.hash !== this.settings.config?.hash) this.settings.reload(snap);
+    if (snap.hash !== this.settings.config?.hash) {
+      this.settings.reload(snap);
+      for (const fn of this.reloadListeners) fn();
+    }
     return snap;
+  }
+
+  /** Calls `fn` after each reload of a changed config.toml (by the watch or a request). Returns an unsubscribe. */
+  onReload(fn: () => void): () => void {
+    this.reloadListeners.add(fn);
+    return () => this.reloadListeners.delete(fn);
   }
 
   /** Watches config.toml (polling: it is replaced by rename, and may not exist yet). */
@@ -97,6 +107,9 @@ export class SettingsApi {
     if (this.watching) return;
     this.watching = true;
     watchFile(this.path, { persistent: false, interval: intervalMs }, this.onChange);
+    // watchFile takes its first stat asynchronously; a change made before that is its baseline and
+    // never fires, so check once more after the first interval.
+    setTimeout(this.onChange, intervalMs * 1.5).unref();
   }
 
   close(): void {

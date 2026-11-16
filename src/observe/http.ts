@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import { dirname, extname, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { LoggedEvent, ObserveEvent } from "../core/events.js";
+import { configPath } from "../core/config.js";
 import type { Settings } from "../core/settings.js";
 import type { Document } from "../document/document.js";
 import type { BlockBaker } from "../perception/render/bake.js";
@@ -12,6 +13,9 @@ import { Atlas, bakeModels } from "./atlas.js";
 import type { EventBus } from "./bus.js";
 import { BodyTooLarge, newToken, ownOrigin, readBody, refuseWrite, WRITE_METHODS } from "./guard.js";
 import { MAX_OTLP_BYTES, otelSetup, otlpRecords } from "./otel.js";
+import { InstanceApi, type InstanceHost } from "./instance-api.js";
+import { LibraryApi, type LibraryHost } from "./library-api.js";
+import type { SessionLogInfo } from "./logs.js";
 import { SettingsApi, type ApiReply } from "./settings-api.js";
 import type { LogTables } from "./states.js";
 import { encodeVoxels, parseBoxParam } from "./voxels.js";
@@ -34,6 +38,9 @@ import { encodeVoxels, parseBoxParam } from "./voxels.js";
  * tabs are ESM modules under `viewer/js/tabs/`, loaded when first opened, talking to `/api/…`:
  *
  *   GET    /api/settings, PUT|DELETE /api/settings/<key>   settings-api.ts
+ *   GET|PUT|DELETE /api/instance                            instance-api.ts
+ *   /api/library/…                                          library-api.ts
+ *   GET /api/logs, POST /api/logs/open                       autosketch ui only (logs.ts)
  *   POST   /v1/logs                Claude Code's OTLP/HTTP JSON log events (13, B3; otel.ts)
  *
  * Every request that changes something goes through `guard.ts` (POST/PUT/DELETE only, the
@@ -88,8 +95,19 @@ export interface ObserveHttpOptions {
   configPath?: string;
   /** Appends an event to the session's log (the `otel` events of `/v1/logs`); absent for a finished log. */
   publish?: (e: ObserveEvent) => void;
+  /** How often config.toml is polled for changes (default 1000 ms; tests shorten it). */
+  configPollMs?: number;
   /** The per-launch write token; random by default. */
   token?: string;
+  /** The session's instance, discovery and link: enables the Instance tab's endpoints (15). */
+  instance?: InstanceHost;
+  /** Library roots, thumbnails and the baker for previews: enables the Library tab's endpoints (15). */
+  library?: LibraryHost;
+  /**
+   * `autosketch ui` (15, U5): no MCP session. The Observe tab lists the workspace's session logs
+   * (`GET /api/logs`) and opens one in its own viewer (`POST /api/logs/open {id}` answers its URL).
+   */
+  standalone?: { logs(): Promise<SessionLogInfo[]>; open(id: string): Promise<string | undefined> };
 }
 
 interface Client {
@@ -134,6 +152,8 @@ export class ObserveHttp {
   otelRecords = 0;
   private port = 0;
   private readonly settingsApi?: SettingsApi;
+  private readonly instanceApi?: InstanceApi;
+  private readonly libraryApi?: LibraryApi;
   private server?: Server;
   private ring: LoggedEvent[] = [];
   private readonly clients = new Set<Client>();
@@ -146,7 +166,9 @@ export class ObserveHttp {
   constructor(private readonly opts: ObserveHttpOptions) {
     this.token = opts.token ?? newToken();
     const path = opts.configPath ?? opts.settings?.config?.path;
-    if (opts.settings && path) this.settingsApi = new SettingsApi(opts.settings, path, opts.log ? { log: opts.log } : {});
+    if (opts.settings && path) this.settingsApi = new SettingsApi(opts.settings, path, { ...(opts.log ? { log: opts.log } : {}), ...(opts.standalone ? { standalone: true } : {}) });
+    if (opts.instance) this.instanceApi = new InstanceApi(opts.instance, path ?? configPath(), opts.log);
+    if (opts.library) this.libraryApi = new LibraryApi(opts.library, path ?? configPath(), this.atlas, opts.log);
   }
 
   /** Bus subscriber: buffers and schedules; never writes to a socket synchronously. */
@@ -183,11 +205,16 @@ export class ObserveHttp {
       for (const c of this.clients) if (!c.lagging) c.res.write(": ping\n\n");
     }, 15_000);
     this.ping.unref();
-    this.settingsApi?.watch();
+    this.settingsApi?.watch(this.opts.configPollMs);
     this.opts.log?.(`observe: viewer at ${this.pageUrl}`);
     const current = this.opts.tables.current;
     if (current) void this.writeUrl(current);
     return this.pageUrl;
+  }
+
+  /** Calls `fn` each time a changed config.toml is reloaded into the settings; a no-op without settings. */
+  onSettingsReload(fn: () => void): () => void {
+    return this.settingsApi?.onReload(fn) ?? (() => {});
   }
 
   async close(): Promise<void> {
@@ -247,7 +274,7 @@ export class ObserveHttp {
         const why = refuseWrite(req, this.token, this.port);
         if (why) return json(res, 403, { error: why });
       }
-      return this.api(path.slice(4), method, req, res);
+      return this.api(path.slice(4), method, req, res, url);
     }
     if (!read) return json(res, 405, { error: "GET only" });
     if (path === "/events") return this.events(url, req, res);
@@ -280,7 +307,7 @@ export class ObserveHttp {
    * `/api/…` (15, *Endpoints*); `rel` is the path after `/api`. Writes reach here only past the
    * guard. A GET never changes anything, so a GET of a write-only path is refused.
    */
-  private async api(rel: string, method: string, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  private async api(rel: string, method: string, req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
     const read = method === "GET" || method === "HEAD";
     const settings = /^\/settings(?:\/([^/]+))?\/?$/.exec(rel);
     if (settings) {
@@ -291,6 +318,35 @@ export class ObserveHttp {
       if (method === "PUT") return reply(res, api.put(key, await jsonBody(req)));
       if (method === "DELETE") return reply(res, api.remove(key, await jsonBody(req)));
       return json(res, 405, { error: "PUT /api/settings/<key> {value} saves a setting; DELETE resets it" });
+    }
+    if (rel === "/instance" || rel === "/instance/") {
+      const api = this.instanceApi;
+      if (!api) return json(res, 404, { error: "the instance isn't available here" });
+      if (read) return json(res, 200, await api.view(url.searchParams.has("refresh")));
+      if (method === "PUT") return reply(res, await api.put(await jsonBody(req)));
+      if (method === "DELETE") return reply(res, api.remove(await jsonBody(req)));
+      return json(res, 405, { error: "PUT /api/instance {id | path} chooses an instance; DELETE unlinks it" });
+    }
+    if (rel === "/logs" || rel === "/logs/open") {
+      const sa = this.opts.standalone;
+      if (!sa) return json(res, 404, { error: "session logs are listed by autosketch ui only" });
+      if (rel === "/logs") return read ? json(res, 200, { logs: await sa.logs() }) : json(res, 405, { error: "GET lists the logs" });
+      if (method !== "POST") return json(res, 405, { error: "POST /api/logs/open {id} opens one" });
+      const id = ((await jsonBody(req)) as { id?: unknown } | undefined)?.id;
+      const opened = typeof id === "string" ? await sa.open(id) : undefined;
+      return opened ? json(res, 200, { url: opened }) : json(res, 404, { error: "no such session log" });
+    }
+    if (rel === "/library" || rel.startsWith("/library/")) {
+      const api = this.libraryApi;
+      if (!api) return json(res, 404, { error: "the library isn't available here" });
+      const sub = rel.slice("/library".length).replace(/^\/|\/$/g, "");
+      if (!sub) return read ? json(res, 200, await api.view()) : json(res, 405, { error: "act on an entry at /api/library/<root>/<kind>/<name>/<action>" });
+      const r = await api.handle(sub, method, url.searchParams, () => jsonBody(req));
+      if ("data" in r) {
+        res.writeHead(200, { "content-type": r.type, "cache-control": "no-cache" });
+        return void res.end(r.data);
+      }
+      return reply(res, r);
     }
     return json(res, 404, { error: "no such endpoint" });
   }
@@ -348,6 +404,9 @@ export class ObserveHttp {
       deltas: d ? { on: true, capped: d.capped, bytes: d.bytes } : { on: false },
       assets: !!this.opts.getBaker,
       settings: !!this.settingsApi,
+      instance: !!this.instanceApi,
+      library: !!this.libraryApi,
+      ...(this.opts.standalone ? { standalone: true } : {}),
       // B3 (13): how many Claude Code log records have arrived, and the setup that sends them here.
       // A free port changes with every launch, so the endpoint only stays valid with a pinned `observe.http`.
       ...(this.opts.publish && this.opts.live !== false ? { otel: { records: this.otelRecords, portPinned: this.opts.port !== 0, setup: otelSetup(this.port) } } : {}),

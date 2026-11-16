@@ -119,3 +119,38 @@ body:not([data-tab="observe"]) .obs-only { display: none; }
 .spend-note { color: var(--dim); }
 .spend-note .snippet { background: #111316; border: 1px solid var(--line); padding: 6px; border-radius: 4px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: all; }
 .spend-note .warn { color: #fc6; }
+
+/* Instance and Library tabs (15). */
+.tab table.kv th { text-align: left; color: var(--dim); font-weight: 400; padding: 1px 12px 1px 0; vertical-align: top; }
+.tab table.list { width: 100%; border-collapse: collapse; }
+.tab table.list th { text-align: left; color: var(--dim); font-weight: 400; font-size: 12px; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+.tab table.list td { padding: 4px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.tab .small { font-size: 11px; }
+.tab .bad { color: var(--refused); }
+.tab .control { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 4px 0; }
+.tab .control input[type="text"] { flex: 1; min-width: 160px; }
+.tab .wrap.wide { max-width: 1280px; }
+.tab nav.kinds { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; margin: 16px 0 8px; }
+.tab nav.kinds button.on { background: #2c3440; border-color: #3a4656; }
+.tab nav.kinds input[type="text"] { flex: 1; min-width: 160px; }
+.lib-body { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(280px, 1fr); gap: 12px; align-items: start; }
+@media (max-width: 800px) { .lib-body { grid-template-columns: 1fr; } }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+.card.selected, .tab table.list tr.selected { outline: 1px solid #6a8ac0; background: #263040; }
+.card img, .card .nothumb { width: 100%; aspect-ratio: 1; object-fit: contain; image-rendering: pixelated; background: #111316; border-radius: 4px; }
+.card .nothumb { display: flex; align-items: center; justify-content: center; color: var(--dim); font-size: 11px; }
+.card-name { font-weight: 600; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flags { display: flex; gap: 3px; flex-wrap: wrap; }
+.detail { position: sticky; top: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.detail h3 { margin: 0; }
+.detail pre.text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 60vh; overflow: auto; background: #111316; padding: 8px; border-radius: 4px; margin: 0; }
+.detail textarea { width: 100%; min-height: 40vh; font: 12px/1.4 ui-monospace, monospace; background: #111316; color: var(--text); border: 1px solid var(--line); border-radius: 4px; padding: 8px; }
+.detail textarea.short { min-height: 4.5em; }
+.detail table.edit { width: 100%; }
+.detail table.edit td input[type="text"], .detail table.edit td select { width: 100%; }
+.detail .role { border-top: 1px solid var(--line); padding-top: 6px; }
+.detail .role input[type="text"]:last-child { width: 100%; }
+.logs { padding: 12px 16px; overflow: auto; }
+.log-row { display: flex; gap: 10px; align-items: center; padding: 3px 0; font-variant-numeric: tabular-nums; }
+canvas.preview { width: 100%; aspect-ratio: 4 / 3; display: block; border-radius: 4px; }

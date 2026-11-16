@@ -526,6 +526,45 @@ async function replayScopeDeltas(id) {
   }
 }
 
+// -- autosketch ui: no session, so the Observe tab lists session logs to replay (15, U5) ------------
+
+async function showSessionLogs() {
+  status("no MCP session", "");
+  $("docname").textContent = "Session logs";
+  $("replay").remove();
+  const box = document.createElement("div");
+  box.className = "logs";
+  $("view-wrap").replaceChildren(box);
+  let logs = [];
+  try {
+    logs = (await getJson("api/logs")).logs;
+  } catch (e) {
+    box.textContent = `Listing session logs failed: ${e.message}`;
+    return;
+  }
+  const head = document.createElement("p");
+  head.className = "dim";
+  head.textContent = logs.length ? "No MCP session runs here. Open a recent session log to replay it in its own viewer:" : "No MCP session runs here, and the workspace has no session logs yet.";
+  box.append(head);
+  for (const l of logs) {
+    const row = document.createElement("div");
+    row.className = "log-row";
+    const b = document.createElement("button");
+    b.textContent = "Open";
+    b.onclick = async () => {
+      const token = (() => { try { return sessionStorage.getItem("autosketch.token") ?? ""; } catch { return ""; } })();
+      const r = await fetch("api/logs/open", { method: "POST", headers: { "content-type": "application/json", "x-autosketch-token": token }, body: JSON.stringify({ id: l.id }) });
+      const data = await r.json().catch(() => ({}));
+      if (r.ok) window.open(data.url, "_blank");
+      else b.textContent = data.error ?? `failed (${r.status})`;
+    };
+    const text = document.createElement("span");
+    text.textContent = `${l.doc}  ·  ${new Date(l.modified).toLocaleString()}  ·  ${Math.ceil(l.bytes / 1024)} KB`;
+    row.append(b, text);
+    box.append(row);
+  }
+}
+
 // -- start ---------------------------------------------------------------------------------------
 
 async function main() {
@@ -561,6 +600,7 @@ async function main() {
   };
   try {
     const info = await getJson("info");
+    if (info.standalone) return void showSessionLogs();
     live = info.live !== false;
     deltasOn = !!info.deltas?.on;
     otelInfo = info.otel ?? null;

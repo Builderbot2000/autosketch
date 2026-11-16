@@ -97,7 +97,14 @@
       else token = sessionStorage.getItem(KEY) ?? undefined;
     } catch { /* storage blocked: the token lives as long as the page */ }
     const TABS = { settings: "./js/tabs/settings.js", library: "./js/tabs/library.js", instance: "./js/tabs/instance.js" };
-    const tabFromHash = () => { const t = location.hash.replace(/^#/, "").split("&")[0]; return t in TABS ? t : "observe"; };
+    // `#settings`, or `#tab=instance` (the server opens `#t=<token>&tab=instance` as the setup wizard).
+    const tabFromHash = () => {
+      for (const part of location.hash.replace(/^#/, "").split("&")) {
+        const t = part.startsWith("tab=") ? part.slice(4) : part;
+        if (t in TABS) return t;
+      }
+      return "observe";
+    };
 
     async function api(path, { method = "GET", body } = {}) {
       const headers = { accept: "application/json" };

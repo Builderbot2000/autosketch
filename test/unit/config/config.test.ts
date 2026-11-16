@@ -2,7 +2,7 @@ import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ABSENT, autosketchHome, ConfigConflictError, configPath, expandHome, formatConfig, hashText, parseConfig, readConfig, writeConfig } from "../../../src/core/config.js";
+import { ABSENT, autosketchHome, ConfigConflictError, configPath, expandHome, formatConfig, hashText, parseConfig, readConfig, setInstance, unsetInstance, updateConfig, writeConfig } from "../../../src/core/config.js";
 
 const home = () => mkdtempSync(join(tmpdir(), "autosketch-home-"));
 
@@ -81,5 +81,30 @@ describe("config.toml store (14, 15 Settings tab)", () => {
     expect(readConfig(path).config.instance).toBe("/edited by hand");
     const fresh = readConfig(path);
     expect(writeConfig({ ...fresh.config, instance: "/c" }, fresh.hash, path).config.instance).toBe("/c");
+  });
+
+  it("keeps version and baseJar with the instance they were saved with", () => {
+    const snap = parseConfig('instance = "/p"\nversion = "1.21.1"\nbaseJar = "/j/client.jar"\n', "c.toml");
+    expect(snap.config).toMatchObject({ instance: "/p", version: "1.21.1", baseJar: "/j/client.jar", extra: {} });
+    expect(parseConfig("version = 1.21\n", "c.toml").warnings).toEqual(['c.toml: version must be a Minecraft version as text (e.g. "1.21.1"), ignored']);
+    const c = structuredClone(snap.config);
+    c.workspace = "/w";
+    expect(formatConfig(c)).toBe('instance = "/p"\nversion = "1.21.1"\nbaseJar = "/j/client.jar"\nworkspace = "/w"\n');
+    setInstance(c, "/q");
+    expect(c).toMatchObject({ instance: "/q", workspace: "/w" });
+    expect(c.version).toBeUndefined();
+    setInstance(c, "/r", { baseJar: "/k.jar" });
+    expect([c.instance, c.version, c.baseJar]).toEqual(["/r", undefined, "/k.jar"]);
+    unsetInstance(c);
+    expect(c).toEqual({ workspace: "/w", settings: {}, extra: {} });
+  });
+
+  it("updateConfig edits a fresh read and writes it", () => {
+    const path = configPath({ AUTOSKETCH_HOME: home() });
+    updateConfig((c) => setInstance(c, "/a"), path);
+    writeFileSync(path, 'instance = "/a"\n[settings]\n"x" = "1"\n');
+    const s = updateConfig((c) => (c.settings.y = "2"), path);
+    expect(s.config).toMatchObject({ instance: "/a", settings: { x: "1", y: "2" } });
+    expect(readConfig(path).hash).toBe(s.hash);
   });
 });

@@ -4,6 +4,8 @@
  * `autosketch setup` / `autosketch config` commands and by hand, and it beats the launch command:
  *
  *   instance = "C:/Users/me/curseforge/minecraft/Instances/Craftoria"
+ *   version = "1.21.1"              (optional: `setup --version`, applies only with that instance)
+ *   baseJar = "/path/to/client.jar" (optional: `setup --base-jar`, likewise)
  *   workspace = "~/autosketch"
  *   [settings]
  *   "observe.snapshots" = "merge"
@@ -29,6 +31,13 @@ import { parse, stringify } from "smol-toml";
 export interface AutosketchConfig {
   /** The remembered instance folder (`14`, *Setup*). `config unset instance` unlinks it. */
   instance?: string;
+  /**
+   * The locator's game version and client jar for that instance (`setup --version`, `--base-jar`;
+   * `14`, *Setup*). They describe the `instance` they were saved with: they apply only while it is
+   * set, and setting or unsetting the instance clears them.
+   */
+  version?: string;
+  baseJar?: string;
   /** Folder for documents. */
   workspace?: string;
   /** `[settings]`: setting key → value text (`15`, *Settings tab*). */
@@ -107,6 +116,12 @@ export function parseConfig(text: string, path = "config.toml"): ConfigSnapshot 
     if (k === "instance" || k === "workspace") {
       if (typeof v === "string" && v.trim()) config[k] = v.trim();
       else warnings.push(`${path}: ${k} must be a folder path (text), ignored`);
+    } else if (k === "baseJar") {
+      if (typeof v === "string" && v.trim()) config.baseJar = v.trim();
+      else warnings.push(`${path}: baseJar must be a file path (text), ignored`);
+    } else if (k === "version") {
+      if (typeof v === "string" && v.trim()) config.version = v.trim();
+      else warnings.push(`${path}: version must be a Minecraft version as text (e.g. "1.21.1"), ignored`);
     } else if (k === "settings") {
       if (!isTable(v)) {
         warnings.push(`${path}: settings must be a table ([settings]), ignored`);
@@ -122,10 +137,12 @@ export function parseConfig(text: string, path = "config.toml"): ConfigSnapshot 
   return snap;
 }
 
-/** The file's text for a config (stable key order: instance, workspace, other keys, [settings]). */
+/** The file's text for a config (stable key order: instance, version, baseJar, workspace, other keys, [settings]). */
 export function formatConfig(config: AutosketchConfig): string {
   const doc: Record<string, unknown> = {};
   if (config.instance !== undefined) doc.instance = config.instance;
+  if (config.version !== undefined) doc.version = config.version;
+  if (config.baseJar !== undefined) doc.baseJar = config.baseJar;
   if (config.workspace !== undefined) doc.workspace = config.workspace;
   Object.assign(doc, config.extra);
   if (Object.keys(config.settings).length) doc.settings = { ...config.settings };
@@ -152,6 +169,41 @@ export function writeConfig(config: AutosketchConfig, expectedHash: string, path
     throw e;
   }
   return { path, exists: true, hash: hashText(text), config: structuredClone(config), warnings: [] };
+}
+
+/**
+ * Read, change, write, for writers that hold no earlier snapshot (the command line): applies `edit`
+ * to a fresh read and writes it with that read's hash, starting over from a new read when another
+ * writer got in between (a few times, then `ConfigConflictError`). The UI, which shows the user what
+ * it read, passes its own hash to `writeConfig` instead.
+ */
+export function updateConfig(edit: (config: AutosketchConfig) => void, path: string = configPath()): ConfigSnapshot {
+  for (let attempt = 0; ; attempt++) {
+    const snap = readConfig(path);
+    const config = structuredClone(snap.config);
+    edit(config);
+    try {
+      return writeConfig(config, snap.hash, path);
+    } catch (e) {
+      if (!(e instanceof ConfigConflictError) || attempt >= 4) throw e;
+    }
+  }
+}
+
+/** Saves an instance choice into `config`: `version` and `baseJar` go with it, so stale ones from an earlier choice are cleared. */
+export function setInstance(config: AutosketchConfig, instance: string, opts: { version?: string; baseJar?: string } = {}): void {
+  config.instance = instance;
+  delete config.version;
+  delete config.baseJar;
+  if (opts.version) config.version = opts.version;
+  if (opts.baseJar) config.baseJar = opts.baseJar;
+}
+
+/** Unlinks the instance (`config unset instance`, the UI's *Unlink instance*): `version` and `baseJar` go with it. */
+export function unsetInstance(config: AutosketchConfig): void {
+  delete config.instance;
+  delete config.version;
+  delete config.baseJar;
 }
 
 function currentHash(path: string): string {

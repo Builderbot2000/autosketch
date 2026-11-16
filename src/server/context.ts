@@ -75,6 +75,8 @@ export function startupArg(name: "instance" | "workspace", argv: readonly string
  * modOrder and tintBiome are settings (`assets/settings.ts`): `--set modOrder=a,b` or the older
  * `--mod-order a,b` / `AUTOSKETCH_MOD_ORDER`, likewise `tintBiome`. The launch `--version` and
  * `--base-jar` describe the launch instance, so they are dropped when config.toml names a different one.
+ * config.toml's own `version` and `baseJar` were saved with its `instance` (`setup`), so they apply
+ * when that instance is the one chosen, before the launch values.
  */
 export function configFromEnv(argv = process.argv.slice(2), env = process.env, file?: ConfigSnapshot): ServerConfig | undefined {
   const arg = (name: string) => {
@@ -83,13 +85,26 @@ export function configFromEnv(argv = process.argv.slice(2), env = process.env, f
   };
   const instance = startupArg("instance", argv, env, file);
   if (!instance) return undefined;
-  const cfg: ServerConfig = { instance: instance.value, instanceSource: instance.source };
+  const cfg: ServerConfig = { instance: instance.value, instanceSource: instance.source, ...launchOptions(argv, env, file) };
+  if (instance.source.kind === "config") {
+    if (file?.config.version) cfg.version = file.config.version;
+    if (file?.config.baseJar) cfg.baseJar = expandHome(file.config.baseJar);
+  }
   if (!instance.overrides || instance.overrides.raw === instance.value) {
     const version = arg("version") ?? env.AUTOSKETCH_VERSION;
     const baseJar = arg("base-jar") ?? env.AUTOSKETCH_BASE_JAR;
-    if (version) cfg.version = version;
-    if (baseJar) cfg.baseJar = baseJar;
+    if (version) cfg.version ??= version;
+    if (baseJar) cfg.baseJar ??= baseJar;
   }
+  return cfg;
+}
+
+/**
+ * Everything `configFromEnv` reads besides the instance (mod order, tint biome, workspace), for a
+ * server that starts with no instance and loads one later (`14`, *Setup*: not configured).
+ */
+export function launchOptions(argv = process.argv.slice(2), env = process.env, file?: ConfigSnapshot): Omit<ServerConfig, "instance" | "instanceSource"> {
+  const cfg: Omit<ServerConfig, "instance" | "instanceSource"> = {};
   // Settings (core/settings.ts): config.toml, --set key=value, the flag alias, then AUTOSKETCH_<KEY>.
   const settings = Settings.from(argv, env, file);
   const modOrder = settings.get(MOD_ORDER);

@@ -3,10 +3,13 @@ import type { z } from "zod";
 import type { InstanceContext } from "./context.js";
 import { INSTRUCTIONS } from "./instructions.js";
 import { noteError, observeCall } from "./observe-call.js";
-import { BASE } from "../scope/scopes.js";
+import { BASE, refusal } from "../scope/scopes.js";
 import { defaultWorkspace, Session } from "./session.js";
 import { TOOL_GROUPS } from "./tools/index.js";
-import { fail, scopeSchema, type ResourceFn, type Result, type ToolFn } from "./tools/shared.js";
+import { fail, scopeSchema, text, type ResourceFn, type Result, type ToolFn } from "./tools/shared.js";
+
+/** The not_configured text for a session the entry point gave no `setup` (in-process uses, tests). */
+const NOT_CONFIGURED_FALLBACK = 'Autosketch has no Minecraft instance to read blocks from. Ask the user to run `npx -y autosketch setup --instance "<instance folder>"` (`npx -y autosketch instances` lists the ones found), then call the tool again.';
 
 export const SERVER_NAME = "autosketch";
 export const SERVER_VERSION = "0.1.0";
@@ -32,13 +35,16 @@ export interface ServerOptions {
  * immediately while the instance loads (seconds on a warm cache, longer the first time).
  * Tool definitions live in tools/, one module per feature area.
  */
-export function createServer(ctx: Promise<InstanceContext>, opts: ServerOptions = {}): McpServer {
+export function createServer(ctx: Promise<InstanceContext> | undefined, opts: ServerOptions = {}): McpServer {
   const hidden = new Set(opts.hideTools ?? []);
   let instructions = hidden.size ? `${INSTRUCTIONS}\n\nNot available in this session: ${[...hidden].sort().join(", ")}.` : INSTRUCTIONS;
   if (opts.channel) instructions += `\n\n${opts.channel.instructions}`;
   const capabilities = opts.channel ? { capabilities: { experimental: { "claude/channel": {} } } } : {};
   const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION }, { instructions, ...capabilities });
   const session = opts.session ?? new Session(defaultWorkspace());
+  // Without an instance the server still starts: tools answer not_configured until one is loaded
+  // (session.loadInstance, or one saved in config.toml since startup; 14, *Setup*).
+  if (ctx && session.instance !== ctx) session.setInstance(ctx);
   const seen = new Set<string>();
 
   const tool: ToolFn = <S extends z.ZodRawShape>(
@@ -57,8 +63,16 @@ export function createServer(ctx: Promise<InstanceContext>, opts: ServerOptions 
       { title: config.title, description: config.description, inputSchema, annotations: { readOnlyHint: config.readOnly ?? true, openWorldHint: false } },
       observeCall(() => session.events, name, async (args: z.infer<z.ZodObject<S>>) => {
         let c: InstanceContext;
+        const pending = session.instanceForCall();
+        if (!pending) {
+          // Not configured (14, *Setup*): instance_info reports it, every other tool refuses with the way out.
+          const why = session.setup ? await session.setup.notConfigured() : NOT_CONFIGURED_FALLBACK;
+          if (name === "instance_info") return text(`No Minecraft instance is loaded yet.\n${why}`);
+          const msg = `not_configured: ${why}`;
+          return noteError(fail(msg), refusal("not_configured", msg));
+        }
         try {
-          c = await ctx;
+          c = await pending;
         } catch (e) {
           return fail(`The Minecraft instance failed to load: ${(e as Error).message}`);
         }

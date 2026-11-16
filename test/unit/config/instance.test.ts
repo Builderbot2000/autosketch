@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseConfig } from "../../../src/core/config.js";
-import { configFromEnv, startupArg, startupArgNotes } from "../../../src/server/context.js";
+import { configFromEnv, launchOptions, startupArg, startupArgNotes } from "../../../src/server/context.js";
 import { instanceSourceText } from "../../../src/server/tools/instance.js";
 
 const file = parseConfig('instance = "/saved/pack"\nworkspace = "~/builds"\n[settings]\n"tintBiome" = "jungle"\n');
@@ -47,5 +47,12 @@ describe("instance and workspace from config.toml (14 Setup, 15 Instance tab)", 
     expect(instanceSourceText({ kind: "config", label: "config.toml" })).toBe("config.toml");
     expect(instanceSourceText({ kind: "flag", label: "--instance" })).toBe("command line (--instance)");
     expect(instanceSourceText({ kind: "env", label: "AUTOSKETCH_INSTANCE" })).toBe("environment (AUTOSKETCH_INSTANCE)");
+  });
+
+  it("applies config.toml's version and baseJar only with its own instance, before the launch values", () => {
+    const saved = parseConfig('instance = "/saved/pack"\nversion = "1.20.1"\nbaseJar = "/jars/client.jar"\n');
+    expect(configFromEnv(["--instance", "/saved/pack", "--version", "1.21.1"], {}, saved)).toMatchObject({ instance: "/saved/pack", version: "1.20.1", baseJar: "/jars/client.jar" });
+    expect(configFromEnv(["--instance", "/launch"], {}, parseConfig('version = "1.20.1"\n'))).toEqual({ instance: "/launch", instanceSource: { kind: "flag", label: "--instance" } });
+    expect(launchOptions(["--tint-biome", "swamp", "--workspace", "/w"], {}, parseConfig(""))).toEqual({ tintBiome: "swamp", workspace: "/w" });
   });
 });

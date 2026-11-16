@@ -10,10 +10,17 @@
  *             off); the URL is printed to stderr and opened in the browser on the first tool call (--set observe.open=false)
  *   --set server.hideTools=analyze,render hides tools (eval ablations, docs/design/10)
  *
+ *   With no instance anywhere the server still starts: tools answer not_configured (with the
+ *   discovered instances, a setup command for each and the UI's URL) until one is chosen, and with
+ *   no instance in config.toml the UI opens on its Instance tab at startup (docs/design/14, *Setup*).
+ *
  *   autosketch observe <path> [--port <n>] [--instance <path>]
  *   opens a finished session log (a session folder, a document's observe/ folder or a document
  *   folder) in the viewer; no MCP session. Uses the instance's textures when --instance or
  *   AUTOSKETCH_INSTANCE is set, flat colours otherwise (docs/design/12, Replay).
+ *
+ *   autosketch instances | setup --instance <id|path> … | config set|unset <key> [value]
+ *   command-line setup, see src/cli/index.ts.
  *
  * stdout carries the protocol; all logging goes to stderr.
  */
@@ -25,10 +32,12 @@ import { openInBrowser } from "../observe/open.js";
 import { OBSERVE_OPEN } from "../observe/settings.js";
 import { scopeLimits } from "../scope/settings.js";
 import { readConfig } from "../core/config.js";
-import { configFromEnv, loadInstanceContext, startupArgNotes } from "./context.js";
+import { configFromEnv, launchOptions, loadInstanceContext, startupArgNotes } from "./context.js";
 import { createServer, SERVER_VERSION } from "./server.js";
 import { SERVER_HIDE_TOOLS } from "./settings.js";
 import { defaultWorkspace, Session } from "./session.js";
+import { INSTANCE_TAB_FRAGMENT, makeInstanceSetup, wantsSetupWizard, withFragment } from "./setup.js";
+import { CLI_COMMANDS, runCli } from "../cli/index.js";
 import { bakerFor } from "./tools/shared.js";
 import { LiveLink } from "../world/live-link.js";
 import { promptSettings, worldSettings } from "../world/settings.js";
@@ -43,22 +52,20 @@ async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   let settings: Settings;
   let cfg: ReturnType<typeof configFromEnv>;
+  let launch: ReturnType<typeof launchOptions>;
   try {
     settings = Settings.from(argv, process.env, file);
     cfg = configFromEnv(argv, process.env, file);
+    launch = launchOptions(argv, process.env, file);
   } catch (e) {
+    // An invalid launch value stops the server (a mistake in the MCP client's config); invalid
+    // config.toml values were already skipped with a note (15, *Settings tab*).
     log((e as Error).message);
     process.exit(2);
   }
   // One line per launch value config.toml overrides, and per problem in the file: logged, never in a tool result.
   for (const line of [...settings.notes(), ...startupArgNotes(argv, process.env, file)]) log(line);
-  if (!cfg) {
-    log(`no instance configured: pass --instance "<path to Minecraft instance>", set AUTOSKETCH_INSTANCE, or set instance in ${file.path}`);
-    process.exit(2);
-  }
-  const ctx = loadInstanceContext(cfg, log);
-  ctx.catch((e: Error) => log(`failed to load instance: ${e.message}`));
-  const workspace = cfg.workspace ?? defaultWorkspace();
+  const workspace = cfg?.workspace ?? launch.workspace ?? defaultWorkspace();
   let session: Session;
   try {
     session = new Session(workspace, log, { scopeLimits: scopeLimits(settings) });
@@ -72,14 +79,36 @@ async function main(): Promise<void> {
   let hideTools: string[];
   try {
     hideTools = settings.get(SERVER_HIDE_TOOLS);
-    observer = startObserve({ workspace, settings, version: SERVER_VERSION, getDoc: () => session.doc, getScopeDoc: (id) => session.scopes.scopes.get(id)?.doc, getBaker: async () => bakerFor(await ctx), log });
+    // Without an instance the viewer draws flat colours (12); the baker exists once one is loaded.
+    const getBaker = () => session.instance?.then(bakerFor) ?? Promise.reject(new Error("no instance loaded"));
+    observer = startObserve({ workspace, settings, version: SERVER_VERSION, getDoc: () => session.doc, getScopeDoc: (id) => session.scopes.scopes.get(id)?.doc, getBaker, log });
   } catch (e) {
     log((e as Error).message);
     process.exit(2);
   }
-  // The browser opens on the first tool call, not at startup: clients start MCP servers with every
-  // session, and a session that never uses autosketch shouldn't pop a tab.
-  if (settings.get(OBSERVE_OPEN)) {
+  // First-run setup (14, *Setup*; 15, *Instance tab and first-run setup*): the server starts with
+  // or without an instance. Without one, tools answer not_configured until the UI or
+  // `autosketch setup` chooses one, which then loads in place.
+  session.setup = makeInstanceSetup({ launch, log, uiUrl: () => observer.ready });
+  if (cfg) {
+    const ctx = loadInstanceContext(cfg, log);
+    ctx.catch((e: Error) => log(`failed to load instance: ${e.message}`));
+    session.setInstance(ctx);
+  } else log(`no instance configured: tools answer not_configured until one is chosen in the UI's Instance tab or with \`autosketch setup --instance <path>\` (saved in ${file.path})`);
+  // With no instance remembered in config.toml, the UI opens on its Instance tab at once, as the
+  // setup wizard (the one exception to opening on the first tool call). Otherwise the browser opens
+  // on the first tool call, not at startup: clients start MCP servers with every session, and a
+  // session that never uses autosketch shouldn't pop a tab.
+  const wizard = wantsSetupWizard(file);
+  if (wizard) {
+    void observer.ready.then((url) => {
+      if (!url) return;
+      const at = withFragment(url, INSTANCE_TAB_FRAGMENT);
+      log(`setup: choose an instance at ${at}`);
+      if (settings.get(OBSERVE_OPEN)) openInBrowser(at, log);
+    });
+  }
+  if (settings.get(OBSERVE_OPEN) && !wizard) {
     let opened = false;
     session.callHooks.push({
       before: () => {
@@ -107,7 +136,7 @@ async function main(): Promise<void> {
   link.setSync(syncLink);
   session.world = link;
   session.callHooks.push(autoSyncHook(() => session.world));
-  const server = createServer(ctx, { session, hideTools, log, channel: { instructions: CHANNEL_INSTRUCTIONS } });
+  const server = createServer(session.instance, { session, hideTools, log, channel: { instructions: CHANNEL_INSTRUCTIONS } });
   // In-game requests (13, *Prompting from the game*): pushed into the session as Claude Code channel
   // events. Whether the session loaded the server as a channel can't be seen from here, so delivery
   // is optimistic once a client has initialized.
@@ -126,7 +155,8 @@ async function main(): Promise<void> {
     process.exit(2);
   }
   session.inGame = inGame;
-  if (autoLink) void ctx.then((c) => link.autoLink({ instanceDir: c.info.root, plugins: c.plugins, palettes: c.book }), () => {});
+  // Once an instance loads (at startup, or later in place).
+  if (autoLink) void session.whenInstance().then((c) => link.autoLink({ instanceDir: c.info.root, plugins: c.plugins, palettes: c.book }));
   const transport = new StdioServerTransport();
   // Save the open document before exiting, so a closed client never loses the last op.
   let closing = false;
@@ -176,7 +206,13 @@ async function observeCommand(args: string[]): Promise<void> {
   process.on("SIGTERM", stop);
 }
 
-const run = process.argv[2] === "observe" ? observeCommand(process.argv.slice(3)) : main();
+const command = process.argv[2];
+const run =
+  command === "observe"
+    ? observeCommand(process.argv.slice(3))
+    : command && CLI_COMMANDS.has(command)
+      ? runCli(command, process.argv.slice(3)).then((code) => process.exit(code))
+      : main();
 run.catch((e: Error) => {
   log(`fatal: ${e.stack ?? e.message}`);
   process.exit(1);

@@ -13,12 +13,18 @@
 <body>
   <header>
     <b>Autosketch</b>
-    <span id="docname">…</span>
-    <span id="session" class="dim"></span>
-    <span id="seq" class="dim"></span>
-    <span id="assets" class="dim"></span>
+    <nav id="tabs" aria-label="sections">
+      <button data-tab="observe" class="on">Observe</button>
+      <button data-tab="settings">Settings</button>
+      <button data-tab="library">Library</button>
+      <button data-tab="instance">Instance</button>
+    </nav>
+    <span id="docname" class="obs-only">…</span>
+    <span id="session" class="dim obs-only"></span>
+    <span id="seq" class="dim obs-only"></span>
+    <span id="assets" class="dim obs-only"></span>
     <span class="grow"></span>
-    <button id="fit" title="Frame the whole build">Fit</button>
+    <button id="fit" class="obs-only" title="Frame the whole build">Fit</button>
     <span id="status">connecting…</span>
   </header>
   <main>
@@ -38,6 +44,8 @@
     <section class="panel side">
       <h2>Scopes</h2>
       <div id="scopes"></div>
+      <h2>Tokens <span class="dim">from Claude Code's telemetry</span></h2>
+      <div id="spend"></div>
       <h2>Events
         <select id="f-doc"><option value="">all documents</option></select>
         <select id="f-kind">
@@ -48,6 +56,7 @@
           <option value="call.refused">refusals</option>
           <option value="render.produced">renders</option>
           <option value="state.add">state.add</option>
+          <option value="otel">otel (telemetry)</option>
         </select>
         <input id="f-tool" placeholder="tool" size="8">
         <label><input id="f-refusals" type="checkbox"> refused only</label>
@@ -71,6 +80,69 @@
     <span id="replay-pos" class="dim"></span>
     <button id="replay-live" title="Follow the latest event">Live</button>
   </footer>
+  <div id="tab-host"></div>
+  <script type="module">
+    // App shell (docs/design/15-management-ui.md, *App shell*). Inline, so the Observe tab loads
+    // exactly what it did before; every other tab is an ESM module under js/tabs/, imported the
+    // first time it is opened. A tab module exports `mount(el, ctx)` and may return `{ show, hide }`.
+    //
+    // Writes (15, *Security*): the server puts a per-launch token in the URL fragment (#t=…), which
+    // is never sent to a server. It is kept in sessionStorage, dropped from the address bar, and sent
+    // as X-Autosketch-Token on every request that changes something.
+    const KEY = "autosketch.token";
+    const found = /(?:^#|&)t=([\w-]+)/.exec(location.hash);
+    let token = found?.[1];
+    try {
+      if (token) sessionStorage.setItem(KEY, token);
+      else token = sessionStorage.getItem(KEY) ?? undefined;
+    } catch { /* storage blocked: the token lives as long as the page */ }
+    const TABS = { settings: "./js/tabs/settings.js", library: "./js/tabs/library.js", instance: "./js/tabs/instance.js" };
+    const tabFromHash = () => { const t = location.hash.replace(/^#/, "").split("&")[0]; return t in TABS ? t : "observe"; };
+
+    async function api(path, { method = "GET", body } = {}) {
+      const headers = { accept: "application/json" };
+      if (method !== "GET") {
+        headers["x-autosketch-token"] = token ?? "";
+        if (body !== undefined) headers["content-type"] = "application/json";
+      }
+      const r = await fetch(`api/${path}`, { method, headers, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw Object.assign(new Error(data.error ?? `HTTP ${r.status}`), { status: r.status, data });
+      return data;
+    }
+    const ctx = { api, canWrite: () => !!token };
+
+    const mounted = new Map();
+    let current = null;
+    async function show(name) {
+      if (name === current) return;
+      current = name;
+      document.body.dataset.tab = name;
+      for (const b of document.querySelectorAll("#tabs button")) b.classList.toggle("on", b.dataset.tab === name);
+      document.querySelector("main").hidden = document.getElementById("replay").hidden = name !== "observe";
+      for (const [n, t] of mounted) if (n !== name && !t.el.hidden) { t.el.hidden = true; t.hide?.(); }
+      history.replaceState(null, "", location.pathname + location.search + (name === "observe" ? "" : `#${name}`));
+      if (name === "observe") return;
+      let t = mounted.get(name);
+      if (!t) {
+        const el = Object.assign(document.createElement("section"), { id: `tab-${name}`, className: "tab" });
+        document.getElementById("tab-host").append(el);
+        t = { el };
+        mounted.set(name, t);
+        try {
+          Object.assign(t, (await (await import(TABS[name])).mount(el, ctx)) ?? {});
+        } catch (e) {
+          el.textContent = `This tab failed to load: ${e.message}`;
+        }
+      }
+      if (current !== name) return;
+      t.el.hidden = false;
+      t.show?.();
+    }
+    for (const b of document.querySelectorAll("#tabs button")) b.addEventListener("click", () => void show(b.dataset.tab));
+    window.addEventListener("hashchange", () => void show(tabFromHash()));
+    void show(tabFromHash());
+  </script>
   <script type="module" src="js/main.js"></script>
 </body>
 </html>

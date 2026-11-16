@@ -45,7 +45,10 @@ export interface Observer {
   readonly snapshots?: SnapshotScheduler;
   readonly deltas?: DeltaWriter;
   readonly http?: ObserveHttp;
-  /** Resolves once the viewer is listening (its URL), or undefined when it is off or failed. */
+  /**
+   * Resolves once the viewer is listening, to the URL to open (with the write token in its fragment,
+   * `…/#t=<token>`, docs/design/15-management-ui.md *Security*), or undefined when it is off or failed.
+   */
   readonly ready: Promise<string | undefined>;
   /** A sink tagged with `doc`; `NO_EVENTS` when everything is off. */
   sink(doc?: string): EventSink;
@@ -105,6 +108,8 @@ export function startObserve(opts: ObserveOptions): Observer {
       dirFor,
       docFor,
       port: port as number,
+      settings: opts.settings,
+      publish: (e) => void bus.publish("base", e),
       ...(opts.getBaker ? { getBaker: opts.getBaker } : {}),
       ...(deltas ? { deltas } : {}),
       ...(opts.version ? { version: opts.version } : {}),

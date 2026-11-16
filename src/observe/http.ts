@@ -4,11 +4,15 @@ import type { AddressInfo } from "node:net";
 import { createRequire } from "node:module";
 import { dirname, extname, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { LoggedEvent } from "../core/events.js";
+import type { LoggedEvent, ObserveEvent } from "../core/events.js";
+import type { Settings } from "../core/settings.js";
 import type { Document } from "../document/document.js";
 import type { BlockBaker } from "../perception/render/bake.js";
 import { Atlas, bakeModels } from "./atlas.js";
 import type { EventBus } from "./bus.js";
+import { BodyTooLarge, newToken, ownOrigin, readBody, refuseWrite, WRITE_METHODS } from "./guard.js";
+import { MAX_OTLP_BYTES, otelSetup, otlpRecords } from "./otel.js";
+import { SettingsApi, type ApiReply } from "./settings-api.js";
 import type { LogTables } from "./states.js";
 import { encodeVoxels, parseBoxParam } from "./voxels.js";
 
@@ -25,6 +29,17 @@ import { encodeVoxels, parseBoxParam } from "./voxels.js";
  *   GET /info                      session id, current document, latest seq, what is available
  *   GET /log/snapshots/<seq>.png   a time-lapse snapshot (replay's fallback when deltas were capped)
  *   GET /vendor/three/...          three.js from the installed package (build/ and examples/jsm/)
+ *
+ * The page is also the management UI (docs/design/15-management-ui.md): an app shell whose other
+ * tabs are ESM modules under `viewer/js/tabs/`, loaded when first opened, talking to `/api/…`:
+ *
+ *   GET    /api/settings, PUT|DELETE /api/settings/<key>   settings-api.ts
+ *   POST   /v1/logs                Claude Code's OTLP/HTTP JSON log events (13, B3; otel.ts)
+ *
+ * Every request that changes something goes through `guard.ts` (POST/PUT/DELETE only, the
+ * per-launch token from the URL fragment, our own Origin). `/v1/logs` comes from Claude Code's
+ * exporter, not a page, so it needs no token: it only appends to the log, takes JSON only (so a
+ * cross-origin page can't send it without a preflight) and refuses any foreign Origin.
  *
  * The same server serves a finished log (`offline.ts`, `autosketch observe <path>`) with
  * `live: false`: the events come from the file, there is no document to read, and nothing is
@@ -67,6 +82,14 @@ export interface ObserveHttpOptions {
   /** Unsent bytes past which a client is dropped until it drains, then resynced. */
   maxClientBacklog?: number;
   log?: (msg: string) => void;
+  /** The server's settings: enables the Settings tab's endpoints (15). Its config.toml snapshot names the file. */
+  settings?: Settings;
+  /** config.toml to read and write; defaults to the path of `settings.config`. Without either, settings are read-only. */
+  configPath?: string;
+  /** Appends an event to the session's log (the `otel` events of `/v1/logs`); absent for a finished log. */
+  publish?: (e: ObserveEvent) => void;
+  /** The per-launch write token; random by default. */
+  token?: string;
 }
 
 interface Client {
@@ -102,7 +125,15 @@ const TYPES: Record<string, string> = {
 };
 
 export class ObserveHttp {
+  /** The server's base URL (`http://127.0.0.1:<port>/`). */
   url?: string;
+  /** The URL to open and print: the base URL with the write token in its fragment (`#t=…`, 15 *Security*). */
+  pageUrl?: string;
+  readonly token: string;
+  /** Log records received at /v1/logs. */
+  otelRecords = 0;
+  private port = 0;
+  private readonly settingsApi?: SettingsApi;
   private server?: Server;
   private ring: LoggedEvent[] = [];
   private readonly clients = new Set<Client>();
@@ -112,7 +143,11 @@ export class ObserveHttp {
   private readonly atlas = new Atlas();
   private readonly urlWritten = new Set<string>();
 
-  constructor(private readonly opts: ObserveHttpOptions) {}
+  constructor(private readonly opts: ObserveHttpOptions) {
+    this.token = opts.token ?? newToken();
+    const path = opts.configPath ?? opts.settings?.config?.path;
+    if (opts.settings && path) this.settingsApi = new SettingsApi(opts.settings, path, opts.log ? { log: opts.log } : {});
+  }
 
   /** Bus subscriber: buffers and schedules; never writes to a socket synchronously. */
   readonly onEvent = (e: LoggedEvent): void => {
@@ -130,8 +165,8 @@ export class ObserveHttp {
 
   async start(): Promise<string> {
     const server = createServer((req, res) => {
-      this.handle(req, res).catch((e: Error) => {
-        if (!res.headersSent) json(res, 500, { error: e.message });
+      this.handle(req, res).catch((e: Error & { status?: number }) => {
+        if (!res.headersSent) json(res, e.status ?? 500, { error: e.message });
         else res.end();
       });
     });
@@ -141,18 +176,22 @@ export class ObserveHttp {
       server.listen(this.opts.port, "127.0.0.1", () => ok());
     });
     const port = (server.address() as AddressInfo).port;
+    this.port = port;
     this.url = `http://127.0.0.1:${port}/`;
+    this.pageUrl = `${this.url}#t=${this.token}`;
     this.ping = setInterval(() => {
       for (const c of this.clients) if (!c.lagging) c.res.write(": ping\n\n");
     }, 15_000);
     this.ping.unref();
-    this.opts.log?.(`observe: viewer at ${this.url}`);
+    this.settingsApi?.watch();
+    this.opts.log?.(`observe: viewer at ${this.pageUrl}`);
     const current = this.opts.tables.current;
     if (current) void this.writeUrl(current);
-    return this.url;
+    return this.pageUrl;
   }
 
   async close(): Promise<void> {
+    this.settingsApi?.close();
     if (this.ping) clearInterval(this.ping);
     for (const c of this.clients) c.res.end();
     this.clients.clear();
@@ -181,12 +220,13 @@ export class ObserveHttp {
   }
 
   private async writeUrl(name: string): Promise<void> {
-    if (this.opts.live === false || !this.url || this.urlWritten.has(name)) return;
+    if (this.opts.live === false || !this.pageUrl || this.urlWritten.has(name)) return;
     this.urlWritten.add(name);
     const dir = this.opts.dirFor(name);
     try {
       await mkdir(dir, { recursive: true });
-      await writeFile(join(dir, "url"), this.url + "\n");
+      // With the token (15, *Security*): the folder is in the user's own workspace.
+      await writeFile(join(dir, "url"), this.pageUrl + "\n");
     } catch (e) {
       this.opts.log?.(`observe: writing ${join(dir, "url")} failed: ${(e as Error).message}`);
     }
@@ -195,9 +235,21 @@ export class ObserveHttp {
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     // Loopback only, and only for pages addressed to it: refuses DNS-rebinding requests.
     if (!allowedHost(req.headers.host)) return json(res, 403, { error: "forbidden host" });
-    if (req.method !== "GET" && req.method !== "HEAD") return json(res, 405, { error: "GET only" });
     const url = new URL(req.url ?? "/", "http://localhost");
     const path = url.pathname;
+    const method = req.method ?? "GET";
+    const read = method === "GET" || method === "HEAD";
+    if (path === "/v1/logs") return this.otlp(req, res);
+    if (path === "/api" || path.startsWith("/api/")) {
+      if (!read) {
+        // Preflights (OPTIONS) and anything else fall through to 405 without CORS headers: never approved.
+        if (!WRITE_METHODS.has(method)) return json(res, 405, { error: "changes need POST, PUT or DELETE" });
+        const why = refuseWrite(req, this.token, this.port);
+        if (why) return json(res, 403, { error: why });
+      }
+      return this.api(path.slice(4), method, req, res);
+    }
+    if (!read) return json(res, 405, { error: "GET only" });
     if (path === "/events") return this.events(url, req, res);
     if (path === "/info") return this.info(res);
     const doc = /^\/doc\/([^/]+)\/(snapshot|region)$/.exec(path);
@@ -224,6 +276,53 @@ export class ObserveHttp {
     return this.static(path, res);
   }
 
+  /**
+   * `/api/…` (15, *Endpoints*); `rel` is the path after `/api`. Writes reach here only past the
+   * guard. A GET never changes anything, so a GET of a write-only path is refused.
+   */
+  private async api(rel: string, method: string, req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const read = method === "GET" || method === "HEAD";
+    const settings = /^\/settings(?:\/([^/]+))?\/?$/.exec(rel);
+    if (settings) {
+      const api = this.settingsApi;
+      if (!api) return json(res, 404, { error: "settings are not available here" });
+      const key = settings[1] === undefined ? undefined : decodeURIComponent(settings[1]);
+      if (key === undefined) return read ? json(res, 200, api.view()) : json(res, 405, { error: "change one setting at /api/settings/<key>" });
+      if (method === "PUT") return reply(res, api.put(key, await jsonBody(req)));
+      if (method === "DELETE") return reply(res, api.remove(key, await jsonBody(req)));
+      return json(res, 405, { error: "PUT /api/settings/<key> {value} saves a setting; DELETE resets it" });
+    }
+    return json(res, 404, { error: "no such endpoint" });
+  }
+
+  /** POST /v1/logs: an OTLP/HTTP JSON logs batch from Claude Code; each record becomes an `otel` event (13, B3). */
+  private async otlp(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (req.method !== "POST") return json(res, 405, { error: "POST only" });
+    const publish = this.opts.publish;
+    if (!publish || this.opts.live === false) return json(res, 404, { error: "not a live session" });
+    // Claude Code's exporter sends no Origin; a page would, and a foreign one is refused.
+    const origin = req.headers.origin;
+    if (origin !== undefined && !ownOrigin(origin, this.port)) return json(res, 403, { error: "foreign Origin" });
+    if (!/^application\/json\b/i.test(String(req.headers["content-type"] ?? ""))) {
+      if (!this.warnedProtobuf) this.opts.log?.("observe: /v1/logs got a non-JSON batch; set OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json");
+      this.warnedProtobuf = true;
+      return json(res, 415, { error: "OTLP/HTTP JSON only: set OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json" });
+    }
+    let body: unknown;
+    try {
+      body = JSON.parse((await readBody(req, MAX_OTLP_BYTES)).toString("utf8"));
+    } catch (e) {
+      return json(res, e instanceof BodyTooLarge ? 413 : 400, { error: (e as Error).message });
+    }
+    const records = otlpRecords(body);
+    if (!records) return json(res, 400, { error: "not an OTLP logs request (resourceLogs[].scopeLogs[].logRecords[])" });
+    for (const record of records) publish({ kind: "otel", record });
+    this.otelRecords += records.length;
+    json(res, 200, {});
+  }
+
+  private warnedProtobuf = false;
+
   private events(url: URL, req: IncomingMessage, res: ServerResponse): void {
     // EventSource sends Last-Event-ID when it reconnects; it wins over the original `since`.
     const since = Math.max(Number(url.searchParams.get("since") ?? 0) || 0, Number(req.headers["last-event-id"] ?? 0) || 0);
@@ -248,6 +347,10 @@ export class ObserveHttp {
       seq: this.opts.bus.lastSeq,
       deltas: d ? { on: true, capped: d.capped, bytes: d.bytes } : { on: false },
       assets: !!this.opts.getBaker,
+      settings: !!this.settingsApi,
+      // B3 (13): how many Claude Code log records have arrived, and the setup that sends them here.
+      // A free port changes with every launch, so the endpoint only stays valid with a pinned `observe.http`.
+      ...(this.opts.publish && this.opts.live !== false ? { otel: { records: this.otelRecords, portPinned: this.opts.port !== 0, setup: otelSetup(this.port) } } : {}),
     });
   }
 
@@ -314,6 +417,26 @@ const sse = (e: LoggedEvent): string => `id: ${e.seq}\ndata: ${JSON.stringify(e)
 function json(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
   res.end(JSON.stringify(body));
+}
+
+function reply(res: ServerResponse, r: ApiReply): void {
+  json(res, r.status, r.body);
+}
+
+/** A write's JSON body (`undefined` when empty). Throws a 400/413-shaped error otherwise. */
+async function jsonBody(req: IncomingMessage): Promise<unknown> {
+  let text: string;
+  try {
+    text = (await readBody(req, 1024 * 1024)).toString("utf8");
+  } catch (e) {
+    throw Object.assign(new Error((e as Error).message), { status: e instanceof BodyTooLarge ? 413 : 400 });
+  }
+  if (!text.trim()) return undefined;
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw Object.assign(new Error("body must be JSON"), { status: 400 });
+  }
 }
 
 function allowedHost(host: string | undefined): boolean {

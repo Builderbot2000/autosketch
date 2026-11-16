@@ -280,21 +280,21 @@ async function buildBlock(
 
   const refs = selectModels(def, defaults);
   const models: ResolvedModel[] = await Promise.all(refs.map((r) => resolver.resolve(r.model)));
-  const placed = models.map((model, i) => ({ model, x: refs[i]!.x, y: refs[i]!.y }));
+  const placed = models.map((model, i) => ({ model, x: refs[i]!.x, y: refs[i]!.y, z: refs[i]!.z ?? 0 }));
   const elements = models.flatMap((m) => m.elements);
 
   const faceTextures: BlockInfo["faceTextures"] = {};
   const textures = new Set<string>();
   let tinted = false;
   let vertexColor: string | undefined;
-  for (const { model, x, y } of placed)
+  for (const { model, x, y, z } of placed)
     for (const e of model.elements)
       for (const f of FACES) {
         const face = e.faces[f];
         if (!face || face.texture === "#missing") continue;
         textures.add(face.texture);
         // Skip textures that don't exist as files (generated at runtime, e.g. XyCraft's cloud layer).
-        if (stack.has(texturePath(face.texture))) faceTextures[rotateFace(f, x, y)] ??= face.texture;
+        if (stack.has(texturePath(face.texture))) faceTextures[rotateFace(f, x, y, z)] ??= face.texture;
         if (face.tintindex !== undefined && face.tintindex >= 0) tinted = true;
         vertexColor ??= face.color;
       }

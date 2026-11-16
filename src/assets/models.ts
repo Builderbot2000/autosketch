@@ -14,6 +14,8 @@ export interface ModelRef {
   model: string; // normalised "ns:path"
   x: number;
   y: number;
+  /** Rotation about the z axis in 90° steps, applied after x and y (1.21.11). Absent when 0. */
+  z?: number;
   uvlock: boolean;
   weight: number;
 }
@@ -58,6 +60,7 @@ interface RawRef {
   model?: string;
   x?: number;
   y?: number;
+  z?: number;
   uvlock?: boolean;
   weight?: number;
 }
@@ -66,7 +69,11 @@ function toRefs(raw: RawRef | RawRef[] | undefined): ModelRef[] {
   const list = Array.isArray(raw) ? raw : raw ? [raw] : [];
   return list
     .filter((r): r is RawRef & { model: string } => typeof r?.model === "string")
-    .map((r) => ({ model: normId(r.model), x: r.x ?? 0, y: r.y ?? 0, uvlock: r.uvlock ?? false, weight: r.weight ?? 1 }));
+    .map((r) => {
+      const ref: ModelRef = { model: normId(r.model), x: r.x ?? 0, y: r.y ?? 0, uvlock: r.uvlock ?? false, weight: r.weight ?? 1 };
+      if (r.z) ref.z = r.z;
+      return ref;
+    });
 }
 
 /** Parses "facing=east,half=bottom" (or "" / "normal" for the catch-all variant). */
@@ -161,13 +168,30 @@ export interface ModelFace {
   tintindex?: number;
   /** NeoForge per-face/element vertex colour (ARGB hex), set in model JSON. */
   color?: string;
+  /** The texture entry asked to be treated as translucent (`force_translucent`, 26.1). */
+  forceTranslucent?: boolean;
+}
+
+/**
+ * Element rotation about `origin`. Either one axis (`axis` + `angle`, every version) or several
+ * (`angles`, degrees about x then y then z, 1.21.11). Angles are not snapped to 22.5° (1.21.6).
+ */
+export type ElementRotation =
+  | { origin: [number, number, number]; axis: "x" | "y" | "z"; angle: number; rescale?: boolean }
+  | { origin: [number, number, number]; angles: [number, number, number]; rescale?: boolean };
+
+/** True when a rotation turns the element at all. */
+export function isRotated(r: ElementRotation | undefined): boolean {
+  return !!r && ("angles" in r ? r.angles.some((a) => a !== 0) : r.angle !== 0);
 }
 
 export interface ModelElement {
   from: [number, number, number];
   to: [number, number, number];
-  rotation?: { origin: [number, number, number]; axis: "x" | "y" | "z"; angle: number; rescale?: boolean };
+  rotation?: ElementRotation;
   shade?: boolean;
+  /** Faces are shaded as if they faced this direction (`shade_direction_override`, 26.3). */
+  shadeDirection?: Face;
   faces: Partial<Record<Face, ModelFace>>;
 }
 
@@ -182,9 +206,12 @@ export interface ResolvedModel {
   loader?: string;
 }
 
+/** A `textures` entry: a texture id or `#variable`, or (26.1) an object with a sprite id. */
+type RawTexture = string | { sprite?: string; force_translucent?: boolean };
+
 interface RawModel {
   parent?: string;
-  textures?: Record<string, string>;
+  textures?: Record<string, RawTexture>;
   elements?: RawElement[];
   ambientocclusion?: boolean;
   loader?: string;
@@ -195,10 +222,22 @@ interface RawModel {
 interface RawElement {
   from: [number, number, number];
   to: [number, number, number];
-  rotation?: ModelElement["rotation"];
+  rotation?: RawRotation;
   shade?: boolean;
+  shade_direction_override?: string;
   faces?: Partial<Record<Face, { texture?: string; uv?: [number, number, number, number]; cullface?: Face; rotation?: number; tintindex?: number; neoforge_data?: { color?: string } }>>;
   neoforge_data?: { color?: string };
+}
+
+/** Both rotation forms as written: `axis` + `angle`, and (1.21.11) per-axis `x`, `y`, `z`. */
+interface RawRotation {
+  origin?: [number, number, number];
+  axis?: string;
+  angle?: number;
+  x?: number;
+  y?: number;
+  z?: number;
+  rescale?: boolean;
 }
 
 const MAX_PARENT_DEPTH = 32;
@@ -282,7 +321,7 @@ export class ModelResolver {
 
   /** chain[0] is the model itself, the last entry its root ancestor. */
   private async merge(id: string, chain: RawModel[], issues: ResolvedModel["issues"]): Promise<ResolvedModel> {
-    const vars: Record<string, string> = {};
+    const vars: TextureVars = {};
     for (let i = chain.length - 1; i >= 0; i--) Object.assign(vars, chain[i]!.textures ?? {});
     const rawElements = chain.find((m) => Array.isArray(m.elements))?.elements;
     const ao = chain.find((m) => m.ambientocclusion !== undefined)?.ambientocclusion ?? true;
@@ -291,7 +330,7 @@ export class ModelResolver {
     const textures: Record<string, string> = {};
     for (const k of Object.keys(vars)) {
       const t = resolveTextureVar(vars, k);
-      if (t) textures[k] = t;
+      if (t) textures[k] = t.id;
     }
 
     let elements = (rawElements ?? []).map((e) => bakeElement(e, vars, issues));
@@ -308,7 +347,7 @@ export class ModelResolver {
           childChain.push(r);
           parent = r.parent ? normId(r.parent) : undefined;
         }
-        const childVars: Record<string, string> = { ...vars };
+        const childVars: TextureVars = { ...vars };
         for (let i = childChain.length - 1; i >= 0; i--) Object.assign(childVars, childChain[i]!.textures ?? {});
         const els = childChain.find((m) => Array.isArray(m.elements))?.elements ?? [];
         elements = elements.concat(els.map((e) => bakeElement(e, childVars, issues)));
@@ -324,21 +363,55 @@ export class ModelResolver {
   }
 }
 
-function resolveTextureVar(vars: Record<string, string>, key: string): string | undefined {
-  let v: string | undefined = vars[key];
-  for (let i = 0; i < 16 && v !== undefined && v.startsWith("#"); i++) v = vars[v.slice(1)];
-  return v === undefined || v.startsWith("#") ? undefined : normId(v);
+type TextureVars = Record<string, RawTexture>;
+
+/**
+ * Follows `#variable` references to a texture id. An object entry (26.1) ends the chain: its
+ * `sprite` is always an id, never a variable.
+ */
+function resolveTextureVar(vars: TextureVars, key: string): { id: string; forceTranslucent: boolean } | undefined {
+  let v: RawTexture | undefined = vars[key];
+  for (let i = 0; i < 16 && typeof v === "string" && v.startsWith("#"); i++) v = vars[v.slice(1)];
+  if (v !== undefined && typeof v === "object") {
+    return typeof v.sprite === "string" && !v.sprite.startsWith("#") ? { id: normId(v.sprite), forceTranslucent: v.force_translucent === true } : undefined;
+  }
+  return v === undefined || v.startsWith("#") ? undefined : { id: normId(v), forceTranslucent: false };
 }
 
-function bakeElement(e: RawElement, vars: Record<string, string>, issues: ResolvedModel["issues"]): ModelElement {
+const AXES = ["x", "y", "z"] as const;
+
+/**
+ * Normalises an element rotation. `axis` + `angle` wins when present, as in the game (1.21.11:
+ * "older notation takes precedence"). Per-axis angles with only one non-zero become the one-axis
+ * form, so both spellings of the same rotation bake identically.
+ */
+export function parseElementRotation(r: RawRotation | undefined): ElementRotation | undefined {
+  if (!r || typeof r !== "object") return undefined;
+  const origin = r.origin ?? [8, 8, 8];
+  const rescale = r.rescale === true ? { rescale: true } : {};
+  const axis = AXES.find((a) => a === r.axis);
+  if (axis && typeof r.angle === "number") return { origin, axis, angle: r.angle, ...rescale };
+  const angles: [number, number, number] = [num(r.x), num(r.y), num(r.z)];
+  const turned = AXES.filter((_, i) => angles[i] !== 0);
+  if (turned.length === 0) return undefined;
+  if (turned.length === 1) return { origin, axis: turned[0]!, angle: angles[AXES.indexOf(turned[0]!)]!, ...rescale };
+  return { origin, angles, ...rescale };
+}
+
+function num(v: unknown): number {
+  return typeof v === "number" && Number.isFinite(v) ? v : 0;
+}
+
+function bakeElement(e: RawElement, vars: TextureVars, issues: ResolvedModel["issues"]): ModelElement {
   const faces: ModelElement["faces"] = {};
   for (const f of FACES) {
     const rf = e.faces?.[f];
     if (!rf) continue;
-    let tex: string | undefined;
-    if (rf.texture) tex = rf.texture.startsWith("#") ? resolveTextureVar(vars, rf.texture.slice(1)) : normId(rf.texture);
+    let tex: { id: string; forceTranslucent: boolean } | undefined;
+    if (rf.texture) tex = rf.texture.startsWith("#") ? resolveTextureVar(vars, rf.texture.slice(1)) : { id: normId(rf.texture), forceTranslucent: false };
     if (!tex) issues.push("missing-texture");
-    const face: ModelFace = { texture: tex ?? "#missing" };
+    const face: ModelFace = { texture: tex?.id ?? "#missing" };
+    if (tex?.forceTranslucent) face.forceTranslucent = true;
     if (rf.uv) face.uv = rf.uv;
     if (rf.cullface) face.cullface = rf.cullface;
     if (rf.rotation) face.rotation = rf.rotation;
@@ -348,8 +421,11 @@ function bakeElement(e: RawElement, vars: Record<string, string>, issues: Resolv
     faces[f] = face;
   }
   const out: ModelElement = { from: e.from, to: e.to, faces };
-  if (e.rotation) out.rotation = e.rotation;
+  const rotation = parseElementRotation(e.rotation);
+  if (rotation) out.rotation = rotation;
   if (e.shade === false) out.shade = false;
+  const dir = FACES.find((f) => f === e.shade_direction_override);
+  if (dir) out.shadeDirection = dir;
   return out;
 }
 
@@ -367,12 +443,14 @@ export function modelBounds(models: ResolvedModel[]): { from: [number, number, n
 
 const X_STEP: Record<Face, Face> = { up: "north", north: "down", down: "south", south: "up", east: "east", west: "west" };
 const Y_STEP: Record<Face, Face> = { north: "east", east: "south", south: "west", west: "north", up: "up", down: "down" };
+const Z_STEP: Record<Face, Face> = { up: "east", east: "down", down: "west", west: "up", north: "north", south: "south" };
 
-/** Where a model face ends up after a blockstate rotation (x first, then y; 90° steps). */
-export function rotateFace(face: Face, x = 0, y = 0): Face {
+/** Where a model face ends up after a blockstate rotation (x, then y, then z; 90° steps). */
+export function rotateFace(face: Face, x = 0, y = 0, z = 0): Face {
   let f = face;
   for (let i = 0; i < (((x / 90) % 4) + 4) % 4; i++) f = X_STEP[f];
   for (let i = 0; i < (((y / 90) % 4) + 4) % 4; i++) f = Y_STEP[f];
+  for (let i = 0; i < (((z / 90) % 4) + 4) % 4; i++) f = Z_STEP[f];
   return f;
 }
 
@@ -380,6 +458,7 @@ export interface PlacedModel {
   model: ResolvedModel;
   x?: number;
   y?: number;
+  z?: number;
 }
 
 /**
@@ -388,10 +467,10 @@ export interface PlacedModel {
  */
 export function isFullCube(parts: PlacedModel[]): boolean {
   const faces = new Set<Face>();
-  for (const { model, x, y } of parts)
+  for (const { model, x, y, z } of parts)
     for (const e of model.elements) {
-      if (e.rotation?.angle || !e.from.every((v) => v <= 0) || !e.to.every((v) => v >= 16)) continue;
-      for (const f of FACES) if (e.faces[f]) faces.add(rotateFace(f, x, y));
+      if (isRotated(e.rotation) || !e.from.every((v) => v <= 0) || !e.to.every((v) => v >= 16)) continue;
+      for (const f of FACES) if (e.faces[f]) faces.add(rotateFace(f, x, y, z));
     }
   return faces.size === 6;
 }

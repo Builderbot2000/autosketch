@@ -144,7 +144,7 @@ export async function camoFaces(camo: string, ctx: RenderContext): Promise<Parti
         if (full(el) !== pass) continue;
         for (const f of FACES) {
           const face = el.faces[f];
-          const w = rotateFace(f, part.x ?? 0, part.y ?? 0);
+          const w = rotateFace(f, part.x ?? 0, part.y ?? 0, part.z ?? 0);
           if (face && face.texture !== "#missing" && !out[w]) out[w] = face;
         }
       }

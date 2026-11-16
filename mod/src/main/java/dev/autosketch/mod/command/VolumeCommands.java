@@ -16,7 +16,7 @@ import dev.autosketch.mod.volume.PlayerStates;
 import dev.autosketch.mod.volume.VolumeManager;
 import dev.autosketch.mod.volume.VolumeModes;
 import dev.autosketch.mod.volume.Wand;
-import dev.autosketch.mod.volume.WandEvents;
+import dev.autosketch.mod.volume.WandControl;
 import java.util.List;
 import java.util.function.Supplier;
 import net.minecraft.ChatFormatting;
@@ -42,7 +42,7 @@ import net.minecraft.world.item.ItemStack;
 public final class VolumeCommands implements CommandExtension {
     private final VolumeManager volumes;
     private final PlayerStates players;
-    private final WandEvents wand;
+    private final WandControl wand;
     private final VolumeModes.Context contextMode;
     private final Feedback feedback;
     private final Bridge bridge;
@@ -52,7 +52,7 @@ public final class VolumeCommands implements CommandExtension {
     private final PlayerStates.State console = new PlayerStates.State();
     private boolean consoleContextMode;
 
-    public VolumeCommands(VolumeManager volumes, PlayerStates players, WandEvents wand, VolumeModes.Context contextMode, Feedback feedback,
+    public VolumeCommands(VolumeManager volumes, PlayerStates players, WandControl wand, VolumeModes.Context contextMode, Feedback feedback,
             Bridge bridge, Supplier<List<WandMode>> modes, Supplier<PatchStatus> patches) {
         this.volumes = volumes;
         this.players = players;

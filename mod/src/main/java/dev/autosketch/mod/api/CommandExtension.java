@@ -6,7 +6,7 @@ import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 
 /**
- * Adds subcommands under {@code /autosketch}, registered with {@link AutosketchSetupEvent#commands}.
+ * Adds subcommands under {@code /autosketch}, registered with {@link AutosketchSetup#commands}.
  * Called once per command registration (every server start and {@code /reload}), on the server thread.
  * Silo S adds {@code ask}, {@code focus} and {@code log} this way; N's own {@code wand}, {@code mode},
  * {@code pos1}, ... use the same hook.

@@ -4,7 +4,7 @@ import org.jetbrains.annotations.Nullable;
 
 /**
  * Patch progress for {@code /autosketch status} and the action bar (13, *Player feedback in-game*).
- * Silo O's patch applier provides it through {@link AutosketchSetupEvent#patchStatus}; read on the
+ * Silo O's patch applier provides it through {@link AutosketchSetup#patchStatus}; read on the
  * server thread.
  */
 public interface PatchStatus {

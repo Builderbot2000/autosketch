@@ -7,7 +7,7 @@ import net.minecraft.server.level.ServerPlayer;
 
 /**
  * One mode of the wand (13, *Work and context volumes in-game*), registered with
- * {@link AutosketchSetupEvent#wandModes}. N registers {@code work} and {@code context}; S registers
+ * {@link AutosketchSetup#wandModes}. N registers {@code work} and {@code context}; S registers
  * {@code focus}. The swap-hands key cycles modes in registration order, {@code /autosketch mode <name>}
  * selects one, and {@code /autosketch pos1|pos2} and left/right clicks call {@link #setCorner} on the
  * player's current mode. All methods run on the server thread.

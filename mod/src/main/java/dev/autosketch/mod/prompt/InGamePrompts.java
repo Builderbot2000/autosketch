@@ -7,6 +7,7 @@ import dev.autosketch.mod.api.Autosketch;
 import dev.autosketch.mod.api.Bridge;
 import dev.autosketch.mod.api.CommandExtension;
 import dev.autosketch.mod.api.LinkVolumes;
+import dev.autosketch.mod.platform.Platform;
 import dev.autosketch.mod.protocol.Box;
 import dev.autosketch.mod.protocol.Frame;
 import dev.autosketch.mod.protocol.Json;
@@ -178,13 +179,13 @@ public final class InGamePrompts {
 
     /** The player's {@code /autosketch log} setting, kept with the player's saved data. Default {@code mine}. */
     public static LogMode logMode(ServerPlayer player) {
-        CompoundTag data = player.getPersistentData();
+        CompoundTag data = Platform.get().playerData(player);
         LogMode m = LogMode.parse(data.contains(LOG_KEY) ? data.getString(LOG_KEY) : null);
         return m == null ? LogMode.MINE : m;
     }
 
     public static void setLogMode(ServerPlayer player, LogMode mode) {
-        player.getPersistentData().putString(LOG_KEY, mode.id());
+        Platform.get().playerData(player).putString(LOG_KEY, mode.id());
     }
 
     /**

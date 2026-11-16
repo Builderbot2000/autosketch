@@ -9,9 +9,10 @@ import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.logging.LogUtils;
 import dev.autosketch.mod.AutosketchConfig;
 import dev.autosketch.mod.api.Autosketch;
-import dev.autosketch.mod.api.AutosketchSetupEvent;
+import dev.autosketch.mod.api.AutosketchSetup;
 import dev.autosketch.mod.api.CommandExtension;
 import dev.autosketch.mod.api.WandMode;
+import dev.autosketch.mod.platform.Platform;
 import dev.autosketch.mod.protocol.Box;
 import dev.autosketch.mod.prompt.ChatRules.LogMode;
 import java.util.List;
@@ -20,18 +21,15 @@ import net.minecraft.commands.Commands;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
-import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.fml.common.EventBusSubscriber;
-import net.neoforged.neoforge.server.ServerLifecycleHooks;
 import org.slf4j.Logger;
 
 /**
  * Registers in-game requests (13, *Prompting from the game*, M13) through the skeleton's hooks:
  * {@code /autosketch ask <text>} (and the configured alias), {@code /autosketch focus clear},
  * {@code /autosketch log off|mine|all}, the wand's {@code focus} mode, and the handlers for
- * {@code prompt.result} and {@code chat}.
+ * {@code prompt.result} and {@code chat}. Each loader's setup event calls {@link #setup} (on
+ * NeoForge, {@code PromptEvents}).
  */
-@EventBusSubscriber(modid = Autosketch.MOD_ID, bus = EventBusSubscriber.Bus.MOD)
 public final class PromptModule {
     private PromptModule() {}
 
@@ -40,14 +38,13 @@ public final class PromptModule {
     /** The focus mode's outline colour (gold), distinct from work and context. */
     public static final int FOCUS_COLOUR = 0xFFC233;
 
-    @SubscribeEvent
-    static void setup(AutosketchSetupEvent e) {
+    public static void setup(AutosketchSetup e) {
         e.messages().register("prompt.result", (m, x) -> {
-            var server = ServerLifecycleHooks.getCurrentServer();
+            var server = Platform.get().currentServer();
             if (server != null) InGamePrompts.onResult(m.header(), server);
         });
         e.messages().register("chat", (m, x) -> {
-            var server = ServerLifecycleHooks.getCurrentServer();
+            var server = Platform.get().currentServer();
             if (server != null) InGamePrompts.onChat(m.header(), server);
         });
         e.commands(PromptModule::commands);

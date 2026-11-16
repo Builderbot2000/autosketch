@@ -5,7 +5,7 @@ import java.util.Objects;
 
 /**
  * Runtime services the mod's packages share. Installed by the mod entry point before
- * {@link AutosketchSetupEvent} is posted; read from then on.
+ * setup ({@link AutosketchSetup}); read from then on.
  */
 public final class Autosketch {
     private Autosketch() {}

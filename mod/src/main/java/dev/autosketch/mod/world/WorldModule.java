@@ -2,10 +2,11 @@ package dev.autosketch.mod.world;
 
 import dev.autosketch.mod.AutosketchConfig;
 import dev.autosketch.mod.api.Autosketch;
-import dev.autosketch.mod.api.AutosketchSetupEvent;
+import dev.autosketch.mod.api.AutosketchSetup;
 import dev.autosketch.mod.api.BridgeSession;
 import dev.autosketch.mod.api.Exchange;
 import dev.autosketch.mod.api.Inbound;
+import dev.autosketch.mod.platform.Platform;
 import dev.autosketch.mod.protocol.Messages;
 import dev.autosketch.mod.protocol.ProtocolException;
 import java.util.Locale;
@@ -15,21 +16,15 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
-import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.fml.common.EventBusSubscriber;
-import net.neoforged.neoforge.common.NeoForge;
-import net.neoforged.neoforge.event.server.ServerStoppedEvent;
-import net.neoforged.neoforge.event.tick.ServerTickEvent;
-import net.neoforged.neoforge.server.ServerLifecycleHooks;
 import org.jetbrains.annotations.Nullable;
 
 /**
  * Silo O's registration (13, M5–M9): the {@code patch}, {@code hashes} and {@code snapshot}
  * handlers, the patch status for {@code /autosketch status}, and the server-tick hooks that drive the
- * patch budget, the sliced reads and the change tracker. Registers through
- * {@link AutosketchSetupEvent}, so no other package's files change.
+ * patch budget, the sliced reads and the change tracker. Registers through {@link AutosketchSetup},
+ * so no other package's files change; each loader's events call {@link #setup} and the tick hooks
+ * (on NeoForge, {@code WorldEvents}).
  */
-@EventBusSubscriber(modid = Autosketch.MOD_ID)
 public final class WorldModule {
     private WorldModule() {}
 
@@ -52,10 +47,9 @@ public final class WorldModule {
         return s;
     }
 
-    @SubscribeEvent
-    static void setup(AutosketchSetupEvent e) {
+    public static void setup(AutosketchSetup e) {
         Function<ResourceKey<Level>, @Nullable ServerLevel> levels = key -> {
-            MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+            MinecraftServer server = Platform.get().currentServer();
             return server == null ? null : server.getLevel(key);
         };
         PatchApplier patches = new PatchApplier(Autosketch.link(), levels,
@@ -72,15 +66,24 @@ public final class WorldModule {
         e.messages().register("hashes", (msg, ex) -> reads.hashes(Messages.HashesRequest.decode(msg.frame()), ex, keysOf(msg)));
         e.messages().register("snapshot", (msg, ex) -> reads.snapshot(Messages.SnapshotRequest.decode(msg.frame()), ex));
         e.patchStatus(patches);
+    }
 
-        NeoForge.EVENT_BUS.addListener((ServerTickEvent.Pre t) -> {
-            Services s = services();
-            s.tracker().refresh();
-            s.patches().tick();
-            s.reads().tick();
-        });
-        NeoForge.EVENT_BUS.addListener((ServerTickEvent.Post t) -> services().tracker().endTick());
-        NeoForge.EVENT_BUS.addListener((ServerStoppedEvent t) -> services().tracker().refresh());
+    /** Start of a server tick: the tracker's volumes, then the patch budget and the sliced reads. */
+    public static void tickStart() {
+        Services s = services();
+        s.tracker().refresh();
+        s.patches().tick();
+        s.reads().tick();
+    }
+
+    /** End of a server tick. */
+    public static void tickEnd() {
+        services().tracker().endTick();
+    }
+
+    /** After the server stopped. */
+    public static void serverStopped() {
+        services().tracker().refresh();
     }
 
     /** Decodes a patch (an invalid body is {@code bad_request} by id) and queues it. */

@@ -1,3 +1,4 @@
+import { gunzipSync } from "node:zlib";
 import type { Compound } from "prismarine-nbt";
 import type { Message, PatchAck, PatchBlock, Sender, SnapshotResult, SurfaceLayer, SurfaceResult, WireArea, WorldBlock } from "../../../src/world/protocol/messages.js";
 import { splitFrame } from "../../../src/world/protocol/codec.js";
@@ -52,6 +53,13 @@ export function sidecarOf(description: string, sender: Sender, m: Message, frame
       break;
     case "dirty":
       if (!m.everything) out.body = { palette: palette(m.blocks.map((b) => b.state)), blocks: worldBlocks(m.blocks) };
+      break;
+    case "registry.result":
+      if (!("unchanged" in m)) out.body = { bytes: Buffer.from(m.report).toString("base64"), report: JSON.parse(gunzipSync(m.report).toString("utf8")) };
+      break;
+    case "upgrade":
+    case "upgrade.result":
+      out.body = m.kind === "structure" ? { structure: toSnbt(m.structure) } : { states: m.states, blockEntities: m.blockEntities.map(toSnbt), entities: m.entities.map(toSnbt) };
       break;
     case "snapshot.result":
       if ("kind" in m) {
@@ -113,6 +121,18 @@ export function messageOf(s: Sidecar): Message {
         blockEntities: (b.regions[i].blockEntities as any[]).map((x) => ({ pos: x.pos, nbt: parseSnbt(x.nbt) })),
       }));
       return { type: "snapshot.result", id: h.id as number, dimension: h.dimension as string, palette: b.palette, regions };
+    }
+    case "registry.result":
+      if (h.unchanged) return h as unknown as Message;
+      return { type: "registry.result", id: h.id as number, hash: h.hash as string, dataVersion: h.dataVersion as number, report: new Uint8Array(Buffer.from(b.bytes as string, "base64")) };
+    case "upgrade":
+    case "upgrade.result": {
+      const data =
+        h.kind === "structure"
+          ? { kind: "structure" as const, structure: parseSnbt(b.structure as string) }
+          : { kind: "elements" as const, states: b.states as string[], blockEntities: (b.blockEntities as string[]).map((x) => parseSnbt(x)), entities: (b.entities as string[]).map((x) => parseSnbt(x)) };
+      if (h.type === "upgrade") return { type: "upgrade", id: h.id as number, from: h.from as number, ...data };
+      return { type: "upgrade.result", id: h.id as number, to: h.to as number, ...(h.failed ? { failed: h.failed as number } : {}), ...data };
     }
     case "hashes.result":
       return { type: "hashes.result", id: h.id as number, sections: (h.sections as [number, number, number, string][]).map(([x, y, z, hash]) => ({ section: [x, y, z], hash })) };

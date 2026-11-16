@@ -86,9 +86,17 @@ export({
 
 ## Import
 
-`doc_open` and `prefab` loading accept every readable format. Imports keep unknown blocks, block entities and entities verbatim (`01`). A DataVersion mismatch produces a warning. Block upgrade (DFU-style renames between versions) is out of scope for v1 beyond a small rename table.
+`doc_open` and `prefab` loading accept every readable format. Imports keep unknown blocks, block entities and entities verbatim (`01`).
 
-**Rename table** (`formats/renames.ts`): when a file is older than the instance, block ids renamed in between are upgraded before canonicalisation: `sign`/`wall_sign` → `oak_sign`/`oak_wall_sign` and `stone_slab` → `smooth_stone_slab` (1.14, DataVersion 1952), `grass_path` → `dirt_path` and filled `cauldron[level]` → `water_cauldron` (1.17, 2724), `grass` → `short_grass` (1.20.3, 3698). The warning lists what was renamed. Property changes (wall sides, redstone) are not upgraded, and files newer than the instance are not downgraded. A file with no DataVersion is left alone.
+**Upgrades** (`14`, *Schematics from other versions: the established practice*; `formats/upgrade.ts`), forward only, at load; files are never rewritten, so a prefab is upgraded each time it loads:
+
+- **Linked** to a game whose mod lists `upgrade` (`13`, protocol 3): the game's own data fixer. A `.nbt` goes whole, as a structure; `.schem`, `.bp` and `.litematic` go per element (palette states, block entities, entities). The document takes the game's DataVersion. Elements the fixer couldn't upgrade are kept as written and counted in a warning; if the game fails mid-request, the rename table is used instead, with a warning.
+- **Unlinked**, or a mod without `upgrade`: the rename table below, with a warning that the upgrade was partial (property and block-entity changes aren't upgraded) and how to get a full one.
+- **Missing versions** take the formats' defaults: a `.schem` without `DataVersion` as 1631 (Sponge v1), a structure as 500, with a warning. MCEdit files go through the legacy table, which targets 1.21.1 names (3955), then the data fixer from there.
+- **A file newer than the game** is never downgraded: it imports with a warning naming both versions, and blocks the game doesn't know are kept verbatim and reported.
+- **The target version** is the linked game's, else the registry report's, else the instance's; exports stamp the same version.
+
+**Rename table** (`formats/renames.ts`, the unlinked fallback): when a file is older than the instance, block ids renamed in between are upgraded before canonicalisation: `sign`/`wall_sign` → `oak_sign`/`oak_wall_sign` and `stone_slab` → `smooth_stone_slab` (1.14, DataVersion 1952), `grass_path` → `dirt_path` and filled `cauldron[level]` → `water_cauldron` (1.17, 2724), `grass` → `short_grass` (1.20.3, 3698). The partial-upgrade warning lists what was renamed. Property changes (wall sides, redstone) are not upgraded.
 
 ## Implementation status
 
@@ -102,7 +110,7 @@ export({
 | Targets | `axiom` writes `.bp` to `<instance>/config/axiom/blueprints/`, or `.schem` to `schematics/` with `format:"schem"`. `create` writes to `<instance>/schematics/`. `path` writes to any file or folder. With no target, the export goes to `<workspace>/<doc>/exports/`, the only place exports may overwrite without `overwrite:true`. |
 | Litematica `.litematic` | Reads (versions up to 7, multi-region merged with regions as components) and writes one region. Round-trip and multi-region tests use synthetic fixtures. Not checked in game. |
 | MCEdit `.schematic` | Reads, including `AddBlocks` and `SchematicaMapping`, through a hand-written legacy ID table. Unknown ids stay visible as `legacy:id_<id>` blocks. Import tests use synthetic fixtures. Never written. |
-| Import | `doc_open({path})` creates a new workspace document named after the file. Block entities and entities are kept. A DataVersion mismatch produces a warning; an older file has its renamed block ids upgraded through the rename table first. |
+| Import | `doc_open({path})` creates a new workspace document named after the file. Block entities and entities are kept. Older files are upgraded through the linked game's data fixer, else the rename table with a partial-upgrade warning; newer files import with a warning (*Import*). Unit tests use synthetic files and a fake fixer; the real fixer is checked in the mod's GameTests and on the Craftoria server. |
 | Entities | Stored in the document with `Pos` in document coordinates. Exports translate them with the blocks and drop those outside the exported region. |
 
 ## Open questions

@@ -56,6 +56,7 @@ class PointerFileTest {
         Files.writeString(games.resolve("other.toml"), "format = 2\ngameDir = \"/nowhere\"\nminecraft = \"1.21.1\"\n");
         Files.writeString(games.resolve("junk.toml"), "not toml at all [[[");
         Files.writeString(games.resolve("abc.registry.json.gz"), "x");
+        for (Path p : new Path[] {liveFile, goneFile, keep}) Files.writeString(PointerFile.reportBeside(p), "report");
         Files.delete(gone);
 
         assertEquals(1, PointerFile.removeStale(games, keep));
@@ -64,6 +65,18 @@ class PointerFileTest {
         assertTrue(Files.exists(keep), "this game's own pointer is kept even before its folder check");
         assertTrue(Files.exists(games.resolve("other.toml")), "another format is left alone");
         assertTrue(Files.exists(games.resolve("junk.toml")));
-        assertTrue(Files.exists(games.resolve("abc.registry.json.gz")));
+        assertTrue(Files.exists(PointerFile.reportBeside(liveFile)), "a live game's report stays");
+        assertTrue(Files.exists(PointerFile.reportBeside(keep)));
+        assertFalse(Files.exists(PointerFile.reportBeside(goneFile)), "the report goes with its stale pointer");
+        assertFalse(Files.exists(games.resolve("abc.registry.json.gz")), "a report without a pointer goes");
+    }
+
+    @Test
+    void keepsThisGamesReportBeforeItsPointerIsWritten(@TempDir Path tmp) throws Exception {
+        Path games = Files.createDirectories(tmp.resolve("games"));
+        Path keep = games.resolve(PointerFile.hash(PointerFile.gameDirText(tmp)) + ".toml");
+        Files.writeString(PointerFile.reportBeside(keep), "report");
+        PointerFile.removeStale(games, keep);
+        assertTrue(Files.exists(PointerFile.reportBeside(keep)));
     }
 }

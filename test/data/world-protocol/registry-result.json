@@ -1,0 +1,48 @@
+{
+  "description": "The registry report: the gzip file the mod writes beside its pointer file, as the body; hash over the uncompressed JSON",
+  "sender": "mod",
+  "header": {
+    "type": "registry.result",
+    "id": 50,
+    "hash": "fe85fca59cb0ad6d",
+    "dataVersion": 3955
+  },
+  "body": {
+    "bytes": "H4sIAAAAAAACA2VPy07DMBD8lzlbQSn0UN/5BS4oh228tqw63sjZipTK/44cFUrhtprXzlzhpUyksL3BFDOPhbzCou92fdfDwJHSG5clSoZ9Puz3BknIcYFFZvFSAuMb+xGiubvdywEGxyTjaYG9glea5sSTOBuYSoPmIjMXjbwJaI0L7DtWGFxg8InB4IOUS5IQ2DVOy7k99JQWxlANHHs6J737N+uD66autzKvWaNeYFtU/bXbUmylHqBFJXMDq4FS2Gre2XbRMfHTHMcTrdwK/l35P22o9QtXJLpZeQEAAA==",
+    "report": {
+      "format": 1,
+      "minecraft": "1.21.1",
+      "dataVersion": 3955,
+      "loader": "neoforge",
+      "loaderVersion": "21.1.249",
+      "blocks": {
+        "examplemod:gear": {
+          "properties": {
+            "axis": [
+              "x",
+              "y",
+              "z"
+            ],
+            "waterlogged": [
+              "true",
+              "false"
+            ]
+          },
+          "default": {
+            "axis": "y",
+            "waterlogged": "false"
+          },
+          "blockEntity": true
+        },
+        "minecraft:air": {},
+        "minecraft:stone": {}
+      },
+      "tags": {
+        "minecraft:mineable/pickaxe": [
+          "examplemod:gear",
+          "minecraft:stone"
+        ]
+      }
+    }
+  }
+}

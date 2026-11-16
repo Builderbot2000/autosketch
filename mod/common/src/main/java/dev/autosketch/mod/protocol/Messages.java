@@ -9,6 +9,7 @@ import dev.autosketch.mod.protocol.BodyTypes.Encoded;
 import dev.autosketch.mod.protocol.BodyTypes.PatchBlock;
 import dev.autosketch.mod.protocol.BodyTypes.SnapshotRegion;
 import dev.autosketch.mod.protocol.BodyTypes.SurfaceLayer;
+import dev.autosketch.mod.protocol.BodyTypes.UpgradeData;
 import dev.autosketch.mod.protocol.BodyTypes.WorldBlock;
 import java.util.ArrayList;
 import java.util.List;
@@ -27,13 +28,15 @@ public final class Messages {
     private Messages() {}
 
     /** The one protocol version the mod speaks (13, *Versions and features*). */
-    public static final int PROTOCOL_VERSION = 2;
+    public static final int PROTOCOL_VERSION = 3;
 
     /** Request modes (13, B6), named by the player's subcommand. */
     public static final List<String> REQUEST_MODES = List.of("ask", "scan", "plan", "build");
 
     /** Optional mod capabilities a mod hello lists in {@code features} (13, *Versions and features*). */
     public static final String FEATURE_MODES = "modes", FEATURE_SCAN = "scan", FEATURE_VOLUMES_SET = "volumes.set";
+    /** Protocol 3 features (14, *Version-specific data lives in the mod*). */
+    public static final String FEATURE_REGISTRY = "registry", FEATURE_UPGRADE = "upgrade";
 
     private static final Pattern HASH = Pattern.compile("[0-9a-f]{16}");
 
@@ -618,6 +621,114 @@ public final class Messages {
             JsonObject h = f.header();
             boolean delivered = Json.reqBool(h, "delivered", id);
             return new PromptResult(id, delivered, delivered ? null : Json.optString(h, "reason", id));
+        }
+    }
+
+    // ── registry report and upgrades (protocol 3) ──────────────────────────────────────────────
+
+    /**
+     * {@code registry}, MCP → mod, protocol 3 (feature {@code registry}): asks for the registry report.
+     * {@code have} is the hash of the report the MCP holds, or null.
+     */
+    public record RegistryRequest(long id, @Nullable Long have) {
+        public Frame encode() {
+            JsonObject h = Json.header("registry");
+            h.addProperty("id", id);
+            if (have != null) h.addProperty("have", hex(have));
+            return new Frame(h);
+        }
+
+        public static RegistryRequest decode(Frame f) throws ProtocolException {
+            expectType(f, "registry");
+            long id = reqId(f);
+            String have = Json.optString(f.header(), "have", id);
+            return new RegistryRequest(id, have == null ? null : parseHex(have, id));
+        }
+    }
+
+    /**
+     * {@code registry.result}, mod → MCP, protocol 3: the report's hash (over its uncompressed JSON) and
+     * DataVersion, and the gzip report file as the body; {@code report} null means {@code unchanged}.
+     */
+    public record RegistryResult(long id, long hash, int dataVersion, byte @Nullable [] report) {
+        public Frame encode() {
+            JsonObject h = Json.header("registry.result");
+            h.addProperty("id", id);
+            h.addProperty("hash", hex(hash));
+            h.addProperty("dataVersion", dataVersion);
+            if (report == null) {
+                h.addProperty("unchanged", true);
+                return new Frame(h);
+            }
+            if (report.length == 0) throw new IllegalArgumentException("a registry report needs content");
+            return new Frame(h, report);
+        }
+
+        public static RegistryResult decode(Frame f) throws ProtocolException {
+            expectType(f, "registry.result");
+            long id = reqId(f);
+            JsonObject h = f.header();
+            long hash = parseHex(Json.reqString(h, "hash", id), id);
+            int dataVersion = Json.reqInt(h, "dataVersion", id);
+            if (h.has("unchanged")) {
+                if (!Json.reqBool(h, "unchanged", id)) throw ProtocolException.badRequest(id, "unchanged is true or omitted");
+                if (f.hasBody()) throw ProtocolException.badRequest(id, "an unchanged registry.result carries no body");
+                return new RegistryResult(id, hash, dataVersion, null);
+            }
+            if (!f.hasBody()) throw ProtocolException.badRequest(id, "registry.result needs the report as its body");
+            return new RegistryResult(id, hash, dataVersion, f.body());
+        }
+    }
+
+    private static String upgradeKind(JsonObject h, long id) throws ProtocolException {
+        String kind = Json.reqString(h, "kind", id);
+        if (!kind.equals("elements") && !kind.equals("structure")) throw ProtocolException.badRequest(id, "kind must be elements or structure");
+        return kind;
+    }
+
+    /**
+     * {@code upgrade}, MCP → mod, protocol 3 (feature {@code upgrade}): run the game's data fixer over
+     * {@code data} from DataVersion {@code from} to the running one.
+     */
+    public record UpgradeRequest(long id, int from, UpgradeData data) {
+        public Frame encode() {
+            JsonObject h = Json.header("upgrade");
+            h.addProperty("id", id);
+            h.addProperty("from", from);
+            h.addProperty("kind", data.kind());
+            return new Frame(h, Bodies.encodeUpgrade(data));
+        }
+
+        public static UpgradeRequest decode(Frame f) throws ProtocolException {
+            expectType(f, "upgrade");
+            long id = reqId(f);
+            JsonObject h = f.header();
+            int from = Json.reqInt(h, "from", id);
+            return new UpgradeRequest(id, from, Bodies.decodeUpgrade(f.body(), upgradeKind(h, id)));
+        }
+    }
+
+    /**
+     * {@code upgrade.result}, mod → MCP, protocol 3: the upgraded data in the request's order and
+     * counts, {@code to} the running DataVersion, {@code failed} how many elements the fixer threw on
+     * (returned unchanged; omitted when 0).
+     */
+    public record UpgradeResult(long id, int to, int failed, UpgradeData data) {
+        public Frame encode() {
+            JsonObject h = Json.header("upgrade.result");
+            h.addProperty("id", id);
+            h.addProperty("to", to);
+            h.addProperty("kind", data.kind());
+            if (failed > 0) h.addProperty("failed", failed);
+            return new Frame(h, Bodies.encodeUpgrade(data));
+        }
+
+        public static UpgradeResult decode(Frame f) throws ProtocolException {
+            expectType(f, "upgrade.result");
+            long id = reqId(f);
+            JsonObject h = f.header();
+            int failed = h.has("failed") ? Json.reqCount(h, "failed", id) : 0;
+            return new UpgradeResult(id, Json.reqInt(h, "to", id), failed, Bodies.decodeUpgrade(f.body(), upgradeKind(h, id)));
         }
     }
 

@@ -17,11 +17,15 @@ import {
   type PatchAck,
   type PatchMessage,
   type PromptResult,
+  type RegistryRequest,
+  type RegistryResult,
   type RequestMode,
   type SnapshotRequest,
   type SnapshotResult,
   type SurfaceRequest,
   type SurfaceResult,
+  type UpgradeRequest,
+  type UpgradeResult,
   type VolatileList,
   type VolumesExtend,
   type VolumesMessage,
@@ -82,6 +86,10 @@ export interface BridgeConnection {
   request(m: Req<VolumesExtend>): Promise<VolumesMessage>;
   /** Resolves with the `volumes` message carrying the request's id. Needs the `volumes.set` feature. */
   request(m: Req<VolumesSet>): Promise<VolumesMessage>;
+  /** The game's registry report (`14`). Needs the `registry` feature. */
+  request(m: Req<RegistryRequest>): Promise<RegistryResult>;
+  /** The game's data fixer over a schematic's data (`14`). Needs the `upgrade` feature. */
+  request(m: Req<UpgradeRequest>): Promise<UpgradeResult>;
   /** Fire-and-forget messages; dropped while disconnected. */
   send(m: NoticeMessage | ChatMessage | PromptResult): void;
   /** Listens to one message type from the mod. Returns the unsubscribe function. */
@@ -113,6 +121,17 @@ interface Pending {
   reject: (e: Error) => void;
   expect: ModType;
 }
+
+/** The response type of each request (`volumes.extend` and `volumes.set` are answered by `volumes`). */
+const RESPONSE = {
+  hashes: "hashes.result",
+  snapshot: "snapshot.result",
+  patch: "patch.ack",
+  "volumes.extend": "volumes",
+  "volumes.set": "volumes",
+  registry: "registry.result",
+  upgrade: "upgrade.result",
+} as const satisfies Record<string, ModType>;
 
 const DOWN = "world_disconnected";
 const OUTDATED = "world_mod_outdated";
@@ -201,12 +220,15 @@ export class Bridge implements BridgeConnection {
   request(m: Req<PatchMessage>): Promise<PatchAck>;
   request(m: Req<VolumesExtend>): Promise<VolumesMessage>;
   request(m: Req<VolumesSet>): Promise<VolumesMessage>;
-  request(m: Req<HashesRequest | SurfaceRequest | SnapshotRequest | PatchMessage | VolumesExtend | VolumesSet>): Promise<ModMessage> {
+  request(m: Req<RegistryRequest>): Promise<RegistryResult>;
+  request(m: Req<UpgradeRequest>): Promise<UpgradeResult>;
+  request(m: Req<HashesRequest | SurfaceRequest | SnapshotRequest | PatchMessage | VolumesExtend | VolumesSet | RegistryRequest | UpgradeRequest>): Promise<ModMessage> {
     if (!this.connected) return Promise.reject(new BridgeError(DOWN, "The game isn't connected (the world link is down); nothing was sent."));
-    const needs: ModFeature | undefined = m.type === "volumes.set" ? "volumes.set" : m.type === "snapshot" && "kind" in m ? "scan" : undefined;
+    const needs: ModFeature | undefined =
+      m.type === "volumes.set" ? "volumes.set" : m.type === "snapshot" && "kind" in m ? "scan" : m.type === "registry" ? "registry" : m.type === "upgrade" ? "upgrade" : undefined;
     if (needs && !this.supports(needs)) return Promise.reject(new BridgeError(OUTDATED, outdated(this.hello!, needs)));
     const id = this.nextId++;
-    const expect: ModType = m.type === "hashes" ? "hashes.result" : m.type === "snapshot" ? "snapshot.result" : m.type === "patch" ? "patch.ack" : "volumes";
+    const expect: ModType = RESPONSE[m.type];
     return new Promise<ModMessage>((resolve, reject) => {
       this.pending.set(id, { resolve, reject, expect });
       if (m.type === "volumes.extend") this.extending.push(id);
@@ -404,7 +426,13 @@ function mismatch(mod: number | undefined, sent: number): BridgeError {
   return new BridgeError("protocol_mismatch", `The mod speaks bridge protocol ${mod} and this Autosketch speaks ${SPOKEN}: the ${older} is older; update the ${older}.`);
 }
 
-const FEATURE_NAMES: Record<ModFeature, string> = { modes: "request modes", scan: "scanning (surface snapshots)", "volumes.set": "setting the volumes" };
+const FEATURE_NAMES: Record<ModFeature, string> = {
+  modes: "request modes",
+  scan: "scanning (surface snapshots)",
+  "volumes.set": "setting the volumes",
+  registry: "the registry report",
+  upgrade: "upgrading schematics through the game's data fixer",
+};
 
 function outdated(hello: ModHello, f: ModFeature): string {
   return `The Autosketch mod ${hello.mod.version} doesn't support ${FEATURE_NAMES[f]} (its hello doesn't list "${f}"): the Autosketch mod is older; update the Autosketch mod.`;

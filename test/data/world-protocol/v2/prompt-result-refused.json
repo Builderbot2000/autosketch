@@ -1,0 +1,10 @@
+{
+  "description": "Request refused: the player isn't on the allowlist",
+  "sender": "mcp",
+  "header": {
+    "type": "prompt.result",
+    "id": 2,
+    "delivered": false,
+    "reason": "not_allowed"
+  }
+}

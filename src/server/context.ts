@@ -6,6 +6,7 @@ import { Settings, type SettingSource, type SourcedText } from "../core/settings
 import { locateInstance, type InstanceInfo, type LocateOptions } from "../assets/locate.js";
 import { openStack, type PackStack } from "../assets/pack.js";
 import { loadRegistry, type Registry } from "../assets/registry.js";
+import { applyReport, readReportFor } from "../assets/report.js";
 import { loadPaletteIndex, type PaletteIndex } from "../palette/index.js";
 import { PaletteBook } from "../palette/pick.js";
 import { SheetRenderer } from "../palette/sheet.js";
@@ -155,6 +156,13 @@ export async function loadInstanceContext(cfg: ServerConfig, log: (msg: string) 
   log(`instance ${info.name}: Minecraft ${info.mcVersion}${info.loader ? `, ${info.loader.name} ${info.loader.version}` : ""}, ${info.layers.length} layers`);
   const { stack, warnings } = await time("pack stack", () => openStack(info));
   const { registry } = await time("registry", () => loadRegistry(stack, { mcVersion: info.mcVersion, onProgress: log }));
+  // The game's own block data on top (14, *Version-specific data lives in the mod*), when the mod wrote it.
+  const reportWarnings: string[] = [];
+  const report = await readReportFor(info.root, reportWarnings);
+  if (report) {
+    const r = applyReport(registry, report);
+    log(`registry report ${report.source}: DataVersion ${report.report.dataVersion}, ${Object.keys(report.report.blocks).length} blocks (${r.corrected} corrected, ${r.added} added)`);
+  }
   // Third-party plugins run with full trust (09); a missing folder is fine.
   const extra = await time("plugins", () => loadPluginDir(pluginDir(cfg.workspace ?? defaultWorkspace())));
   const merged = mergePlugins(BUILTIN_PLUGINS, extra.plugins);
@@ -170,7 +178,7 @@ export async function loadInstanceContext(cfg: ServerConfig, log: (msg: string) 
     plugins,
     sheets: new SheetRenderer(index, stack, { ...tint, cacheDir: defaultCacheDir() }),
     book: new PaletteBook(),
-    warnings: [...warnings, ...registry.data.warnings, ...extra.warnings, ...merged.warnings],
+    warnings: [...warnings, ...registry.data.warnings, ...reportWarnings, ...extra.warnings, ...merged.warnings],
     timings,
     ...tint,
     ...(cfg.instanceSource ? { instanceSource: cfg.instanceSource } : {}),

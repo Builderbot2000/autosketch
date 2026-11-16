@@ -1,0 +1,23 @@
+{
+  "description": "Mod hello from a dedicated server (no host player), listing only some features",
+  "sender": "mod",
+  "header": {
+    "type": "hello",
+    "protocol": 2,
+    "mod": {
+      "version": "0.2.0"
+    },
+    "game": {
+      "version": "1.21.1",
+      "dataVersion": 3955,
+      "loader": "neoforge",
+      "loaderVersion": "21.1.249"
+    },
+    "singleplayer": false,
+    "host": null,
+    "features": [
+      "modes",
+      "volumes.set"
+    ]
+  }
+}

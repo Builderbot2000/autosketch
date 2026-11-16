@@ -116,14 +116,38 @@ public final class PointerFile {
         return file;
     }
 
+    /** The registry report beside a pointer file ({@code <stem>.registry.json.gz}; 14, *Version-specific data lives in the mod*). */
+    public static Path reportBeside(Path pointer) {
+        String name = pointer.getFileName().toString();
+        return pointer.resolveSibling(name.substring(0, name.length() - ".toml".length()) + REPORT_SUFFIX);
+    }
+
+    /** The suffix of a registry report beside its pointer. */
+    public static final String REPORT_SUFFIX = ".registry.json.gz";
+
     /**
-     * Deletes the pointers in {@code games} whose game folder no longer exists, except {@code keep}.
-     * Files it can't read, of another format, or naming a path this OS can't check (a drive-letter
-     * path seen from Linux) are left alone. Returns how many were deleted.
+     * Deletes the pointers in {@code games} whose game folder no longer exists, except {@code keep},
+     * with the registry report beside each, and reports whose pointer is gone. Files it can't read,
+     * of another format, or naming a path this OS can't check (a drive-letter path seen from Linux)
+     * are left alone. Returns how many pointers were deleted.
      */
     public static int removeStale(Path games, @Nullable Path keep) {
         if (!Files.isDirectory(games)) return 0;
         int removed = 0;
+        try (DirectoryStream<Path> files = Files.newDirectoryStream(games, "*" + REPORT_SUFFIX)) {
+            for (Path f : files) {
+                String name = f.getFileName().toString();
+                Path pointer = f.resolveSibling(name.substring(0, name.length() - REPORT_SUFFIX.length()) + ".toml");
+                if (pointer.equals(keep) || Files.exists(pointer)) continue;
+                try {
+                    Files.deleteIfExists(f);
+                } catch (IOException e) {
+                    LOG.debug("Autosketch: registry report {} left alone ({})", f, e.toString());
+                }
+            }
+        } catch (IOException e) {
+            LOG.warn("Autosketch: couldn't list registry reports in {}: {}", games, e.toString());
+        }
         try (DirectoryStream<Path> files = Files.newDirectoryStream(games, "*.toml")) {
             for (Path f : files) {
                 if (f.equals(keep)) continue;
@@ -134,6 +158,7 @@ public final class PointerFile {
                     if (driveLetter && File.separatorChar == '/') continue;
                     if (!Files.isDirectory(Path.of(dir))) {
                         Files.deleteIfExists(f);
+                        Files.deleteIfExists(reportBeside(f));
                         removed++;
                     }
                 } catch (IOException | RuntimeException e) {
@@ -153,6 +178,7 @@ public final class PointerFile {
             String gameDir = gameDirText(server.getServerDirectory());
             if (!AutosketchConfig.get().discovery.pointer) {
                 Files.deleteIfExists(games.resolve(hash(gameDir) + ".toml"));
+                Files.deleteIfExists(games.resolve(hash(gameDir) + REPORT_SUFFIX));
                 return;
             }
             Platform platform = Platform.get();

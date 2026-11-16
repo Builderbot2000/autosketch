@@ -11,6 +11,8 @@ import { Session } from "../../../src/server/session.js";
 import { LiveLink } from "../../../src/world/live-link.js";
 import { autoSyncHook, syncLink } from "../../../src/world/sync.js";
 import type { Compound } from "../../../src/world/protocol/index.js";
+import { watchGameReport } from "../../../src/assets/report.js";
+import { bridgeUpgrader } from "../../../src/world/upgrade.js";
 import { Rcon } from "./rcon.js";
 
 /**
@@ -86,6 +88,8 @@ export async function startMcp(opts: { ackWaitMs?: number } = {}): Promise<Mcp> 
   link.setSync(syncLink);
   session.world = link;
   session.callHooks.push(autoSyncHook(() => session.world));
+  session.upgrader = () => bridgeUpgrader(link.bridge);
+  watchGameReport(link.bridge, async () => (await instanceContext()).registry);
   const server = createServer(instanceContext(), { session });
   const [a, b] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "e2e", version: "0" });

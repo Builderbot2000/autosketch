@@ -1,0 +1,30 @@
+{
+  "description": "Surface result: grass, water, leaves; the columns of a missing (ungenerated) chunk read as none",
+  "sender": "mod",
+  "header": {
+    "type": "snapshot.result",
+    "id": 40,
+    "dimension": "minecraft:overworld",
+    "kind": "surface",
+    "columns": {
+      "min": [-2, 30],
+      "max": [1, 32]
+    },
+    "minY": -64,
+    "missing": [
+      [-1, 2]
+    ]
+  },
+  "body": {
+    "palette": [
+      "minecraft:grass_block[snowy=false]",
+      "minecraft:water[level=0]",
+      "minecraft:oak_leaves[distance=1,persistent=false,waterlogged=false]",
+      "minecraft:stone"
+    ],
+    "surface": {
+      "heights": [135, 135, 136, 127, 135, 142, 127, 127, 0, 0, 1, 127],
+      "states": [0, 0, 0, 1, 0, 2, 1, 1, 0, 0, 3, 1]
+    }
+  }
+}

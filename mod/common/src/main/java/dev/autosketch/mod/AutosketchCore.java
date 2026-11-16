@@ -190,9 +190,19 @@ public final class AutosketchCore {
         Platform platform = Platform.get();
         return new Messages.ModHello(modVersion, SharedConstants.getCurrentVersion().getName(), SharedConstants.getCurrentVersion().getDataVersion().getVersion(),
                 platform.loader(), platform.loaderVersion(), !server.isDedicatedServer(),
-                host == null || host.getId() == null ? null : new Messages.Player(host.getName(), host.getId()), FEATURES);
+                host == null || host.getId() == null ? null : new Messages.Player(host.getName(), host.getId()), features());
     }
 
     /** The protocol-2 features this build implements (13, *Versions and features*). */
     static final List<String> FEATURES = List.of(Messages.FEATURE_MODES, Messages.FEATURE_SCAN, Messages.FEATURE_VOLUMES_SET);
+
+    /** Protocol-3 features, listed when a silo registered their handler (the request's type is the feature's name). */
+    static final List<String> HANDLER_FEATURES = List.of(Messages.FEATURE_REGISTRY, Messages.FEATURE_UPGRADE);
+
+    /** The features the hello lists. */
+    List<String> features() {
+        List<String> out = new java.util.ArrayList<>(FEATURES);
+        for (String f : HANDLER_FEATURES) if (dispatcher.handles(f)) out.add(f);
+        return List.copyOf(out);
+    }
 }

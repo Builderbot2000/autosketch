@@ -1,0 +1,34 @@
+{
+  "description": "A scan request (/autosketch scan 20 the tower and the courtyard): radius clipped to 12 chunks, the columns and full-block box the mod grants for the probe",
+  "sender": "mod",
+  "header": {
+    "type": "prompt",
+    "id": 3,
+    "player": {
+      "name": "Kev",
+      "uuid": "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+    },
+    "text": "the tower and the courtyard",
+    "context": {
+      "dimension": "minecraft:overworld",
+      "position": [-40.5, 68, 23.5],
+      "eye": [-40.5, 69.62, 23.5],
+      "yaw": 45,
+      "pitch": 10,
+      "facing": "west"
+    },
+    "mode": "scan",
+    "scan": {
+      "radius": 12,
+      "clipped": true,
+      "columns": {
+        "min": [-240, -176],
+        "max": [159, 223]
+      },
+      "box": {
+        "min": [-144, 36, -80],
+        "max": [62, 132, 126]
+      }
+    }
+  }
+}

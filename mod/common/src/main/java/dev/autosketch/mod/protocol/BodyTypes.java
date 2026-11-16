@@ -73,6 +73,26 @@ public final class BodyTypes {
         }
     }
 
+    /**
+     * What an {@code upgrade} carries (protocol 3; 14, *Schematics from other versions*): a schematic's
+     * elements (block states as the file names them, block-entity compounds without {@code x}/{@code y}/{@code z},
+     * entity compounds without {@code Pos}), or one whole structure file ({@code structure} non-null,
+     * the lists empty).
+     */
+    public record UpgradeData(List<String> states, List<CompoundTag> blockEntities, List<CompoundTag> entities, @Nullable CompoundTag structure) {
+        public static UpgradeData elements(List<String> states, List<CompoundTag> blockEntities, List<CompoundTag> entities) {
+            return new UpgradeData(List.copyOf(states), List.copyOf(blockEntities), List.copyOf(entities), null);
+        }
+
+        public static UpgradeData structure(CompoundTag structure) {
+            return new UpgradeData(List.of(), List.of(), List.of(), structure);
+        }
+
+        public String kind() {
+            return structure == null ? "elements" : "structure";
+        }
+    }
+
     /** An encoded body and the grid its positions are relative to. */
     public record Encoded(Grid grid, byte[] body) {}
 }

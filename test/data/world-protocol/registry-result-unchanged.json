@@ -1,0 +1,11 @@
+{
+  "description": "The MCP already holds this report: no body",
+  "sender": "mod",
+  "header": {
+    "type": "registry.result",
+    "id": 51,
+    "hash": "fe85fca59cb0ad6d",
+    "dataVersion": 3955,
+    "unchanged": true
+  }
+}

@@ -8,6 +8,7 @@ import dev.autosketch.mod.protocol.BodyTypes.PatchBlock;
 import dev.autosketch.mod.protocol.BodyTypes.Rejected;
 import dev.autosketch.mod.protocol.BodyTypes.SnapshotRegion;
 import dev.autosketch.mod.protocol.BodyTypes.SurfaceLayer;
+import dev.autosketch.mod.protocol.BodyTypes.UpgradeData;
 import dev.autosketch.mod.protocol.BodyTypes.WorldBlock;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -440,4 +441,58 @@ public final class Bodies {
     }
 
     public record SurfaceBody(List<String> palette, SurfaceLayer surface, @Nullable SurfaceLayer ceilings) {}
+
+    // ── upgrade, upgrade.result (protocol 3) ──────────────────────────────────────────────────
+
+    private static void writeCompounds(ByteWriter w, List<CompoundTag> list) {
+        w.varint(list.size());
+        for (CompoundTag c : list) {
+            byte[] b = Nbt.write(c);
+            w.varint(b.length);
+            w.bytes(b);
+        }
+    }
+
+    private static List<CompoundTag> readCompounds(ByteReader r, String what) throws ProtocolException {
+        int n = count(r, what + " count");
+        List<CompoundTag> out = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            int len = r.count(r.remaining(), what + " NBT length");
+            out.add(Nbt.read(r.buffer(), r.position(), len));
+            r.skip(len);
+        }
+        return out;
+    }
+
+    /**
+     * Upgrade body (13, *Binary bodies*): kind {@code elements} is the states as a string list (the
+     * sender's order, duplicates allowed), then the block-entity compounds and the entity compounds,
+     * each a varint count and per compound its varint byte length and NBT; kind {@code structure} is
+     * the same compound list holding exactly one compound. Results use the same layout.
+     */
+    public static byte[] encodeUpgrade(UpgradeData d) {
+        ByteWriter w = new ByteWriter();
+        if (d.structure() != null) writeCompounds(w, List.of(d.structure()));
+        else {
+            w.table(d.states());
+            writeCompounds(w, d.blockEntities());
+            writeCompounds(w, d.entities());
+        }
+        return w.toByteArray();
+    }
+
+    public static UpgradeData decodeUpgrade(byte[] body, String kind) throws ProtocolException {
+        ByteReader r = new ByteReader(body);
+        if (kind.equals("structure")) {
+            List<CompoundTag> list = readCompounds(r, "upgrade structure");
+            if (list.size() != 1) throw ProtocolException.malformed("upgrade structure: " + list.size() + " compounds, expected 1");
+            r.expectEnd("upgrade");
+            return UpgradeData.structure(list.get(0));
+        }
+        List<String> states = r.table();
+        List<CompoundTag> blockEntities = readCompounds(r, "upgrade block entities");
+        List<CompoundTag> entities = readCompounds(r, "upgrade entities");
+        r.expectEnd("upgrade");
+        return UpgradeData.elements(states, blockEntities, entities);
+    }
 }

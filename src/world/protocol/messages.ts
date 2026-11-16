@@ -9,10 +9,10 @@ import type { Vec3 } from "../../core/region.js";
  */
 
 /** The protocol version this side speaks natively (`N`). */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 /**
  * Every version the MCP speaks: its own and the one before (`N`, `N−1`; `14`, *Version skew between
- * mod and MCP*). Everything version 2 adds is optional on the wire, so one codec reads both.
+ * mod and MCP*). Everything version 3 adds is optional on the wire, so one codec reads both.
  */
 export const SUPPORTED_PROTOCOLS: readonly number[] = [PROTOCOL_VERSION, PROTOCOL_VERSION - 1];
 /** Largest frame length value (bytes after the 4-byte length prefix). */
@@ -73,7 +73,7 @@ export type RequestMode = (typeof REQUEST_MODES)[number];
  * Optional capabilities a mod's `hello` lists in `features` (*Versions and features*). The MCP uses
  * an addition only when the mod lists it, never because of the protocol number.
  */
-export const MOD_FEATURES = ["modes", "scan", "volumes.set"] as const;
+export const MOD_FEATURES = ["modes", "scan", "volumes.set", "registry", "upgrade"] as const;
 export type ModFeature = (typeof MOD_FEATURES)[number];
 
 /** A world block as the mod reports it: canonical state, block-entity NBT when it has one. */
@@ -289,6 +289,51 @@ export interface PromptMessage {
 
 export type PromptResult = { type: "prompt.result"; id: number; delivered: true } | { type: "prompt.result"; id: number; delivered: false; reason: PromptRefusal };
 
+/**
+ * The MCP asks for the game's registry report (protocol 3, feature `registry`; `14`, *Version-specific
+ * data lives in the mod*). `have` is the hash of the report the MCP already holds: the mod answers
+ * `unchanged` without a body when it matches.
+ */
+export interface RegistryRequest {
+  type: "registry";
+  id: number;
+  have?: Hash64;
+}
+
+/**
+ * The registry report. `hash` is the first 8 bytes of SHA-256 over the report's uncompressed JSON;
+ * `report` is the gzip file exactly as the mod writes it beside its pointer file (absent when
+ * `unchanged`).
+ */
+export type RegistryResult =
+  | { type: "registry.result"; id: number; hash: Hash64; dataVersion: number; unchanged: true }
+  | { type: "registry.result"; id: number; hash: Hash64; dataVersion: number; report: Uint8Array };
+
+/**
+ * What an upgrade carries (`14`, *Schematics from other versions*): a schematic's elements (block
+ * states, block-entity and entity NBT), or a whole structure file (`STRUCTURE` fix type).
+ */
+export type UpgradeData =
+  | {
+      kind: "elements";
+      /** Block states as the file names them: `ns:id[name=value,…]`, not necessarily canonical. */
+      states: string[];
+      /** Block-entity compounds (`id`, no `x`/`y`/`z`). */
+      blockEntities: Compound[];
+      /** Entity compounds (`id`, no `Pos`). */
+      entities: Compound[];
+    }
+  | { kind: "structure"; structure: Compound };
+
+/** The MCP asks the mod to run the game's data fixer from `from` to the running version (protocol 3, feature `upgrade`). */
+export type UpgradeRequest = { type: "upgrade"; id: number; from: number } & UpgradeData;
+
+/**
+ * The upgraded data, in the request's order and counts. `to` is the running game's DataVersion;
+ * `failed` counts elements the fixer threw on, returned unchanged (omitted when 0).
+ */
+export type UpgradeResult = { type: "upgrade.result"; id: number; to: number; failed?: number } & UpgradeData;
+
 export interface NoticeMessage {
   type: "notice";
   text: string;
@@ -304,9 +349,9 @@ export interface ChatMessage {
 }
 
 /** Messages the MCP sends. */
-export type McpMessage = ClientHello | ErrorMessage | VolumesExtend | VolumesSet | HashesRequest | SnapshotRequest | SurfaceRequest | PatchMessage | PromptResult | NoticeMessage | ChatMessage;
+export type McpMessage = ClientHello | ErrorMessage | VolumesExtend | VolumesSet | HashesRequest | SnapshotRequest | SurfaceRequest | PatchMessage | RegistryRequest | UpgradeRequest | PromptResult | NoticeMessage | ChatMessage;
 /** Messages the mod sends. */
-export type ModMessage = ModHello | ErrorMessage | VolumesMessage | HashesResult | SnapshotResult | SurfaceResult | PatchAck | DirtyMessage | PromptMessage;
+export type ModMessage = ModHello | ErrorMessage | VolumesMessage | HashesResult | SnapshotResult | SurfaceResult | PatchAck | DirtyMessage | PromptMessage | RegistryResult | UpgradeResult;
 export type Message = McpMessage | ModMessage;
 export type Sender = "mcp" | "mod";
 

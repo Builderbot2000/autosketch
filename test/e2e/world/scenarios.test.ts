@@ -198,10 +198,19 @@ describe.skipIf(!ENABLED)("e2e world: scenarios", () => {
     expect(strip(dst.nbt)).toEqual(strip(src.nbt));
     expect(dst.states.get(`${w.min[0] + 1},-60,${w.min[2] + 3}`)).toBe("create:cogwheel[axis=y,waterlogged=false]");
     expect(JSON.stringify(dst.nbt.get(`${w.min[0] + 4},-60,${w.min[2] + 3}`))).toContain("minecraft:diamond");
-    // A modded block typed by name: the asset registry may miss properties the game has
+    // A modded block typed by name. With the mod's registry report (14) it gets the game's full
+    // state and is written. Without one, the asset registry may miss properties the game has
     // (waterlogged), and then the game refuses it rather than writing air or a default.
-    const typed = await mcp.call("set_blocks", { blocks: [{ pos: [6, 1, 6], block: "create:cogwheel" }] });
     const at: Vec3 = [w.min[0] + 6, -60, w.min[2] + 6];
+    if (mcp.link.bridge.supports("registry")) {
+      const ctx = await instanceContext();
+      await until(() => !!ctx.registry.report, 30_000, "the registry report from the game");
+      const placed = await mcp.call("set_blocks", { blocks: [{ pos: [6, 1, 6], block: "create:cogwheel" }] });
+      expect(placed).toContain("world: 1 placed, 0 skipped (hand-edited), 0 rejected");
+      expect(await worldBlock(mcp.link, at)).toBe("create:cogwheel[axis=y,waterlogged=false]");
+      return;
+    }
+    const typed = await mcp.call("set_blocks", { blocks: [{ pos: [6, 1, 6], block: "create:cogwheel" }] });
     if (typed.includes("1 rejected")) {
       expect(typed).toContain("unknown_state");
       expect(await worldBlock(mcp.link, at)).toBe("minecraft:air");

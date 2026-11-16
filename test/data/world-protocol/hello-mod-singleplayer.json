@@ -1,9 +1,9 @@
 {
-  "description": "Mod hello from the integrated server of a singleplayer world, listing every version-2 feature",
+  "description": "Mod hello from the integrated server of a singleplayer world, listing every feature up to version 3",
   "sender": "mod",
   "header": {
     "type": "hello",
-    "protocol": 2,
+    "protocol": 3,
     "mod": {
       "version": "0.2.0"
     },
@@ -21,7 +21,9 @@
     "features": [
       "modes",
       "scan",
-      "volumes.set"
+      "volumes.set",
+      "registry",
+      "upgrade"
     ]
   }
 }

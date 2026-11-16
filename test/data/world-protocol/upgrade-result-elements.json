@@ -1,0 +1,23 @@
+{
+  "description": "The upgraded elements, in the request's order: grass became short_grass, the unknown block passed through, the sign's text moved to front_text and back_text (the game keeps the old keys too; left out here)",
+  "sender": "mod",
+  "header": {
+    "type": "upgrade.result",
+    "id": 60,
+    "to": 3955,
+    "kind": "elements"
+  },
+  "body": {
+    "states": [
+      "minecraft:short_grass",
+      "minecraft:oak_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]",
+      "othermod:gizmo[lit=true]"
+    ],
+    "blockEntities": [
+      "{back_text:{color:\"black\",has_glowing_text:0b,messages:[\"\\\"\\\"\",\"\\\"\\\"\",\"\\\"\\\"\",\"\\\"\\\"\"]},front_text:{color:\"black\",has_glowing_text:0b,messages:[\"{\\\"text\\\":\\\"North\\\"}\",\"{\\\"text\\\":\\\"\\\"}\",\"{\\\"text\\\":\\\"\\\"}\",\"{\\\"text\\\":\\\"\\\"}\"]},id:\"minecraft:sign\",is_waxed:0b}"
+    ],
+    "entities": [
+      "{Invisible:0b,Rotation:[90f,0f],id:\"minecraft:armor_stand\"}"
+    ]
+  }
+}

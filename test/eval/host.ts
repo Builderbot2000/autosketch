@@ -41,9 +41,11 @@ export class StdioHost implements ServerHost {
       ...(hiddenTools.length ? ["--set", `server.hideTools=${hiddenTools.join(",")}`] : []),
       ...this.extraArgs,
     ];
-    // The server needs no API key; keep it out of the child's environment.
+    // The server needs no API key; keep it out of the child's environment. AUTOSKETCH_HOME points
+    // at an empty folder inside the run's workspace, so the user's ~/.autosketch/config.toml (which
+    // outranks every launch option, 15 *Settings tab*) never applies to an eval.
     const { ANTHROPIC_API_KEY: _key, ...env } = process.env as Record<string, string>;
-    return { command: process.execPath, args, cwd: REPO, env: { ...env, AUTOSKETCH_WORKSPACE: workspace } };
+    return { command: process.execPath, args, cwd: REPO, env: { ...env, AUTOSKETCH_WORKSPACE: workspace, AUTOSKETCH_HOME: join(workspace, ".autosketch-home") } };
   }
 
   /** Starts the server once over stdio and lists its tools. No model involved. */

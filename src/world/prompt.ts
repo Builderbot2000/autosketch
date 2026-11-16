@@ -1,11 +1,15 @@
-import type { Vec3 } from "../core/region.js";
+import type { PublicBox, Vec3 } from "../core/region.js";
 import type { EventListener } from "../core/fanout.js";
 import { lookTarget, removeCamera, saveCamera } from "../document/cameras.js";
 import type { Document } from "../document/document.js";
+import type { PaletteBook } from "../palette/pick.js";
+import { refusal } from "../scope/scopes.js";
 import { ActivityStream, type OpenRequest } from "./chat-stream.js";
 import type { LinkVolumes, WorldLink } from "./link.js";
 import { MODE_ALLOWS, modeOf, RequestModeRule } from "./modes.js";
 import type { GameContext, ModHello, PlayerRef, PromptMessage, PromptRefusal, WireBox } from "./protocol/messages.js";
+import { loadProbe, probeText, type Probe } from "./probe.js";
+import { setVolumes, type ContextArg, type VolumesFrame } from "./set-volumes.js";
 import type { PromptSettings } from "./settings.js";
 
 /**
@@ -51,6 +55,14 @@ export interface InGameReplies {
   readonly current: OpenRequest | undefined;
   /** Sends reply lines; `done` closes the request's stream. `open` says whether the request answered was the open one. */
   reply(lines: string[], opts?: { done?: boolean; request?: number }): { request: OpenRequest | undefined; open: boolean };
+  /** Sets the player's volumes (`world_volumes`, B4) in the coordinates of the open probe or linked document; resolves with the result text. */
+  setVolumes(work: PublicBox, context?: ContextArg): Promise<string>;
+}
+
+/** What the scan probe uses of the session (structurally `Session`). */
+export interface ProbeHost {
+  readonly doc?: Document | undefined;
+  adoptTemporary(doc: Document): Promise<Document>;
 }
 
 export interface InGameRequestsOptions extends PromptSettings {
@@ -62,6 +74,12 @@ export interface InGameRequestsOptions extends PromptSettings {
   listening: () => boolean;
   /** Schedules an autosave of the linked document (`Session.touch`). */
   touch?: () => void;
+  /** Opens the scan probe as the session's temporary document (B4). Without it, scan requests arrive without a probe. */
+  host?: ProbeHost;
+  /** The palettes the probe document carries (the instance's book). */
+  palettes?: () => PaletteBook | undefined;
+  /** Whether linking follows a volume change on its own (setting `world.autoLink`; default true), for `world_volumes`' result. */
+  autoLink?: boolean;
   log?: (msg: string) => void;
 }
 
@@ -86,12 +104,14 @@ export class InGameRequests implements InGameReplies {
    */
   readonly modeRule: RequestModeRule;
   private readonly offs: (() => void)[] = [];
+  /** The latest scan probe (B4); open while it is still the session's document. */
+  private probe?: Probe;
 
   constructor(
     private readonly link: WorldLink,
     private readonly opts: InGameRequestsOptions,
   ) {
-    this.stream = new ActivityStream({ subscribe: opts.subscribe, send: (m) => link.bridge.send(m), linked: () => link.state === "linked", activityMs: opts.activityMs, idleMs: opts.idleMs });
+    this.stream = new ActivityStream({ subscribe: opts.subscribe, send: (m) => link.bridge.send(m), linked: () => link.state === "linked" || this.probeOpen() !== undefined, activityMs: opts.activityMs, idleMs: opts.idleMs });
     this.modeRule = new RequestModeRule(
       () => {
         const r = this.stream.current;
@@ -117,6 +137,23 @@ export class InGameRequests implements InGameReplies {
     return this.stream.reply(lines, opts);
   }
 
+  /** The scan probe while it is the session's open document. */
+  probeOpen(): Probe | undefined {
+    const p = this.probe;
+    return p && this.opts.host?.doc === p.doc ? p : undefined;
+  }
+
+  async setVolumes(work: PublicBox, context?: ContextArg): Promise<string> {
+    const p = this.probeOpen();
+    let frame: VolumesFrame | undefined;
+    if (p) frame = { origin: p.origin, dimension: p.dimension, label: "probe" };
+    else if (this.link.state === "linked" && this.link.volumes) frame = { origin: this.link.volumes.origin, dimension: this.link.volumes.dimension, label: "local" };
+    if (!this.link.bridge.connected) throw refusal("world_disconnected", "No game is connected, so there are no volumes to set.");
+    if (!frame)
+      throw refusal("world_no_document", "world_volumes takes coordinates in the scan probe or the linked document, and neither is open. Ask the player to run /autosketch scan, or link with doc_open({world: true}).");
+    return setVolumes(this.link.bridge, frame, work, context, this.opts.autoLink ?? true);
+  }
+
   close(): void {
     for (const off of this.offs.splice(0)) off();
     this.stream.stop();
@@ -130,6 +167,7 @@ export class InGameRequests implements InGameReplies {
     };
     if (!promptAllowed(m.player, this.opts.promptPlayers, this.link.bridge.hello)) return refuse("not_allowed");
     if (!this.link.bridge.modes.includes(m.mode ?? "build")) return refuse("unsupported_mode");
+    if (m.mode === "scan") return this.onScan(m, refuse);
     if (this.link.state !== "linked") await this.link.ensureLinked?.();
     const doc = this.link.doc, volumes = this.link.volumes;
     if (this.link.state !== "linked" || !doc || !volumes) return refuse("no_link");
@@ -146,6 +184,49 @@ export class InGameRequests implements InGameReplies {
     this.link.bridge.send({ type: "prompt.result", id: m.id, delivered: true });
     this.stream.open({ id: m.id, player: m.player, mode: modeOf(m) });
   }
+
+  /**
+   * A scan request (B4): no link needed. The probe is read from the grant and opened as the
+   * session's temporary document before the event is sent; when it can't be, the event says why
+   * and the request is delivered anyway (the agent can still answer).
+   */
+  private async onScan(m: PromptMessage, refuse: (reason: PromptRefusal) => void): Promise<void> {
+    if (!this.opts.listening()) return refuse("no_listener");
+    let note: string;
+    const palettes = this.opts.palettes?.();
+    if (!m.scan) note = "No probe: the mod sent no scan grant (its hello doesn't list the scan feature; update the Autosketch mod).";
+    else if (!this.opts.host) note = "No probe: this server can't open one.";
+    else {
+      try {
+        const probe = await loadProbe(this.link.bridge, { ...m, scan: m.scan }, { dataVersion: this.link.bridge.hello?.game.dataVersion ?? 0, ...(palettes ? { palettes } : {}) });
+        await this.opts.host.adoptTemporary(probe.doc);
+        this.probe = probe;
+        note = probeText(probe) + " " + scanHandles(probe, m);
+      } catch (e) {
+        note = `The probe couldn't be loaded: ${(e as Error).message}`;
+      }
+    }
+    const text = [`In-game scan request from ${m.player.name}: ${JSON.stringify(m.text)}.`, MODE_ALLOWS.scan, note, `Answer the player with world_reply (request ${m.id}); pass done: true when finished.`].join(" ");
+    try {
+      await this.opts.notify(text, { request: String(m.id), player: m.player.name });
+    } catch (e) {
+      this.opts.log?.(`channel notification failed: ${(e as Error).message}`);
+      return refuse("no_listener");
+    }
+    this.link.bridge.send({ type: "prompt.result", id: m.id, delivered: true });
+    this.stream.open({ id: m.id, player: m.player, mode: "scan" });
+  }
+}
+
+/** The scan event's handle line: which of target, focus and the player camera the probe holds. */
+function scanHandles(p: Probe, m: PromptMessage): string {
+  const ctx = m.context, doc = p.doc;
+  const out: string[] = [];
+  if (ctx.target) out.push(doc.selections.has("target") ? `Looking at ${ctx.target.state} (${ctx.target.face} face), saved as "target".` : `Looking at ${ctx.target.state} outside the scanned columns, so not saved.`);
+  else out.push("Not looking at a block within reach.");
+  if (ctx.focus) out.push(doc.selections.has("focus") ? `Focus box ${size(ctx.focus)}, saved as "focus".` : "The focus box reaches outside the scanned columns, so not saved.");
+  out.push(`Standing at ${pt(sub(ctx.position.map(Math.floor) as Vec3, p.origin))} facing ${ctx.facing}; your view is saved as camera "player".`);
+  return out.join(" ");
 }
 
 // -- the event text ------------------------------------------------------------------------------

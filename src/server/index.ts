@@ -30,6 +30,7 @@ import { startObserve, type Observer } from "../observe/index.js";
 import { serveLog } from "../observe/offline.js";
 import { openInBrowser } from "../observe/open.js";
 import { OBSERVE_OPEN } from "../observe/settings.js";
+import type { PaletteBook } from "../palette/pick.js";
 import { scopeLimits } from "../scope/settings.js";
 import { readConfig } from "../core/config.js";
 import { configFromEnv, launchOptions, loadInstanceContext, startupArgNotes } from "./context.js";
@@ -141,6 +142,8 @@ async function main(): Promise<void> {
   // events. Whether the session loaded the server as a channel can't be seen from here, so delivery
   // is optimistic once a client has initialized.
   let inGame: InGameRequests;
+  let book: PaletteBook | undefined;
+  void session.whenInstance().then((c) => (book = c.book));
   try {
     inGame = new InGameRequests(link, {
       ...promptSettings(settings),
@@ -148,6 +151,10 @@ async function main(): Promise<void> {
       notify: (content, meta) => server.server.notification({ method: CHANNEL_METHOD, params: { content, meta } } as never),
       listening: () => server.server.getClientCapabilities() !== undefined,
       touch: () => session.touch(),
+      // The scan probe (13, B4) opens as the session's temporary document, with the instance's palettes.
+      host: session,
+      palettes: () => book,
+      autoLink,
       log,
     });
   } catch (e) {

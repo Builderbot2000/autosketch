@@ -161,7 +161,7 @@ describe("bridge and fake host, protocol 1 (N−1)", () => {
     const { host, bridge, hello } = await pair({ protocol: 1, volumes: { work: WORK } });
     expect(hello.protocol).toBe(1);
     expect(hello.features).toBeUndefined();
-    expect(host.received[0]).toMatchObject({ type: "hello", protocol: 1, modes: ["ask", "plan", "build"] });
+    expect(host.received[0]).toMatchObject({ type: "hello", protocol: 1, modes: ["ask", "scan", "plan", "build"] });
     host.set([1, 64, 1], "minecraft:stone");
     const snap = await bridge.request({ type: "snapshot", dimension: OW, boxes: [{ min: [1, 64, 1], max: [1, 64, 1] }] });
     expect(snap.palette).toEqual(["minecraft:stone"]);
@@ -207,8 +207,8 @@ describe("bridge and fake host, protocol 2", () => {
   it("pairs in protocol 2 and sees every feature the hello lists", async () => {
     const { host, bridge, hello } = await pair({ volumes: { work: WORK } });
     expect(hello).toMatchObject({ protocol: PROTOCOL_VERSION, features: ["modes", "scan", "volumes.set"] });
-    expect(host.received[0]).toMatchObject({ type: "hello", protocol: 2, modes: ["ask", "plan", "build"] });
-    expect(host.mcpModes).toEqual(["ask", "plan", "build"]);
+    expect(host.received[0]).toMatchObject({ type: "hello", protocol: 2, modes: ["ask", "scan", "plan", "build"] });
+    expect(host.mcpModes).toEqual(["ask", "scan", "plan", "build"]);
     for (const f of MOD_FEATURES) expect(bridge.supports(f)).toBe(true);
     bridge.close();
     expect(bridge.supports("scan")).toBe(false); // nothing while disconnected
@@ -278,7 +278,7 @@ describe("bridge and fake host, protocol 2", () => {
 
 describe("the mode gate (13, B6, Compatibility)", () => {
   it("a mode the MCP's hello doesn't list is refused by the mod itself, and nothing is sent", async () => {
-    const { host } = await pair({ volumes: { work: WORK } }); // the bridge lists ask, plan and build: not scan
+    const { host } = await pair({ volumes: { work: WORK } }, { modes: ["ask", "plan", "build"] }); // an MCP that serves no scan
     expect(await host.playerAsk(HOST, "scan here", {}, { mode: "scan" })).toEqual({ type: "prompt.result", id: 1, delivered: false, reason: "unsupported_mode", local: true });
     expect(host.sent.some((m) => m.type === "prompt")).toBe(false);
     void host.playerAsk(HOST, "build it", {}, { mode: "build" });
@@ -301,7 +301,7 @@ describe("the mode gate (13, B6, Compatibility)", () => {
   });
 
   it("the MCP refuses a mode it didn't list even if a mod sends it, so a read-only request never runs as a build", async () => {
-    const { host, bridge } = await pair({ volumes: { work: WORK }, enforceModes: false });
+    const { host, bridge } = await pair({ volumes: { work: WORK }, enforceModes: false }, { modes: ["ask", "plan", "build"] });
     const link = { bridge, state: "unlinked", doc: undefined, volumes: undefined } as unknown as WorldLink;
     const inGame = new InGameRequests(link, { promptPlayers: [], idleMs: 60_000, activityMs: 0, subscribe: () => () => {}, notify: async () => {}, listening: () => true });
     try {

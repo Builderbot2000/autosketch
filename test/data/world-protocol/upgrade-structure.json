@@ -1,0 +1,13 @@
+{
+  "description": "Upgrade a whole structure file (STRUCTURE fix type); it has no DataVersion, so from is 500 as the game assumes",
+  "sender": "mcp",
+  "header": {
+    "type": "upgrade",
+    "id": 62,
+    "from": 500,
+    "kind": "structure"
+  },
+  "body": {
+    "structure": "{DataVersion:500,blocks:[{pos:[0,0,0],state:0}],entities:[],palette:[{Name:\"minecraft:grass\"}],size:[1,1,1]}"
+  }
+}

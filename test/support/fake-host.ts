@@ -1,10 +1,12 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { gzipSync } from "node:zlib";
 import type { Compound } from "prismarine-nbt";
 import type { Vec3 } from "../../src/core/region.js";
+import { renameState } from "../../src/formats/renames.js";
 import { decodeMessage, encodeMessage, ProtocolError, splitFrame } from "../../src/world/protocol/codec.js";
 import { FrameReader } from "../../src/world/protocol/frame.js";
 import { isStateOnly, nbtHash, sectionHashes } from "../../src/world/protocol/hash.js";
@@ -27,6 +29,8 @@ import {
   type PromptResult,
   type RequestMode,
   type ScanGrant,
+  type UpgradeData,
+  type UpgradeRequest,
   type SnapshotRequest,
   type SurfaceLayer,
   type SurfaceRequest,
@@ -48,10 +52,11 @@ import { isCanonicalForm } from "../../src/world/protocol/state.js";
  * snapshots. What it doesn't model: the tick budget (patches apply at once, in order), chunk
  * loading, and side effects of writes.
  *
- * It speaks either protocol version the MCP supports (`protocol`, default the current one). A
- * version-1 host lists no `features`, sends no `mode`, and answers version-2 requests as a
- * version-1 mod would; a version-2 host lists every feature unless `features` says otherwise
- * (*Versions and features*).
+ * It speaks any protocol version (`protocol`, default the current one), listing the features of
+ * that version unless `features` says otherwise (*Versions and features*): a version-1 host lists
+ * none and sends no `mode`, a version-2 host lacks `registry` and `upgrade`, and each answers later
+ * requests as that version's mod would. Its registry report is `registryReport`; its data fixer is
+ * the MCP's own rename table over states (NBT passes through), or `upgrade`.
  */
 
 export interface Volumes {
@@ -73,8 +78,12 @@ export interface FakeHostOptions {
   game?: Partial<ModHello["game"]>;
   /** Protocol version the host speaks (to test mismatches and `N−1`). */
   protocol?: number;
-  /** Features the hello lists; default every `MOD_FEATURES` entry from protocol 2 on, none (omitted) before. */
+  /** Features the hello lists; default those of the host's protocol version (none, omitted, for version 1). */
   features?: string[];
+  /** The registry report (format 1 JSON) the host serves for `registry`; default a small vanilla one. */
+  registryReport?: object;
+  /** The data fixer for `upgrade`; default the rename table over states and structure palettes, NBT unchanged. */
+  upgrade?: (m: UpgradeRequest, to: number) => UpgradeData & { failed?: number };
   /** The mod's `contextCap` (blocks), for `volumes.set`; default 4,194,304. */
   contextCap?: number;
   /** Scan sizing (`13`, B4): default radius, maximum radius, blocks below and above the feet, full-block cap. */
@@ -186,7 +195,13 @@ export class FakeHost {
 
   /** The features the hello lists (undefined: the key is omitted, as a version-1 mod does). */
   get features(): string[] | undefined {
-    return this.opts.features ?? (this.protocol >= 2 ? [...MOD_FEATURES] : undefined);
+    return this.opts.features ?? FEATURES_BY_VERSION[Math.min(this.protocol, PROTOCOL_VERSION)];
+  }
+
+  /** The registry report as the mod writes it: gzip of the JSON, and the hash over the JSON. */
+  get registryFile(): { gzip: Uint8Array; hash: string } {
+    const json = Buffer.from(JSON.stringify(this.opts.registryReport ?? DEFAULT_REPORT), "utf8");
+    return { gzip: new Uint8Array(gzipSync(json)), hash: createHash("sha256").update(json).digest("hex").slice(0, 16) };
   }
 
   has(feature: string): boolean {
@@ -498,6 +513,18 @@ export class FakeHost {
       case "patch":
         await this.beforePatch?.(m);
         return this.applyPatch(m, s);
+      case "registry": {
+        if (!this.has("registry")) return this.send({ type: "error", id: m.id, code: "unknown_type", message: "unknown message type registry" }, s);
+        const { gzip, hash } = this.registryFile;
+        const dataVersion = this.opts.game?.dataVersion ?? 3955;
+        return this.send(m.have === hash ? { type: "registry.result", id: m.id, hash, dataVersion, unchanged: true } : { type: "registry.result", id: m.id, hash, dataVersion, report: gzip }, s);
+      }
+      case "upgrade": {
+        if (!this.has("upgrade")) return this.send({ type: "error", id: m.id, code: "unknown_type", message: "unknown message type upgrade" }, s);
+        const to = this.opts.game?.dataVersion ?? 3955;
+        const data = m.from >= to ? dataOf(m) : (this.opts.upgrade ?? renameUpgrade)(m, to);
+        return this.send({ type: "upgrade.result", id: m.id, to, ...data }, s);
+      }
       case "prompt.result": {
         const resolve = this.prompts.get(m.id);
         this.prompts.delete(m.id);
@@ -680,7 +707,39 @@ function containsBox(outer: WireBox, inner: WireBox): boolean {
 }
 
 const DIMENSIONS = new Set(["minecraft:overworld", "minecraft:the_nether", "minecraft:the_end"]);
-const KNOWN = new Set(["hello", "error", "volumes.extend", "volumes.set", "hashes", "snapshot", "patch", "prompt.result", "notice", "chat"]);
+const KNOWN = new Set(["hello", "error", "volumes.extend", "volumes.set", "hashes", "snapshot", "patch", "registry", "upgrade", "prompt.result", "notice", "chat"]);
+
+/** The features each protocol version's mod lists (*Versions and features*). */
+const FEATURES_BY_VERSION: Record<number, string[] | undefined> = { 1: undefined, 2: ["modes", "scan", "volumes.set"], 3: [...MOD_FEATURES] };
+
+/** A small vanilla registry report (format 1). */
+const DEFAULT_REPORT = {
+  format: 1,
+  minecraft: "1.21.1",
+  dataVersion: 3955,
+  loader: "neoforge",
+  loaderVersion: "21.1.249",
+  blocks: { "minecraft:air": {}, "minecraft:stone": {} },
+  tags: {},
+};
+
+function dataOf(m: UpgradeRequest): UpgradeData {
+  return m.kind === "structure" ? { kind: "structure", structure: m.structure } : { kind: "elements", states: m.states, blockEntities: m.blockEntities, entities: m.entities };
+}
+
+/** The fake data fixer: the MCP's rename table over states (and a structure's palette names), NBT unchanged. */
+function renameUpgrade(m: UpgradeRequest, to: number): UpgradeData {
+  if (m.kind === "elements") return { kind: "elements", states: m.states.map((st) => renameState(st, m.from, to)), blockEntities: m.blockEntities, entities: m.entities };
+  const v = { ...m.structure.value } as Record<string, any>;
+  const palette = v.palette?.value?.value as { Name?: { value: string } }[] | undefined;
+  if (palette)
+    v.palette = {
+      ...v.palette,
+      value: { ...v.palette.value, value: palette.map((e) => (e.Name ? { ...e, Name: { type: "string", value: renameState(e.Name.value, m.from, to) } } : e)) },
+    };
+  v.DataVersion = { type: "int", value: to };
+  return { kind: "structure", structure: { ...m.structure, value: v } };
+}
 
 function sectionBox(s: Vec3): WireBox {
   return { min: [s[0] * 16, s[1] * 16, s[2] * 16], max: [s[0] * 16 + 15, s[1] * 16 + 15, s[2] * 16 + 15] };

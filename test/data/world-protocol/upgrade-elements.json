@@ -1,0 +1,23 @@
+{
+  "description": "Upgrade a 1.20.1 schematic's elements: palette states as the file names them, a sign with its pre-1.20 text layout, an armor stand",
+  "sender": "mcp",
+  "header": {
+    "type": "upgrade",
+    "id": 60,
+    "from": 3465,
+    "kind": "elements"
+  },
+  "body": {
+    "states": [
+      "minecraft:grass",
+      "minecraft:oak_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]",
+      "othermod:gizmo[lit=true]"
+    ],
+    "blockEntities": [
+      "{Color:\"black\",GlowingText:0b,Text1:\"{\\\"text\\\":\\\"North\\\"}\",Text2:\"{\\\"text\\\":\\\"\\\"}\",Text3:\"{\\\"text\\\":\\\"\\\"}\",Text4:\"{\\\"text\\\":\\\"\\\"}\",id:\"minecraft:sign\"}"
+    ],
+    "entities": [
+      "{Invisible:0b,Rotation:[90f,0f],id:\"minecraft:armor_stand\"}"
+    ]
+  }
+}

@@ -1,5 +1,19 @@
 import type { Vec3 } from "../../core/region.js";
-import { decodeAckBody, decodeDirtyBody, decodePatchBody, decodeSnapshotBody, decodeSurfaceBody, encodeAckBody, encodeDirtyBody, encodePatchBody, encodeSnapshotBody, encodeSurfaceBody, type Grid } from "./body.js";
+import {
+  decodeAckBody,
+  decodeDirtyBody,
+  decodePatchBody,
+  decodeSnapshotBody,
+  decodeSurfaceBody,
+  decodeUpgradeBody,
+  encodeAckBody,
+  encodeDirtyBody,
+  encodePatchBody,
+  encodeSnapshotBody,
+  encodeSurfaceBody,
+  encodeUpgradeBody,
+  type Grid,
+} from "./body.js";
 import {
   ERROR_CODES,
   MAX_FRAME,
@@ -112,6 +126,16 @@ function split(m: Message): { header: Record<string, unknown>; body: Uint8Array 
       const e = encodeDirtyBody(m.blocks);
       return { header: { type: m.type, everything: false, ...grid(e.grid), count: m.blocks.length }, body: e.body };
     }
+    case "registry":
+      return { header: { type: m.type, id: m.id, ...(m.have !== undefined ? { have: m.have } : {}) }, body: none };
+    case "registry.result":
+      if ("unchanged" in m) return { header: { type: m.type, id: m.id, hash: m.hash, dataVersion: m.dataVersion, unchanged: true }, body: none };
+      if (!m.report.length) throw new ProtocolError("registry.result: a report that isn't unchanged needs a body");
+      return { header: { type: m.type, id: m.id, hash: m.hash, dataVersion: m.dataVersion }, body: m.report };
+    case "upgrade":
+      return { header: { type: m.type, id: m.id, from: m.from, kind: m.kind }, body: encodeUpgradeBody(m) };
+    case "upgrade.result":
+      return { header: { type: m.type, id: m.id, to: m.to, kind: m.kind, ...(m.failed ? { failed: m.failed } : {}) }, body: encodeUpgradeBody(m) };
     case "prompt":
       return {
         header: { type: m.type, id: m.id, player: player(m.player), text: m.text, context: context(m.context), ...(m.mode ? { mode: m.mode } : {}), ...(m.scan ? { scan: scanGrant(m.scan) } : {}) },
@@ -203,9 +227,9 @@ export function decodeFrame(frame: Uint8Array, sender: Sender): Message {
   return decodeMessage(frame.subarray(4), sender);
 }
 
-const MCP_TYPES = new Set(["hello", "error", "volumes.extend", "volumes.set", "hashes", "snapshot", "patch", "prompt.result", "notice", "chat"]);
-const MOD_TYPES = new Set(["hello", "error", "volumes", "hashes.result", "snapshot.result", "patch.ack", "dirty", "prompt"]);
-const BODY_TYPES = new Set(["snapshot.result", "patch", "patch.ack", "dirty"]);
+const MCP_TYPES = new Set(["hello", "error", "volumes.extend", "volumes.set", "hashes", "snapshot", "patch", "registry", "upgrade", "prompt.result", "notice", "chat"]);
+const MOD_TYPES = new Set(["hello", "error", "volumes", "hashes.result", "snapshot.result", "patch.ack", "dirty", "prompt", "registry.result", "upgrade.result"]);
+const BODY_TYPES = new Set(["snapshot.result", "patch", "patch.ack", "dirty", "registry.result", "upgrade", "upgrade.result"]);
 
 function decode(type: string, v: Fields, body: Uint8Array, sender: Sender): Message {
   if (!(sender === "mcp" ? MCP_TYPES : MOD_TYPES).has(type)) throw new ProtocolError(`unknown message type "${type}" from the ${sender === "mcp" ? "MCP" : "mod"}`);
@@ -302,6 +326,27 @@ function decode(type: string, v: Fields, body: Uint8Array, sender: Sender): Mess
         return { type, everything: true };
       }
       return { type, everything: false, blocks: decodeDirtyBody(body, v.grid(), v.int("count")) };
+    case "registry":
+      return { type, id: v.id("id"), ...(v.has("have") ? { have: v.hash("have") } : {}) };
+    case "registry.result": {
+      const id = v.id("id"), hash = v.hash("hash"), dataVersion = v.int("dataVersion");
+      if (v.has("unchanged")) {
+        if (!v.bool("unchanged")) throw new ProtocolError("unchanged is true or omitted");
+        if (body.length) throw new ProtocolError("an unchanged registry.result carries no body");
+        return { type, id, hash, dataVersion, unchanged: true };
+      }
+      if (!body.length) throw new ProtocolError("registry.result needs the report as its body");
+      return { type, id, hash, dataVersion, report: body };
+    }
+    case "upgrade": {
+      const id = v.id("id"), from = v.int("from"), kind = v.oneOf("kind", ["elements", "structure"]);
+      return { type, id, from, ...decodeUpgradeBody(body, kind) };
+    }
+    case "upgrade.result": {
+      const id = v.id("id"), to = v.int("to"), kind = v.oneOf("kind", ["elements", "structure"]);
+      const failed = v.has("failed") ? v.int("failed") : 0;
+      return { type, id, to, ...(failed ? { failed } : {}), ...decodeUpgradeBody(body, kind) };
+    }
     case "prompt": {
       const c = v.obj("context");
       const facing = c.oneOf("facing", ["north", "south", "west", "east"]);
@@ -439,6 +484,12 @@ class Fields {
       if (typeof s !== "string") throw new ProtocolError(`${this.name(k)}[${i}] must be a string`);
       return s;
     });
+  }
+
+  hash(k: string): string {
+    const v = this.o[k];
+    if (typeof v !== "string" || !/^[0-9a-f]{16}$/.test(v)) this.fail(k, "16 lowercase hex digits");
+    return v;
   }
 
   /** A y coordinate (may be negative). */

@@ -1,0 +1,23 @@
+{
+  "description": "The agent sets the work volume and two context boxes (B4): the default-style seam box and a reference box",
+  "sender": "mcp",
+  "header": {
+    "type": "volumes.set",
+    "id": 30,
+    "dimension": "minecraft:overworld",
+    "work": {
+      "min": [100, 64, -200],
+      "max": [131, 87, -169]
+    },
+    "context": [
+      {
+        "min": [97, 61, -203],
+        "max": [134, 90, -166]
+      },
+      {
+        "min": [300, 60, -40],
+        "max": [340, 110, 0]
+      }
+    ]
+  }
+}

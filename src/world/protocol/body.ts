@@ -1,7 +1,7 @@
 import type { Compound } from "prismarine-nbt";
 import type { Vec3 } from "../../core/region.js";
 import { ByteReader, ByteWriter, bytesToHex, hexToBytes } from "./bytes.js";
-import type { PatchAck, PatchBlock, RejectReason, SnapshotRegion, SnapshotResult, SurfaceLayer, SurfaceResult, WireArea, WireBox, WorldBlock } from "./messages.js";
+import type { PatchAck, PatchBlock, RejectReason, SnapshotRegion, SnapshotResult, SurfaceLayer, SurfaceResult, UpgradeData, WireArea, WireBox, WorldBlock } from "./messages.js";
 import { REJECT_REASONS } from "./messages.js";
 import { readNbt, writeNbt } from "./nbt.js";
 
@@ -457,4 +457,65 @@ export function decodeSurfaceBody(body: Uint8Array, columns: WireArea, withCeili
     }
   done(r, "surface");
   return { palette, surface, ...(ceilings ? { ceilings } : {}) };
+}
+
+// ── upgrade, upgrade.result (protocol 3) ───────────────────────────────────────────────────────
+
+function writeCompounds(w: ByteWriter, list: readonly Compound[]): void {
+  w.varint(list.length);
+  const tmp = new ByteWriter(256);
+  for (const c of list) {
+    tmp.length = 0;
+    writeNbt(tmp, c);
+    w.varint(tmp.length);
+    w.bytes(tmp.finish());
+  }
+}
+
+function readCompound(r: ByteReader, what: string): Compound {
+  const len = r.varint();
+  if (len > r.remaining) throw new Error(`${what}: NBT of ${len} bytes can't fit`);
+  const sub = new ByteReader(r.buf, r.pos, r.pos + len);
+  const c = readNbt(sub);
+  if (sub.remaining) throw new Error(`${what}: NBT length ${len} doesn't match its content`);
+  r.pos += len;
+  return c;
+}
+
+function readCompounds(r: ByteReader, what: string): Compound[] {
+  const n = r.varint();
+  if (n > r.remaining) throw new Error(`${what}: ${n} compounds can't fit`);
+  return Array.from({ length: n }, () => readCompound(r, what));
+}
+
+/**
+ * Upgrade body. Kind `elements`: the states as a string list (in the sender's order, duplicates
+ * allowed), then the block-entity compounds and the entity compounds, each as a varint count and per
+ * compound its varint byte length and NBT. Kind `structure`: the same compound list holding exactly
+ * one compound. The result's body has the same layout, order and counts.
+ */
+export function encodeUpgradeBody(d: UpgradeData): Uint8Array {
+  const w = new ByteWriter(1024);
+  if (d.kind === "structure") writeCompounds(w, [d.structure]);
+  else {
+    writeTable(w, d.states);
+    writeCompounds(w, d.blockEntities);
+    writeCompounds(w, d.entities);
+  }
+  return w.finish();
+}
+
+export function decodeUpgradeBody(body: Uint8Array, kind: UpgradeData["kind"]): UpgradeData {
+  const r = new ByteReader(body);
+  if (kind === "structure") {
+    const list = readCompounds(r, "upgrade structure");
+    if (list.length !== 1) throw new Error(`upgrade structure: ${list.length} compounds, expected 1`);
+    done(r, "upgrade");
+    return { kind, structure: list[0]! };
+  }
+  const states = readTable(r);
+  const blockEntities = readCompounds(r, "upgrade block entities");
+  const entities = readCompounds(r, "upgrade entities");
+  done(r, "upgrade");
+  return { kind, states, blockEntities, entities };
 }

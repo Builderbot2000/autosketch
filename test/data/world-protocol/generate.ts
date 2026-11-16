@@ -1,11 +1,13 @@
 /**
- * Regenerates the golden vectors of the current protocol version (2) in this folder
+ * Regenerates the golden vectors of the current protocol version (3) in this folder
  * (docs/design/13-live-world.md, *Wire format*, *Golden vectors*). Run:
  * `npx tsx test/data/world-protocol/generate.ts`. All content is synthetic. The vectors are frozen:
- * regenerate only for a protocol change, and say so in the commit. The previous version's vectors
- * live in `v1/`, copied unchanged when version 2 was cut; this script never writes there.
+ * regenerate only for a protocol change, and say so in the commit. Earlier versions' vectors live in
+ * `v1/` and `v2/`, each copied unchanged when the next version was cut; this script never writes there.
  */
+import { createHash } from "node:crypto";
 import { writeFileSync, mkdirSync } from "node:fs";
+import { gzipSync } from "node:zlib";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { decodeFrame, encodeMessage } from "../../../src/world/protocol/codec.js";
@@ -49,7 +51,7 @@ mkdirSync(dir, { recursive: true });
 // ── handshake and control ──────────────────────────────────────────────────────────────────────
 vector("hello-mcp", "mcp", "MCP hello: protocol, pairing token, client, volatile-key list (the built-in default plus one plugin entry and one state-only type), and every request mode", {
   type: "hello",
-  protocol: 2,
+  protocol: 3,
   token: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
   client: { name: "autosketch", version: "1.0.0" },
   volatile: { ...DEFAULT_VOLATILE, "create:mechanical_press": ["Speed", "Network/Stress"], "create:belt": "state_only" },
@@ -57,15 +59,15 @@ vector("hello-mcp", "mcp", "MCP hello: protocol, pairing token, client, volatile
 });
 vector("hello-mcp-build-only", "mcp", "MCP hello listing only the build mode: the mod refuses ask, scan and plan requests itself (unsupported_mode)", {
   type: "hello",
-  protocol: 2,
+  protocol: 3,
   token: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
   client: { name: "autosketch", version: "1.1.0" },
   volatile: {},
   modes: ["build"],
 });
-vector("hello-mod-singleplayer", "mod", "Mod hello from the integrated server of a singleplayer world, listing every version-2 feature", {
+vector("hello-mod-singleplayer", "mod", "Mod hello from the integrated server of a singleplayer world, listing every feature up to version 3", {
   type: "hello",
-  protocol: 2,
+  protocol: 3,
   mod: { version: "0.2.0" },
   game: { version: "1.21.1", dataVersion: 3955, loader: "neoforge", loaderVersion: "21.1.249" },
   singleplayer: true,
@@ -74,14 +76,14 @@ vector("hello-mod-singleplayer", "mod", "Mod hello from the integrated server of
 });
 vector("hello-mod-dedicated", "mod", "Mod hello from a dedicated server (no host player), listing only some features", {
   type: "hello",
-  protocol: 2,
+  protocol: 3,
   mod: { version: "0.2.0" },
   game: { version: "1.21.1", dataVersion: 3955, loader: "neoforge", loaderVersion: "21.1.249" },
   singleplayer: false,
   host: null,
-  features: ["modes", "volumes.set"],
+  features: ["modes", "volumes.set", "registry"],
 });
-vector("error-protocol-mismatch", "mod", "The mod refuses a hello with another protocol version and closes (the MCP sent a newer one: the mod tells the player to update the mod)", { type: "error", id: null, code: "protocol_mismatch", message: "mod speaks protocol 2, MCP sent 3", protocol: 2 });
+vector("error-protocol-mismatch", "mod", "The mod refuses a hello with another protocol version and closes (the MCP sent a newer one: the mod tells the player to update the mod)", { type: "error", id: null, code: "protocol_mismatch", message: "mod speaks protocol 3, MCP sent 4", protocol: 3 });
 vector("error-request", "mod", "A request the mod can't serve, answered by id; the connection stays open", { type: "error", id: 12, code: "outside_volumes", message: "box 0,0,0..15,15,15 lies outside the linked volumes" });
 vector("error-internal", "mod", "A valid request the mod failed to serve (its own fault, unlike bad_request); the connection stays open", { type: "error", id: 13, code: "internal", message: "failed to read block entity at 104,66,-195" });
 vector("volumes", "mod", "Work volume and two context boxes: the default (work grown by 3) and a distant reference box", {
@@ -353,6 +355,76 @@ vector("prompt-result-unsupported-mode", "mcp", "Request refused: its mode isn't
 vector("notice", "mcp", "Action-bar text for every player with notices on", { type: "notice", text: "Autosketch: 1,204 placed, 3 skipped", player: null });
 vector("chat-activity", "mcp", "Activity lines following a request, to the requesting player", { type: "chat", request: 1, player: UUID_KEV, kind: "activity", lines: ["fill: 1,204 blocks", "world: 1,204 placed, 3 skipped (hand-edited), 0 rejected"] });
 vector("chat-reply", "mcp", "The agent's reply closing a request", { type: "chat", request: 1, player: UUID_KEV, kind: "reply", lines: ["Balcony added on the south face, 5 wide.", "Tell me if you want railings."] });
+
+// ── registry report and upgrades (protocol 3) ──────────────────────────────────────────────────
+{
+  // A synthetic report in format 1 (`14`, *Version-specific data lives in the mod*): one modded block
+  // with a property its blockstate file wouldn't list (waterlogged), and one tag.
+  const report = {
+    format: 1,
+    minecraft: "1.21.1",
+    dataVersion: 3955,
+    loader: "neoforge",
+    loaderVersion: "21.1.249",
+    blocks: {
+      "examplemod:gear": { properties: { axis: ["x", "y", "z"], waterlogged: ["true", "false"] }, default: { axis: "y", waterlogged: "false" }, blockEntity: true },
+      "minecraft:air": {},
+      "minecraft:stone": {},
+    },
+    tags: { "minecraft:mineable/pickaxe": ["examplemod:gear", "minecraft:stone"] },
+  };
+  const json = Buffer.from(JSON.stringify(report), "utf8");
+  const hash = createHash("sha256").update(json).digest("hex").slice(0, 16);
+  vector("registry", "mcp", "The MCP asks for the registry report, holding none", { type: "registry", id: 50 });
+  vector("registry-have", "mcp", "The MCP asks for the registry report, holding the one with this hash (from the file beside the pointer)", { type: "registry", id: 51, have: hash });
+  vector("registry-result", "mod", "The registry report: the gzip file the mod writes beside its pointer file, as the body; hash over the uncompressed JSON", {
+    type: "registry.result",
+    id: 50,
+    hash,
+    dataVersion: 3955,
+    report: new Uint8Array(gzipSync(json, { level: 9 })),
+  });
+  vector("registry-result-unchanged", "mod", "The MCP already holds this report: no body", { type: "registry.result", id: 51, hash, dataVersion: 3955, unchanged: true });
+}
+vector("upgrade-elements", "mcp", "Upgrade a 1.20.1 schematic's elements: palette states as the file names them, a sign with its pre-1.20 text layout, an armor stand", {
+  type: "upgrade",
+  id: 60,
+  from: 3465,
+  kind: "elements",
+  states: ["minecraft:grass", "minecraft:oak_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]", "othermod:gizmo[lit=true]"],
+  blockEntities: [S('{id:"minecraft:sign",Text1:"{\\"text\\":\\"North\\"}",Text2:"{\\"text\\":\\"\\"}",Text3:"{\\"text\\":\\"\\"}",Text4:"{\\"text\\":\\"\\"}",Color:"black",GlowingText:0b}')],
+  entities: [S('{id:"minecraft:armor_stand",Rotation:[90.0f,0.0f],Invisible:0b}')],
+});
+vector("upgrade-result-elements", "mod", "The upgraded elements, in the request's order: grass became short_grass, the unknown block passed through, the sign gained front_text and back_text", {
+  type: "upgrade.result",
+  id: 60,
+  to: 3955,
+  kind: "elements",
+  states: ["minecraft:short_grass", "minecraft:oak_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]", "othermod:gizmo[lit=true]"],
+  blockEntities: [S('{id:"minecraft:sign",is_waxed:0b,front_text:{has_glowing_text:0b,color:"black",messages:["{\\"text\\":\\"North\\"}","{\\"text\\":\\"\\"}","{\\"text\\":\\"\\"}","{\\"text\\":\\"\\"}"]},back_text:{has_glowing_text:0b,color:"black",messages:["\\"\\"","\\"\\"","\\"\\"","\\"\\""]}}')],
+  entities: [S('{id:"minecraft:armor_stand",Rotation:[90.0f,0.0f],Invisible:0b}')],
+});
+vector("upgrade-result-failed", "mod", "An upgrade where the fixer threw on one element, returned unchanged and counted in failed", {
+  type: "upgrade.result",
+  id: 61,
+  to: 3955,
+  failed: 1,
+  kind: "elements",
+  states: ["minecraft:stone"],
+  blockEntities: [S('{id:"examplemod:broken",Data:[I;1,2,3]}')],
+  entities: [],
+});
+{
+  const structure = S('{DataVersion:500,size:[1,1,1],palette:[{Name:"minecraft:grass"}],blocks:[{pos:[0,0,0],state:0}],entities:[]}');
+  vector("upgrade-structure", "mcp", "Upgrade a whole structure file (STRUCTURE fix type); it has no DataVersion, so from is 500 as the game assumes", { type: "upgrade", id: 62, from: 500, kind: "structure", structure });
+  vector("upgrade-result-structure", "mod", "The upgraded structure, stamped with the running version", {
+    type: "upgrade.result",
+    id: 62,
+    to: 3955,
+    kind: "structure",
+    structure: S('{DataVersion:3955,size:[1,1,1],palette:[{Name:"minecraft:short_grass"}],blocks:[{pos:[0,0,0],state:0}],entities:[]}'),
+  });
+}
 
 // ── hashing ────────────────────────────────────────────────────────────────────────────────────
 /** The starting default list the hash vectors were cut with; pinned so the frozen hash vectors don't follow later growth of `DEFAULT_VOLATILE`. */

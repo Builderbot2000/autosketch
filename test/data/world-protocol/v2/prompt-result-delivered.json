@@ -1,0 +1,9 @@
+{
+  "description": "Request delivered to the agent session",
+  "sender": "mcp",
+  "header": {
+    "type": "prompt.result",
+    "id": 1,
+    "delivered": true
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "description": "Surface snapshot with the ceiling above y 20 (the player is underground)",
+  "sender": "mcp",
+  "header": {
+    "type": "snapshot",
+    "id": 41,
+    "dimension": "minecraft:overworld",
+    "kind": "surface",
+    "columns": {
+      "min": [-2, 30],
+      "max": [1, 32]
+    },
+    "ceiling": 20
+  }
+}

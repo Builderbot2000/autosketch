@@ -53,6 +53,8 @@ export interface InstanceHost {
   launch?: { folder: string; label: string };
   /** Instance discovery (`14`), cached by the host. */
   discover(refresh?: boolean): Promise<{ candidates: Candidate[]; warnings: string[] }>;
+  /** `autosketch ui`: no MCP session here, so nothing loads; a choice is only saved. */
+  standalone?: boolean;
   /** The live world link (`13`), read-only. */
   link?(): { state: string; dimension?: string } | undefined;
 }
@@ -71,6 +73,8 @@ export interface InstanceView {
   link: { state: string; dimension?: string } | null;
   candidates: Candidate[];
   discoveryWarnings: string[];
+  /** `autosketch ui`: no server session; choices are saved for the next server start. */
+  standalone: boolean;
 }
 
 export class InstanceApi {
@@ -98,6 +102,7 @@ export class InstanceApi {
       link: this.host.link?.() ?? null,
       candidates: found.candidates,
       discoveryWarnings: found.warnings,
+      standalone: !!this.host.standalone,
     };
   }
 
@@ -119,12 +124,12 @@ export class InstanceApi {
     // The first choice loads in place; switching away from a loaded instance needs a restart (15).
     const current = this.host.status();
     let loading = false;
-    if (!this.host.hasInstance()) {
+    if (!this.host.hasInstance() && !this.host.standalone) {
       loading = true;
       this.host.load(choice.folder, hints).catch((e: Error) => this.log?.(`setup: loading ${choice.folder} failed: ${e.message}`));
     }
-    const restartNeeded = !loading && !sameFolder(choice.folder, current.folder);
-    return { status: 200, body: { saved: savedOf(written.config), hash: written.hash, name: choice.name, loading, restartNeeded } };
+    const restartNeeded = !loading && !this.host.standalone && !sameFolder(choice.folder, current.folder);
+    return { status: 200, body: { saved: savedOf(written.config), hash: written.hash, name: choice.name, loading, restartNeeded, ...(this.host.standalone ? { standalone: true } : {}) } };
   }
 
   remove(body: unknown): ApiReply {

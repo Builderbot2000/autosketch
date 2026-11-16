@@ -19,6 +19,10 @@
  *   folder) in the viewer; no MCP session. Uses the instance's textures when --instance or
  *   AUTOSKETCH_INSTANCE is set, flat colours otherwise (docs/design/12, Replay).
  *
+ *   autosketch ui [--port <n>] [--no-open]
+ *   the management UI (settings, library, instance; session logs to replay) with no MCP session,
+ *   until interrupted (docs/design/15, U5).
+ *
  *   autosketch instances | setup --instance <id|path> … | config set|unset <key> [value]
  *   command-line setup, see src/cli/index.ts.
  *
@@ -39,6 +43,7 @@ import { SERVER_HIDE_TOOLS } from "./settings.js";
 import { defaultWorkspace, Session } from "./session.js";
 import { makeInstanceHost } from "./instance-host.js";
 import { makeLibraryHost } from "./library-host.js";
+import { uiCommand } from "./ui-command.js";
 import { INSTANCE_TAB_FRAGMENT, makeInstanceSetup, wantsSetupWizard, withFragment } from "./setup.js";
 import { CLI_COMMANDS, runCli } from "../cli/index.js";
 import { bakerFor } from "./tools/shared.js";
@@ -221,7 +226,9 @@ const command = process.argv[2];
 const run =
   command === "observe"
     ? observeCommand(process.argv.slice(3))
-    : command && CLI_COMMANDS.has(command)
+    : command === "ui"
+      ? uiCommand(process.argv.slice(3), log)
+      : command && CLI_COMMANDS.has(command)
       ? runCli(command, process.argv.slice(3)).then((code) => process.exit(code))
       : main();
 run.catch((e: Error) => {

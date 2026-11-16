@@ -81,9 +81,9 @@ export class SettingsApi {
   constructor(
     private readonly settings: Settings,
     readonly path: string,
-    private readonly opts: { log?: (msg: string) => void } = {},
+    private readonly opts: { log?: (msg: string) => void; /** No server runs here (`autosketch ui`): nothing is "restart needed". */ standalone?: boolean } = {},
   ) {
-    for (const r of settings.resolveAll()) this.running.set(r.setting.key, json(r.value));
+    if (!opts.standalone) for (const r of settings.resolveAll()) this.running.set(r.setting.key, json(r.value));
   }
 
   /** Re-reads config.toml and swaps it into `Settings` when its hash changed. */

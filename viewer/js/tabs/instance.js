@@ -30,7 +30,9 @@ export async function mount(el, ctx) {
     render();
     try {
       const r = await ctx.api("instance", { method: "PUT", body: { ...body, hash: view.hash } });
-      message = r.loading
+      message = r.standalone
+        ? { text: `Saved ${r.name} in config.toml. Autosketch uses it from its next start (a running server with no instance picks it up on its next tool call).`, cls: "msg" }
+        : r.loading
         ? { text: `Saved ${r.name} in config.toml. Loading it now; tools start working once it has loaded.`, cls: "msg" }
         : r.restartNeeded
           ? { text: `Saved ${r.name} in config.toml. Another instance is loaded, so restart the MCP server (restart Claude Code, or reconnect the server) to switch.`, cls: "restart" }
@@ -54,6 +56,8 @@ export async function mount(el, ctx) {
   }
 
   function current(c) {
+    if (c.state === "none" && view.standalone)
+      return h("div", { class: "notice" }, view.saved ? `No MCP server runs here (autosketch ui): ${view.saved.folder} is saved and loads when Autosketch starts.` : "No MCP server runs here (autosketch ui): choose an instance and Autosketch uses it from its next start.");
     if (c.state === "none")
       return h("div", { class: "notice" + (c.error ? " bad" : "") }, c.error ? `Loading ${c.folder} failed: ${c.error}` : "No instance is loaded: tools answer not_configured until one is chosen.");
     const rows = [

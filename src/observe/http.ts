@@ -15,6 +15,7 @@ import { BodyTooLarge, newToken, ownOrigin, readBody, refuseWrite, WRITE_METHODS
 import { MAX_OTLP_BYTES, otelSetup, otlpRecords } from "./otel.js";
 import { InstanceApi, type InstanceHost } from "./instance-api.js";
 import { LibraryApi, type LibraryHost } from "./library-api.js";
+import type { SessionLogInfo } from "./logs.js";
 import { SettingsApi, type ApiReply } from "./settings-api.js";
 import type { LogTables } from "./states.js";
 import { encodeVoxels, parseBoxParam } from "./voxels.js";
@@ -39,6 +40,7 @@ import { encodeVoxels, parseBoxParam } from "./voxels.js";
  *   GET    /api/settings, PUT|DELETE /api/settings/<key>   settings-api.ts
  *   GET|PUT|DELETE /api/instance                            instance-api.ts
  *   /api/library/…                                          library-api.ts
+ *   GET /api/logs, POST /api/logs/open                       autosketch ui only (logs.ts)
  *   POST   /v1/logs                Claude Code's OTLP/HTTP JSON log events (13, B3; otel.ts)
  *
  * Every request that changes something goes through `guard.ts` (POST/PUT/DELETE only, the
@@ -101,6 +103,11 @@ export interface ObserveHttpOptions {
   instance?: InstanceHost;
   /** Library roots, thumbnails and the baker for previews: enables the Library tab's endpoints (15). */
   library?: LibraryHost;
+  /**
+   * `autosketch ui` (15, U5): no MCP session. The Observe tab lists the workspace's session logs
+   * (`GET /api/logs`) and opens one in its own viewer (`POST /api/logs/open {id}` answers its URL).
+   */
+  standalone?: { logs(): Promise<SessionLogInfo[]>; open(id: string): Promise<string | undefined> };
 }
 
 interface Client {
@@ -159,7 +166,7 @@ export class ObserveHttp {
   constructor(private readonly opts: ObserveHttpOptions) {
     this.token = opts.token ?? newToken();
     const path = opts.configPath ?? opts.settings?.config?.path;
-    if (opts.settings && path) this.settingsApi = new SettingsApi(opts.settings, path, opts.log ? { log: opts.log } : {});
+    if (opts.settings && path) this.settingsApi = new SettingsApi(opts.settings, path, { ...(opts.log ? { log: opts.log } : {}), ...(opts.standalone ? { standalone: true } : {}) });
     if (opts.instance) this.instanceApi = new InstanceApi(opts.instance, path ?? configPath(), opts.log);
     if (opts.library) this.libraryApi = new LibraryApi(opts.library, path ?? configPath(), this.atlas, opts.log);
   }
@@ -320,6 +327,15 @@ export class ObserveHttp {
       if (method === "DELETE") return reply(res, api.remove(await jsonBody(req)));
       return json(res, 405, { error: "PUT /api/instance {id | path} chooses an instance; DELETE unlinks it" });
     }
+    if (rel === "/logs" || rel === "/logs/open") {
+      const sa = this.opts.standalone;
+      if (!sa) return json(res, 404, { error: "session logs are listed by autosketch ui only" });
+      if (rel === "/logs") return read ? json(res, 200, { logs: await sa.logs() }) : json(res, 405, { error: "GET lists the logs" });
+      if (method !== "POST") return json(res, 405, { error: "POST /api/logs/open {id} opens one" });
+      const id = ((await jsonBody(req)) as { id?: unknown } | undefined)?.id;
+      const opened = typeof id === "string" ? await sa.open(id) : undefined;
+      return opened ? json(res, 200, { url: opened }) : json(res, 404, { error: "no such session log" });
+    }
     if (rel === "/library" || rel.startsWith("/library/")) {
       const api = this.libraryApi;
       if (!api) return json(res, 404, { error: "the library isn't available here" });
@@ -390,6 +406,7 @@ export class ObserveHttp {
       settings: !!this.settingsApi,
       instance: !!this.instanceApi,
       library: !!this.libraryApi,
+      ...(this.opts.standalone ? { standalone: true } : {}),
       // B3 (13): how many Claude Code log records have arrived, and the setup that sends them here.
       // A free port changes with every launch, so the endpoint only stays valid with a pinned `observe.http`.
       ...(this.opts.publish && this.opts.live !== false ? { otel: { records: this.otelRecords, portPinned: this.opts.port !== 0, setup: otelSetup(this.port) } } : {}),

@@ -3,7 +3,7 @@ import { fitUv } from "../../assets/builtin-models/geometry.js";
 import { builtinModel, type CodeModel, type CodeModelPart, type RenderContext, type RenderHook } from "../../assets/builtin-models/index.js";
 import type { PackStack } from "../../assets/pack.js";
 import type { Registry } from "../../assets/registry.js";
-import { FACES, parseBlockstate, rotateFace, selectModels, splitId, type BlockstateDef, type Face, type ModelElement, type ModelRef, type ResolvedModel, ModelResolver } from "../../assets/models.js";
+import { FACES, isRotated, parseBlockstate, rotateFace, selectModels, splitId, type BlockstateDef, type Face, type ModelElement, type ModelRef, type ResolvedModel, ModelResolver } from "../../assets/models.js";
 import { parseState } from "../../core/blockstate.js";
 import type { RGB } from "../../palette/color.js";
 import { Image } from "../../palette/image.js";
@@ -12,7 +12,7 @@ import type { TextureLoader, Tinter } from "../../palette/textures.js";
 /**
  * Bakes block states into textured quads in block space (0..1), the way the game does
  * (docs/design/06-perception.md "Renders"): blockstate → models → elements → faces, with element
- * rotation, blockstate x/y rotation, tints and directional face shading. Cached per state.
+ * rotation (one axis, or several since 1.21.11), blockstate x/y/z rotation, tints and directional face shading. Cached per state.
  */
 
 export interface BakedQuad {
@@ -100,12 +100,13 @@ export class BlockBaker {
     const { id, props } = parseState(state);
     const def = await this.def(id);
     if (!def) return [];
-    return Promise.all(selectModels(def, props).map(async (ref) => ({ elements: (await this.resolver.resolve(ref.model)).elements, x: ref.x, y: ref.y })));
+    return Promise.all(selectModels(def, props).map(async (ref) => ({ elements: (await this.resolver.resolve(ref.model)).elements, x: ref.x, y: ref.y, ...(ref.z ? { z: ref.z } : {}) })));
   }
 
   private async bakeCode(model: CodeModel, out: BakedQuad[], tint: RGB | undefined, fallbackTex: Texture | undefined): Promise<void> {
     for (const part of model.parts) {
       const ref: ModelRef = { model: "", x: part.x ?? 0, y: part.y ?? 0, uvlock: false, weight: 1 };
+      if (part.z) ref.z = part.z;
       for (const el of part.elements) await this.bakeElement(el, ref, out, tint, fallbackTex);
     }
   }
@@ -226,18 +227,18 @@ export class BlockBaker {
     for (const f of FACES) {
       const face = el.faces[f];
       if (!face) continue;
-      const tex = face.texture === "#missing" ? this.placeholderTexture() : ((await this.texture(face.texture)) ?? fallbackTex ?? this.placeholderTexture());
+      let tex = face.texture === "#missing" ? this.placeholderTexture() : ((await this.texture(face.texture)) ?? fallbackTex ?? this.placeholderTexture());
+      if (face.forceTranslucent && !tex.translucent) tex = { ...tex, translucent: true }; // 26.1: drawn in the blended pass
       const faceTint = face.tintindex !== undefined && face.tintindex >= 0 ? tint : face.color ? argbToRgb(face.color) : undefined;
       const uv = fitUv(face, tex.img.width, tex.img.height).uv; // code-drawn faces: match the real texture's aspect
       const q = quadFor(f, el.from, el.to, uv, tex, faceTint, el.shade !== false, face.rotation ?? 0);
-      if (el.rotation?.angle) rotateElement(q.pos, el.rotation);
-      if (ref.x || ref.y) {
-        rotateBlock(q.pos, ref.x, ref.y);
-        if (q.cull) q.cull = rotateFace(q.cull, ref.x, ref.y);
-      }
-      if (face.cullface) q.cull = rotateFace(face.cullface, ref.x, ref.y);
+      if (el.rotation && isRotated(el.rotation)) rotateElement(q.pos, el.rotation);
+      if (ref.x || ref.y || ref.z) rotateBlock(q.pos, ref.x, ref.y, ref.z);
+      // Face names (and so culling) ignore element rotation (1.21.11), but follow the blockstate's.
+      if (face.cullface) q.cull = rotateFace(face.cullface, ref.x, ref.y, ref.z);
       else delete q.cull;
-      q.shade = el.shade === false ? 1 : shadeOf(q.pos);
+      // 26.3 replaced `shade: false` with `shade_direction_override` ("up" is the old no-shading).
+      q.shade = el.shadeDirection ? SHADE[el.shadeDirection] : el.shade === false ? 1 : shadeOf(q.pos);
       out.push(q);
     }
   }
@@ -318,19 +319,30 @@ function quadFor(f: Face, from: V3, to: V3, uv: [number, number, number, number]
   return q;
 }
 
+/**
+ * Element rotation about its origin, any angle (no 22.5° snapping since 1.21.6). The several-axis
+ * form (1.21.11) turns about x, then y, then z, each about the fixed block axes.
+ */
 function rotateElement(pos: Float32Array, r: NonNullable<ModelElement["rotation"]>): void {
-  const a = (r.angle * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
   const o = r.origin.map((v) => v / 16);
-  const scale = r.rescale ? 1 / Math.cos(Math.abs(a)) : 1;
+  const steps: ["x" | "y" | "z", number][] = "angles" in r ? (["x", "y", "z"] as const).map((ax, i) => [ax, r.angles[i]!]) : [[r.axis, r.angle]];
+  // Rescale is defined for one axis (1/cos(angle) across the other two). For the several-axis form
+  // the game's behaviour is undocumented, so it is not applied there.
+  const one = "angles" in r ? undefined : r;
+  const scale = one?.rescale ? 1 / Math.cos(Math.abs((one.angle * Math.PI) / 180)) : 1;
   for (let i = 0; i < 12; i += 3) {
     let x = pos[i]! - o[0]!, y = pos[i + 1]! - o[1]!, z = pos[i + 2]! - o[2]!;
-    if (r.axis === "x") [y, z] = [y * c - z * s, y * s + z * c];
-    else if (r.axis === "y") [x, z] = [x * c + z * s, -x * s + z * c];
-    else [x, y] = [x * c - y * s, x * s + y * c];
-    if (scale !== 1) {
-      if (r.axis !== "x") x *= scale;
-      if (r.axis !== "y") y *= scale;
-      if (r.axis !== "z") z *= scale;
+    for (const [axis, deg] of steps) {
+      if (!deg) continue;
+      const a = (deg * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
+      if (axis === "x") [y, z] = [y * c - z * s, y * s + z * c];
+      else if (axis === "y") [x, z] = [x * c + z * s, -x * s + z * c];
+      else [x, y] = [x * c - y * s, x * s + y * c];
+    }
+    if (one && scale !== 1) {
+      if (one.axis !== "x") x *= scale;
+      if (one.axis !== "y") y *= scale;
+      if (one.axis !== "z") z *= scale;
     }
     pos[i] = x + o[0]!;
     pos[i + 1] = y + o[1]!;
@@ -338,13 +350,14 @@ function rotateElement(pos: Float32Array, r: NonNullable<ModelElement["rotation"
   }
 }
 
-/** Blockstate rotation: x first, then y, in 90° steps about the block centre (matches rotateFace). */
-function rotateBlock(pos: Float32Array, rx = 0, ry = 0): void {
-  const sx = (((rx / 90) % 4) + 4) % 4, sy = (((ry / 90) % 4) + 4) % 4;
+/** Blockstate rotation: x, then y, then z (1.21.11), in 90° steps about the block centre (matches rotateFace). */
+function rotateBlock(pos: Float32Array, rx = 0, ry = 0, rz = 0): void {
+  const sx = (((rx / 90) % 4) + 4) % 4, sy = (((ry / 90) % 4) + 4) % 4, sz = (((rz / 90) % 4) + 4) % 4;
   for (let i = 0; i < 12; i += 3) {
     let x = pos[i]! - 0.5, y = pos[i + 1]! - 0.5, z = pos[i + 2]! - 0.5;
     for (let k = 0; k < sx; k++) [y, z] = [z, -y]; // up → north
     for (let k = 0; k < sy; k++) [x, z] = [-z, x]; // north → east
+    for (let k = 0; k < sz; k++) [x, y] = [y, -x]; // up → east
     pos[i] = x + 0.5;
     pos[i + 1] = y + 0.5;
     pos[i + 2] = z + 0.5;

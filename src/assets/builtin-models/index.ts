@@ -19,6 +19,8 @@ export interface CodeModelPart {
   elements: ModelElement[];
   x?: number;
   y?: number;
+  /** Blockstate z rotation (1.21.11), from a JSON model's variant. */
+  z?: number;
 }
 
 export interface CodeModel {

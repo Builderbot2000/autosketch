@@ -7,19 +7,19 @@ import { parseBool, parseInt0, parseList, parseText, setting, type Settings } fr
  * its `.minecraft` / `minecraft` subfolder when that is where the pairing file is. Set it for a
  * dedicated server, whose folder isn't the client instance.
  */
-export const WORLD_GAME_DIR = setting("world.gameDir", "", "a folder path", parseText);
+export const WORLD_GAME_DIR = setting("world.gameDir", "", "a folder path", parseText, { group: "World", summary: "Game folder holding the companion mod's pairing file; empty uses the instance. Set it for a dedicated server." });
 
 /**
  * Link the world without `doc_open({world: true})`: connect as soon as the game is up, and link
  * the base document whenever the player marks a work volume (13, *Automatic linking*).
  */
-export const WORLD_AUTO_LINK = setting("world.autoLink", true, "true or false", parseBool);
+export const WORLD_AUTO_LINK = setting("world.autoLink", true, "true or false", parseBool, { group: "World", summary: "Link the open document to the game as soon as the game is up and a work volume is marked." });
 
 /**
  * How long a tool call waits, after its body returns, for the acks of the patches it sent, so the
  * `world:` line lands in its own result (13, *Agent → world*). Later acks go to the next result.
  */
-export const WORLD_ACK_WAIT_MS = setting("world.ackWaitMs", 1500, "milliseconds 0..60000", parseInt0(0, 60_000));
+export const WORLD_ACK_WAIT_MS = setting("world.ackWaitMs", 1500, "milliseconds 0..60000", parseInt0(0, 60_000), { group: "World", summary: "How long a tool call waits for the game to confirm its changes, so the result can report them." });
 
 export interface WorldSettings {
   gameDir?: string;
@@ -38,13 +38,13 @@ export function worldSettings(s: Settings): WorldSettings {
  * dedicated server the list starts empty, so every request is refused until players are added.
  * Prefer UUIDs: a name can be reused, or claimed by anyone on an offline-mode server.
  */
-export const WORLD_PROMPT_PLAYERS = setting<string[]>("world.promptPlayers", [], "a comma-separated list of player UUIDs or names", parseList);
+export const WORLD_PROMPT_PLAYERS = setting<string[]>("world.promptPlayers", [], "a comma-separated list of player UUIDs or names", parseList, { group: "World", summary: "Players allowed to send requests from the game (UUIDs or names). The singleplayer host is always allowed." });
 
 /** An in-game request's stream closes after this long with no tool calls (13, "Which requests stream"). */
-export const WORLD_PROMPT_IDLE_MS = setting("world.promptIdleMs", 300_000, "milliseconds 1000..86400000", parseInt0(1000, 86_400_000));
+export const WORLD_PROMPT_IDLE_MS = setting("world.promptIdleMs", 300_000, "milliseconds 1000..86400000", parseInt0(1000, 86_400_000), { group: "World", summary: "An in-game request's updates stop after this long with no tool calls." });
 
 /** At most one activity `chat` message per this interval; calls in between are coalesced into it (13, "Activity"). */
-export const WORLD_ACTIVITY_MS = setting("world.activityMs", 2000, "milliseconds 0..60000", parseInt0(0, 60_000));
+export const WORLD_ACTIVITY_MS = setting("world.activityMs", 2000, "milliseconds 0..60000", parseInt0(0, 60_000), { group: "World", summary: "At most one activity message in the game chat per this interval." });
 
 export interface PromptSettings {
   promptPlayers: string[];

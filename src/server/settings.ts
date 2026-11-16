@@ -6,4 +6,4 @@ import { parseList, setting } from "../core/settings.js";
  * `server.hideTools` leaves the named tools out of the tool list, for the agent evaluation tier's
  * ablations (docs/design/10-testing.md, *Ablations*): `--set server.hideTools=analyze,render`.
  */
-export const SERVER_HIDE_TOOLS = setting<string[]>("server.hideTools", [], "a comma-separated list of tool names", parseList);
+export const SERVER_HIDE_TOOLS = setting<string[]>("server.hideTools", [], "a comma-separated list of tool names", parseList, { group: "Server", summary: "Tools left out of the tool list (for evaluation runs)." });

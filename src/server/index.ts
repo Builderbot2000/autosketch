@@ -68,10 +68,14 @@ async function main(): Promise<void> {
   session.events = observer.sink("base");
   session.eventsFor = (doc) => observer.sink(doc);
   // The live world link (13), wired in here like observe/: tools reach it only through the session.
-  // It connects on doc_open({world: true}); its call hook runs before the auto-sync hook.
+  // It connects on its own once the instance is loaded (world.autoLink), or on doc_open({world: true});
+  // its call hook runs before the auto-sync hook.
   let link: LiveLink;
+  let autoLink: boolean;
   try {
-    link = new LiveLink(session, { ...worldSettings(settings), log });
+    const ws = worldSettings(settings);
+    autoLink = ws.autoLink;
+    link = new LiveLink(session, { ...ws, log });
   } catch (e) {
     log((e as Error).message);
     process.exit(2);
@@ -98,6 +102,7 @@ async function main(): Promise<void> {
     process.exit(2);
   }
   session.inGame = inGame;
+  if (autoLink) void ctx.then((c) => link.autoLink({ instanceDir: c.info.root, plugins: c.plugins, palettes: c.book }), () => {});
   const transport = new StdioServerTransport();
   // Save the open document before exiting, so a closed client never loses the last op.
   let closing = false;

@@ -51,7 +51,7 @@ afterEach(async () => {
 
 const ChannelNote = z.object({ method: z.literal(CHANNEL_METHOD), params: z.object({ content: z.string(), meta: z.record(z.string()) }) });
 
-async function setup(opts: { promptPlayers?: string[]; singleplayer?: boolean; activityMs?: number; idleMs?: number; context?: WireBox[] } = {}) {
+async function setup(opts: { promptPlayers?: string[]; singleplayer?: boolean; activityMs?: number; idleMs?: number; context?: WireBox[]; auto?: boolean } = {}) {
   host = await FakeHost.start({ volumes: { work: WORK, ...(opts.context ? { context: opts.context } : {}) }, ...(opts.singleplayer === false ? { singleplayer: false, host: null } : {}) });
   const session = new Session(tempDir());
   link = new LiveLink(session, { ackWaitMs: 2000, backoff: { minMs: 20, maxMs: 50 } });
@@ -74,6 +74,12 @@ async function setup(opts: { promptPlayers?: string[]; singleplayer?: boolean; a
     touch: () => session.touch(),
   });
   session.inGame = inGame;
+  if (opts.auto) {
+    await session.create({ name: "tower", mcVersion: "1.21.1", palettes: new PaletteBook() });
+    link.autoLink({ instanceDir: host.instanceDir, plugins: [], palettes: new PaletteBook() });
+    await host.waitFor(() => link!.bridge.connected);
+    return { session, client, host, events, server };
+  }
   const opened = await client.callTool({ name: "doc_open", arguments: { world: true } });
   expect(texts(opened)[0]).toContain("Linked to the world");
   return { session, client, host, events, server };
@@ -181,6 +187,17 @@ describe("delivery (W11)", () => {
     expect(await host.playerAsk(HOST, "hi")).toMatchObject({ delivered: false, reason: "no_link" });
     expect(events).toHaveLength(0);
     expect(session.doc?.selections.has("target") ?? false).toBe(false);
+  });
+
+  it("links on the request with automatic linking, even over another open document", async () => {
+    const { host, events, session } = await setup({ auto: true });
+    await link!.settle();
+    expect(session.doc!.meta.name).toBe("tower"); // not replaced without a request
+    expect(await host.playerAsk(HOST, "build a cottage")).toMatchObject({ delivered: true });
+    await host.waitFor(() => events.length === 1);
+    expect(link!.state).toBe("linked");
+    expect(session.doc!.meta.name).toBe("world");
+    expect(events[0]!.content).toContain('Work volume 16×16×16, context +3 (scope "base")');
   });
 
   it("refuses no_listener when no agent session can receive the event", async () => {

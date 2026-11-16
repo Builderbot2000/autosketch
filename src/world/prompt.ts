@@ -14,6 +14,9 @@ import type { PromptSettings } from "./settings.js";
  * 1. **The allowlist** (`world.promptPlayers`, plus the singleplayer host the mod's `hello` names).
  *    It runs before anything else, so a player who isn't allowed learns nothing and nothing reaches
  *    the channel: refused `not_allowed`.
+ * 1b. **The mode gate:** a request in a mode this MCP's hello didn't list is refused
+ *    `unsupported_mode` (the mod should have refused it itself; `13`, *Versions and features*), so a
+ *    read-only mode is never run as a build. A prompt without `mode` is a `build` request.
  * 2. **The link:** no linked document, refused `no_link`.
  * 3. **A listener:** refused `no_listener` when the MCP client is known not to receive channel
  *    events. Claude Code doesn't say whether a session loaded the server as a channel (the client's
@@ -112,6 +115,7 @@ export class InGameRequests implements InGameReplies {
       this.link.bridge.send({ type: "prompt.result", id: m.id, delivered: false, reason });
     };
     if (!promptAllowed(m.player, this.opts.promptPlayers, this.link.bridge.hello)) return refuse("not_allowed");
+    if (!this.link.bridge.modes.includes(m.mode ?? "build")) return refuse("unsupported_mode");
     if (this.link.state !== "linked") await this.link.ensureLinked?.();
     const doc = this.link.doc, volumes = this.link.volumes;
     if (this.link.state !== "linked" || !doc || !volumes) return refuse("no_link");

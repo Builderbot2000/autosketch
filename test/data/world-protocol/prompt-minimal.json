@@ -1,5 +1,5 @@
 {
-  "description": "A request looking at nothing, no focus box",
+  "description": "An ask request looking at nothing, no focus box",
   "sender": "mod",
   "header": {
     "type": "prompt",
@@ -8,7 +8,7 @@
       "name": "Alex",
       "uuid": "7c9e6679-7425-40de-944b-e07fc1f90ae7"
     },
-    "text": "match the tower over there",
+    "text": "what is the tower over there made of?",
     "context": {
       "dimension": "minecraft:overworld",
       "position": [0.5, 70, 0.5],
@@ -16,6 +16,7 @@
       "yaw": -90.5,
       "pitch": -30.75,
       "facing": "east"
-    }
+    },
+    "mode": "ask"
   }
 }

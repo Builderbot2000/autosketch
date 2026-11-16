@@ -1,0 +1,10 @@
+{
+  "description": "volumes.set refused: the context exceeds the mod's contextCap; the connection stays open",
+  "sender": "mod",
+  "header": {
+    "type": "error",
+    "id": 30,
+    "code": "bad_volumes",
+    "message": "the context holds 5000000 blocks, more than the cap of 4194304"
+  }
+}

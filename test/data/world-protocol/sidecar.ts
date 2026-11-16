@@ -1,5 +1,5 @@
 import type { Compound } from "prismarine-nbt";
-import type { Message, PatchAck, PatchBlock, Sender, SnapshotResult, WorldBlock } from "../../../src/world/protocol/messages.js";
+import type { Message, PatchAck, PatchBlock, Sender, SnapshotResult, SurfaceLayer, SurfaceResult, WireArea, WorldBlock } from "../../../src/world/protocol/messages.js";
 import { splitFrame } from "../../../src/world/protocol/codec.js";
 import { parseSnbt, toSnbt } from "../../../src/world/protocol/snbt.js";
 
@@ -54,6 +54,11 @@ export function sidecarOf(description: string, sender: Sender, m: Message, frame
       if (!m.everything) out.body = { palette: palette(m.blocks.map((b) => b.state)), blocks: worldBlocks(m.blocks) };
       break;
     case "snapshot.result":
+      if ("kind" in m) {
+        const layer = (l: SurfaceLayer) => ({ heights: Array.from(l.heights), states: Array.from(l.states) });
+        out.body = { palette: m.palette, surface: layer(m.surface), ...(m.ceilings ? { ceilings: layer(m.ceilings) } : {}) };
+        break;
+      }
       out.body = { palette: m.palette, regions: m.regions.map((r) => ({ states: Array.from(r.states), blockEntities: r.blockEntities.map((b) => ({ pos: b.pos, nbt: toSnbt(b.nbt) })) })) };
       break;
   }
@@ -85,6 +90,23 @@ export function messageOf(s: Sidecar): Message {
       if (h.everything) return { type: "dirty", everything: true };
       return { type: "dirty", everything: false, blocks: (b.blocks as any[]).map((x) => clean({ pos: x.pos, state: x.state, nbt: nbt(x.nbt) })) };
     case "snapshot.result": {
+      if (h.kind === "surface") {
+        const layer = (l: { heights: number[]; states: number[] }): SurfaceLayer => ({ heights: Uint32Array.from(l.heights), states: Uint32Array.from(l.states) });
+        const m: SurfaceResult = {
+          type: "snapshot.result",
+          id: h.id as number,
+          dimension: h.dimension as string,
+          kind: "surface",
+          columns: h.columns as WireArea,
+          minY: h.minY as number,
+          ...(h.ceiling !== undefined ? { ceiling: h.ceiling as number } : {}),
+          missing: h.missing as [number, number][],
+          palette: b.palette,
+          surface: layer(b.surface),
+          ...(b.ceilings ? { ceilings: layer(b.ceilings) } : {}),
+        };
+        return m;
+      }
       const regions = (h.regions as SnapshotResult["regions"][number]["box"][]).map((box, i) => ({
         box,
         states: Uint32Array.from(b.regions[i].states as number[]),

@@ -10,7 +10,9 @@ import { FrameReader } from "../../src/world/protocol/frame.js";
 import { isStateOnly, nbtHash, sectionHashes } from "../../src/world/protocol/hash.js";
 import {
   DIRTY_CAP,
+  helloModes,
   HELLO_TIMEOUT_MS,
+  MOD_FEATURES,
   PROTOCOL_VERSION,
   type ChatMessage,
   type ErrorCode,
@@ -23,8 +25,14 @@ import {
   type PatchMessage,
   type PlayerRef,
   type PromptResult,
+  type RequestMode,
+  type ScanGrant,
   type SnapshotRequest,
+  type SurfaceLayer,
+  type SurfaceRequest,
   type VolatileList,
+  type VolumesSet,
+  type WireArea,
   type WireBox,
   type WorldBlock,
 } from "../../src/world/protocol/messages.js";
@@ -39,6 +47,11 @@ import { isCanonicalForm } from "../../src/world/protocol/state.js";
  * the normalized list, `dirty` notices for tracked changes inside the volumes, section hashes and
  * snapshots. What it doesn't model: the tick budget (patches apply at once, in order), chunk
  * loading, and side effects of writes.
+ *
+ * It speaks either protocol version the MCP supports (`protocol`, default the current one). A
+ * version-1 host lists no `features`, sends no `mode`, and answers version-2 requests as a
+ * version-1 mod would; a version-2 host lists every feature unless `features` says otherwise
+ * (*Versions and features*).
  */
 
 export interface Volumes {
@@ -58,8 +71,18 @@ export interface FakeHostOptions {
   singleplayer?: boolean;
   host?: PlayerRef | null;
   game?: Partial<ModHello["game"]>;
-  /** Protocol version the host speaks (to test mismatches). */
+  /** Protocol version the host speaks (to test mismatches and `N−1`). */
   protocol?: number;
+  /** Features the hello lists; default every `MOD_FEATURES` entry from protocol 2 on, none (omitted) before. */
+  features?: string[];
+  /** The mod's `contextCap` (blocks), for `volumes.set`; default 4,194,304. */
+  contextCap?: number;
+  /** Scan sizing (`13`, B4): default radius, maximum radius, blocks below and above the feet, full-block cap. */
+  scan?: { chunks?: number; chunksMax?: number; below?: number; above?: number; cap?: number };
+  /** Chunks `"cx,cz"` that aren't generated: surface snapshots list them as missing. */
+  missingChunks?: Set<string>;
+  /** False makes the host a misbehaving mod that sends modes the MCP's hello didn't list (to test the MCP-side gate). Default true. */
+  enforceModes?: boolean;
   /** Positions one dirty notice may list (default `DIRTY_CAP`). */
   dirtyCap?: number;
   /** Handshake timeout in ms (default `HELLO_TIMEOUT_MS`). */
@@ -69,6 +92,9 @@ export interface FakeHostOptions {
   /** Whether a block accepts the given NBT (default: any compound with a string `id`). */
   acceptsNbt?: (state: string, nbt: Compound) => boolean;
 }
+
+/** What `playerAsk` resolves with: the MCP's `prompt.result`, or the mod's own refusal (`no_link`, `unsupported_mode`) when nothing was sent. */
+export type AskResult = PromptResult & { local?: true };
 
 export interface PatchLogEntry {
   patch: PatchMessage;
@@ -109,6 +135,10 @@ export class FakeHost {
   readonly sent: ModMessage[] = [];
   readonly chats: ChatMessage[] = [];
   readonly notices: NoticeMessage[] = [];
+  /** The modes the MCP's last hello listed. */
+  mcpModes: readonly RequestMode[] = [];
+  /** The scan grant of the last scan request, while it lasts (*Wire format*, `prompt`, `scan`). */
+  scanGrant: (ScanGrant & { dimension: string }) | null = null;
   /** Called before a patch is applied; may return a promise to hold it (later requests wait, as in the mod). */
   beforePatch?: (patch: PatchMessage) => void | Promise<void>;
   port = 0;
@@ -148,6 +178,24 @@ export class FakeHost {
 
   get dimension(): string | undefined {
     return this.volumes?.dimension;
+  }
+
+  get protocol(): number {
+    return this.opts.protocol ?? PROTOCOL_VERSION;
+  }
+
+  /** The features the hello lists (undefined: the key is omitted, as a version-1 mod does). */
+  get features(): string[] | undefined {
+    return this.opts.features ?? (this.protocol >= 2 ? [...MOD_FEATURES] : undefined);
+  }
+
+  has(feature: string): boolean {
+    return this.features?.includes(feature) ?? false;
+  }
+
+  /** The current volumes, as the host holds them. */
+  get currentVolumes(): { work: WireBox; context: WireBox[]; dimension: string } | null {
+    return this.volumes && { work: this.volumes.work, context: this.volumes.context, dimension: this.volumes.dimension };
   }
 
   // ── world access ───────────────────────────────────────────────────────────────────────────
@@ -207,14 +255,27 @@ export class FakeHost {
     if (this.connected) this.sendVolumes();
   }
 
-  /** A player asks the agent from the game. Resolves with the MCP's `prompt.result` (or `no_link` when nobody is connected). */
-  playerAsk(player: PlayerRef, text: string, context: Partial<GameContext> = {}): Promise<PromptResult> {
+  /**
+   * A player asks the agent from the game. Resolves with the MCP's `prompt.result`, or with the
+   * mod's own refusal when nothing is sent: `no_link` when nobody is connected, `unsupported_mode`
+   * when the MCP's hello didn't list the mode (B6). `mode` (default `build`) and `radius` (scan
+   * only, in chunks) are the subcommand's; a host without the `modes` feature sends no mode.
+   */
+  playerAsk(player: PlayerRef, text: string, context: Partial<GameContext> = {}, opts: { mode?: RequestMode; radius?: number } = {}): Promise<AskResult> {
     const id = ++this.promptId;
-    if (!this.connected) return Promise.resolve({ type: "prompt.result", id, delivered: false, reason: "no_link" });
+    if (!this.connected) return Promise.resolve({ type: "prompt.result", id, delivered: false, reason: "no_link", local: true });
     const ctx: GameContext = { dimension: this.volumes?.dimension ?? "minecraft:overworld", position: [0.5, 64, 0.5], eye: [0.5, 65.62, 0.5], yaw: 0, pitch: 0, facing: "south", ...context };
+    const modes = this.has("modes");
+    const mode = opts.mode ?? "build";
+    if (modes && this.opts.enforceModes !== false && !this.mcpModes.includes(mode)) return Promise.resolve({ type: "prompt.result", id, delivered: false, reason: "unsupported_mode", local: true });
+    let scan: ScanGrant | undefined;
+    if (modes && mode === "scan" && this.has("scan")) {
+      scan = this.grant(ctx, opts.radius);
+      this.scanGrant = { ...scan, dimension: ctx.dimension };
+    }
     return new Promise((resolve) => {
       this.prompts.set(id, resolve);
-      this.send({ type: "prompt", id, player, text, context: ctx });
+      this.send({ type: "prompt", id, player, text, context: ctx, ...(modes ? { mode } : {}), ...(scan ? { scan } : {}) });
     });
   }
 
@@ -308,7 +369,10 @@ export class FakeHost {
     s.on("error", () => {});
     s.on("close", () => {
       clearTimeout(timer);
-      if (this.socket === s) this.socket = undefined;
+      if (this.socket === s) {
+        this.socket = undefined;
+        this.scanGrant = null; // a grant lasts until the connection closes
+      }
     });
     s.on("data", (chunk) => {
       let frames: Uint8Array[];
@@ -328,13 +392,14 @@ export class FakeHost {
           }
           if (m.type !== "hello") return refuse("not_ready", `expected hello, got ${m.type}`);
           this.received.push(m);
-          const mine = this.opts.protocol ?? PROTOCOL_VERSION;
+          const mine = this.protocol;
           if (m.protocol !== mine) return refuse("protocol_mismatch", `mod speaks protocol ${mine}, MCP sent ${m.protocol}`, { protocol: mine });
           const a = Buffer.from(m.token), b = Buffer.from(this.token);
           if (a.length !== b.length || !timingSafeEqual(a, b)) return refuse("bad_token", "wrong pairing token");
           authed = true;
           clearTimeout(timer);
           this.volatile = m.volatile;
+          this.mcpModes = helloModes(m);
           if (this.socket && this.socket !== s) {
             const old = this.socket;
             old.write(encodeMessage({ type: "error", id: null, code: "replaced", message: "a newer connection took over" }));
@@ -350,6 +415,7 @@ export class FakeHost {
             game: { version: "1.21.1", dataVersion: 3955, loader: "neoforge", loaderVersion: "21.1.249", ...this.opts.game },
             singleplayer: this.opts.singleplayer ?? true,
             host: this.opts.host === undefined ? { name: "Dev", uuid: "00000000-0000-4000-8000-000000000001" } : this.opts.host,
+            ...(this.features ? { features: this.features } : {}),
           });
           this.sendVolumes();
           continue;
@@ -377,6 +443,22 @@ export class FakeHost {
     });
   }
 
+  /** The scan grant for a request at `ctx` (B4): chunks within the radius, and the full-block box within the cap. */
+  private grant(ctx: GameContext, radius?: number): ScanGrant {
+    const o = this.opts.scan ?? {};
+    const max = o.chunksMax ?? 12, asked = radius ?? o.chunks ?? 4;
+    const r = Math.min(asked, max);
+    const cx = Math.floor(ctx.position[0]) >> 4, cz = Math.floor(ctx.position[2]) >> 4;
+    const columns: WireArea = { min: [16 * (cx - r), 16 * (cz - r)], max: [16 * (cx + r) + 15, 16 * (cz + r) + 15] };
+    const fy = Math.floor(ctx.position[1]);
+    const y0 = Math.max(BUILD_MIN_Y, fy - (o.below ?? 32)), y1 = Math.min(BUILD_MAX_Y, fy + (o.above ?? 64));
+    const side = Math.min(columns.max[0] - columns.min[0] + 1, Math.floor(Math.sqrt((o.cap ?? 4_194_304) / (y1 - y0 + 1))));
+    const px = Math.floor(ctx.position[0]), pz = Math.floor(ctx.position[2]);
+    const lo = (p: number, a: number, b: number) => Math.min(Math.max(p - (side >> 1), a), b - side + 1);
+    const bx = lo(px, columns.min[0], columns.max[0]), bz = lo(pz, columns.min[1], columns.max[1]);
+    return { radius: r, ...(asked > max ? { clipped: true } : {}), columns, box: { min: [bx, y0, bz], max: [bx + side - 1, y1, bz + side - 1] } };
+  }
+
   private send(m: ModMessage, s = this.socket): void {
     if (!s || s.destroyed) return;
     this.sent.push(m);
@@ -390,13 +472,22 @@ export class FakeHost {
 
   private async handle(m: McpMessage, s: Socket): Promise<void> {
     switch (m.type) {
-      case "hashes":
-      case "snapshot": {
-        const err = this.checkRead(m.dimension, "boxes" in m ? m.boxes : m.sections.map(sectionBox));
+      case "snapshot":
+        if ("kind" in m) {
+          // A version-1 mod reads neither kind nor columns: to it this snapshot has no boxes or sections.
+          if (!this.has("scan")) return this.send({ type: "error", id: m.id, code: "bad_request", message: "snapshot takes exactly one of boxes or sections" }, s);
+          return this.surface(m, s);
+        }
+      // falls through
+      case "hashes": {
+        const err = this.checkRead(m.dimension, "boxes" in m ? m.boxes : m.sections.map(sectionBox), m.type === "snapshot");
         if (err) return this.send({ type: "error", id: m.id, code: err, message: `can't serve ${m.type}: ${err}` }, s);
         if (m.type === "hashes") return this.send({ type: "hashes.result", id: m.id, sections: sectionHashes(m.boxes, (x, y, z) => this.get([x, y, z]), this.volatile) }, s);
         return this.snapshot(m, s);
       }
+      case "volumes.set":
+        if (!this.has("volumes.set")) return this.send({ type: "error", id: m.id, code: "unknown_type", message: "unknown message type volumes.set" }, s);
+        return this.volumesSet(m, s);
       case "volumes.extend": {
         const v = this.volumes;
         if (!v || m.link !== this.link) return this.send({ type: "error", id: m.id, code: "stale_link", message: `extension for link ${m.link}, current link is ${this.link}` }, s);
@@ -426,7 +517,75 @@ export class FakeHost {
     }
   }
 
-  private checkRead(dimension: string, boxes: WireBox[]): ErrorCode | undefined {
+  /** `volumes.set` (*Wire format*): the volumes as if the player had marked them, confirmed by a `volumes` carrying the id. */
+  private volumesSet(m: VolumesSet, s: Socket): void {
+    const refuse = (code: ErrorCode, message: string) => this.send({ type: "error", id: m.id, code, message }, s);
+    if (!DIMENSIONS.has(m.dimension)) return refuse("wrong_dimension", `no dimension ${m.dimension} on this server`);
+    if (m.work.min[1] < BUILD_MIN_Y || m.work.max[1] > BUILD_MAX_Y) return refuse("bad_volumes", "the work volume lies outside the build height");
+    const clip = (b: WireBox): WireBox => ({ min: [b.min[0], Math.max(b.min[1], BUILD_MIN_Y), b.min[2]], max: [b.max[0], Math.min(b.max[1], BUILD_MAX_Y), b.max[2]] });
+    let context = (m.context ?? [grow(m.work, 3)]).map(clip);
+    const seam = clip(grow(m.work, 1));
+    if (!context.some((b) => containsBox(b, seam))) context = [seam, ...context];
+    const total = context.reduce((n, b) => n + (b.max[0] - b.min[0] + 1) * (b.max[1] - b.min[1] + 1) * (b.max[2] - b.min[2] + 1), 0);
+    if (total > (this.opts.contextCap ?? 4_194_304)) return refuse("bad_volumes", `the context holds ${total} blocks, more than the cap of ${this.opts.contextCap ?? 4_194_304}`);
+    const prev = this.volumes;
+    if (!prev || prev.dimension !== m.dimension || !sameBox(prev.work, m.work)) {
+      this.link++;
+      this.extended = null;
+    }
+    this.volumes = { work: m.work, context, dimension: m.dimension };
+    this.send({ type: "volumes", id: m.id, link: this.link, dimension: m.dimension, work: m.work, context, ...(this.extended ? { extended: this.extended } : {}) }, s);
+  }
+
+  /** `snapshot` kind `surface`: per column the topmost non-air block, and the lowest one at or above `ceiling`. */
+  private surface(m: SurfaceRequest, s: Socket): void {
+    const g = this.scanGrant;
+    const a = m.columns;
+    const inGrant = !!g && g.dimension === m.dimension && a.min[0] >= g.columns.min[0] && a.min[1] >= g.columns.min[1] && a.max[0] <= g.columns.max[0] && a.max[1] <= g.columns.max[1];
+    if (!inGrant) {
+      const box: WireBox = { min: [a.min[0], 0, a.min[1]], max: [a.max[0], 0, a.max[1]] };
+      const err = this.checkRead(m.dimension, [box], false);
+      if (err) return this.send({ type: "error", id: m.id, code: err, message: `can't serve a surface snapshot: ${err}` }, s);
+    }
+    const sx = a.max[0] - a.min[0] + 1, sz = a.max[1] - a.min[1] + 1, n = sx * sz;
+    const missing = this.opts.missingChunks ?? new Set<string>();
+    const top = new Map<string, number>(), ceil = new Map<string, number>();
+    for (const [k, c] of this.world) {
+      if (c.state === AIR) continue;
+      const [x, y, z] = k.split(",").map(Number) as [number, number, number];
+      if (x < a.min[0] || x > a.max[0] || z < a.min[1] || z > a.max[1] || y < BUILD_MIN_Y || y > BUILD_MAX_Y) continue;
+      const col = `${x},${z}`;
+      if ((top.get(col) ?? -Infinity) < y) top.set(col, y);
+      if (m.ceiling !== undefined && y >= m.ceiling && (ceil.get(col) ?? Infinity) > y) ceil.set(col, y);
+    }
+    const palette: string[] = [];
+    const index = new Map<string, number>();
+    const layer = (): SurfaceLayer => ({ heights: new Uint32Array(n), states: new Uint32Array(n) });
+    const surface = layer(), ceilings = m.ceiling !== undefined ? layer() : undefined;
+    const put = (l: SurfaceLayer, i: number, x: number, y: number | undefined, z: number) => {
+      if (y === undefined) return;
+      const st = this.get([x, y, z]).state;
+      let p = index.get(st);
+      if (p === undefined) index.set(st, (p = palette.push(st) - 1));
+      l.heights[i] = y - BUILD_MIN_Y + 1;
+      l.states[i] = p;
+    };
+    for (let dz = 0; dz < sz; dz++)
+      for (let dx = 0; dx < sx; dx++) {
+        const x = a.min[0] + dx, z = a.min[1] + dz, i = dx + sx * dz;
+        if (missing.has(`${x >> 4},${z >> 4}`)) continue;
+        put(surface, i, x, top.get(`${x},${z}`), z);
+        if (ceilings) put(ceilings, i, x, ceil.get(`${x},${z}`), z);
+      }
+    const missingList: [number, number][] = [];
+    for (let cz = a.min[1] >> 4; cz <= a.max[1] >> 4; cz++) for (let cx = a.min[0] >> 4; cx <= a.max[0] >> 4; cx++) if (missing.has(`${cx},${cz}`)) missingList.push([cx, cz]);
+    this.send({ type: "snapshot.result", id: m.id, dimension: m.dimension, kind: "surface", columns: a, minY: BUILD_MIN_Y, ...(m.ceiling !== undefined ? { ceiling: m.ceiling } : {}), missing: missingList, palette, surface, ...(ceilings ? { ceilings } : {}) }, s);
+  }
+
+  /** Read checks; a blocks snapshot inside the scan grant's box is served with or without volumes. */
+  private checkRead(dimension: string, boxes: WireBox[], blocks: boolean): ErrorCode | undefined {
+    const g = this.scanGrant;
+    if (blocks && g && g.dimension === dimension && boxes.every((b) => containsBox(g.box, b))) return undefined;
     const v = this.volumes;
     if (!v) return "no_volumes";
     if (dimension !== v.dimension) return "wrong_dimension";
@@ -520,7 +679,8 @@ function containsBox(outer: WireBox, inner: WireBox): boolean {
   return [0, 1, 2].every((i) => outer.min[i]! <= inner.min[i]! && outer.max[i]! >= inner.max[i]!);
 }
 
-const KNOWN = new Set(["hello", "error", "volumes.extend", "hashes", "snapshot", "patch", "prompt.result", "notice", "chat"]);
+const DIMENSIONS = new Set(["minecraft:overworld", "minecraft:the_nether", "minecraft:the_end"]);
+const KNOWN = new Set(["hello", "error", "volumes.extend", "volumes.set", "hashes", "snapshot", "patch", "prompt.result", "notice", "chat"]);
 
 function sectionBox(s: Vec3): WireBox {
   return { min: [s[0] * 16, s[1] * 16, s[2] * 16], max: [s[0] * 16 + 15, s[1] * 16 + 15, s[2] * 16 + 15] };

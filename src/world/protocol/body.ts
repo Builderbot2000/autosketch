@@ -1,7 +1,7 @@
 import type { Compound } from "prismarine-nbt";
 import type { Vec3 } from "../../core/region.js";
 import { ByteReader, ByteWriter, bytesToHex, hexToBytes } from "./bytes.js";
-import type { PatchAck, PatchBlock, RejectReason, SnapshotRegion, SnapshotResult, WireBox, WorldBlock } from "./messages.js";
+import type { PatchAck, PatchBlock, RejectReason, SnapshotRegion, SnapshotResult, SurfaceLayer, SurfaceResult, WireArea, WireBox, WorldBlock } from "./messages.js";
 import { REJECT_REASONS } from "./messages.js";
 import { readNbt, writeNbt } from "./nbt.js";
 
@@ -402,4 +402,59 @@ export function decodeSnapshotBody(body: Uint8Array, boxes: readonly WireBox[]):
   }
   done(r, "snapshot");
   return { palette, regions };
+}
+
+// ── snapshot.result, kind surface ──────────────────────────────────────────────────────────────
+
+/** Number of columns in an area (x fastest, then z). */
+export function areaColumns(a: WireArea): number {
+  const v = (a.max[0] - a.min[0] + 1) * (a.max[1] - a.min[1] + 1);
+  if (!Number.isSafeInteger(v) || v <= 0) throw new Error(`bad area ${JSON.stringify(a)}`);
+  return v;
+}
+
+/**
+ * Surface body: the palette (first-use order over the columns, each column's surface before its
+ * ceiling), then per column in index order a varint height code (0 = none, else y − minY + 1)
+ * followed by the palette index when the code isn't 0; with a ceiling layer, the column's ceiling
+ * value follows its surface value.
+ */
+export function encodeSurfaceBody(m: Pick<SurfaceResult, "columns" | "palette" | "surface" | "ceilings">): Uint8Array {
+  const n = areaColumns(m.columns);
+  const layers = m.ceilings ? [m.surface, m.ceilings] : [m.surface];
+  for (const l of layers) if (l.heights.length !== n || l.states.length !== n) throw new Error(`surface layer holds ${l.heights.length} columns for an area of ${n}`);
+  const table = new Table();
+  const w = new ByteWriter(Math.max(1024, n * 3 * layers.length + 64));
+  const values = new ByteWriter(Math.max(1024, n * 3 * layers.length));
+  for (let i = 0; i < n; i++)
+    for (const l of layers) {
+      const h = l.heights[i]!;
+      values.varint(h);
+      if (h === 0) continue;
+      values.varint(table.of(entry(m.palette, l.states[i]!, "surface state")));
+    }
+  writeTable(w, table.list);
+  w.bytes(values.finish());
+  return w.finish();
+}
+
+export function decodeSurfaceBody(body: Uint8Array, columns: WireArea, withCeiling: boolean): Pick<SurfaceResult, "palette" | "surface" | "ceilings"> {
+  const r = new ByteReader(body);
+  const palette = readTable(r);
+  const n = areaColumns(columns);
+  const layer = (): SurfaceLayer => ({ heights: new Uint32Array(n), states: new Uint32Array(n) });
+  const surface = layer(), ceilings = withCeiling ? layer() : undefined;
+  const layers = ceilings ? [surface, ceilings] : [surface];
+  for (let i = 0; i < n; i++)
+    for (const l of layers) {
+      const h = r.varint();
+      if (h > 0xffffffff) throw new Error(`surface: height code ${h} out of range`);
+      l.heights[i] = h;
+      if (h === 0) continue;
+      const s = r.varint();
+      if (s >= palette.length) throw new Error(`surface: state index ${s} outside the palette of ${palette.length}`);
+      l.states[i] = s;
+    }
+  done(r, "surface");
+  return { palette, surface, ...(ceilings ? { ceilings } : {}) };
 }

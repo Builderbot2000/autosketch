@@ -1,6 +1,6 @@
 # Autosketch companion mod
 
-Server-side mod for Minecraft 1.21.1 on NeoForge (21.1.249, as in Craftoria 1.37.0) that links a running game to a local Autosketch MCP server. Design: `docs/design/13-live-world.md`; build layout and release: `docs/design/14-distribution.md`. It registers no blocks, items or other registry content, so vanilla clients can join a server that runs it. It needs **Cloth Config** (`cloth_config`, 15.x on 1.21.1) wherever it is installed; Craftoria already has it.
+Mod for Minecraft 1.21.1 on NeoForge (21.1.249, as in Craftoria 1.37.0) that links a running game to a local Autosketch MCP server. Design: `docs/design/13-live-world.md`; build layout and release: `docs/design/14-distribution.md`. It registers no blocks, items or other registry content, so vanilla clients can join a server that runs it. It runs on the server (in singleplayer, the game's built-in one); on a client it adds an optional client half (air clicks and the air-point preview, below) that servers and clients without it don't need. It needs **Cloth Config** (`cloth_config`, 15.x on 1.21.1) wherever it is installed; Craftoria already has it.
 
 ## Build and test
 
@@ -55,7 +55,9 @@ One target is active today, Minecraft 1.21.1 on NeoForge (Java 21). A new versio
 | `…world.WorldEvents` | neoforge | O | NeoForge's setup and tick hooks for `WorldModule` |
 | `…prompt` | common | S | `/autosketch ask\|plan\|build` (request modes, B6) and `scan` (B4), the `askAlias` root, focus mode, chat (`PromptModule`) |
 | `…prompt.PromptEvents` | neoforge | S | NeoForge's setup hook for `PromptModule` |
-| `…client` | neoforge | N | the config screen in the mod list (client only) |
+| `…client` | neoforge | N, Y | the config screen in the mod list, and air mode's client half (`AirClient`): left clicks into the air, sneak+scroll distance, the point's outline (client only) |
+| `…volume.AirMode`, `AirCommands` | common | Y | air mode (13, B2): `/autosketch air on\|off\|reach <n>`, right click into the air, the particle preview for clients without the client half |
+| `…volume.AirPayloads` | neoforge | Y | the client half's two optional custom payloads (`autosketch:air_click`, `autosketch:air_state`) |
 | `neoforge/src/gametest` | neoforge | all | GameTests; template `autosketch:empty` is a synthetic 3×3×3 of air |
 
 Silos register from their own package: the registration code is a `setup(AutosketchSetup)` method in common, called from a small NeoForge class that subscribes to `AutosketchSetupEvent` on the mod bus (`WorldEvents`, `PromptEvents`), so nobody edits another silo's files. See the javadoc of `AutosketchSetupEvent`.
@@ -67,6 +69,7 @@ Silos register from their own package: the registration code is a `setup(Autoske
 - **Commands** (op level 2, cheats on in singleplayer): the wand is any blaze rod (config `wandItem` under `[volumes]`), held in the main hand: left click a block sets corner 1, right click corner 2 of the current mode's box, and neither click breaks, opens or uses anything (as with WorldEdit's wooden axe). For players below op level 2 the rod is just a rod; the swap-hands key (F) cycles the mode, or `/autosketch mode work|context|…`. `/autosketch pos1|pos2 [x y z]` does the same at your feet or the given position. `/autosketch context add` adds the box marked in context mode, `context grow <n>` makes the context the work volume grown by `n`, `context clear` goes back to the default (grown by 3). `/autosketch clear` removes the work volume (unlinks). `/autosketch show` toggles outlines when not holding the wand, `/autosketch notices on|off` the action-bar notices, `/autosketch status` shows the link.
 - **From the console or RCON** (no player): `/autosketch mode work|context`, `/autosketch pos1|pos2 <x y z>` and `/autosketch context add` work too, with one shared set of corners in the source's dimension; each `pos1` + `pos2` pair names one box. The end-to-end tests set volumes this way.
 - **Config** (`config/autosketch.toml`, Cloth Config; on a client also from the mod list's config button): `tickBudget = 20000` blocks per tick and `tracker = "both"` (hook plus scan, so Axiom's direct writes are seen too), from measurements on Craftoria (`docs/design/13-live-world.md`, *Measured on Craftoria*). The file is read at game start, again on every server start, and within a second of being saved while a server runs (as NeoForge did); `tracker` is read once at game start, since it decides whether the mixin applies. Out-of-range numbers are clamped and invalid values reset to the default. **Upgrading from a build before Cloth Config:** on the first start, `config/autosketch-common.toml` (the old NeoForge config) is read once, every key and value kept, and renamed to `autosketch-common.toml.bak`.
+- **Air mode** (per player, `/autosketch air on|off`): with the wand, a click into the air sets a corner at a point along your look, `/autosketch air reach <n>` blocks ahead (default 5, at most 64), shown as a white outline. Right click into the air sets corner 2, sneak+right click corner 1; with the mod on your client too, a left click into the air sets corner 1 and sneak+scroll changes the distance.
 - **Volumes are shared**: one work volume per server, whoever marks it. Wand mode and half-marked corners are per player.
 
 ### Game on Windows, MCP in WSL2

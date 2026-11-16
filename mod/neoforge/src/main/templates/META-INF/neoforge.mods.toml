@@ -8,9 +8,10 @@ version="${mod_version}"
 displayName="${mod_name}"
 description='''
 Links a running game to a local Autosketch MCP server: work and context volumes marked in-game,
-conditional patches from the agent, and the player's hand edits reported back. Server-side only.
+conditional patches from the agent, and the player's hand edits reported back. Runs on the server;
+the client half (air clicks, previews) is optional.
 '''
-# Server-side only (M2): clients without the mod may join, and clients with it don't require it on the server.
+# The client half is optional (13, M2, B2): clients without the mod may join, and clients with it join servers without it.
 displayTest="IGNORE_ALL_VERSION"
 
 # Silo O: the change tracker's hook on chunk block writes (M9).

@@ -22,6 +22,9 @@ public final class PlayerStates {
         public @Nullable Boolean notices;
         /** Game time until which the wand's mode line stays off the action bar (a notice is showing). */
         public long actionBarBusyUntil;
+        /** Air mode (B2): clicks into the air set corners at {@code airReach} blocks along the look. */
+        public boolean air;
+        public int airReach = AirMode.DEFAULT_REACH;
     }
 
     /** Two corners in one dimension; setting a corner in another dimension forgets the other. */

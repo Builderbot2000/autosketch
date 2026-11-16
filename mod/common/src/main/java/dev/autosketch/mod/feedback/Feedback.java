@@ -27,7 +27,7 @@ import org.joml.Vector3f;
 public final class Feedback {
     /** How long a notice keeps the wand's mode line off the action bar. */
     private static final int NOTICE_TICKS = 60;
-    private static final int OUTLINE_PERIOD = 10;
+    public static final int OUTLINE_PERIOD = 10;
     private static final int MODE_LINE_PERIOD = 20;
     /** Outline points farther than this from the player aren't sent. */
     private static final double OUTLINE_RANGE = 96;
@@ -109,6 +109,12 @@ public final class Feedback {
             DustParticleOptions dust = new DustParticleOptions(new Vector3f(((rgb >> 16) & 255) / 255f, ((rgb >> 8) & 255) / 255f, (rgb & 255) / 255f), 1.0f);
             for (Box b : m.outline(p)) drawBox(p, dust, b, budget);
         }
+    }
+
+    /** One box's outline in a colour, for this player only (air mode's preview point, B2). */
+    public static void outline(ServerPlayer p, int rgb, Box b) {
+        DustParticleOptions dust = new DustParticleOptions(new Vector3f(((rgb >> 16) & 255) / 255f, ((rgb >> 8) & 255) / 255f, (rgb & 255) / 255f), 1.0f);
+        drawBox(p, dust, b, new int[] {MAX_POINTS});
     }
 
     /** The 12 edges of a box, on block boundaries (max + 1), a point per block or sparser on long edges. */

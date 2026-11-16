@@ -3,7 +3,9 @@ package dev.autosketch.mod.gametest;
 import dev.autosketch.mod.AutosketchMod;
 import dev.autosketch.mod.api.Autosketch;
 import dev.autosketch.mod.api.LinkVolumes;
+import dev.autosketch.mod.platform.Platform;
 import dev.autosketch.mod.protocol.Box;
+import dev.autosketch.mod.volume.AirMode;
 import dev.autosketch.mod.volume.Wand;
 import java.util.List;
 import java.util.UUID;
@@ -182,6 +184,57 @@ public final class VolumeGameTests {
     static net.minecraft.world.InteractionResult useOn(ServerPlayer p, BlockPos pos) {
         var hit = new net.minecraft.world.phys.BlockHitResult(Vec3.atCenterOf(pos), Direction.UP, pos, false);
         return p.gameMode.useItemOn(p, p.level(), p.getMainHandItem(), InteractionHand.MAIN_HAND, hit);
+    }
+
+    /** B2 without the client half: right click into the air sets corner 2, sneak+right click corner 1, at the air distance. */
+    @GameTest(template = "empty", batch = "autosketch_air")
+    public static void airModeSetsCornersWithoutTheClientHalf(GameTestHelper h) {
+        ServerPlayer p = op(h);
+        var air = AutosketchMod.internals().air();
+        p.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.BLAZE_ROD));
+        run(p, "autosketch mode work");
+        BlockPos base = h.absolutePos(new BlockPos(1, 1, 1));
+        p.moveTo(base.getX() + 0.5, base.getY() + 20, base.getZ() + 0.5, 0f, -90f); // high above, looking straight up
+        h.assertFalse(Platform.get().hasClientHalf(p), "a mock player has no client half");
+
+        var off = new PlayerInteractEvent.RightClickItem(p, InteractionHand.MAIN_HAND);
+        NeoForge.EVENT_BUS.post(off);
+        h.assertFalse(off.isCanceled(), "with air mode off, a right click into the air is the item's own");
+        h.assertTrue(Autosketch.link().current() == null, "and sets nothing");
+
+        run(p, "autosketch air on");
+        run(p, "autosketch air reach 7");
+        h.assertTrue(air.on(p) && air.reach(p) == 7, "air on, distance 7");
+        BlockPos c1 = AirMode.point(p, 7);
+        h.assertTrue(c1.equals(BlockPos.containing(p.getEyePosition().add(0, 7, 0))), "the point is 7 blocks along the look: " + c1);
+        p.setShiftKeyDown(true);
+        var first = new PlayerInteractEvent.RightClickItem(p, InteractionHand.MAIN_HAND);
+        NeoForge.EVENT_BUS.post(first);
+        h.assertTrue(first.isCanceled(), "the wand's air click is cancelled");
+        h.assertTrue(Autosketch.link().current() == null, "sneak+right click set corner 1 only");
+        p.setShiftKeyDown(false);
+        p.moveTo(base.getX() + 4.5, base.getY() + 22, base.getZ() + 2.5, 0f, -90f);
+        BlockPos c2 = AirMode.point(p, 7);
+        NeoForge.EVENT_BUS.post(new PlayerInteractEvent.RightClickItem(p, InteractionHand.MAIN_HAND));
+        LinkVolumes v = Autosketch.link().current();
+        h.assertTrue(v != null && v.work().equals(Box.of(c1, c2)), "right click set corner 2: " + v + " expected " + Box.of(c1, c2));
+        long link = v.link();
+
+        // A use that follows a click on a block in reach is the block click's; air mode leaves it alone.
+        BlockPos above = BlockPos.containing(p.getEyePosition().add(0, 2, 0));
+        h.getLevel().setBlockAndUpdate(above, Blocks.STONE.defaultBlockState());
+        var onBlock = new PlayerInteractEvent.RightClickItem(p, InteractionHand.MAIN_HAND);
+        NeoForge.EVENT_BUS.post(onBlock);
+        h.assertTrue(Autosketch.link().current().link() == link, "no air corner while a block is in reach");
+        h.getLevel().setBlockAndUpdate(above, Blocks.AIR.defaultBlockState());
+
+        // The client half's left click arrives as corner 1 with its own distance.
+        air.clientClick(p, 1, 3);
+        v = Autosketch.link().current();
+        h.assertTrue(v.work().equals(Box.of(AirMode.point(p, 3), c2)) && air.reach(p) == 3, "client air click set corner 1 at distance 3: " + v);
+        run(p, "autosketch air off");
+        h.assertFalse(air.on(p), "air off");
+        done(h, p);
     }
 
     @GameTest(template = "empty", batch = "autosketch_extend")

@@ -41,6 +41,31 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
+// The build check that the common module stays loader-free (14, *Build layout*). Compiling against
+// NeoForm already fails on a NeoForge class; this also catches a loader name in any form (an
+// import, a fully qualified name, the tests) and says which file, before anything compiles.
+def commonSources = files(sourceSets.main.java.srcDirs, sourceSets.test.java.srcDirs).asFileTree.matching { include '**/*.java' }
+def checkNoLoaderImports = tasks.register('checkNoLoaderImports') {
+    group = 'verification'
+    description = 'Fails if the common module refers to a mod loader (NeoForge, Forge, Fabric).'
+    inputs.files(commonSources).withPropertyName('sources').withPathSensitivity(PathSensitivity.RELATIVE)
+    def marker = layout.buildDirectory.file('checkNoLoaderImports/ok')
+    outputs.file(marker)
+    doLast {
+        def loader = ~/\bnet\.(neoforged|minecraftforge|fabricmc)\./
+        def offenders = []
+        commonSources.each { f ->
+            f.readLines('UTF-8').eachWithIndex { line, i -> if (line =~ loader) offenders << "${f}:${i + 1}: ${line.trim()}" }
+        }
+        if (offenders) throw new GradleException('The common module must use vanilla types only (14, Build layout). Move these to the loader module:\n' + offenders.join('\n'))
+        def out = marker.get().asFile
+        out.parentFile.mkdirs()
+        out.text = 'ok'
+    }
+}
+tasks.named('compileJava') { dependsOn checkNoLoaderImports }
+tasks.named('check') { dependsOn checkNoLoaderImports }
+
 // The golden vectors shared with the TypeScript side (13, *Golden vectors*): the only files both
 // sides read. Tests find them through this property, so nothing is copied into mod/.
 def goldenDir = rootProject.file('../test/data/world-protocol').absolutePath

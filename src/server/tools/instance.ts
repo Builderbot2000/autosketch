@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { SettingSource } from "../../core/settings.js";
 import { colorName } from "../../palette/color.js";
 import { fail, text, type ToolDeps } from "./shared.js";
 
@@ -15,7 +16,7 @@ export function registerInstanceTools({ tool }: ToolDeps): void {
     (c) => {
       const ns = [...c.registry.namespaces()].sort((a, b) => b[1] - a[1]);
       const lines = [
-        `${c.info.name}: Minecraft ${c.info.mcVersion}${c.info.loader ? ` (${c.info.loader.name} ${c.info.loader.version})` : ""}, ${c.info.launcher} instance`,
+        `${c.info.name}: Minecraft ${c.info.mcVersion}${c.info.loader ? ` (${c.info.loader.name} ${c.info.loader.version})` : ""}, ${c.info.launcher} instance${c.instanceSource ? `, chosen by ${instanceSourceText(c.instanceSource)}` : ""}`,
         `${c.registry.size} blocks from ${ns.length} namespaces; ${c.palette.buildable().length} buildable material families, ${c.palette.series.size} dye series`,
         `largest mods: ${ns.slice(0, 8).map(([n, k]) => `${c.registry.modName(n)} (${k})`).join(", ")}`,
         `plugins active: ${c.plugins.map((p) => p.id).join(", ") || "none"}`,
@@ -24,6 +25,11 @@ export function registerInstanceTools({ tool }: ToolDeps): void {
       return text(lines.join("\n"));
     },
   );
+}
+
+/** How the instance was chosen (`15`, *Instance tab*): `config.toml`, `command line (--instance)`, `environment (AUTOSKETCH_INSTANCE)`. */
+export function instanceSourceText(s: SettingSource): string {
+  return s.kind === "config" ? "config.toml" : s.kind === "env" ? `environment (${s.label})` : `command line (${s.label})`;
 }
 
 /** block_info is registered after the palette tools to keep the established tool order. */

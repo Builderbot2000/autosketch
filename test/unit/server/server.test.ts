@@ -133,14 +133,22 @@ describe("MCP server", () => {
   });
 
   it("reads config from args and env", () => {
-    expect(configFromEnv(["--instance", "/x", "--version", "1.21.1"], {})).toEqual({ instance: "/x", version: "1.21.1" });
-    expect(configFromEnv([], { AUTOSKETCH_INSTANCE: "/y" })).toEqual({ instance: "/y" });
+    const flag = { instanceSource: { kind: "flag", label: "--instance" } };
+    expect(configFromEnv(["--instance", "/x", "--version", "1.21.1"], {})).toEqual({ instance: "/x", version: "1.21.1", ...flag });
+    expect(configFromEnv([], { AUTOSKETCH_INSTANCE: "/y" })).toEqual({ instance: "/y", instanceSource: { kind: "env", label: "AUTOSKETCH_INSTANCE" } });
     expect(configFromEnv([], {})).toBeUndefined();
-    expect(configFromEnv(["--instance", "/x", "--workspace", "/w"], {})).toEqual({ instance: "/x", workspace: "/w" });
+    expect(configFromEnv(["--instance", "/x", "--workspace", "/w"], {})).toEqual({ instance: "/x", workspace: "/w", ...flag });
     // modOrder / tintBiome are settings: the old flags and env vars still work, and --set does too.
-    expect(configFromEnv(["--instance", "/x", "--mod-order", "a, b", "--tint-biome", "jungle"], {})).toEqual({ instance: "/x", modOrder: ["a", "b"], tintBiome: "jungle" });
-    expect(configFromEnv(["--instance", "/x"], { AUTOSKETCH_MOD_ORDER: "c", AUTOSKETCH_TINT_BIOME: "swamp" })).toEqual({ instance: "/x", modOrder: ["c"], tintBiome: "swamp" });
-    expect(configFromEnv(["--instance", "/x", "--set", "tintBiome=desert", "--set=modOrder=d"], { AUTOSKETCH_TINT_BIOME: "swamp" })).toEqual({ instance: "/x", modOrder: ["d"], tintBiome: "desert" });
+    expect(configFromEnv(["--instance", "/x", "--mod-order", "a, b", "--tint-biome", "jungle"], {})).toEqual({ instance: "/x", modOrder: ["a", "b"], tintBiome: "jungle", ...flag });
+    expect(configFromEnv(["--instance", "/x"], { AUTOSKETCH_MOD_ORDER: "c", AUTOSKETCH_TINT_BIOME: "swamp" })).toEqual({ instance: "/x", modOrder: ["c"], tintBiome: "swamp", ...flag });
+    expect(configFromEnv(["--instance", "/x", "--set", "tintBiome=desert", "--set=modOrder=d"], { AUTOSKETCH_TINT_BIOME: "swamp" })).toEqual({ instance: "/x", modOrder: ["d"], tintBiome: "desert", ...flag });
+  });
+
+  it("says in instance_info which source chose the instance", async () => {
+    const ctx = await fixtureContext();
+    expect(textOf(await (await connect(Promise.resolve(ctx))).callTool({ name: "instance_info", arguments: {} }))).toMatch(/^Fixture: Minecraft 1\.21\.1, generic instance\n/);
+    const saved = await connect(Promise.resolve({ ...ctx, instanceSource: { kind: "config", label: "config.toml" } }));
+    expect(textOf(await saved.callTool({ name: "instance_info", arguments: {} }))).toMatch(/^Fixture: Minecraft 1\.21\.1, generic instance, chosen by config\.toml\n/);
   });
 
   it("builds, checks, undoes, checkpoints and reopens a document", async () => {

@@ -130,7 +130,7 @@ The server never sees model tokens. It records response sizes, and the eval runn
 | `scope.minWorkBlocks` | 512 | Smallest work volume a fork may take (`11`) |
 | `scope.maxDepth` | 3 | Deepest fork below the base build (`11`) |
 
-Settings are one server-wide system (`src/core/settings.ts`), not specific to observability. Every setting is read, highest priority first, from `--set <key>=<value>`, then a flag alias if the setting declares one, then `AUTOSKETCH_<KEY>` (key upper-cased, `.` and camel-case humps become `_`), then its default. `15` proposes a `config.toml` layer between the environment and the default, written by the management UI. Each area declares its keys next to the code that uses them. A flag alias exists only to keep a flag that predates the module working; new settings don't add one. The settings outside this doc:
+Settings are one server-wide system (`src/core/settings.ts`), not specific to observability. Every setting is read, highest priority first, from the user's `~/.autosketch/config.toml` `[settings]` table (written by the management UI and `autosketch config`, `15`, *Settings tab*), then `--set <key>=<value>`, then a flag alias if the setting declares one, then `AUTOSKETCH_<KEY>` (key upper-cased, `.` and camel-case humps become `_`), then its default. Each area declares its keys next to the code that uses them. A flag alias exists only to keep a flag that predates the module working; new settings don't add one. The settings outside this doc:
 
 | Setting | Aliases | Declared in | Doc |
 |---|---|---|---|

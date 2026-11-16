@@ -13,6 +13,7 @@ import dev.autosketch.mod.protocol.BodyTypes.Normalized;
 import dev.autosketch.mod.protocol.BodyTypes.PatchBlock;
 import dev.autosketch.mod.protocol.BodyTypes.Rejected;
 import dev.autosketch.mod.protocol.BodyTypes.SnapshotRegion;
+import dev.autosketch.mod.protocol.BodyTypes.SurfaceLayer;
 import dev.autosketch.mod.protocol.BodyTypes.WorldBlock;
 import dev.autosketch.mod.protocol.Messages.Dirty;
 import dev.autosketch.mod.protocol.Messages.HashesRequest;
@@ -24,6 +25,12 @@ import dev.autosketch.mod.protocol.Messages.Patch;
 import dev.autosketch.mod.protocol.Messages.PatchAck;
 import dev.autosketch.mod.protocol.Messages.SnapshotRequest;
 import dev.autosketch.mod.protocol.Messages.SnapshotResult;
+import dev.autosketch.mod.protocol.Messages.ChunkXZ;
+import dev.autosketch.mod.protocol.Messages.Prompt;
+import dev.autosketch.mod.protocol.Messages.PromptResult;
+import dev.autosketch.mod.protocol.Messages.SurfaceRequest;
+import dev.autosketch.mod.protocol.Messages.SurfaceResult;
+import dev.autosketch.mod.protocol.Messages.VolumesSet;
 import dev.autosketch.mod.protocol.Messages.Volumes;
 import dev.autosketch.mod.protocol.Messages.VolumesExtend;
 import java.util.ArrayList;
@@ -44,12 +51,19 @@ class GoldenVectorsTest {
     @Test
     void everyMessageKindHasAVector() {
         List<String> names = Golden.frameNames();
-        assertTrue(names.size() >= 36, "found " + names.size() + " vectors in " + Golden.dir());
+        assertTrue(names.size() >= 48, "found " + names.size() + " vectors in " + Golden.dir());
+        assertTrue(Golden.frameNames("v1/").size() >= 36, "the frozen version-1 vectors");
     }
 
     @TestFactory
     Stream<DynamicTest> vectors() {
         return Golden.frameNames().stream().map(name -> DynamicTest.dynamicTest(name, () -> check(name)));
+    }
+
+    /** The version-1 frames still decode and re-encode unchanged (13, *Versions and features*: every addition is optional). */
+    @TestFactory
+    Stream<DynamicTest> version1Vectors() {
+        return Golden.frameNames("v1/").stream().map(name -> DynamicTest.dynamicTest(name, () -> check(name)));
     }
 
     private static void check(String name) throws Exception {
@@ -63,8 +77,11 @@ class GoldenVectorsTest {
         Object decoded = decodeTyped(frame, sender);
         if (decoded == null) {
             assertFalse(frame.hasBody());
-            return; // prompt, prompt.result, chat: header-only messages of the in-game requests package
+            return; // chat: a header-only message the in-game requests package reads with Json
         }
+        // The mod speaks one version, its own, so its typed hello always says 2: a version-1 mod
+        // hello only has to decode.
+        if (decoded instanceof ModHello && Json.reqInt(frame.header(), "protocol", null) != Messages.PROTOCOL_VERSION) return;
         assertArrayEquals(bin, FrameCodec.encode(encodeTyped(decoded)), "typed message re-encodes byte for byte");
 
         Object built = fromSidecar(frame.type(), sender, side);
@@ -80,8 +97,11 @@ class GoldenVectorsTest {
             case "volumes.extend" -> VolumesExtend.decode(f);
             case "hashes" -> HashesRequest.decode(f);
             case "hashes.result" -> HashesResult.decode(f);
-            case "snapshot" -> SnapshotRequest.decode(f);
-            case "snapshot.result" -> SnapshotResult.decode(f);
+            case "volumes.set" -> VolumesSet.decode(f);
+            case "snapshot" -> Messages.snapshotKind(f).equals("surface") ? SurfaceRequest.decode(f) : SnapshotRequest.decode(f);
+            case "snapshot.result" -> "surface".equals(Json.optString(f.header(), "kind", null)) ? SurfaceResult.decode(f) : SnapshotResult.decode(f);
+            case "prompt" -> Prompt.decode(f);
+            case "prompt.result" -> PromptResult.decode(f);
             case "patch" -> Patch.decode(f);
             case "patch.ack" -> PatchAck.decode(f);
             case "dirty" -> Dirty.decode(f);
@@ -99,8 +119,13 @@ class GoldenVectorsTest {
             case VolumesExtend x -> x.encode();
             case HashesRequest x -> x.encode();
             case HashesResult x -> x.encode();
+            case VolumesSet x -> x.encode();
             case SnapshotRequest x -> x.encode();
+            case SurfaceRequest x -> x.encode();
             case SnapshotResult x -> x.encode();
+            case SurfaceResult x -> x.encode();
+            case Prompt x -> x.encode();
+            case PromptResult x -> x.encode();
             case Patch x -> x.encode();
             case PatchAck x -> x.encode();
             case Dirty x -> x.encode();
@@ -119,7 +144,7 @@ class GoldenVectorsTest {
                     h.has("force"), side.has("generated") ? largePatch() : patchBlocks(body));
             case "patch.ack" -> new PatchAck(h.get("id").getAsLong(), h.get("applied").getAsInt(), h.get("overwritten").getAsInt(), ackLists(body));
             case "dirty" -> h.get("everything").getAsBoolean() ? Dirty.all() : new Dirty(false, worldBlocks(body.getAsJsonArray("blocks")));
-            case "snapshot.result" -> snapshotResult(h, body);
+            case "snapshot.result" -> h.has("kind") ? surfaceResult(h, body) : snapshotResult(h, body);
             // Header-only messages: the typed decoder applied to the sidecar's header.
             default -> decodeTyped(new Frame(h), sender);
         };
@@ -188,7 +213,45 @@ class GoldenVectorsTest {
         return new SnapshotResult(h.get("id").getAsLong(), h.get("dimension").getAsString(), palette, regions);
     }
 
+    private static SurfaceResult surfaceResult(JsonObject h, JsonObject body) throws ProtocolException {
+        List<String> palette = new ArrayList<>();
+        for (JsonElement e : body.getAsJsonArray("palette")) palette.add(e.getAsString());
+        List<ChunkXZ> missing = new ArrayList<>();
+        for (JsonElement e : h.getAsJsonArray("missing")) missing.add(new ChunkXZ(e.getAsJsonArray().get(0).getAsInt(), e.getAsJsonArray().get(1).getAsInt()));
+        Integer ceiling = h.has("ceiling") ? h.get("ceiling").getAsInt() : null;
+        return new SurfaceResult(h.get("id").getAsLong(), h.get("dimension").getAsString(), Area.fromJson(h.get("columns"), "columns", null),
+                h.get("minY").getAsInt(), ceiling, missing, palette, layer(body.getAsJsonObject("surface")),
+                body.has("ceilings") ? layer(body.getAsJsonObject("ceilings")) : null);
+    }
+
+    private static SurfaceLayer layer(JsonObject o) {
+        var hs = o.getAsJsonArray("heights");
+        var ss = o.getAsJsonArray("states");
+        SurfaceLayer l = SurfaceLayer.of(hs.size());
+        for (int i = 0; i < hs.size(); i++) {
+            l.heights()[i] = hs.get(i).getAsInt();
+            l.states()[i] = ss.get(i).getAsInt();
+        }
+        return l;
+    }
+
     private static void assertSameContent(Object expected, Object actual) {
+        if (expected instanceof SurfaceResult e && actual instanceof SurfaceResult a) {
+            assertEquals(e.id(), a.id());
+            assertEquals(e.columns(), a.columns());
+            assertEquals(e.minY(), a.minY());
+            assertEquals(e.ceiling(), a.ceiling());
+            assertEquals(e.missing(), a.missing());
+            assertEquals(e.palette(), a.palette(), "palette in first-use order");
+            assertArrayEquals(e.surface().heights(), a.surface().heights(), "surface heights");
+            assertArrayEquals(e.surface().states(), a.surface().states(), "surface states");
+            assertEquals(e.ceilings() == null, a.ceilings() == null);
+            if (e.ceilings() != null) {
+                assertArrayEquals(e.ceilings().heights(), a.ceilings().heights(), "ceiling heights");
+                assertArrayEquals(e.ceilings().states(), a.ceilings().states(), "ceiling states");
+            }
+            return;
+        }
         if (expected instanceof SnapshotResult e && actual instanceof SnapshotResult a) {
             assertEquals(e.id(), a.id());
             assertEquals(e.dimension(), a.dimension());

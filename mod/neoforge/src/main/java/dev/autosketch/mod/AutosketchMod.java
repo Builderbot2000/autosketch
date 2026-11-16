@@ -3,6 +3,7 @@ package dev.autosketch.mod;
 import dev.autosketch.mod.api.Autosketch;
 import dev.autosketch.mod.api.AutosketchSetupEvent;
 import dev.autosketch.mod.platform.Platform;
+import dev.autosketch.mod.volume.AirPayloads;
 import dev.autosketch.mod.volume.WandEvents;
 import java.nio.file.Path;
 import net.minecraft.nbt.CompoundTag;
@@ -15,6 +16,8 @@ import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.neoforged.fml.loading.FMLPaths;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.neoforge.event.server.ServerStartedEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
@@ -26,9 +29,10 @@ import org.jetbrains.annotations.Nullable;
  * NeoForge entry point of the Autosketch companion mod (13, *Companion mod requirements*): installs
  * the NeoForge {@link Platform}, builds the {@link AutosketchCore} (common) and wires it to NeoForge's
  * events, and posts {@link AutosketchSetupEvent} so each silo registers from its own package.
- * Server-side only (M2): it registers no blocks, items or other registry content, and never touches
- * client classes, so it runs on a dedicated server and in singleplayer, and vanilla clients join
- * without it.
+ * It registers no blocks, items or other registry content (M2), and this class never touches client
+ * classes, so it runs on a dedicated server and in singleplayer, and vanilla clients join without
+ * it. The optional client half (B2: air clicks, the air-point preview) is {@code client.AirClient},
+ * loaded only on a physical client; its messages are registered optional ({@link AirPayloads}).
  */
 @Mod(Autosketch.MOD_ID)
 public final class AutosketchMod {
@@ -46,7 +50,7 @@ public final class AutosketchMod {
         this.modBus = modBus;
         Platform.install(new NeoForgePlatform());
         core = new AutosketchCore(container.getModInfo().getVersion().toString());
-        WandEvents wand = new WandEvents(core.wand());
+        WandEvents wand = new WandEvents(core.wand(), core.air());
 
         modBus.addListener(this::commonSetup);
         NeoForge.EVENT_BUS.addListener((RegisterCommandsEvent e) -> core.registerCommands(e.getDispatcher(), e.getBuildContext()));
@@ -56,6 +60,11 @@ public final class AutosketchMod {
         NeoForge.EVENT_BUS.addListener(wand::leftClick);
         NeoForge.EVENT_BUS.addListener(wand::rightClick);
         NeoForge.EVENT_BUS.addListener(wand::swapHands);
+        NeoForge.EVENT_BUS.addListener(wand::rightClickItem);
+        NeoForge.EVENT_BUS.addListener((PlayerEvent.PlayerLoggedInEvent e) -> {
+            if (e.getEntity() instanceof ServerPlayer p) core.air().sync(p);
+        });
+        modBus.addListener((RegisterPayloadHandlersEvent e) -> AirPayloads.register(e, core.air()));
     }
 
     private void commonSetup(FMLCommonSetupEvent event) {
@@ -86,6 +95,16 @@ public final class AutosketchMod {
         @Override
         public CompoundTag playerData(ServerPlayer player) {
             return player.getPersistentData();
+        }
+
+        @Override
+        public boolean hasClientHalf(ServerPlayer player) {
+            return AirPayloads.hasClientHalf(player);
+        }
+
+        @Override
+        public void sendAirState(ServerPlayer player, boolean on, int reach, String wandItem) {
+            AirPayloads.sendState(player, on, reach, wandItem);
         }
     }
 }

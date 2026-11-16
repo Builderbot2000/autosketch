@@ -69,6 +69,7 @@ public final class ChatRules {
             case "no_link" -> "Autosketch: not delivered: no linked world document (set a work volume and link it from the agent)";
             case "not_allowed" -> "Autosketch: not delivered: you are not on the agent's allowed players (world.promptPlayers)";
             case "no_listener" -> "Autosketch: not delivered: no agent session is listening";
+            case "unsupported_mode" -> "Autosketch: not delivered: the Autosketch MCP server doesn't accept this request mode (update it; /autosketch build still works)";
             default -> "Autosketch: not delivered: " + reason;
         };
     }

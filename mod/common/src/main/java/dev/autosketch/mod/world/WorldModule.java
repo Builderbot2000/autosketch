@@ -32,6 +32,14 @@ public final class WorldModule {
     public record Services(PatchApplier patches, WorldReads reads, ChangeTracker tracker) {}
 
     private static volatile @Nullable Services services;
+    private static volatile @Nullable SurfaceReads surface;
+
+    /** Surface snapshots (B4), for GameTests. */
+    public static SurfaceReads surface() {
+        SurfaceReads s = surface;
+        if (s == null) throw new IllegalStateException("the world module isn't set up yet");
+        return s;
+    }
     private static volatile @Nullable BridgeSession keysSession;
     private static volatile VolatileKeys keys = VolatileKeys.EMPTY;
 
@@ -61,10 +69,21 @@ public final class WorldModule {
                 () -> AutosketchConfig.get().tracking.scanPeriod,
                 frame -> Autosketch.bridge().send(frame));
         services = new Services(patches, reads, tracker);
+        surface = new SurfaceReads(Autosketch.link(), levels, Util.backgroundExecutor());
+        // The scan grant lasts until the next scan request, the connection closing or the server stopping (B4).
+        Autosketch.bridge().addListener(new dev.autosketch.mod.api.Bridge.Listener() {
+            @Override
+            public void disconnected(BridgeSession session) {
+                ScanGrants.clear();
+            }
+        });
 
         e.messages().register("patch", (msg, ex) -> handlePatch(msg, ex));
         e.messages().register("hashes", (msg, ex) -> reads.hashes(Messages.HashesRequest.decode(msg.frame()), ex, keysOf(msg)));
-        e.messages().register("snapshot", (msg, ex) -> reads.snapshot(Messages.SnapshotRequest.decode(msg.frame()), ex));
+        e.messages().register("snapshot", (msg, ex) -> {
+            if (Messages.snapshotKind(msg.frame()).equals("surface")) surface.surface(Messages.SurfaceRequest.decode(msg.frame()), ex);
+            else reads.snapshot(Messages.SnapshotRequest.decode(msg.frame()), ex);
+        });
         e.patchStatus(patches);
     }
 
@@ -74,6 +93,7 @@ public final class WorldModule {
         s.tracker().refresh();
         s.patches().tick();
         s.reads().tick();
+        if (surface != null) surface.tick();
     }
 
     /** End of a server tick. */
@@ -83,6 +103,7 @@ public final class WorldModule {
 
     /** After the server stopped. */
     public static void serverStopped() {
+        ScanGrants.clear();
         services().tracker().refresh();
     }
 

@@ -32,6 +32,17 @@ public interface Platform {
      */
     CompoundTag playerData(ServerPlayer player);
 
+    /**
+     * Whether the player's client runs the mod's optional client half (13, B2), so it draws its own
+     * air-mode preview. False on a loader without one.
+     */
+    default boolean hasClientHalf(ServerPlayer player) {
+        return false;
+    }
+
+    /** Sends the air-mode state to the player's client half, when it has one; nothing otherwise. */
+    default void sendAirState(ServerPlayer player, boolean on, int reach, String wandItem) {}
+
     /** The installed platform. */
     static Platform get() {
         Platform p = Holder.platform;

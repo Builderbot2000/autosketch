@@ -68,6 +68,10 @@ public final class AutosketchConfig implements ConfigData {
     @ConfigEntry.Gui.TransitiveObject
     public Prompts prompts = new Prompts();
 
+    @ConfigEntry.Category("scan")
+    @ConfigEntry.Gui.TransitiveObject
+    public Scan scan = new Scan();
+
     @ConfigEntry.Category("discovery")
     @ConfigEntry.Gui.TransitiveObject
     public Discovery discovery = new Discovery();
@@ -95,6 +99,18 @@ public final class AutosketchConfig implements ConfigData {
     public static final class Volumes {
         @ConfigEntry.Gui.Tooltip
         public long contextCap = 4_194_304L;
+        // Silo Y (B1): the wand is any stack of this item.
+        @ConfigEntry.Gui.Tooltip(count = 2)
+        public String wandItem = DEFAULT_WAND;
+    }
+
+    public static final String DEFAULT_WAND = "minecraft:blaze_rod";
+
+    /** An item id with its namespace ({@code blaze_rod} → {@code minecraft:blaze_rod}), or null when it isn't a valid id. */
+    public static @Nullable String itemId(@Nullable String s) {
+        if (s == null) return null;
+        net.minecraft.resources.ResourceLocation id = net.minecraft.resources.ResourceLocation.tryParse(s.trim());
+        return id == null ? null : id.toString();
     }
 
     public static final class Feedback {
@@ -112,6 +128,20 @@ public final class AutosketchConfig implements ConfigData {
     public static final class Discovery {
         @ConfigEntry.Gui.Tooltip(count = 2)
         public boolean pointer = true;
+    }
+
+    /** {@code /autosketch scan} (13, B4): the grant a scan request gives the MCP to read. */
+    public static final class Scan {
+        @ConfigEntry.Gui.Tooltip
+        public int scanChunks = 4;
+        @ConfigEntry.Gui.Tooltip
+        public int scanChunksMax = 12;
+        @ConfigEntry.Gui.Tooltip
+        public int scanBelow = 32;
+        @ConfigEntry.Gui.Tooltip
+        public int scanAbove = 64;
+        @ConfigEntry.Gui.Tooltip
+        public long scanCap = 4_194_304L;
     }
 
     // ── keys: file layout, comments, ranges ───────────────────────────────────────────────────
@@ -153,11 +183,17 @@ public final class AutosketchConfig implements ConfigData {
                     "1 ~ " + (1L << 40), c -> c.volumes.contextCap, (c, v) -> {
                         if (v instanceof Long l) c.volumes.contextCap = Math.max(1L, Math.min(1L << 40, l));
                     }),
+            new Key("volumes", "wandItem", List.of(
+                    "The wand: any stack of this item, held in the main hand by an op, sets corners (left click corner 1, right click corner 2) and never uses the item or the block.",
+                    "An item id, e.g. \"minecraft:blaze_rod\" (the default)."),
+                    null, c -> c.volumes.wandItem, (c, v) -> {
+                        if (v instanceof String s && itemId(s) != null) c.volumes.wandItem = itemId(s);
+                    }),
             new Key("feedback", "noticesDefault", List.of("Whether action-bar notices are on for a player who hasn't set /autosketch notices."),
                     null, c -> c.feedback.noticesDefault, (c, v) -> {
                         if (v instanceof Boolean b) c.feedback.noticesDefault = b;
                     }),
-            new Key("prompts", "askAlias", List.of("A short top-level alias for /autosketch ask (e.g. \"as\"), or empty for none."),
+            new Key("prompts", "askAlias", List.of("A short top-level root for the request commands (e.g. \"as\" gives /as build <text>, /as ask <text>), or empty for none."),
                     null, c -> c.prompts.askAlias, (c, v) -> {
                         if (v instanceof String s) c.prompts.askAlias = s;
                     }),
@@ -171,7 +207,20 @@ public final class AutosketchConfig implements ConfigData {
                     "so a local Autosketch MCP can find this game (14, *Instance discovery*). Off: no file is written and this game's old one is removed."),
                     null, c -> c.discovery.pointer, (c, v) -> {
                         if (v instanceof Boolean b) c.discovery.pointer = b;
+                    }),
+            intKey("scan", "scanChunks", 0, 32, c -> c.scan.scanChunks, (c, v) -> c.scan.scanChunks = v,
+                    "Default radius of /autosketch scan, in chunks around the player's chunk (4: 9x9 chunks, 144 blocks across)."),
+            intKey("scan", "scanChunksMax", 0, 32, c -> c.scan.scanChunksMax, (c, v) -> c.scan.scanChunksMax = v,
+                    "Largest scan radius in chunks; a larger request is clipped with a warning (12: 25x25 chunks, 400 blocks across)."),
+            intKey("scan", "scanBelow", 0, 4096, c -> c.scan.scanBelow, (c, v) -> c.scan.scanBelow = v,
+                    "How far below the player's feet the full-block part of a scan reaches."),
+            intKey("scan", "scanAbove", 0, 4096, c -> c.scan.scanAbove, (c, v) -> c.scan.scanAbove = v,
+                    "How far above the player's feet the full-block part of a scan reaches."),
+            new Key("scan", "scanCap", List.of("Most blocks the full-block part of a scan may cover; its width shrinks to fit (default: the context cap)."),
+                    "1 ~ " + (1L << 40), c -> c.scan.scanCap, (c, v) -> {
+                        if (v instanceof Long l) c.scan.scanCap = Math.max(1L, Math.min(1L << 40, l));
                     }));
+
 
     static boolean validTracker(String s) {
         return s.equals("hook") || s.equals("scan") || s.equals("both");
@@ -187,6 +236,7 @@ public final class AutosketchConfig implements ConfigData {
         }
         if (tracking.tracker == null || !validTracker(tracking.tracker)) tracking.tracker = defaults.tracking.tracker;
         if (prompts.askAlias == null) prompts.askAlias = defaults.prompts.askAlias;
+        volumes.wandItem = itemId(volumes.wandItem) == null ? defaults.volumes.wandItem : itemId(volumes.wandItem);
     }
 
     /** A config with the values {@code text} sets; keys it lacks or can't read keep their defaults. */

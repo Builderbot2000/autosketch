@@ -12,8 +12,17 @@ import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 public final class WandEvents {
     private final WandControl wand;
 
-    public WandEvents(WandControl wand) {
+    private final AirMode air;
+
+    public WandEvents(WandControl wand, AirMode air) {
         this.wand = wand;
+        this.air = air;
+    }
+
+    /** A use of the item without a block (B2's server-only air path: right click into the air). */
+    public void rightClickItem(PlayerInteractEvent.RightClickItem e) {
+        if (e.getLevel().isClientSide() || !(e.getEntity() instanceof ServerPlayer p)) return;
+        if (air.rightClickAir(p, e.getHand() == InteractionHand.MAIN_HAND)) e.setCanceled(true);
     }
 
     public void leftClick(PlayerInteractEvent.LeftClickBlock e) {

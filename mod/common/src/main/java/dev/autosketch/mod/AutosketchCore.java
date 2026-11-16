@@ -18,6 +18,8 @@ import dev.autosketch.mod.feedback.Feedback;
 import dev.autosketch.mod.platform.Platform;
 import dev.autosketch.mod.protocol.Frame;
 import dev.autosketch.mod.protocol.Messages;
+import dev.autosketch.mod.volume.AirCommands;
+import dev.autosketch.mod.volume.AirMode;
 import dev.autosketch.mod.volume.ChunkTickets;
 import dev.autosketch.mod.volume.LinkVolumesHolder;
 import dev.autosketch.mod.volume.PlayerStates;
@@ -51,13 +53,14 @@ public final class AutosketchCore {
     private final VolumeManager volumes;
     private final Feedback feedback;
     private final WandControl wand;
+    private final AirMode air;
     private List<CommandExtension> commands = List.of();
 
     /** Mod-internal pieces, for GameTests only. Not an API: other silos use {@link Autosketch}. */
-    public record Internals(VolumeManager volumes, ChunkTickets tickets, BridgeServer bridge, PlayerStates players, WandControl wand) {}
+    public record Internals(VolumeManager volumes, ChunkTickets tickets, BridgeServer bridge, PlayerStates players, WandControl wand, AirMode air) {}
 
     public Internals internals() {
-        return new Internals(volumes, tickets, bridge, players, wand);
+        return new Internals(volumes, tickets, bridge, players, wand, air);
     }
 
     /** Builds the pieces and loads the config; the platform must be installed first. */
@@ -69,6 +72,7 @@ public final class AutosketchCore {
         volumes = new VolumeManager(holder, bridge, tickets, () -> AutosketchConfig.get().volumes.contextCap);
         feedback = new Feedback(players, () -> AutosketchConfig.get().feedback.noticesDefault, Autosketch::wandModes, Autosketch::patchStatus);
         wand = new WandControl(players, Autosketch::wandModes, feedback);
+        air = new AirMode(players, wand::mode, feedback);
         Autosketch.install(bridge, holder, PatchStatus.NONE, List.of());
 
         bridge.addListener(new Bridge.Listener() {
@@ -88,6 +92,10 @@ public final class AutosketchCore {
         return wand;
     }
 
+    public AirMode air() {
+        return air;
+    }
+
     /** Runs a task on the current server's thread; dropped when no server is running (no connection can exist then). */
     private static void onServerThread(Runnable task) {
         MinecraftServer server = Platform.get().currentServer();
@@ -105,12 +113,19 @@ public final class AutosketchCore {
         setup.wandModes(new VolumeModes.Work(volumes, players, feedback));
         setup.wandModes(contextMode);
         setup.commands(new VolumeCommands(volumes, players, wand, contextMode, feedback, bridge, Autosketch::wandModes, Autosketch::patchStatus));
+        setup.commands(new AirCommands(air));
         setup.messages().register("volumes.extend", (m, ex) -> {
             Messages.VolumesExtend req = Messages.VolumesExtend.decode(m.frame());
             volumes.extend(req.id(), req.link(), req.work());
             MinecraftServer server = Platform.get().currentServer();
             if (server != null)
                 feedback.notice(server, null, "Autosketch: work volume extended to " + VolumeModes.size(req.work()) + " to include whole blocks");
+        });
+        setup.messages().register("volumes.set", (m, ex) -> {
+            Messages.VolumesSet req = Messages.VolumesSet.decode(m.frame());
+            volumes.setFromAgent(req.id(), req.dimension(), req.work(), req.context());
+            MinecraftServer server = Platform.get().currentServer();
+            if (server != null) feedback.notice(server, null, "Autosketch: the agent set the work volume to " + VolumeModes.size(req.work()));
         });
         setup.messages().register("notice", (m, ex) -> {
             Messages.Notice n = Messages.Notice.decode(m.frame());
@@ -146,6 +161,11 @@ public final class AutosketchCore {
                 public Frame volumes() {
                     return volumes.volumesFrame();
                 }
+
+                @Override
+                public void protocolMismatch(int mcpProtocol) {
+                    feedback.notice(server, null, BridgeServer.mismatchText(mcpProtocol));
+                }
             });
         } catch (IOException e) {
             LOG.error("Autosketch bridge failed to start (port {})", port, e);
@@ -161,6 +181,7 @@ public final class AutosketchCore {
     /** End of a server tick: outlines and notices, and once a second a look at the config file. */
     public void tickEnd(MinecraftServer server) {
         feedback.tick(server);
+        air.tick(server);
         if (server.getTickCount() % 20 == 0) AutosketchConfig.reloadIfChanged();
     }
 
@@ -169,6 +190,9 @@ public final class AutosketchCore {
         Platform platform = Platform.get();
         return new Messages.ModHello(modVersion, SharedConstants.getCurrentVersion().getName(), SharedConstants.getCurrentVersion().getDataVersion().getVersion(),
                 platform.loader(), platform.loaderVersion(), !server.isDedicatedServer(),
-                host == null || host.getId() == null ? null : new Messages.Player(host.getName(), host.getId()));
+                host == null || host.getId() == null ? null : new Messages.Player(host.getName(), host.getId()), FEATURES);
     }
+
+    /** The protocol-2 features this build implements (13, *Versions and features*). */
+    static final List<String> FEATURES = List.of(Messages.FEATURE_MODES, Messages.FEATURE_SCAN, Messages.FEATURE_VOLUMES_SET);
 }

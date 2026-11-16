@@ -27,12 +27,12 @@ import net.minecraft.commands.arguments.coordinates.BlockPosArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.item.ItemStack;
 
 /**
  * Silo N's subcommands (13, *Work and context volumes in-game*, *Player feedback in-game*; M3):
- * {@code wand}, {@code mode}, {@code pos1}, {@code pos2}, {@code show}, {@code clear},
- * {@code status}, {@code notices on|off}, {@code context add|grow <n>|clear}.
+ * {@code mode}, {@code pos1}, {@code pos2}, {@code show}, {@code clear},
+ * {@code status}, {@code notices on|off}, {@code context add|grow <n>|clear}. There is no
+ * {@code wand} command: the wand is any stack of the configured item (B1, {@link Wand}).
  *
  * <p>From a source that isn't a player (the server console, RCON, a command block), {@code mode
  * work|context}, {@code pos1|pos2 <x y z>} and {@code context add} work too, with one shared set of
@@ -67,7 +67,6 @@ public final class VolumeCommands implements CommandExtension {
     @Override
     public void register(Registration r) {
         LiteralArgumentBuilder<CommandSourceStack> root = r.root();
-        root.then(Commands.literal("wand").executes(this::giveWand));
         root.then(Commands.literal("mode").then(Commands.argument("mode", StringArgumentType.word())
                 .suggests((c, b) -> SharedSuggestionProvider.suggest(modes.get().stream().map(WandMode::name), b))
                 .executes(this::mode)));
@@ -97,13 +96,6 @@ public final class VolumeCommands implements CommandExtension {
     private static int refused(CommandContext<CommandSourceStack> c, String text) {
         c.getSource().sendFailure(Component.literal("Autosketch: " + text));
         return 0;
-    }
-
-    private int giveWand(CommandContext<CommandSourceStack> c) throws CommandSyntaxException {
-        ServerPlayer p = c.getSource().getPlayerOrException();
-        ItemStack stack = Wand.create();
-        if (!p.getInventory().add(stack)) p.drop(stack, false);
-        return ok(c, "wand given. Left and right click set corners; the swap-hands key cycles the mode (now " + wand.mode(p).name() + ").");
     }
 
     private int mode(CommandContext<CommandSourceStack> c) throws CommandSyntaxException {
@@ -175,7 +167,7 @@ public final class VolumeCommands implements CommandExtension {
         }
         ServerPlayer p = c.getSource().getPlayerOrException();
         Box b = contextMode.marked(p);
-        if (b == null) return refused(c, "mark a box in context mode first (/autosketch mode context, then left and right click)");
+        if (b == null) return refused(c, "mark a box in context mode first (/autosketch mode context, then left and right click with the wand, " + Wand.itemId() + ")");
         try {
             volumes.contextAdd(p.serverLevel(), b);
         } catch (VolumeManager.Refused e) {

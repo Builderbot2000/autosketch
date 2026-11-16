@@ -4,7 +4,7 @@
  * that has the mod:
  *
  *   1. a wrong token is refused with `bad_token` and the connection closes;
- *   2. protocol 2 is refused with `protocol_mismatch` carrying the mod's version, and closes;
+ *   2. a protocol one above the mod's is refused with `protocol_mismatch` carrying the mod's version, and closes;
  *   3. the right token pairs: the mod's `hello`, then `volumes`;
  *   4. then every `volumes` the mod sends is printed while the player marks volumes in-game
  *      (work volume, `context add`, `context grow`, `context clear`, `clear`). With `--extend`, the
@@ -66,7 +66,7 @@ function open(port: number): Promise<Session> {
   });
 }
 
-function hello(token: string, protocol = 1): Message {
+function hello(token: string, protocol: number): Message {
   return { type: "hello", protocol, token, client: { name: "autosketch-smoke", version: "0.0.0" }, volatile: DEFAULT_VOLATILE } as Message;
 }
 
@@ -85,21 +85,21 @@ console.log(`pairing file: port ${pairing.port}, protocol ${pairing.protocol}`);
 
 {
   const s = await open(pairing.port);
-  s.send(hello("0".repeat(64)));
+  s.send(hello("0".repeat(64), pairing.protocol));
   const m = await s.next();
   check(m !== "closed" && m.type === "error" && m.code === "bad_token", "wrong token refused with bad_token");
   check((await s.next()) === "closed", "and the connection closed");
 }
 {
   const s = await open(pairing.port);
-  s.send(hello(pairing.token, 2));
+  s.send(hello(pairing.token, pairing.protocol + 1));
   const m = await s.next();
-  check(m !== "closed" && m.type === "error" && m.code === "protocol_mismatch" && m.protocol === 1, "protocol 2 refused with protocol_mismatch (mod speaks 1)");
+  check(m !== "closed" && m.type === "error" && m.code === "protocol_mismatch" && m.protocol === pairing.protocol, `protocol ${pairing.protocol + 1} refused with protocol_mismatch (mod speaks ${pairing.protocol})`);
   check((await s.next()) === "closed", "and the connection closed");
 }
 
 const s = await open(pairing.port);
-s.send(hello(pairing.token));
+s.send(hello(pairing.token, pairing.protocol));
 const h = await s.next();
 check(h !== "closed" && h.type === "hello", "paired: the mod's hello");
 if (h !== "closed" && h.type === "hello" && "game" in h) console.log(`     mod ${h.mod.version}, ${h.game.version} (data ${h.game.dataVersion}), ${h.game.loader} ${h.game.loaderVersion}, singleplayer ${h.singleplayer}`);

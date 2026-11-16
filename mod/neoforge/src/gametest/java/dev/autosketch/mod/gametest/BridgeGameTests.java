@@ -42,7 +42,7 @@ public final class BridgeGameTests {
 
         Mcp(int port, String token) throws Exception {
             socket = new Socket("127.0.0.1", port);
-            socket.getOutputStream().write(FrameCodec.encode(new Messages.McpHello(1, token, "gametest", "1.0.0", new JsonObject()).encode()));
+            socket.getOutputStream().write(FrameCodec.encode(new Messages.McpHello(Messages.PROTOCOL_VERSION, token, "gametest", "1.0.0", new JsonObject()).encode()));
             Thread t = new Thread(() -> {
                 try (DataInputStream in = new DataInputStream(socket.getInputStream())) {
                     Frame f;

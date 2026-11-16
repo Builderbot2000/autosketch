@@ -16,6 +16,8 @@ public final class ErrorCodes {
     public static final String REPLACED = "replaced";
     public static final String STALE_LINK = "stale_link";
     public static final String BAD_EXTENSION = "bad_extension";
+    /** Protocol 2: a {@code volumes.set} the player couldn't have marked either. */
+    public static final String BAD_VOLUMES = "bad_volumes";
     /** A failure inside the mod while serving a valid request; the connection stays open. */
     public static final String INTERNAL = "internal";
 

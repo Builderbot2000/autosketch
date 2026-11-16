@@ -3,7 +3,7 @@
  * snapshot and section-hash cost by volume, and change-tracker cost. Not a pass/fail test; prints
  * a JSON report. Needs a running server (test/e2e/world/server.sh) and the env of harness.ts.
  *
- *   npx tsx test/e2e/world/measure.ts throughput|snapshot|tracker [--runs 5]
+ *   npx tsx test/e2e/world/measure.ts throughput|snapshot|tracker|surface [--runs 5]
  */
 import { encodeMessage, type PatchBlock } from "../../../src/world/protocol/index.js";
 import { rcon, setVolumes, startMcp, sleep, type Mcp, type Vec3 } from "./harness.js";
@@ -181,12 +181,67 @@ async function tracker(r: Rcon, m: Mcp): Promise<void> {
   log("mspt_linked_idle", await mspt(r));
 }
 
+/**
+ * Surface snapshots (13, B4) at the default scan radius (4 chunks) and the maximum (12), with and
+ * without a ceiling: wall time, frame size, and the server's tick time while reading. The area is
+ * served inside a flat context box over the whole radius (no player, so no scan grant), whose ticket
+ * keeps the chunks loaded: this measures reading loaded chunks.
+ */
+async function surface(r: Rcon, m: Mcp): Promise<void> {
+  const SX = 6000, SZ = 0;
+  const cx = SX >> 4, cz = SZ >> 4;
+  const area = (rad: number) => ({ min: [16 * (cx - rad), 16 * (cz - rad)] as [number, number], max: [16 * (cx + rad) + 15, 16 * (cz + rad) + 15] as [number, number] });
+  const big = area(12);
+  const work = { min: [SX, -61, SZ] as Vec3, max: [SX + 15, -50, SZ + 15] as Vec3 };
+  await setVolumes(r, work, { min: [big.min[0], -64, big.min[1]], max: [big.max[0], -64, big.max[1]] }, m.link);
+  await m.call("doc_open", { world: true });
+  const dim = m.link.bridge.volumes?.dimension ?? "minecraft:overworld";
+  // Wait for the ticket to load (and, on a first run, generate) every chunk of the area.
+  const t0 = performance.now();
+  for (;;) {
+    const s = await m.link.bridge.request({ type: "snapshot", kind: "surface", dimension: dim, columns: big });
+    if (s.missing.length === 0) break;
+    if (performance.now() - t0 > 300_000) throw new Error(`${s.missing.length} chunks still missing`);
+    await sleep(2000);
+  }
+  log("surface_chunks_ready_ms", Math.round(performance.now() - t0));
+  await sleep(5000);
+  for (const [name, a] of [["r4_144x144", area(4)], ["r12_400x400", big]] as const)
+    for (const ceiling of [undefined, -62]) {
+      const times: number[] = [];
+      let bytes = 0;
+      const idle = await mspt(r);
+      for (let i = 0; i < runs; i++) {
+        const t = performance.now();
+        const s = await m.link.bridge.request({ type: "snapshot", kind: "surface", dimension: dim, columns: a, ...(ceiling !== undefined ? { ceiling } : {}) });
+        times.push(performance.now() - t);
+        if (!bytes) bytes = encodeMessage(s).length;
+      }
+      const columns = (a.max[0] - a.min[0] + 1) * (a.max[1] - a.min[1] + 1);
+      log(`surface_${name}${ceiling !== undefined ? "_ceiling" : ""}`, { columns, ms_median: Math.round(median(times)), ms_max: Math.round(Math.max(...times)), frame_bytes: bytes, mspt_idle: idle, mspt_last100_after: await mspt(r) });
+    }
+  // Cold: release the ticket, let the chunks unload, then ask again right as the volumes come back
+  // (the new ticket loads chunks over the next ticks; the read loads from disk whatever isn't loaded yet).
+  // Unlinked by the clear, the harness's link doesn't relink, so nothing else reads the area first.
+  for (let i = 0; i < 2; i++) {
+    await r.command("autosketch clear");
+    await sleep(60_000);
+    const before = await mspt(r);
+    await setVolumes(r, work, { min: [big.min[0], -64, big.min[1]], max: [big.max[0], -64, big.max[1]] });
+    const t = performance.now();
+    const s = await m.link.bridge.request({ type: "snapshot", kind: "surface", dimension: dim, columns: big });
+    log(`surface_r12_cold_${i}`, { ms: Math.round(performance.now() - t), missing: s.missing.length, mspt_before: before, mspt_last100_after: await mspt(r) });
+  }
+  await r.command("autosketch clear");
+}
+
 const r = await rcon();
 const m = await startMcp({ ackWaitMs: 0 });
 try {
   if (what === "throughput") await throughput(r, m);
   else if (what === "snapshot") await snapshot(r, m);
   else if (what === "tracker") await tracker(r, m);
+  else if (what === "surface") await surface(r, m);
   process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
 } catch (e) {
   process.stderr.write(`failed: ${(e as Error).stack}\n${JSON.stringify(out)}\n`);

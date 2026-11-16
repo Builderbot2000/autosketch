@@ -135,6 +135,17 @@ public final class Json {
         return e.isJsonNull() ? null : asLong(e, "\"" + key + "\"", id);
     }
 
+    /** An optional array of strings; null when absent. */
+    public static @Nullable List<String> optStrings(JsonObject o, String key, @Nullable Long id) throws ProtocolException {
+        if (!o.has(key)) return null;
+        List<String> out = new ArrayList<>();
+        for (JsonElement e : reqArray(o, key, id)) {
+            if (!e.isJsonPrimitive() || !e.getAsJsonPrimitive().isString()) throw bad(id, "\"" + key + "\" must hold strings");
+            out.add(e.getAsString());
+        }
+        return List.copyOf(out);
+    }
+
     public static JsonObject reqObject(JsonObject o, String key, @Nullable Long id) throws ProtocolException {
         JsonElement e = req(o, key, id);
         if (!e.isJsonObject()) throw bad(id, "\"" + key + "\" must be an object");

@@ -322,7 +322,7 @@ export class LiveLink implements WorldLink {
     await this.connect(o);
     const v = await this.volumesMessage();
     if (v.work === null)
-      throw refusal("world_no_volume", "No work volume is set in-game. In the game, run /autosketch wand and mark the work volume (left-click one corner, right-click the other), then call doc_open({world: true}) again.");
+      throw refusal("world_no_volume", "No work volume is set in-game. In the game, mark the work volume with the wand, a blaze rod held by an op (left-click one corner, right-click the other), then call doc_open({world: true}) again.");
     if (!relink && existsSync(this.host.pathFor(o.name)) && !o.overwrite) {
       const old = await loadNative(this.host.pathFor(o.name), { journal: false }).catch(() => undefined);
       if (!old?.meta.source?.startsWith("world:"))

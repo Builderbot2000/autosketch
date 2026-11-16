@@ -3,7 +3,9 @@ package dev.autosketch.mod.gametest;
 import dev.autosketch.mod.AutosketchMod;
 import dev.autosketch.mod.api.Autosketch;
 import dev.autosketch.mod.api.LinkVolumes;
+import dev.autosketch.mod.platform.Platform;
 import dev.autosketch.mod.protocol.Box;
+import dev.autosketch.mod.volume.AirMode;
 import dev.autosketch.mod.volume.Wand;
 import java.util.List;
 import java.util.UUID;
@@ -16,6 +18,8 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -114,8 +118,8 @@ public final class VolumeGameTests {
     @GameTest(template = "empty", batch = "autosketch_wand")
     public static void wandClicksAndSwapHands(GameTestHelper h) {
         ServerPlayer p = op(h);
-        p.setItemInHand(InteractionHand.MAIN_HAND, Wand.create());
-        h.assertTrue(Wand.isWand(p.getMainHandItem()), "the wand carries its marker");
+        p.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.BLAZE_ROD));
+        h.assertTrue(Wand.isWand(p.getMainHandItem()), "any plain blaze rod is the wand (B1)");
         run(p, "autosketch mode work");
 
         BlockPos a = h.absolutePos(new BlockPos(0, 1, 0)), b = h.absolutePos(new BlockPos(2, 1, 2));
@@ -137,6 +141,99 @@ public final class VolumeGameTests {
         NeoForge.EVENT_BUS.post(new LivingSwapItemsEvent.Hands(p));
         String third = AutosketchMod.internals().wand().mode(p).name();
         h.assertTrue(!third.equals("context"), "and on (" + third + ")");
+        done(h, p);
+    }
+
+    /** B1: a non-op's rod, or a rod in the off hand, is a plain blaze rod; the wand never opens a block. */
+    @GameTest(template = "empty", batch = "autosketch_wand_rules")
+    public static void wandIsMainHandAndOpOnly(GameTestHelper h) {
+        ServerPlayer op = op(h);
+        ServerPlayer guest = h.makeMockServerPlayerInLevel();
+        BlockPos a = h.absolutePos(new BlockPos(0, 1, 0)), b = h.absolutePos(new BlockPos(2, 1, 2));
+        h.setBlock(new BlockPos(1, 1, 1), Blocks.BREWING_STAND);
+        BlockPos stand = h.absolutePos(new BlockPos(1, 1, 1));
+        var wand = AutosketchMod.internals().wand();
+
+        guest.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.BLAZE_ROD));
+        var left = new PlayerInteractEvent.LeftClickBlock(guest, a, Direction.UP, PlayerInteractEvent.LeftClickBlock.Action.START);
+        NeoForge.EVENT_BUS.post(left);
+        h.assertFalse(left.isCanceled(), "a non-op's left click with a rod is untouched");
+        h.assertTrue(useOn(guest, stand).consumesAction() && guest.containerMenu != guest.inventoryMenu, "a non-op's rod opens the brewing stand as usual");
+        guest.closeContainer();
+        h.assertTrue(Autosketch.link().current() == null, "and sets no corner");
+
+        op.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY);
+        op.setItemInHand(InteractionHand.OFF_HAND, new ItemStack(Items.BLAZE_ROD));
+        h.assertFalse(wand.leftClick(op, a, true), "a rod in the off hand isn't the wand");
+        h.assertFalse(wand.rightClick(op, b, false), "nor for a right click");
+        h.assertTrue(Autosketch.link().current() == null, "no corner set from the off hand");
+
+        op.setItemInHand(InteractionHand.OFF_HAND, ItemStack.EMPTY);
+        op.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.BLAZE_ROD));
+        run(op, "autosketch mode work");
+        h.assertTrue(wand.leftClick(op, a, true), "an op's main-hand rod sets corner 1");
+        useOn(op, stand);
+        h.assertTrue(op.containerMenu == op.inventoryMenu, "clicking the brewing stand with the wand doesn't open it");
+        LinkVolumes v = Autosketch.link().current();
+        h.assertTrue(v != null && v.work().equals(Box.of(a, stand)), "it sets corner 2 instead: " + v);
+        h.getLevel().getServer().getPlayerList().remove(guest);
+        done(h, op);
+    }
+
+    /** A right click on a block with the main hand, through the game's own interaction path (which posts the event). */
+    static net.minecraft.world.InteractionResult useOn(ServerPlayer p, BlockPos pos) {
+        var hit = new net.minecraft.world.phys.BlockHitResult(Vec3.atCenterOf(pos), Direction.UP, pos, false);
+        return p.gameMode.useItemOn(p, p.level(), p.getMainHandItem(), InteractionHand.MAIN_HAND, hit);
+    }
+
+    /** B2 without the client half: right click into the air sets corner 2, sneak+right click corner 1, at the air distance. */
+    @GameTest(template = "empty", batch = "autosketch_air")
+    public static void airModeSetsCornersWithoutTheClientHalf(GameTestHelper h) {
+        ServerPlayer p = op(h);
+        var air = AutosketchMod.internals().air();
+        p.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.BLAZE_ROD));
+        run(p, "autosketch mode work");
+        BlockPos base = h.absolutePos(new BlockPos(1, 1, 1));
+        p.moveTo(base.getX() + 0.5, base.getY() + 20, base.getZ() + 0.5, 0f, -90f); // high above, looking straight up
+        h.assertFalse(Platform.get().hasClientHalf(p), "a mock player has no client half");
+
+        var off = new PlayerInteractEvent.RightClickItem(p, InteractionHand.MAIN_HAND);
+        NeoForge.EVENT_BUS.post(off);
+        h.assertFalse(off.isCanceled(), "with air mode off, a right click into the air is the item's own");
+        h.assertTrue(Autosketch.link().current() == null, "and sets nothing");
+
+        run(p, "autosketch air on");
+        run(p, "autosketch air reach 7");
+        h.assertTrue(air.on(p) && air.reach(p) == 7, "air on, distance 7");
+        BlockPos c1 = AirMode.point(p, 7);
+        h.assertTrue(c1.equals(BlockPos.containing(p.getEyePosition().add(0, 7, 0))), "the point is 7 blocks along the look: " + c1);
+        p.setShiftKeyDown(true);
+        var first = new PlayerInteractEvent.RightClickItem(p, InteractionHand.MAIN_HAND);
+        NeoForge.EVENT_BUS.post(first);
+        h.assertTrue(first.isCanceled(), "the wand's air click is cancelled");
+        h.assertTrue(Autosketch.link().current() == null, "sneak+right click set corner 1 only");
+        p.setShiftKeyDown(false);
+        p.moveTo(base.getX() + 4.5, base.getY() + 22, base.getZ() + 2.5, 0f, -90f);
+        BlockPos c2 = AirMode.point(p, 7);
+        NeoForge.EVENT_BUS.post(new PlayerInteractEvent.RightClickItem(p, InteractionHand.MAIN_HAND));
+        LinkVolumes v = Autosketch.link().current();
+        h.assertTrue(v != null && v.work().equals(Box.of(c1, c2)), "right click set corner 2: " + v + " expected " + Box.of(c1, c2));
+        long link = v.link();
+
+        // A use that follows a click on a block in reach is the block click's; air mode leaves it alone.
+        BlockPos above = BlockPos.containing(p.getEyePosition().add(0, 2, 0));
+        h.getLevel().setBlockAndUpdate(above, Blocks.STONE.defaultBlockState());
+        var onBlock = new PlayerInteractEvent.RightClickItem(p, InteractionHand.MAIN_HAND);
+        NeoForge.EVENT_BUS.post(onBlock);
+        h.assertTrue(Autosketch.link().current().link() == link, "no air corner while a block is in reach");
+        h.getLevel().setBlockAndUpdate(above, Blocks.AIR.defaultBlockState());
+
+        // The client half's left click arrives as corner 1 with its own distance.
+        air.clientClick(p, 1, 3);
+        v = Autosketch.link().current();
+        h.assertTrue(v.work().equals(Box.of(AirMode.point(p, 3), c2)) && air.reach(p) == 3, "client air click set corner 1 at distance 3: " + v);
+        run(p, "autosketch air off");
+        h.assertFalse(air.on(p), "air off");
         done(h, p);
     }
 

@@ -7,6 +7,7 @@ import dev.autosketch.mod.protocol.BodyTypes.Normalized;
 import dev.autosketch.mod.protocol.BodyTypes.PatchBlock;
 import dev.autosketch.mod.protocol.BodyTypes.Rejected;
 import dev.autosketch.mod.protocol.BodyTypes.SnapshotRegion;
+import dev.autosketch.mod.protocol.BodyTypes.SurfaceLayer;
 import dev.autosketch.mod.protocol.BodyTypes.WorldBlock;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -17,6 +18,7 @@ import java.util.Map;
 import java.util.function.Function;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Binary bodies (13, *Wire format*, *Binary bodies*). Positions are gap-coded ascending linear
@@ -379,4 +381,63 @@ public final class Bodies {
     }
 
     public record SnapshotBody(List<String> palette, List<SnapshotRegion> regions) {}
+
+    // ── snapshot.result, kind surface (protocol 2) ─────────────────────────────────────────────
+
+    /**
+     * Surface body (13, *Binary bodies*): the palette in first-use order over the columns (each
+     * column's surface before its ceiling), then per column in index order a varint height code and,
+     * when it isn't 0, the varint palette index; with {@code ceilings}, each column's ceiling value
+     * follows its surface value. {@code palette} may hold unused entries; they are left out.
+     */
+    public static byte[] encodeSurface(List<String> palette, long columns, SurfaceLayer surface, @Nullable SurfaceLayer ceilings) {
+        SurfaceLayer[] layers = ceilings == null ? new SurfaceLayer[] {surface} : new SurfaceLayer[] {surface, ceilings};
+        for (SurfaceLayer l : layers)
+            if (l.heights().length != columns) throw new IllegalArgumentException("surface layer holds " + l.heights().length + " columns for an area of " + columns);
+        int n = (int) columns;
+        int[] remap = new int[palette.size()];
+        Arrays.fill(remap, -1);
+        List<String> used = new ArrayList<>();
+        ByteWriter values = new ByteWriter(Math.max(1024, n * 3 * layers.length));
+        for (int i = 0; i < n; i++)
+            for (SurfaceLayer l : layers) {
+                int h = l.heights()[i];
+                if (h < 0) throw new IllegalArgumentException("negative surface height code");
+                values.varint(h);
+                if (h == 0) continue;
+                int st = l.states()[i];
+                if (remap[st] == -1) {
+                    remap[st] = used.size();
+                    used.add(palette.get(st));
+                }
+                values.varint(remap[st]);
+            }
+        ByteWriter w = new ByteWriter(values.length() + 64 * used.size() + 16);
+        w.table(used);
+        values.writeTo(w);
+        return w.toByteArray();
+    }
+
+    /** Decodes a surface body for an area of {@code columns}; ceilings present when {@code withCeiling}. */
+    public static SurfaceBody decodeSurface(byte[] body, long columns, boolean withCeiling) throws ProtocolException {
+        ByteReader r = new ByteReader(body);
+        List<String> palette = r.table();
+        if (columns > r.remaining()) throw ProtocolException.malformed("surface: " + columns + " columns can't fit in " + r.remaining() + " bytes");
+        int n = (int) columns;
+        SurfaceLayer surface = SurfaceLayer.of(n), ceilings = withCeiling ? SurfaceLayer.of(n) : null;
+        SurfaceLayer[] layers = ceilings == null ? new SurfaceLayer[] {surface} : new SurfaceLayer[] {surface, ceilings};
+        for (int i = 0; i < n; i++)
+            for (SurfaceLayer l : layers) {
+                int h = r.count(Integer.MAX_VALUE, "surface height code");
+                l.heights()[i] = h;
+                if (h == 0) continue;
+                long s = r.varint();
+                if (s >= palette.size()) throw ProtocolException.malformed("surface: state index " + s + " outside the palette of " + palette.size());
+                l.states()[i] = (int) s;
+            }
+        r.expectEnd("surface");
+        return new SurfaceBody(palette, surface, ceilings);
+    }
+
+    public record SurfaceBody(List<String> palette, SurfaceLayer surface, @Nullable SurfaceLayer ceilings) {}
 }

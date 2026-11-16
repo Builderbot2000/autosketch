@@ -9,7 +9,8 @@ version = mod_version
 group = mod_group_id
 
 base {
-    archivesName = mod_id
+    // MultiLoader convention: <mod id>-<loader>-<minecraft version>-<mod version>.jar (14, *Release naming*).
+    archivesName = "${mod_id}-neoforge-${minecraft_version}"
 }
 
 // Mojang ships Java 21 for 1.21.1. The foojay resolver (settings.gradle) downloads it if missing.

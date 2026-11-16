@@ -30,6 +30,10 @@ End-to-end tests of the live world link (`13`) against a running NeoForge server
 - `scenarios.test.ts`: the scenarios of silo R's brief (`docs/briefs/world/R-end-to-end.md`), each in its own work volume of a flat world. The last one kills and restarts the server.
 - `measure.ts throughput|snapshot|tracker` and `volatile.ts`: the measurements behind `13`, *Measured on Craftoria*. They print JSON; they aren't pass/fail tests.
 
+### Mod targets beyond the Craftoria profile
+
+The mod's full suite (JUnit, GameTests) and the e2e world tier run only on the Craftoria profile (NeoForge 1.21.1). Every other loader or Minecraft version the mod is built for gets a **smoke test only**: the jar builds, the GameTest server starts with the mod, and the bridge pairs (`14`, *Tests across versions*). **Not yet covered:** the full GameTest suite, the protocol golden vectors through each target's codec, and an e2e run per target. Release notes mark such targets *smoke-tested* until this is done.
+
 ## Tier 3: agent evaluation (`test/eval/`, opt-in, costs tokens)
 
 This measures whether the perception and palette design actually help the agent. It is the core claim of the project.

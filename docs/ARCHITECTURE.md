@@ -67,6 +67,7 @@ The agent has to understand (a) **what it can build with**: blocks, materials, p
 | 11 | Scoped sessions | Isolated sandboxes (work + read-only context volume) for subagents, try-locks on work volumes, merge as one patch | [design/11-scoped-sessions.md](design/11-scoped-sessions.md) |
 | 12 | Observability | Event log, live localhost viewer (3D view, scope tree, locks, timeline), replay and time-lapse for the human; never read by agents | [design/12-observability.md](design/12-observability.md) |
 | 13 | Live world link | Companion mod plus world link: the player sets a work and context volume in-game, which makes the linked document the root scope (`11`); agent edits reach the world as conditional patches, hand edits sync back; the world is authoritative; the player can prompt the agent from the game | [design/13-live-world.md](design/13-live-world.md) |
+| 14 | Distribution | One-command install and setup, instance discovery in known places only, the mod on CurseForge and Modrinth, what changes across versions and loaders, version skew between mod and MCP | [design/14-distribution.md](design/14-distribution.md) |
 
 ## Dependency rules
 

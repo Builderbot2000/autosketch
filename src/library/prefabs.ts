@@ -7,7 +7,7 @@ import { stateId } from "../core/blockstate.js";
 import type { Vec3 } from "../core/region.js";
 import type { Facing } from "../document/document.js";
 import { BP_MAGIC, splitBlueprint } from "../formats/axiom.js";
-import { importFile } from "../formats/index.js";
+import { importFile, type ImportUpgrade } from "../formats/index.js";
 import { text as nbtText } from "../formats/nbt.js";
 import { snapshotOf, type Snapshot } from "../formats/snapshot.js";
 import { encodeSponge } from "../formats/sponge.js";
@@ -152,15 +152,21 @@ export interface LoadedPrefab {
 
 const loaded = new Map<string, { mtime: number; value: LoadedPrefab }>();
 
-/** Reads a prefab's blocks (cached per file and modification time). Unknown blocks are kept (01). */
-export async function loadPrefab(p: Prefab, registry?: Registry): Promise<LoadedPrefab> {
+/**
+ * Reads a prefab's blocks (cached per file, modification time and how it was upgraded). Unknown
+ * blocks are kept (01). A prefab from an older version is upgraded each time it loads, as the game
+ * does with structures, and the file is never rewritten (14, *Schematics from other versions*):
+ * through the linked game's data fixer, else the rename table.
+ */
+export async function loadPrefab(p: Prefab, registry?: Registry, upgrade: ImportUpgrade = {}): Promise<LoadedPrefab> {
   const mtime = (await stat(p.file)).mtimeMs;
-  const hit = loaded.get(p.file);
+  const key = `${p.file}\0${upgrade.upgrader ? `game ${upgrade.upgrader.dataVersion}` : `tables ${upgrade.dataVersion ?? 0}`}`;
+  const hit = loaded.get(key);
   if (hit && hit.mtime === mtime) return hit.value;
-  const imp = await importFile(p.file, { name: "prefab", ...(registry ? { registry } : {}) });
+  const imp = await importFile(p.file, { name: "prefab", ...(registry ? { registry } : {}), ...upgrade });
   const snapshot = snapshotOf(imp.doc);
   const value = { snapshot, warnings: imp.warnings };
-  loaded.set(p.file, { mtime, value });
+  loaded.set(key, { mtime, value });
   return value;
 }
 

@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { dataVersionFor } from "../../core/version.js";
 import { z } from "zod";
 import { loadPrefab } from "../../library/prefabs.js";
 import { scriptApiDts } from "../../script/dts.js";
@@ -24,7 +25,7 @@ export function extraScriptOps(c: InstanceContext): readonly ScriptOp[] {
 export async function runScriptTool(c: InstanceContext, session: Session, source: string, args: Record<string, unknown> | undefined, name: string, limits: { timeoutMs?: number } = {}, preload: readonly string[] = []): Promise<Result> {
   const doc = session.require();
   const lib = libraryFor(c, session);
-  const prefabs = { resolve: (ref: string) => lib.resolve(ref), load: (p: Parameters<typeof loadPrefab>[0]) => loadPrefab(p, c.registry) };
+  const prefabs = { resolve: (ref: string) => lib.resolve(ref), load: (p: Parameters<typeof loadPrefab>[0]) => loadPrefab(p, c.registry, session.schematicVersion(c.registry, dataVersionFor(c.info.mcVersion))) };
   let run: ScriptRun;
   try {
     run = await runScript(doc, env(c), { source, ...(args ? { args } : {}), name, ops: extraScriptOps(c), prefabs, ...(preload.length ? { preload } : {}), ...limits });

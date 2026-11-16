@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { dataVersionFor } from "../../core/version.js";
 import { Mask } from "../../core/mask.js";
 import { formatVec, type Box, type Vec3 } from "../../core/region.js";
 import { blockIndex, snapshotOf, type Snapshot } from "../../formats/snapshot.js";
@@ -113,7 +114,7 @@ export function registerLibraryTools({ tool, resource, session }: ToolDeps): voi
       const doc = session.require();
       const lib = libraryFor(c, session);
       const p = await lib.resolve(a.prefab);
-      const loaded = await loadPrefab(p, c.registry);
+      const loaded = await loadPrefab(p, c.registry, session.schematicVersion(c.registry, dataVersionFor(c.info.mcVersion)));
       return editWith(session, () => {
         const r = stampPrefab(doc, env(c), p, loaded, {
           at: a.at as StampAt,

@@ -37,7 +37,7 @@ describe("block rename table", () => {
     imp.doc.voxels.forEach((x, y, z, id) => blocks.push(`${x},${y},${z}=${imp.doc.states.get(id)}`));
     expect(blocks.sort()).toEqual(["0,0,0=minecraft:dirt_path", "1,0,0=minecraft:short_grass", "2,0,0=minecraft:dirt_path"]);
     const w = imp.warnings.join("\n");
-    expect(w).toMatch(/renamed minecraft:grass_path → minecraft:dirt_path, minecraft:grass → minecraft:short_grass/);
+    expect(w).toMatch(/partial upgrade from DataVersion 2586 to 3955: no game with the Autosketch mod is linked, so only renamed block ids were upgraded \(minecraft:grass_path → minecraft:dirt_path, minecraft:grass → minecraft:short_grass\)/);
     expect(w).not.toMatch(/unknown block/);
   });
 });

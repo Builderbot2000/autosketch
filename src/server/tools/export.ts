@@ -33,7 +33,8 @@ export function registerExportTools({ tool, session }: ToolDeps): void {
     async (c, a) => {
       const doc = session.require();
       await session.flush();
-      const dataVersion = dataVersionFor(c.info.mcVersion);
+      // Writing stamps the running game's version (14): the linked game's, the registry report's, else the instance's.
+      const dataVersion = session.schematicVersion(c.registry, dataVersionFor(c.info.mcVersion)).dataVersion;
       const r = await exportDocument(
         doc,
         {

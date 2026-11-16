@@ -69,13 +69,12 @@ export function registerDocumentTools({ tool, session }: ToolDeps): void {
         return text(formatInfo(doc, c.registry, session.path));
       }
       const name = a.name ?? basename(a.path).replace(/\.[^.]*$/, "").replace(/[^a-z0-9_-]+/gi, "_").replace(/^_+|_+$/g, "").slice(0, 64);
-      const dataVersion = dataVersionFor(c.info.mcVersion);
       const imp = await importFile(a.path, {
         name: name || "imported",
         registry: c.registry,
         palettes: c.book,
         plugins: c.plugins,
-        ...(dataVersion ? { dataVersion } : {}),
+        ...session.schematicVersion(c.registry, dataVersionFor(c.info.mcVersion)),
         ...(a.front ? { front: a.front } : {}),
       });
       await session.adopt(imp.doc, a.overwrite ? { overwrite: true } : {});

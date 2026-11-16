@@ -15,7 +15,7 @@ import { decodeSponge, encodeSponge, type Decoded, type SpongeVersion } from "./
 import { decodeStructure, encodeStructure, splitToFit } from "./structure.js";
 import { decodeLitematic, encodeLitematic, type LitematicRegion } from "./litematic.js";
 import { decodeSchematic } from "./schematic.js";
-import { upgradeSnapshot } from "./renames.js";
+import { upgradeDecoded, type SchematicUpgrader } from "./upgrade.js";
 
 /**
  * Export and import (docs/design/08-formats.md). Export writes a normalised snapshot of the
@@ -263,42 +263,44 @@ export interface Imported {
   warnings: string[];
 }
 
+/** How an import upgrades files from other versions (`upgrade.ts`). */
+export interface ImportUpgrade {
+  /** The game's DataVersion when no game is linked: the registry report's, else the instance's. */
+  dataVersion?: number;
+  /** The linked game's data fixer, when the mod serves `upgrade`. */
+  upgrader?: SchematicUpgrader;
+}
+
 /** Reads a schematic file into a fresh document named `name`. */
 export async function importFile(
   path: string,
-  opts: { name: string; registry?: Registry; dataVersion?: number; palettes?: PaletteBook; front?: Facing; plugins?: readonly AutosketchPlugin[] },
+  opts: { name: string; registry?: Registry; palettes?: PaletteBook; front?: Facing; plugins?: readonly AutosketchPlugin[] } & ImportUpgrade,
 ): Promise<Imported> {
   const buf = await readFile(path);
   const format = detectFormat(buf, path);
   const warnings: string[] = [];
-  let renamed: string[] = [];
   let doc: Document;
   if (format === "native") {
     doc = decodeNative(buf, opts.palettes ? { palettes: opts.palettes } : {});
     doc.meta.source = path;
   } else {
-    // Decode verbatim, then rename (older files) and canonicalise in one pass (renames.ts).
+    // Decode verbatim, then upgrade (older files) and canonicalise (upgrade.ts).
     const lite = format === "litematic" ? decodeLitematic(buf) : undefined;
     const dec: Decoded =
       lite ?? (format === "schem" ? decodeSponge(buf) : format === "nbt" ? decodeStructure(buf) : format === "schematic" ? decodeSchematic(buf) : decodeBlueprint(buf));
     warnings.push(...dec.warnings);
-    const up = upgradeSnapshot(dec.snapshot, opts.dataVersion, opts.registry);
+    const up = await upgradeDecoded(format, buf, dec.snapshot, {
+      ...(opts.dataVersion ? { target: opts.dataVersion } : {}),
+      ...(opts.upgrader ? { upgrader: opts.upgrader } : {}),
+      ...(opts.registry ? { registry: opts.registry } : {}),
+    });
     warnings.push(...up.warnings);
-    renamed = up.renamed;
-    doc = documentFromSnapshot(dec.snapshot, { name: opts.name, dataVersion: dec.snapshot.dataVersion, source: path, ...(opts.front ? { front: opts.front } : {}) });
+    doc = documentFromSnapshot(up.snapshot, { name: opts.name, dataVersion: up.snapshot.dataVersion, source: path, ...(opts.front ? { front: opts.front } : {}) });
     if (lite && lite.regions.length > 1) addRegionComponents(doc, lite.regions);
     if (opts.palettes) doc.palettes = opts.palettes;
   }
   doc.meta.name = opts.name;
   if (opts.front) doc.meta.front = opts.front;
-  if (opts.dataVersion && doc.meta.dataVersion && doc.meta.dataVersion !== opts.dataVersion) {
-    const older = doc.meta.dataVersion < opts.dataVersion;
-    warnings.push(
-      `file DataVersion ${doc.meta.dataVersion} differs from this instance's ${opts.dataVersion}; ` +
-        (renamed.length ? `renamed ${renamed.join(", ")}; ` : "") +
-        (older ? "other block changes between versions (properties) are not upgraded" : "blocks added after this instance's version may be unknown"),
-    );
-  }
   if (opts.plugins) warnings.push(...documentNbtWarnings(opts.plugins, doc));
   return { doc, format, warnings };
 }

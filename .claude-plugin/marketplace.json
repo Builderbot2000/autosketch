@@ -1,0 +1,18 @@
+{
+  "name": "autosketch",
+  "owner": {
+    "name": "Builderbot2000",
+    "url": "https://github.com/Builderbot2000"
+  },
+  "metadata": {
+    "description": "Autosketch: agent-driven Minecraft schematic building with your own modded instance."
+  },
+  "plugins": [
+    {
+      "name": "autosketch",
+      "source": "./packaging/claude-plugin",
+      "description": "The Autosketch MCP server and its building skills.",
+      "category": "productivity"
+    }
+  ]
+}

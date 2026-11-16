@@ -62,7 +62,7 @@ Locks are not separate events. A fork takes its lock and a merge or abandon rele
 
 ## Live viewer
 
-The MCP process also serves a dashboard on `127.0.0.1:<port>` (stdio stays reserved for MCP). It binds to loopback only and is on by default on a free port, so it boots with every session; `observe.http=false` turns it off. On start, the server prints the URL to stderr, writes it to `observe/<session-id>/url` and, unless `observe.open=false`, opens it in the default browser (`src/observe/open.ts`: `open` on macOS, `start` on Windows, `wslview` then `cmd.exe /c start` under WSL, `xdg-open` elsewhere; detached, stdio untouched, failures only logged).
+The MCP process also serves a dashboard on `127.0.0.1:<port>` (stdio stays reserved for MCP). It binds to loopback only and is on by default on a free port, so it boots with every session; `observe.http=false` turns it off. On start, the server prints the URL to stderr, writes it to `observe/<session-id>/url` and, unless `observe.open=false`, opens it in the default browser on the first tool call (not at startup, since clients start the server with every session) (`src/observe/open.ts`: `open` on macOS, `start` on Windows, `wslview` then `cmd.exe /c start` under WSL, `xdg-open` elsewhere; detached, stdio untouched, failures only logged).
 
 ### Endpoints
 
@@ -123,7 +123,7 @@ The server never sees model tokens. It records response sizes, and the eval runn
 | `observe.deltas` | `"auto"` | `"auto"` (on when the viewer is enabled), `"on"` or `"off"` |
 | `observe.maxDeltaBytes` | 512 MB | Per-session cap on `deltas.bin` |
 | `observe.http` | free port | Port number, `true` for a free port, or `false` for no viewer |
-| `observe.open` | `true` | Open the live viewer in the default browser when it starts |
+| `observe.open` | `true` | Open the live viewer in the default browser on the first tool call |
 | `observe.snapshots` | `"off"` | `"merge"`, `"checkpoint"` or `"off"` |
 | `observe.retainSessions` | 20 | Older session folders are pruned at startup |
 | `scope.maxWorkRatio` | 0.5 | Largest child work volume as a share of the parent's (`11`) |

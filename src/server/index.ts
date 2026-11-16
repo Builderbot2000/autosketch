@@ -6,7 +6,7 @@
  *   (or AUTOSKETCH_INSTANCE / AUTOSKETCH_VERSION / AUTOSKETCH_BASE_JAR / AUTOSKETCH_WORKSPACE)
  *   settings: --set observe.log=false (or AUTOSKETCH_OBSERVE_LOG=false), see core/settings.ts
  *   viewer:   on by default on a free port (--set observe.http=<port> to pin one, =false to turn it
- *             off); the URL is printed to stderr and opened in the browser (--set observe.open=false)
+ *             off); the URL is printed to stderr and opened in the browser on the first tool call (--set observe.open=false)
  *   --set server.hideTools=analyze,render hides tools (eval ablations, docs/design/10)
  *
  *   autosketch observe <path> [--port <n>] [--instance <path>]
@@ -64,7 +64,18 @@ async function main(): Promise<void> {
     log((e as Error).message);
     process.exit(2);
   }
-  if (settings.get(OBSERVE_OPEN)) void observer.ready.then((url) => url && openInBrowser(url, log));
+  // The browser opens on the first tool call, not at startup: clients start MCP servers with every
+  // session, and a session that never uses autosketch shouldn't pop a tab.
+  if (settings.get(OBSERVE_OPEN)) {
+    let opened = false;
+    session.callHooks.push({
+      before: () => {
+        if (opened) return;
+        opened = true;
+        void observer.ready.then((url) => url && openInBrowser(url, log));
+      },
+    });
+  }
   session.events = observer.sink("base");
   session.eventsFor = (doc) => observer.sink(doc);
   // The live world link (13), wired in here like observe/: tools reach it only through the session.

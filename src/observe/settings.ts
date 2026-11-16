@@ -20,7 +20,7 @@ export const parseHttp = (raw: string): number | false | undefined => {
 /** On by default (a free port), so the viewer boots with every MCP session. */
 export const OBSERVE_HTTP = setting<number | false>("observe.http", 0, "a port 1..65535, true (a free port) or false", parseHttp);
 
-/** `observe.open`: open the live viewer in the default browser once it is up (MCP server only). */
+/** `observe.open`: open the live viewer in the default browser on the first tool call (MCP server only). */
 export const OBSERVE_OPEN = setting("observe.open", true, "true or false", parseBool);
 
 export const DELTA_MODES = ["auto", "on", "off"] as const;

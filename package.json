@@ -49,7 +49,7 @@
     "autosketch": "dist/server/index.js"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13"
   },
   "files": [
     "dist",

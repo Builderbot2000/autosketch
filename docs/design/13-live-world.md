@@ -116,7 +116,7 @@ world (the save)
 - **Same machine only.** The MCP runs on the machine the game (or dedicated server) runs on. Remote servers are out of scope for now (see *Open questions*). Running the game on Windows and the MCP in WSL2 counts as the same machine: WSL2 reaches the mod's loopback socket with mirrored networking (`networkingMode=mirrored` in `%UserProfile%\.wslconfig`). Without it, the MCP reports that the port in the pairing file can't be reached and names the setting.
 - **Transport:** a localhost TCP socket opened by the mod, length-prefixed messages. JSON for control messages; patch and snapshot bodies use a compact binary encoding (palette plus packed positions), since a large stamp can carry millions of blocks.
 - **Pairing:** the mod writes its port and a random token to `<instance>/config/autosketch-bridge.toml` on startup. The MCP already locates the instance (`02`), reads the file, and sends the token in its hello. A connection without the right token is refused.
-- **Version check:** hellos carry the protocol version, the game version and data version, and the mod version. A mismatch is reported, not guessed around.
+- **Version check:** hellos carry the protocol version, the game version and data version, and the mod version. The MCP speaks its own protocol version and the one before it, and gates every addition on what the hellos list (*Wire format*, *Versions and features*). Any other mismatch is reported, saying which side is older, not guessed around.
 - **Lifecycle:** the MCP reconnects when the game restarts, and the link resumes with a sync of the sections whose hashes differ (a full snapshot if the work volume changed meanwhile, which is a relink). Patches queued while disconnected are discarded, not replayed: the next sync makes the cache match the world, and the agent sees the result.
 - **Permissions:** commands and the wand require op level 2 (cheats on, in singleplayer).
 - **Automatic linking** (setting `world.autoLink`, default on): once the instance is loaded, the MCP keeps trying to connect (every 2 s, quietly, until the game is up; the bridge's own reconnect takes over after the first connection). Whenever the player has a work volume and nothing is linked, it links the base document as `doc_open({ world: true })` would, and the agent's next result on it carries a `world: linked automatically` line. It doesn't do this on its own while scoped jobs are open, or over an open document that isn't a world document (`meta.source` `world:…`), so it never takes the agent's work away. An in-game request arriving unlinked links even over another document (it is saved and closed, and the agent is told), because the player asking is the signal; it still waits for scoped jobs. Clearing the work volume unlinks as before, and the next work volume links again. Reason: a player marking a work volume in the game has already said what to link; requiring the agent to call `doc_open` first made every first request fail with `no_link`. `doc_open({ world: true })` stays for explicit links, a document name, and relinking after scoped jobs.
@@ -128,14 +128,15 @@ world (the save)
 | both | `hello` | protocol version, token and volatile-key list (MCP → mod), game/data/mod versions (mod → MCP) |
 | mod → MCP | `volumes` | dimension, work volume box, context boxes, or none (on change and after hello) |
 | MCP → mod | `volumes.extend` | link, the work volume extended to whole blocks (*Model*: a box that cuts a door or multi-block) |
+| MCP → mod | `volumes.set` | dimension, work volume, context boxes or the default: the mod sets them as if the player had (B4) |
 | MCP → mod | `hashes` | boxes (work and context volumes) |
 | mod → MCP | `hashes.result` | one hash per chunk section the box touches |
-| MCP → mod | `snapshot` | boxes, or a list of chunk sections |
-| mod → MCP | `snapshot.result` | palette, blocks, block entities |
+| MCP → mod | `snapshot` | boxes, or a list of chunk sections; or, kind `surface`, an area of columns (B4) |
+| mod → MCP | `snapshot.result` | palette, blocks, block entities; or per column the topmost non-air block (and ceiling) |
 | MCP → mod | `patch` | id, dimension, positions with expected states and NBT hashes, new states, NBT |
 | mod → MCP | `patch.ack` | id, applied count, skipped (position, actual state, actual NBT), rejected (position, reason) |
 | mod → MCP | `dirty` | changed positions, or "everything" when too many to list |
-| mod → MCP | `prompt` | id, player (name and UUID), text, game context (*Prompting from the game*) |
+| mod → MCP | `prompt` | id, player (name and UUID), text, game context (*Prompting from the game*), mode (B6), scan grant (B4) |
 | MCP → mod | `prompt.result` | id, delivered or refused, with the reason when refused |
 | MCP → mod | `notice` | short text for the player's action bar (optional) |
 | MCP → mod | `chat` | request id or none, target (one player or all with log on), kind (`activity` or `reply`), lines |
@@ -144,7 +145,7 @@ Field names, types and encodings are in *Wire format*, *Message schemas*.
 
 ## Wire format
 
-Protocol version **1**. This section and the golden vectors in `test/data/world-protocol/` are the whole contract between the mod and the MCP: either side can be written from them alone. The TypeScript reference is `src/world/protocol/` (codec, hashing, pairing file) and `test/support/fake-host.ts` (the mod's side, in memory), but nothing here needs them.
+Protocol version **2** (*Versions and features*: the MCP also speaks version 1; the version-1 contract is this section without the additions marked "protocol 2", and its vectors are in `test/data/world-protocol/v1/`). This section and the golden vectors in `test/data/world-protocol/` are the whole contract between the mod and the MCP: either side can be written from them alone. The TypeScript reference is `src/world/protocol/` (codec, hashing, pairing file) and `test/support/fake-host.ts` (the mod's side, in memory), but nothing here needs them.
 
 ### Primitives
 
@@ -174,21 +175,39 @@ bytes    body            frameLength − 4 − headerLength bytes; empty unless 
 - **Maximum frame size:** `frameLength` ≤ 268,435,456 (256 MiB). A sender never writes a larger frame.
 - **Undecodable messages.** If the framing or the header can't be decoded (a `frameLength` below 4 or above the maximum, a `headerLength` that doesn't fit, a header that isn't UTF-8 JSON or isn't an object), the receiver sends `error` `bad_request` with id `null` and closes the connection: it can no longer tell where the next frame starts, or whom to answer. If the frame and header decode and the header has an `id`, but a field or the body is invalid (a missing or mistyped field, a body on a message that has none, a count that disagrees with the body, a bad NBT compound), it replies `error` `bad_request` with that `id` and the connection stays open. An invalid message without an `id` is answered with `bad_request` id `null`, and the connection stays open too.
 - **Messages with a body:** `patch`, `snapshot.result`, `patch.ack` and `dirty` (unless `everything`). Every other message has an empty body.
-- **Headers** are written compact (no whitespace), keys in the order the tables below list them, optional fields omitted when absent. Receivers accept any key order and ignore keys they don't know (a later minor addition stays compatible within version 1). Compare headers as JSON values, not as bytes: number formatting differs between JSON libraries.
-- **Ordering:** TCP keeps frames in order. Each side sends messages in the order the events happen. The mod handles **requests** (MCP messages with an `id`: `volumes.extend`, `hashes`, `snapshot`, `patch`) strictly in arrival order, each finishing before the next starts: a `snapshot` or `hashes` request that arrives while a patch is still applying across ticks is answered after that patch's ack, so it sees the patch. Messages without an `id` (`notice`, `chat`, `prompt.result`, `error`) don't wait behind a multi-tick patch; the mod may handle them as they arrive. From the mod, `dirty`, `volumes` and `prompt` may interleave with responses.
-- **Request ids:** `volumes.extend`, `hashes`, `snapshot` and `patch` carry an `id` the MCP assigns from one counter per connection, starting at 1 and increasing by at least 1 per request (so patch ids increase, and patches apply in id order). Their responses (`hashes.result`, `snapshot.result`, `patch.ack`, or `error`) carry the same `id`. A `volumes.extend` that succeeds is answered by a `volumes` message (which has no id), and one that fails by an `error` with its id. `prompt` ids come from the mod's own counter; a `prompt.result` carries the prompt's id in its `id` field, and a `chat` carries it in its `request` field.
+- **Headers** are written compact (no whitespace), keys in the order the tables below list them, optional fields omitted when absent. Receivers accept any key order and ignore keys they don't know (so an addition stays readable by the previous version, *Versions and features*). Compare headers as JSON values, not as bytes: number formatting differs between JSON libraries.
+- **Ordering:** TCP keeps frames in order. Each side sends messages in the order the events happen. The mod handles **requests** (MCP messages with an `id`: `volumes.extend`, `volumes.set`, `hashes`, `snapshot`, `patch`) strictly in arrival order, each finishing before the next starts: a `snapshot` or `hashes` request that arrives while a patch is still applying across ticks is answered after that patch's ack, so it sees the patch. Messages without an `id` (`notice`, `chat`, `prompt.result`, `error`) don't wait behind a multi-tick patch; the mod may handle them as they arrive. From the mod, `dirty`, `volumes` and `prompt` may interleave with responses.
+- **Request ids:** `volumes.extend`, `volumes.set`, `hashes`, `snapshot` and `patch` carry an `id` the MCP assigns from one counter per connection, starting at 1 and increasing by at least 1 per request (so patch ids increase, and patches apply in id order). Their responses (`hashes.result`, `snapshot.result`, `patch.ack`, or `error`) carry the same `id`. A `volumes.extend` that succeeds is answered by a `volumes` message (which has no id), and one that fails by an `error` with its id. A `volumes.set` that succeeds is answered by a `volumes` message carrying its `id` (protocol 2), and one that fails by an `error` with its id. `prompt` ids come from the mod's own counter; a `prompt.result` carries the prompt's id in its `id` field, and a `chat` carries it in its `request` field.
 
 ### Connection and handshake
 
 1. The mod starts listening when the server starts (singleplayer: when the world opens; dedicated: at startup), on the configured port or an ephemeral one, bound to `127.0.0.1` only, and writes the pairing file. It deletes the file when the server stops.
-2. The MCP reads the pairing file, checks `protocol`, connects to `host:port` and sends `hello` with the token and its volatile-key list.
-3. The mod checks, in order: the first frame is a `hello` (else `error` `not_ready`, close); `protocol` equals its own (else `error` `protocol_mismatch` carrying its own version in `protocol`, close); `token` equals its token, compared in constant time (else `error` `bad_token`, close). The handshake must finish within 10 seconds of connecting, or the mod closes the socket.
+2. The MCP reads the pairing file, connects to `host:port` and sends `hello` with the token, its volatile-key list and its request modes. Its `protocol` is the pairing file's when the MCP speaks that version (its own or the one before), and its own otherwise, so that the mod refuses it in step 3 and can tell the player which side is older (*Versions and features*).
+3. The mod checks, in order: the first frame is a `hello` (else `error` `not_ready`, close); `protocol` equals its own (else `error` `protocol_mismatch` carrying its own version in `protocol`, close, and an action-bar notice to ops naming the older side: the hello's `protocol` lower than the mod's means the MCP is older, higher means the mod is); `token` equals its token, compared in constant time (else `error` `bad_token`, close). The handshake must finish within 10 seconds of connecting, or the mod closes the socket.
 4. The mod replies with its own `hello`, then immediately sends `volumes`.
-5. The MCP checks the mod's `hello`: on a `protocol` other than its own it reports the mismatch to the agent and closes. It never guesses around a mismatch (*Version check*). The `game.dataVersion` is the MCP's to compare with its documents.
+5. The MCP checks the mod's `hello`: on a `protocol` other than the one it sent it reports the mismatch to the agent, naming the older side and what to update, and closes. It never guesses around a mismatch (*Version check*). A `protocol_mismatch` naming a version the MCP speaks means the pairing file was stale (the game restarted with another mod), so the MCP retries instead of reporting. The `game.dataVersion` is the MCP's to compare with its documents.
 6. **One connection at a time.** When a new connection completes the handshake, the mod sends `error` `replaced` to the old one and closes it. A restarted MCP therefore takes over without waiting for the old socket to time out (M10).
 7. **Disconnect.** Either side may close at any time. The mod discards queued patches it hasn't started and finishes the one in progress (its ack is lost; the next sync reconciles). It keeps the volumes of the current link until the server stops or the player clears the work volume, so a reconnecting MCP finds the same volumes. It releases the chunk tickets on disconnect and takes them again on reconnect (*Model*), so an unattended server doesn't keep chunks loaded.
 
 The framing, the `hello` fields `type`, `protocol` and `token`, and the `error` message keep their meaning in every future protocol version, so a mismatch is always reported clearly.
+
+### Versions and features
+
+Settled in `14` (*Version skew between mod and MCP*): the mod and the MCP release separately, so updating either side first must not break a working setup.
+
+- **The mod speaks one version**, its own, written in the pairing file. **The MCP speaks two:** its own (`N`, now 2) and the one before (`N−1`, now 1). It says hello in the mod's version when it speaks it. Otherwise it says hello in its own, the mod refuses it (`protocol_mismatch`), and both sides say which one is older and what to update: the MCP in the tool result (`The mod speaks bridge protocol 3 and this Autosketch speaks 1 and 2: the Autosketch MCP server is older; update the Autosketch MCP server.`), the mod on the action bar.
+- **Every addition is optional on the wire.** A field added in version `N` is omitted by a version-`N−1` sender and ignored by a version-`N−1` receiver, and a message type added in `N` is never sent to a side that doesn't list it. So one codec reads both versions, and the version-1 vectors round-trip through the version-2 codec unchanged.
+- **Features gate on the hellos, never on version numbers.** The MCP uses an addition only when the mod's `hello` lists it in `features`; the mod sends a request mode only when the MCP's `hello` lists it in `modes`. A mod at version 2 that leaves a feature out (an older build, a port to another loader) is treated, for that feature, exactly like a version-1 mod.
+- **Mod features** (protocol 2; receivers ignore names they don't know):
+
+  | Feature | The mod |
+  |---|---|
+  | `modes` | sends `mode` on every `prompt`, and only modes the MCP's hello lists; refuses any other request itself with `unsupported_mode` on the action bar (B6) |
+  | `scan` | sends the `scan` grant on scan prompts, serves `snapshot` kind `surface`, and serves blocks snapshots inside the grant (B4) |
+  | `volumes.set` | accepts `volumes.set` |
+
+- **Without a feature**, the MCP: treats a `prompt` without `mode` as `build` (what `/autosketch ask` meant in version 1); refuses tools that need `scan` or `volumes.set` with `world_mod_outdated`, saying the mod is older and to update it, without sending anything.
+- **What changed from version 1 to 2:** `hello` (MCP) gained `modes`, `hello` (mod) gained `features`; `prompt` gained `mode` and `scan`; `prompt.result` gained the reason `unsupported_mode`; `snapshot` and `snapshot.result` gained the kind `surface`; `volumes` gained `id`; the message `volumes.set` and the error `bad_volumes` are new. Nothing was removed or changed in meaning.
 
 ### Pairing file
 
@@ -207,7 +226,7 @@ started = "2026-11-08T10:15:30Z"
 
 | Key | Type | Meaning |
 |---|---|---|
-| `protocol` | integer | The mod's protocol version. The MCP refuses to connect on a mismatch and says which side to update. |
+| `protocol` | integer | The mod's protocol version. The MCP says hello in it when it speaks it (*Versions and features*); otherwise the handshake fails and both sides say which one to update. |
 | `host` | string | Always `127.0.0.1` in v1 (*Same machine only*). |
 | `port` | integer | The listening TCP port. |
 | `token` | string | 32 bytes from `SecureRandom`, as 64 lowercase hex digits. |
@@ -279,6 +298,7 @@ blockList     table palette, varint N, positions(N), indices(N) states, nbtList
 | `dirty` | blockList (the changed positions with their current state and NBT) |
 | `patch.ack` | blockList (**skipped**: actual state and NBT) · table reasons · varint R · positions(R) **rejected** · indices(R) reasons · varint M · positions(M) **normalized** · nbtList (normalized NBT; an entry without NBT means "no block entity") |
 | `snapshot.result` | table palette · for each region, in header order, every position of its box in index order: varint palette index · nbtList (ordinals run over all regions' positions concatenated, in header order) |
+| `snapshot.result`, kind `surface` | table palette · for each column of the area in index order (`dx + sx · dz`, x fastest): varint **h**, then varint palette index when h > 0; with `ceiling`, the column's ceiling value (h and index the same way) follows its surface value. h = 0 means none (all air, or a missing chunk); otherwise the block is at y = `minY` + h − 1. The palette is in first-use order over that sequence |
 
 For a `patch.ack` the grid covers the skipped, rejected and normalized positions together, and the reason table is in first-use order over the rejected list. A snapshot region's positions are its box's own grid (origin = box min); a snapshot carries no `origin` or `size`.
 
@@ -293,21 +313,23 @@ Every header has `type` first. "MCP → mod" and "mod → MCP" say who sends it.
 | Key | Type | Meaning |
 |---|---|---|
 | `type` | `"hello"` | |
-| `protocol` | integer | `1` |
+| `protocol` | integer | `2`, or `1` to a version-1 mod (*Versions and features*) |
 | `token` | string | From the pairing file |
 | `client` | `{name, version}` | `{"name":"autosketch","version":"1.0.0"}` |
 | `volatile` | object | The volatile-key list (*Hashing*). May be `{}` |
+| `modes` | string[] | Protocol 2. The request modes the MCP enforces, from `ask`, `scan`, `plan`, `build` (B6). The mod sends no other mode. Absent means `["build"]`. Sent to a version-1 mod too, which ignores it |
 
 **`hello`**, mod → MCP
 
 | Key | Type | Meaning |
 |---|---|---|
 | `type` | `"hello"` | |
-| `protocol` | integer | `1` |
+| `protocol` | integer | `2` |
 | `mod` | `{version}` | The mod's version |
 | `game` | `{version, dataVersion, loader, loaderVersion}` | e.g. `"1.21.1"`, `3955`, `"neoforge"`, `"21.1.249"` |
 | `singleplayer` | boolean | True on the integrated server of a singleplayer world |
 | `host` | `{name, uuid}` or `null` | The singleplayer host (the allowlist default, *Allowed players*); `null` on a dedicated server |
+| `features` | string[] | Protocol 2. The optional capabilities the mod has (*Versions and features*): `modes`, `scan`, `volumes.set`. Absent means none |
 
 **`error`**, either direction
 
@@ -334,12 +356,14 @@ Every header has `type` first. "MCP → mod" and "mod → MCP" say who sends it.
 | `internal` | mod | the request was valid, but the mod failed serving it (an exception, a world block entity it can't encode). `bad_request` only ever blames the sender; this blames the mod | open |
 | `stale_link` | mod | a `volumes.extend` for a `link` that isn't the current one, or while no work volume is set | open |
 | `bad_extension` | mod | a `volumes.extend` box that doesn't contain the player's work volume | open |
+| `bad_volumes` | mod | protocol 2: a `volumes.set` the player couldn't have marked either: a work volume outside the build height, or a context over `contextCap` | open |
 
 **`volumes`**, mod → MCP: after `hello`, and whenever the work volume, the context or the dimension changes.
 
 | Key | Type | Meaning |
 |---|---|---|
 | `type` | `"volumes"` | |
+| `id` | integer, optional | Protocol 2. Only on the `volumes` that confirms a `volumes.set`: that request's id |
 | `link` | integer | Link generation, from a counter that lasts the server's lifetime (not reset by reconnects). Changes, to a value not used before since the server started, whenever the work volume or dimension changes, including when the work volume is cleared. Context-only changes and `volumes.extend` keep it |
 | `dimension` | string | The dimension of both volumes. Absent when `work` is `null` |
 | `work` | Box or `null` | The work volume; `null` when none is set (unlinked) |
@@ -363,6 +387,24 @@ On success the mod:
 - sends `volumes` again, with the same `link` and the box in `extended`. The `link` doesn't change, because the MCP caused the extension and its journal stays valid.
 
 A later `volumes.extend` replaces the earlier one. The extension is dropped when the player changes the work volume or dimension (a new `link`) or clears it. The MCP declares the extension before sending any patch that writes into it; requests are handled in arrival order, so a patch sent after `volumes.extend` sees it.
+
+**`volumes.set`**, MCP → mod, protocol 2, feature `volumes.set`. The agent sets the volumes (B4, `/autosketch scan`); the mod sets them exactly as if the player had marked them with the wand.
+
+| Key | Type | Meaning |
+|---|---|---|
+| `type`, `id` | | |
+| `dimension` | string | The dimension of both volumes; one the server has, otherwise `error` `wrong_dimension` |
+| `work` | Box | The work volume; inside the build height, otherwise `error` `bad_volumes` |
+| `context` | Box[], optional | The context boxes. Absent: the default context, as when the player marks a work volume (the work volume grown by 3) |
+
+On success the mod:
+
+- clips the context boxes to the build height and puts the seam box (the work volume grown by 1) first when no given box contains it, as for the player's own context (*Work and context volumes in-game*); refuses with `bad_volumes` when the context then exceeds `contextCap`;
+- sets the volumes: a new `link` when the work volume or dimension changes (dropping any extension), the same `link` otherwise; outlines and tickets follow as for the player's volumes;
+- tells ops with notices on (for example `Autosketch: the agent set the work volume to 32×24×32`), so the player sees whose change it was;
+- answers with `volumes` carrying the request's `id` (that message is also the usual change notice; it isn't sent twice).
+
+The mod accepts `volumes.set` from the paired MCP at any time: which requests may send it is the MCP's to enforce (B6). Linking follows as for any new work volume (*Connection*, automatic linking).
 
 **`hashes`**, MCP → mod
 
@@ -388,6 +430,18 @@ A later `volumes.extend` replaces the earlier one. The extension is dropped when
 | `boxes` | Box[] | Read these boxes |
 | `sections` | `[sx, sy, sz][]` | Read these whole sections (each the full 16³ box, even where it extends past the volumes; the MCP keeps only the positions inside its volumes) |
 
+Protocol 2 adds `kind` (feature `scan`). A blocks snapshot (`kind` absent, or `"blocks"`) is the one above. A **surface** snapshot reads one value per column instead (B4):
+
+| Key | Type | Meaning |
+|---|---|---|
+| `type`, `id` | | |
+| `dimension` | string | |
+| `kind` | `"surface"` | |
+| `columns` | Area | `{"min":[x,z],"max":[x,z]}`: an inclusive area of block columns, `min ≤ max` |
+| `ceiling` | integer, optional | Also report, per column, the lowest non-air block at or above this y (the MCP asks when the player is underground) |
+
+**Where the mod serves reads.** Blocks snapshots, section hashes and surface snapshots are served inside the chunks the link keeps loaded (the `outside_volumes` error). Protocol 2 adds the **scan grant** of the latest `scan` prompt (`prompt`, `scan`): while it lasts, a surface snapshot whose columns lie inside `scan.columns`, and a blocks snapshot whose boxes lie inside `scan.box`, are served in the grant's dimension even when no work volume is set (no `no_volumes`). Outside both: `outside_volumes`, or `no_volumes` when no work volume is set. A grant lasts until the next `scan` prompt replaces it, the connection closes or the server stops. For grant reads the mod loads chunks as it reads (it may spread the read over ticks, as for other snapshots), takes no ticket, and never generates a chunk.
+
 **`snapshot.result`**, mod → MCP, with a body
 
 | Key | Type | Meaning |
@@ -395,6 +449,20 @@ A later `volumes.extend` replaces the earlier one. The extension is dropped when
 | `type`, `id` | | |
 | `dimension` | string | |
 | `regions` | Box[] | The boxes read, in request order (for `sections`, each section's box) |
+
+For a surface snapshot (protocol 2) the header is instead:
+
+| Key | Type | Meaning |
+|---|---|---|
+| `type`, `id` | | |
+| `dimension` | string | |
+| `kind` | `"surface"` | |
+| `columns` | Area | As requested |
+| `minY` | integer | The dimension's lowest build y (`-64` in the 1.21.1 overworld) |
+| `ceiling` | integer, optional | As requested; present exactly when the body has ceilings |
+| `missing` | `[cx, cz][]` | Chunks of the area that aren't generated, ascending by `cz`, then `cx`; may be empty. Their columns read as none |
+
+Per column, the **surface block** is the highest position within the build height whose state isn't air (`minecraft:air`, which on the wire includes cave and void air): what the game's `WORLD_SURFACE` heightmap gives, one below its value. Fluids, leaves, plants and snow layers count. The **ceiling block** is the lowest non-air position at or above `ceiling` (none when everything from there to the top is air). States only, no block entities: the full-block layer of a scan is a blocks snapshot of `scan.box`.
 
 The body holds every position of every region, air included, as states, plus the NBT of every block entity in them. Positions outside the world's build height (a section box above the top or below the bottom) read as `minecraft:air` with no block entity, in snapshots and section hashes alike. Regions may overlap (a context box overlapping the work volume); a position in two regions appears in both, with its NBT in both.
 
@@ -461,6 +529,12 @@ The **dirty cap is at most 4,096 positions** (one section's worth); the mod may 
 | `context.target` | `{pos, state, face}`, optional | The block under the crosshair within the configured reach: integer position, canonical state, the face looked at (`down`, `up`, `north`, `south`, `west`, `east`). Absent when the crosshair hits no block |
 | `context.focus` | Box, optional | The focus box, already clipped to the work and context volumes |
 | `context.focusClipped` | `true`, optional | The focus box was clipped |
+| `mode` | string, optional | Protocol 2, feature `modes`: the subcommand, `ask`, `scan`, `plan` or `build` (B6). A mod with the feature sends it on every prompt, and only a mode the MCP's hello lists. Absent means `build` |
+| `scan` | object, optional | Protocol 2, only with mode `scan`: the **scan grant**, what the mod lets the MCP read for the probe (B4). The mod sizes it from its config: |
+| `scan.radius` | integer | Radius in chunks around the player's chunk, after clipping to `scanChunksMax` |
+| `scan.clipped` | `true`, optional | The player asked for a larger radius (the mod also warns on the action bar) |
+| `scan.columns` | Area | The columns of the chunks within the radius: `16·(cx−r)` to `16·(cx+r)+15` on x, likewise on z, for the player's chunk `(cx, cz)` |
+| `scan.box` | Box | The full-block box: from `scanBelow` under the feet to `scanAbove` over them, clipped to the build height, around the player and inside `columns`, as wide as `scanCap` blocks allow |
 
 **`prompt.result`**, MCP → mod
 
@@ -468,7 +542,7 @@ The **dirty cap is at most 4,096 positions** (one section's worth); the mod may 
 |---|---|---|
 | `type`, `id` | | The prompt's id |
 | `delivered` | boolean | |
-| `reason` | string | Only when not delivered: `no_link` (no linked document), `not_allowed` (not on `world.promptPlayers`), `no_listener` (no agent session will receive it) |
+| `reason` | string | Only when not delivered: `no_link` (no linked document), `not_allowed` (not on `world.promptPlayers`), `no_listener` (no agent session will receive it), `unsupported_mode` (protocol 2: the prompt's mode isn't one the MCP's hello listed; the mod should have refused it itself, and shows this code the same way) |
 
 When the mod has no connection at all, it tells the player `no_link` itself.
 
@@ -551,13 +625,13 @@ Both sides compute it the same way: the mod over the world, the MCP over its cac
 
 ### Golden vectors
 
-`test/data/world-protocol/` holds one complete frame per file (`<name>.bin`, length prefix included) with a sidecar `<name>.json`:
+`test/data/world-protocol/` holds one complete frame per file (`<name>.bin`, length prefix included) with a sidecar `<name>.json`, for the current version (2). `test/data/world-protocol/v1/` keeps the version-1 frames, frozen as they were cut; an MCP must still decode and re-encode them (it speaks `N−1`), and the version-2 codec does, byte for byte. The hash vectors are shared: hashing didn't change.
 
 - `description`, `sender` (`"mcp"` or `"mod"`), and `header`, the frame's JSON header exactly.
-- `body`, for messages with a body: the decoded content in encoded order. Patches list `blocks` with world `pos`, `expected`, `expectedNbtHash`, `state` and `nbt`; acks list `skipped`, `rejected` (with `reason`) and `normalized`; dirty notices list `blocks`; snapshot results list each region's `states` (palette indices) and `blockEntities`. The `palette` (and `reasons`) tables are given too, in their encoded order. NBT is written as SNBT (the game's `TagParser.parseTag` reads it).
+- `body`, for messages with a body: the decoded content in encoded order. Surface results list `surface` (and `ceilings`) as `heights` and `states` arrays, one entry per column (a state is `0`, and not encoded, where the height is `0`). Patches list `blocks` with world `pos`, `expected`, `expectedNbtHash`, `state` and `nbt`; acks list `skipped`, `rejected` (with `reason`) and `normalized`; dirty notices list `blocks`; snapshot results list each region's `states` (palette indices) and `blockEntities`. The `palette` (and `reasons`) tables are given too, in their encoded order. NBT is written as SNBT (the game's `TagParser.parseTag` reads it).
 - `generated`, instead of `body`, for `patch-large`: the rule that produces its blocks.
 
-There is a vector per message kind: `hello` both ways, `error` (including a refused extension and `internal`), `volumes` (with and without a work volume, and with an extension in force), `volumes.extend`, `hashes` and its result, `snapshot` by boxes and by sections, `snapshot.result` (empty, one block, mixed palette with block entities and overlapping regions), `patch` (empty, one block, mixed palette given out of order, block entities with expected NBT hashes, forced, large), `patch.ack` (all applied, mixed, forced, stale), `dirty` (positions, everything), `prompt` (full and minimal), `prompt.result` (delivered, refused), `notice` and `chat` (activity, reply). Hash vectors: `hash-nbt.json` (compounds with their volatile lists, canonical bytes in hex and hash: empty, unordered keys, nested, every tag type, modified UTF-8, furnace with and without volatile keys, a nested path and `*`, state only) and `hash-sections.json` (sections with their boxes and blocks and expected hash: full, a single position, negative coordinates with partial overlapping boxes, block entities with volatile and state-only types).
+There is a vector per message kind: `hello` both ways, `error` (including a refused extension and `internal`), `volumes` (with and without a work volume, and with an extension in force), `volumes.extend`, `hashes` and its result, `snapshot` by boxes and by sections, `snapshot.result` (empty, one block, mixed palette with block entities and overlapping regions), `patch` (empty, one block, mixed palette given out of order, block entities with expected NBT hashes, forced, large), `patch.ack` (all applied, mixed, forced, stale), `dirty` (positions, everything), `prompt` (full and minimal), `prompt.result` (delivered, refused), `notice` and `chat` (activity, reply). Protocol 2 adds: `hello` with `modes` (all, and build only) and with `features` (all, and some), `prompt` with modes `build`, `ask` and `scan` (with a clipped grant), `prompt.result` `unsupported_mode`, `volumes.set` (with context, and default), the `volumes` confirming one (with `id`), `error` `bad_volumes`, `snapshot` kind `surface` (with and without `ceiling`) and its results (a missing chunk; ceilings). Hash vectors: `hash-nbt.json` (compounds with their volatile lists, canonical bytes in hex and hash: empty, unordered keys, nested, every tag type, modified UTF-8, furnace with and without volatile keys, a nested path and `*`, state only) and `hash-sections.json` (sections with their boxes and blocks and expected hash: full, a single position, negative coordinates with partial overlapping boxes, block entities with volatile and state-only types).
 
 An implementation passes when it decodes every vector to its sidecar, re-encodes the sidecar to the same bytes (headers compared as JSON), and reproduces every hash. The vectors are synthetic, and they are frozen: a change to them is a protocol change.
 
@@ -673,6 +747,7 @@ Work is split into silos in `docs/briefs/world/`. Suggested order: protocol, has
 | Feedback (M11) | N | Done. Outline particles (dust in each mode's colour, block-boundary edges, nearby points only) while holding the wand or after `/autosketch show`; the wand's mode on the action bar; `notice` messages and finished patches (`Autosketch: 1,204 placed, 3 skipped`, from O's `PatchStatus`) on the action bar for ops with notices on (`/autosketch notices on\|off`, default from config). `/autosketch status`: MCP, link, volumes, extension, context, pending and last patch. |
 | Entities (M12) | N | Done for silo N: a GameTest links volumes, grows context, extends, holds and releases tickets and shows outlines around a pig and an armor stand, and checks they're alive, unmoved and the entity count unchanged. |
 | In-game requests, mod (M13) | S | Done. Package `…prompt`: `/autosketch ask <text>` and the configured `askAlias` (op level 2, skipped with a warning when the name is malformed or taken), `/autosketch focus clear`, `/autosketch log off\|mine\|all` (kept in the player's saved data, default `mine`). The wand's `focus` mode (gold outline) clips the focus box to the volume box it overlaps most (the effective work volume or a context box), with an action-bar warning. A `prompt` carries the player's dimension, feet and eye position, yaw (wrapped to [−180, 180)), pitch, facing, the crosshair block from a server-side raycast to `targetReach` (fluids looked through; state in canonical form, face) and the clipped focus box. Without a connection the player hears `no_link` at once. `prompt.result` goes on the asking player's action bar. `chat` goes to the named player (replies always, activity unless `off`) and to every other player with `all`; only op-level-2 players see agent output. Activity is dimmed, replies prominent, and lines wrap at 100 characters. JUnit for clipping, visibility and wrapping; GameTests for the prompt's context, refusals on the action bar and the log settings. |
+| Protocol 2: modes, surface, `volumes.set`; `N`/`N−1` (B4, B6 wire) | Z | Done (wave 0), against the fake host; the mod side is silo Y's. *Versions and features* and the protocol-2 rows above. `src/world/protocol/`: `PROTOCOL_VERSION` 2 and `SUPPORTED_PROTOCOLS` [2, 1]; codec for `modes`, `features`, `mode`, `scan`, `unsupported_mode`, `volumes.set`, `volumes` `id`, `bad_volumes`, `snapshot`/`snapshot.result` kind `surface` (body in `body.ts`), all optional so version-1 frames round-trip; `modHas`, `helloModes`. Vectors regenerated (`generate.ts`; the hash vectors pinned to the starting volatile list they were cut with, so they stay frozen); version-1 frames kept in `v1/`. `src/world/bridge.ts`: hello in the pairing file's version when it is 2 or 1, else in 2 so the mod can name the older side; mismatch messages name the older side and what to update; a stale pairing file is retried; `supports(feature)` from the mod's hello; `volumes.set` (matched by `id`) and surface snapshots refused `world_mod_outdated` unsent when the mod doesn't list `volumes.set` or `scan`; hello `modes` from the option `modes`, default `["build"]` until enforcement lands (wave 1). `src/world/prompt.ts`: a prompt in a mode the hello didn't list is refused `unsupported_mode` (no mode: `build`). Fake host: speaks 1 or 2 (`protocol`, `features`), records the MCP's modes and refuses other modes itself, scan grant, surface snapshots (ceiling, missing chunks), grant reads without volumes, `volumes.set` (default context, seam, `bad_volumes`, `wrong_dimension`); a version-1 host answers version-2 requests as the old mod would. Tests: `test/unit/world/protocol-versions.test.ts`. Not built yet: mode enforcement (B6), scan and the probe document, `world_volumes` (B4). The surface size on Craftoria isn't measured yet (B4). |
 | In-game requests, MCP (W11) | S | Done against the fake host. `src/world/prompt.ts`: the allowlist (`world.promptPlayers`, UUIDs or names, plus the singleplayer host named in `hello`) runs first, then `no_link`, then `no_listener`. The context becomes local handles on the linked document: the `focus` and `target` selections (outside both volumes, or in another dimension, reported and not saved; in the context volume, saved and called read-only), and the camera `player` (eye − origin − 0.5, `lookTarget` from yaw and pitch, 70°). Handles a request doesn't carry are removed. One `notifications/claude/channel` event with the fixed text and `request`/`player` meta, then `prompt.result`. `createServer({ channel })` declares the experimental `claude/channel` capability and adds the channel instructions (wired in `server/index.ts`). `src/world/chat-stream.ts`: activity lines from the session fan-out (calls with their blocks, images and patch results; `world_sync` commits and `world_reply` itself left out), consecutive same-outcome calls merged, at most one message per `world.activityMs` (6 lines, the rest summed), listening only while the bridge is up. The `world_reply` tool (`server/tools/world-prompt.ts`, through `Session.inGame`) flushes activity, then sends the reply. `done` closes the stream, and so does `world.promptIdleMs` with no tool calls or the next request. A late reply still reaches the player who asked. |
 | Patch applier (M5, M6) | O | Done. `mod/…/world/PatchApplier.java`: the steps of *Applying a patch* per position in index order: `stale_link` (link, volumes, dimension checked per position, so a relink mid-patch rejects the rest); `outside_volumes` for anything outside `LinkVolumes.effectiveWork()` (context included) or the build height; `unknown_state` unless the string is exactly the canonical printing of a known state (`States`); `bad_nbt` when the new block has no block entity, the `id` is missing, unknown or not valid for the block, or the game fails to load it (the block entity is built and loaded before anything is written); the precondition compares the printed world state and, with an expected hash, the hash of the world's block entity (missing or state-only never matches); `force` writes and counts `overwritten`; then the normalized check. Writes (`WorldBlocks.write`) go straight into the chunk section, as Axiom and WorldEdit paste, so neither the old block's `onRemove` (drops) nor the new one's `onPlace` (falling, flowing, redstone) runs; heightmaps, section emptiness, sky-light sources and a queued light check, block-entity removal and loading, POI, unsaved flag and the client update (`sendBlockUpdated`, no neighbour updates) follow. Entities are never touched. Chunks load synchronously when not yet loaded. A world block entity the ack can't encode fails the patch with `internal`. Hashing (`Hashing`, `VolatileKeys`) reproduces every case of `hash-nbt.json` and `hash-sections.json` (JUnit). GameTests: matching write, mismatch skip with the actual state, forced overwrite, chest skipped by NBT hash after its items changed, lit furnace with ticked burn time not skipped, unknown and non-canonical states rejected (never air), context, outside and stale rejections, `bad_nbt`, normalized list, sand doesn't fall, water doesn't flow, a broken chest drops nothing, light follows a patched light source, and an ack identical to L's fake host's on the same world and patch (`ParityGameTests`, the fake host's ack recorded in the test). |
 | Ordering and budget (M7) | O | Done. Patches queue in id order and apply at the start of each server tick (and at once on arrival, with what is left of the tick's budget) under `tickBudget` blocks per tick (default 20,000 since silo R's Craftoria measurements, *Measured on Craftoria*; positions rejected without touching the world don't count), plus a 25 ms time cap per tick so a stamp full of block entities can't stall a tick. A patch in progress is visible part-way; its ack goes out when it finishes, and later requests wait for it (the dispatcher's order). A patch not started when its connection closed is dropped; the one in progress finishes. `PatchStatus` gives pending (queued plus applying) and the last ack's counts. GameTest: 100,000 blocks under a 10,000 budget take at least 10 ticks, a second patch applies after the first and sees its result. |

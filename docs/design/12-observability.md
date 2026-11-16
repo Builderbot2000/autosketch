@@ -43,7 +43,7 @@ The server publishes typed events on an in-process bus. A buffered writer append
 | `scope.merge` | scope, report, diff stats, changed box (base frame), the parent's journal `seq` for the merge | `scope_merge` |
 | `scope.abandon` | scope, reason (`call`, `restart`) | `scope_abandon`, shutdown |
 | `call.start` / `call.end` | tool, scope, duration, ok, response size (text characters, image count and pixels) | server adapter |
-| `call.refused` | tool, scope, refusal code (`lock_overlap`, `nest_too_large`, `nest_too_small`, `nest_depth`, `outside_work_volume`, `scope_required`, `sync_barrier`, `world_disconnected`, `world_no_volume` (13), …), message | server adapter |
+| `call.refused` | tool, scope, refusal code (`lock_overlap`, `nest_too_large`, `nest_too_small`, `nest_depth`, `outside_work_volume`, `scope_required`, `sync_barrier`, `world_disconnected`, `world_no_volume`, `world_mod_outdated` (13), …), message | server adapter |
 | `render.produced` | view, size, scope, optional thumbnail path | perception |
 | `world.link` | state (`linked`, `relinked`, `unlinked`, `connected`, `disconnected`), dimension, work box (local), blocks added by whole-block extension, context box count, reason | world link (13) |
 | `world.patch` | patch id, journal `seq`s, blocks sent, forced, ack counts (applied, skipped, rejected, overwritten, normalized), or `dropped` with a reason when it wasn't sent or confirmed | world link (13) |

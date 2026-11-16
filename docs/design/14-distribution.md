@@ -191,6 +191,7 @@ Today a protocol mismatch closes the link, which is right (`13`, *Version check*
 - The MCP supports its own protocol version and the one before it, so updating the MCP first never breaks a working setup. The mod speaks one version.
 - Features gate on what the `hello`s list, as B6's `modes` do (`13`), not on version numbers.
 - On a mismatch, both sides say which one is older and what to update: the MCP in the tool result, the mod on the action bar.
+- The wire rules (which version the MCP says hello in, the mod's `features`, what changed in version 2) are in `13`, *Wire format*, *Versions and features*.
 
 ## Operator agent on other models (deferred)
 
@@ -211,6 +212,7 @@ Deferred by the user until later development. What was found, for when it comes 
 | Not-configured start | Not built (wave 1): with no instance anywhere the server still exits with a message, now naming `config.toml` too |
 | Instance discovery, pointer files, WSL | Not built (wave 1) |
 | Packaging and listings | Not built (wave 2) |
+| Version skew, MCP side (`N`/`N−1`, silo Z) | Done (wave 0), against the fake host. Protocol version 2; the bridge (`src/world/bridge.ts`) speaks 2 and 1, saying hello in the pairing file's version when it speaks it and in 2 otherwise, so the mod can name the older side too. Mismatch results name the older side and what to update (`… the Autosketch mod is older; update the Autosketch mod.`); a stale pairing file is retried, not reported. Additions are used only when the mod's hello lists them (`Bridge.supports`); otherwise the request is refused `world_mod_outdated` without being sent. Version-1 golden vectors kept in `test/data/world-protocol/v1/` and round-tripped by the version-2 codec; the fake host speaks both (`test/unit/world/protocol-versions.test.ts`). |
 
 ## Open questions
 

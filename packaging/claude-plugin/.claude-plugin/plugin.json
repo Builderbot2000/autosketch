@@ -1,0 +1,35 @@
+{
+  "name": "autosketch",
+  "displayName": "Autosketch",
+  "version": "0.1.0",
+  "description": "Build Minecraft schematics with an agent, using blocks and textures from your own modded instance. Includes the Autosketch MCP server and its building skills.",
+  "author": {
+    "name": "Builderbot2000",
+    "url": "https://github.com/Builderbot2000"
+  },
+  "homepage": "https://github.com/Builderbot2000/autosketch#readme",
+  "repository": "https://github.com/Builderbot2000/autosketch",
+  "license": "AGPL-3.0-or-later",
+  "keywords": [
+    "minecraft",
+    "schematic",
+    "axiom",
+    "create",
+    "modded"
+  ],
+  "mcpServers": {
+    "autosketch": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "autosketch@0.1.0"
+      ]
+    }
+  },
+  "channels": [
+    {
+      "server": "autosketch",
+      "displayName": "Autosketch in-game requests"
+    }
+  ]
+}

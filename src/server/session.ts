@@ -27,7 +27,9 @@ import type { InstanceContext } from "./context.js";
  */
 
 export function defaultWorkspace(env = process.env): string {
-  return env.AUTOSKETCH_WORKSPACE || join(homedir(), "autosketch");
+  // An unexpanded placeholder (an MCPB host's empty optional field) counts as unset, as in context.ts's launchEnv.
+  const w = env.AUTOSKETCH_WORKSPACE?.trim();
+  return w && !/^\$\{[^}]*\}$/.test(w) ? w : join(homedir(), "autosketch");
 }
 
 const NAME = /^[a-z0-9][a-z0-9_-]{0,63}$/i;

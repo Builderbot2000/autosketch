@@ -1,10 +1,13 @@
 {
   "name": "autosketch",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Local MCP server for agent-driven Minecraft schematic building, with visual and palette harnessing",
+  "mcpName": "io.github.Builderbot2000/autosketch",
   "main": "dist/server/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "prepack": "npm run clean && npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -15,17 +18,29 @@
     "test:e2e-world": "vitest run test/e2e/world",
     "eval": "tsx test/eval/cli.ts",
     "dev": "tsx src/server/index.ts",
-    "start": "node dist/server/index.js"
+    "start": "node dist/server/index.js",
+    "package:plugin": "tsx scripts/build-plugin.ts",
+    "package:mcpb": "tsx scripts/build-mcpb.ts",
+    "package:version": "tsx scripts/sync-versions.ts"
   },
   "keywords": [
     "minecraft",
     "schematic",
     "mcp",
+    "mcp-server",
     "axiom",
     "create"
   ],
-  "author": "",
+  "author": "Builderbot2000",
   "license": "AGPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Builderbot2000/autosketch.git"
+  },
+  "homepage": "https://github.com/Builderbot2000/autosketch#readme",
+  "bugs": {
+    "url": "https://github.com/Builderbot2000/autosketch/issues"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
     "fflate": "^0.8.3",
@@ -52,10 +67,13 @@
     "node": ">=22.13"
   },
   "files": [
-    "dist",
+    "dist/**/*.js",
     "data",
-    "library",
+    "library/knowledge",
+    "library/palettes",
+    "library/prefabs",
     "viewer",
+    "server.json",
     "README.md",
     "LICENSE"
   ]

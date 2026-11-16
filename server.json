@@ -1,0 +1,38 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.Builderbot2000/autosketch",
+  "title": "Autosketch",
+  "description": "Build Minecraft schematics with an agent, using blocks and textures from your own modded instance.",
+  "repository": {
+    "url": "https://github.com/Builderbot2000/autosketch",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/Builderbot2000/autosketch#readme",
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "autosketch",
+      "version": "0.1.0",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "AUTOSKETCH_INSTANCE",
+          "description": "Minecraft instance folder to read blocks from. Optional: without it, choose one in the setup page the server opens, or with `npx autosketch setup`.",
+          "isRequired": false,
+          "format": "filepath"
+        },
+        {
+          "name": "AUTOSKETCH_WORKSPACE",
+          "description": "Folder for documents (default ~/autosketch).",
+          "isRequired": false,
+          "format": "filepath"
+        }
+      ]
+    }
+  ]
+}

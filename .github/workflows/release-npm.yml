@@ -1,0 +1,64 @@
+# npm release (docs/design/14-distribution.md, *Package and listings*).
+#
+# Runs when a version tag (v0.1.0, …) is pushed. Nothing is built or published until the repository
+# has an NPM_TOKEN secret (an npm automation or granular token with publish rights on `autosketch`):
+# without it the first step fails with an error saying so. The tag must match package.json's version.
+#
+# What it does once the secret exists: typecheck and test, publish the package to npm with
+# provenance, build the MCPB bundle for Claude Desktop, and attach it to a GitHub release for the tag.
+# The MCP Registry entry (server.json) is published separately: see 14, *Package and listings*.
+name: Release (npm)
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # the GitHub release and its MCPB asset
+  id-token: write # npm provenance
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the NPM_TOKEN secret
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NPM_TOKEN" ]; then
+            echo "::error title=NPM_TOKEN missing::Add an NPM_TOKEN repository secret (Settings > Secrets and variables > Actions) with publish rights on the autosketch package. Nothing was built or published."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.13"
+          registry-url: "https://registry.npmjs.org"
+          cache: npm
+
+      - name: Check the tag matches package.json
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match package.json version $version (run npm version and npm run package:version first)."
+            exit 1
+          fi
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public
+
+      - name: Build the MCPB bundle
+        run: npm run package:mcpb
+
+      - name: GitHub release with the MCPB bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" "build/autosketch-${GITHUB_REF_NAME#v}.mcpb" --title "Autosketch $GITHUB_REF_NAME" --generate-notes

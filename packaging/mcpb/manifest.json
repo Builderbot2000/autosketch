@@ -1,0 +1,64 @@
+{
+  "manifest_version": "0.3",
+  "name": "autosketch",
+  "display_name": "Autosketch",
+  "version": "0.1.0",
+  "description": "Build Minecraft schematics with an agent, using blocks and textures from your own modded instance.",
+  "long_description": "Autosketch reads blocks, shapes and textures from your own Minecraft instance (vanilla or modded; no game assets are shipped) and gives the agent high-level build actions, renders, slices and palette sheets. Results export to Axiom blueprints, Sponge `.schem` and Create `.nbt`.\n\nChoose your instance below, or leave it empty: the server then opens a setup page in your browser listing the instances it found in your launchers' folders.\n\nIn-game requests through the companion mod need Claude Code channels, which Claude Desktop doesn't have; building and the live world link work.",
+  "author": {
+    "name": "Builderbot2000",
+    "url": "https://github.com/Builderbot2000"
+  },
+  "license": "AGPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Builderbot2000/autosketch.git"
+  },
+  "homepage": "https://github.com/Builderbot2000/autosketch#readme",
+  "keywords": [
+    "minecraft",
+    "schematic",
+    "axiom",
+    "create",
+    "modded"
+  ],
+  "compatibility": {
+    "platforms": [
+      "win32",
+      "darwin",
+      "linux"
+    ],
+    "runtimes": {
+      "node": ">=22.13.0"
+    }
+  },
+  "user_config": {
+    "instance": {
+      "type": "directory",
+      "title": "Minecraft instance",
+      "description": "The instance folder to read blocks from (for CurseForge: …/curseforge/minecraft/Instances/<pack>). Leave empty to choose in the setup page instead.",
+      "required": false
+    },
+    "workspace": {
+      "type": "directory",
+      "title": "Workspace",
+      "description": "Folder where documents are saved.",
+      "required": false,
+      "default": "${HOME}/autosketch"
+    }
+  },
+  "server": {
+    "type": "node",
+    "entry_point": "server/dist/server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/server/dist/server/index.js"
+      ],
+      "env": {
+        "AUTOSKETCH_INSTANCE": "${user_config.instance}",
+        "AUTOSKETCH_WORKSPACE": "${user_config.workspace}"
+      }
+    }
+  }
+}

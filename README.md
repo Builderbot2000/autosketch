@@ -7,7 +7,28 @@ A local, FOSS MCP server that lets AI agents build Minecraft schematics with hig
 
 Status: early development. Material palettes, documents, basic editing (fill, replace, undo, checkpoints, text slices), renders, and export/import of Axiom blueprints (`.bp`), Sponge `.schem` (Axiom, WorldEdit) and structure `.nbt` (Create) work. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## Use with Claude Code
+## Install
+
+Needs Node.js 22.13 or newer. (Not published yet: these are the routes the first release will use.)
+
+**Claude Code**, as a plugin (the MCP server plus its building skills):
+
+```
+/plugin install autosketch --marketplace Builderbot2000/autosketch
+```
+
+or as a plain MCP server, choosing the instance once:
+
+```
+npx -y autosketch instances                       # what was found in your launchers' folders
+npx -y autosketch setup --instance <id> --client claude
+```
+
+Without a `setup`, the server opens a setup page in your browser on first start, listing the instances it found. The choice is saved in `~/.autosketch/config.toml` (`npx -y autosketch config unset instance` forgets it).
+
+**Claude Desktop**: open `autosketch-<version>.mcpb` from the GitHub release and choose your instance folder (or leave it empty to use the setup page).
+
+**From a checkout:**
 
 ```
 npm install && npm run build
@@ -27,6 +48,8 @@ With the companion mod (`mod/`) and the live world link (`docs/design/13-live-wo
 ```
 claude --dangerously-load-development-channels server:autosketch
 ```
+
+Installed as the plugin, the server is named by the plugin instead: `claude --dangerously-load-development-channels plugin:autosketch@autosketch`.
 
 The server connects to the game on its own once it is running, and links as soon as you mark a work volume with `/autosketch wand` (turn this off with `--set world.autoLink=false`, then the agent links with `doc_open({world: true})`). (`--channels server:autosketch` is the form for an approved channel.) This works only in interactive sessions. Without it, the world link still works, and in-game requests are dropped silently by Claude Code. The server can't detect that, so the player is told "delivered".
 

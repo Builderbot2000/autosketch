@@ -53,6 +53,16 @@ export interface StartupArg {
 }
 
 /**
+ * An `AUTOSKETCH_*` launch variable, or undefined when it is empty or an unexpanded placeholder
+ * (`${user_config.instance}`): an MCPB host (Claude Desktop) may pass an optional field the user
+ * left empty either way (`14`, *Package and listings*).
+ */
+export function launchEnv(env: Readonly<Record<string, string | undefined>>, key: string): string | undefined {
+  const v = env[key]?.trim();
+  return v && !/^\$\{[^}]*\}$/.test(v) ? v : undefined;
+}
+
+/**
  * The instance or workspace: config.toml's `instance` / `workspace` (with `~` expanded) first, then
  * the launch `--instance` / `--workspace`, then `AUTOSKETCH_INSTANCE` / `AUTOSKETCH_WORKSPACE`, else
  * undefined (`14`, *Setup*: config.toml has priority, launch options fill what it leaves unset).
@@ -63,7 +73,8 @@ export function startupArg(name: "instance" | "workspace", argv: readonly string
   const launch: SourcedText[] = [];
   const flagValue = i >= 0 ? argv[i + 1] : undefined;
   if (flagValue) launch.push({ source: { kind: "flag", label: `--${name}` }, raw: flagValue });
-  if (env[envKey]) launch.push({ source: { kind: "env", label: envKey }, raw: env[envKey]! });
+  const envValue = launchEnv(env, envKey);
+  if (envValue) launch.push({ source: { kind: "env", label: envKey }, raw: envValue });
   const saved = file?.config[name];
   if (saved) return { value: expandHome(saved), source: { kind: "config", label: "config.toml" }, ...(launch[0] ? { overrides: launch[0] } : {}) };
   return launch[0] && { value: launch[0].raw, source: launch[0].source };
@@ -91,8 +102,8 @@ export function configFromEnv(argv = process.argv.slice(2), env = process.env, f
     if (file?.config.baseJar) cfg.baseJar = expandHome(file.config.baseJar);
   }
   if (!instance.overrides || instance.overrides.raw === instance.value) {
-    const version = arg("version") ?? env.AUTOSKETCH_VERSION;
-    const baseJar = arg("base-jar") ?? env.AUTOSKETCH_BASE_JAR;
+    const version = arg("version") ?? launchEnv(env, "AUTOSKETCH_VERSION");
+    const baseJar = arg("base-jar") ?? launchEnv(env, "AUTOSKETCH_BASE_JAR");
     if (version) cfg.version ??= version;
     if (baseJar) cfg.baseJar ??= baseJar;
   }

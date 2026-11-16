@@ -121,6 +121,12 @@ public final class AutosketchCore {
             if (server != null)
                 feedback.notice(server, null, "Autosketch: work volume extended to " + VolumeModes.size(req.work()) + " to include whole blocks");
         });
+        setup.messages().register("volumes.set", (m, ex) -> {
+            Messages.VolumesSet req = Messages.VolumesSet.decode(m.frame());
+            volumes.setFromAgent(req.id(), req.dimension(), req.work(), req.context());
+            MinecraftServer server = Platform.get().currentServer();
+            if (server != null) feedback.notice(server, null, "Autosketch: the agent set the work volume to " + VolumeModes.size(req.work()));
+        });
         setup.messages().register("notice", (m, ex) -> {
             Messages.Notice n = Messages.Notice.decode(m.frame());
             MinecraftServer server = Platform.get().currentServer();
@@ -188,5 +194,5 @@ public final class AutosketchCore {
     }
 
     /** The protocol-2 features this build implements (13, *Versions and features*). */
-    static final List<String> FEATURES = List.of(Messages.FEATURE_MODES);
+    static final List<String> FEATURES = List.of(Messages.FEATURE_MODES, Messages.FEATURE_SCAN, Messages.FEATURE_VOLUMES_SET);
 }

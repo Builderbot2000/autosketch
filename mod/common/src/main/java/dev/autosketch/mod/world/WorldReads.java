@@ -108,8 +108,9 @@ public final class WorldReads {
         for (Box b : regions) total += b.volume();
         // Every position takes at least one byte of body.
         if (total > FrameCodec.MAX_FRAME) throw ProtocolException.refuse(ErrorCodes.TOO_LARGE, req.id(), total + " positions can't fit in one frame; ask for fewer boxes or sections");
-        ServerLevel level = check(req.id(), req.dimension(), regions);
-        start(new Job(level, regions, sectionsOf(regions), ex) {
+        ServerLevel granted = granted(req.dimension(), regions);
+        ServerLevel level = granted != null ? granted : check(req.id(), req.dimension(), regions);
+        start(new Job(level, regions, sectionsOf(regions), ex, granted != null) {
             @Override
             void finish() {
                 List<String> palette = new ArrayList<>();
@@ -156,6 +157,17 @@ public final class WorldReads {
         });
     }
 
+    /**
+     * Protocol 2 (B4): the scan grant's level when every box lies inside the grant's box in its
+     * dimension, so the snapshot is served without volumes (and without generating chunks); else null.
+     */
+    private @Nullable ServerLevel granted(String dimension, List<Box> boxes) {
+        ScanGrants.Held g = ScanGrants.current();
+        if (g == null || !g.dimension().location().toString().equals(dimension)) return null;
+        for (Box b : boxes) if (!g.grant().box().contains(b)) return null;
+        return levels.apply(g.dimension());
+    }
+
     /** {@code no_volumes}, {@code wrong_dimension}, {@code outside_volumes} (chunk columns the link keeps loaded). */
     private ServerLevel check(long id, String dimension, List<Box> boxes) throws ProtocolException {
         LinkVolumes v = link.current();
@@ -197,7 +209,7 @@ public final class WorldReads {
             try {
                 while (j.next < j.sections.size() && (first || System.nanoTime() < deadline)) {
                     long[] s = j.sections.get(j.next++);
-                    j.captured.put(key(s), capture(j.level, (int) s[0], (int) s[1], (int) s[2], j.boxes));
+                    j.captured.put(key(s), capture(j.level, (int) s[0], (int) s[1], (int) s[2], j.boxes, j.noGenerate));
                     first = false;
                 }
             } catch (RuntimeException e) {
@@ -215,8 +227,14 @@ public final class WorldReads {
 
     /** One section's states (a copy) and the NBT of its block entities inside the boxes. */
     static Captured capture(ServerLevel level, int sx, int sy, int sz, List<Box> boxes) {
+        return capture(level, sx, sy, sz, boxes, false);
+    }
+
+    /** As above; with {@code noGenerate} (a scan-grant read), a chunk never fully generated reads as air. */
+    static Captured capture(ServerLevel level, int sx, int sy, int sz, List<Box> boxes, boolean noGenerate) {
         if (sy < level.getMinSection() || sy >= level.getMaxSection()) return new Captured(null, Map.of());
-        LevelChunk chunk = level.getChunk(sx, sz);
+        LevelChunk chunk = noGenerate ? SurfaceReads.existing(level, sx, sz, new int[1]) : level.getChunk(sx, sz);
+        if (chunk == null) return new Captured(null, Map.of());
         PalettedContainer<BlockState> states = chunk.getSection(chunk.getSectionIndexFromSectionY(sy)).getStates().copy();
         Map<Long, CompoundTag> bes = new HashMap<>();
         for (BlockEntity be : chunk.getBlockEntities().values()) {
@@ -238,15 +256,21 @@ public final class WorldReads {
         final List<Box> boxes;
         final List<long[]> sections;
         final Exchange exchange;
+        final boolean noGenerate;
         final Map<SKey, Captured> captured = new LinkedHashMap<>();
         int next, ticks;
         long serverNanos, offThreadStart;
 
         Job(ServerLevel level, List<Box> boxes, List<long[]> sections, Exchange exchange) {
+            this(level, boxes, sections, exchange, false);
+        }
+
+        Job(ServerLevel level, List<Box> boxes, List<long[]> sections, Exchange exchange, boolean noGenerate) {
             this.level = level;
             this.boxes = boxes;
             this.sections = sections;
             this.exchange = exchange;
+            this.noGenerate = noGenerate;
         }
 
         /** Off-thread: build and send the reply from the copies. */

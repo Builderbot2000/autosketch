@@ -266,6 +266,47 @@ public final class PromptGameTests {
         helper.succeed();
     }
 
+    /** B4: /autosketch scan [radius] [text] sends a scan request with its grant; an MCP without scan gets nothing. */
+    @GameTest(template = "empty")
+    public static void scanSendsItsGrantAndIsRefusedWhenUnlisted(GameTestHelper helper) {
+        ServerPlayer player = helper.makeMockServerPlayerInLevel();
+        Recorder out = new Recorder();
+        dev.autosketch.mod.world.ScanGrants.clear();
+        RecordingBridge noScan = new RecordingBridge(true);
+        with(noScan, fixed(null), out, () -> run(player, "autosketch scan the tower"));
+        helper.assertTrue(noScan.sent.isEmpty(), "a scan request to an MCP whose hello lacks scan sends nothing");
+        helper.assertTrue(out.barOf(player).getLast().contains("doesn't accept scan requests"), "unsupported_mode on the action bar: " + out.barOf(player));
+        helper.assertTrue(dev.autosketch.mod.world.ScanGrants.current() == null, "and grants nothing");
+
+        RecordingBridge all = new RecordingBridge(true, List.of("ask", "scan", "plan", "build"));
+        with(all, fixed(null), out, () -> {
+            run(player, "autosketch scan");
+            run(player, "autosketch scan the tower and the courtyard");
+            run(player, "autosketch scan 20 the tower");
+        });
+        helper.assertTrue(all.sent.size() == 3, "three scan requests sent: " + all.sent.size());
+        try {
+            var plain = dev.autosketch.mod.protocol.Messages.Prompt.decode(all.sent.get(0));
+            var texted = dev.autosketch.mod.protocol.Messages.Prompt.decode(all.sent.get(1));
+            var big = dev.autosketch.mod.protocol.Messages.Prompt.decode(all.sent.get(2));
+            helper.assertTrue(plain.mode().equals("scan") && plain.text().isEmpty() && plain.scan().radius() == 4 && !plain.scan().clipped(), "default radius 4, no text: " + plain);
+            helper.assertTrue(texted.text().equals("the tower and the courtyard") && texted.scan().radius() == 4, "text without a radius: " + texted.text());
+            helper.assertTrue(big.text().equals("the tower") && big.scan().radius() == 12 && big.scan().clipped(), "radius 20 clipped to 12: " + big.scan());
+            BlockPos feet = player.blockPosition();
+            int cx = feet.getX() >> 4;
+            helper.assertTrue(big.scan().columns().minX() == 16 * (cx - 12) && big.scan().columns().maxX() == 16 * (cx + 12) + 15, "columns of the chunks within 12");
+            helper.assertTrue(big.scan().box().minY() == Math.max(helper.getLevel().getMinBuildHeight(), feet.getY() - 32), "the box reaches scanBelow under the feet");
+            var held = dev.autosketch.mod.world.ScanGrants.current();
+            helper.assertTrue(held != null && held.grant().equals(big.scan()) && held.dimension().equals(helper.getLevel().dimension()), "the latest scan's grant is in force");
+        } catch (dev.autosketch.mod.protocol.ProtocolException e) {
+            throw new RuntimeException(e);
+        }
+        helper.assertTrue(out.barOf(player).getLast().contains("scanChunksMax"), "the clipped radius is warned about: " + out.barOf(player));
+        dev.autosketch.mod.world.ScanGrants.clear();
+        leave(player);
+        helper.succeed();
+    }
+
     /** B6: askAlias is a short root for the request subcommands. */
     @GameTest(template = "empty")
     public static void aliasIsAShortRootForRequests(GameTestHelper helper) {
@@ -273,7 +314,7 @@ public final class PromptGameTests {
         PromptModule.alias(dispatcher, "zz");
         var root = dispatcher.getRoot().getChild("zz");
         helper.assertTrue(root != null, "the alias is registered");
-        for (String m : List.of("ask", "plan", "build")) helper.assertTrue(root.getChild(m) != null, "/zz " + m);
+        for (String m : List.of("ask", "scan", "plan", "build")) helper.assertTrue(root.getChild(m) != null, "/zz " + m);
         PromptModule.alias(dispatcher, "Bad Name");
         helper.assertTrue(dispatcher.getRoot().getChild("Bad Name") == null, "a malformed alias is skipped");
         helper.succeed();

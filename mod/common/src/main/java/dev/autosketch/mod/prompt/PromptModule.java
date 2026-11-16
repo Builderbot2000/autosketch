@@ -1,6 +1,7 @@
 package dev.autosketch.mod.prompt;
 
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.logging.LogUtils;
@@ -97,11 +98,23 @@ public final class PromptModule {
     /** The request modes with a plain {@code <text>} subcommand; {@code scan} has its own (B4). */
     static final List<String> TEXT_MODES = List.of("ask", "plan", "build");
 
-    /** Adds the request subcommands under {@code root} ({@code /autosketch}, or the alias). */
+    /**
+     * Adds the request subcommands under {@code root} ({@code /autosketch}, or the alias), including
+     * {@code scan [radius] [text]} (B4: radius in chunks; a number first is the radius, anything else
+     * the text).
+     */
     static void requests(LiteralArgumentBuilder<CommandSourceStack> root) {
         for (String mode : TEXT_MODES)
             root.then(Commands.literal(mode).then(Commands.argument("text", StringArgumentType.greedyString())
                     .executes(ctx -> InGamePrompts.request(ctx.getSource().getPlayerOrException(), mode, StringArgumentType.getString(ctx, "text"), Autosketch.bridge()))));
+        root.then(Commands.literal("scan")
+                .executes(ctx -> InGamePrompts.scan(ctx.getSource().getPlayerOrException(), -1, "", Autosketch.bridge()))
+                .then(Commands.argument("radius", IntegerArgumentType.integer(0))
+                        .executes(ctx -> InGamePrompts.scan(ctx.getSource().getPlayerOrException(), IntegerArgumentType.getInteger(ctx, "radius"), "", Autosketch.bridge()))
+                        .then(Commands.argument("text", StringArgumentType.greedyString())
+                                .executes(ctx -> InGamePrompts.scan(ctx.getSource().getPlayerOrException(), IntegerArgumentType.getInteger(ctx, "radius"), StringArgumentType.getString(ctx, "text"), Autosketch.bridge()))))
+                .then(Commands.argument("text", StringArgumentType.greedyString())
+                        .executes(ctx -> InGamePrompts.scan(ctx.getSource().getPlayerOrException(), -1, StringArgumentType.getString(ctx, "text"), Autosketch.bridge()))));
     }
 
     /**

@@ -23,7 +23,9 @@ import org.jetbrains.annotations.Nullable;
  *
  * <p>The context is the work volume grown by {@code grow} (3 by default; always at least 1, so the
  * seam around the work volume is covered) plus any boxes the player added, clipped to the build
- * height, and capped in total volume. The work volume is not persisted: it lasts until the server
+ * height, and capped in total volume. The agent may also set the volumes ({@code volumes.set}, B4), with
+ * the default context or an explicit list of boxes ({@code grow} 0: no grown box, the list leads with
+ * the seam box when no given box covers it). The work volume is not persisted: it lasts until the server
  * stops or a player clears it, across MCP reconnects. Every change updates {@link LinkVolumesHolder},
  * the chunk tickets, and sends {@code volumes}. Server thread only.
  */
@@ -102,9 +104,12 @@ public final class VolumeManager {
         Box clipped = clip(level, box);
         if (clipped == null) throw new Refused("The work volume lies outside the build height.");
         boolean sameDim = level.dimension().equals(dimension);
-        List<Box> keep = sameDim ? extra : List.of();
-        checkCap(level, clipped, grow, keep);
-        if (!sameDim) extra.clear();
+        // An agent-set context (grow 0) was laid out around the old work volume: start from the default.
+        boolean agentContext = grow == 0;
+        List<Box> keep = sameDim && !agentContext ? extra : List.of();
+        checkCap(level, clipped, agentContext ? DEFAULT_GROW : grow, keep);
+        if (!sameDim || agentContext) extra.clear();
+        if (agentContext) grow = DEFAULT_GROW;
         dimension = level.dimension();
         work = clipped;
         extended = null;
@@ -122,6 +127,54 @@ public final class VolumeManager {
         extra.clear();
         link++;
         refresh();
+    }
+
+    /**
+     * {@code volumes.set} (13, *Message schemas*; B4): the agent sets the volumes as if the player had
+     * marked them. {@code context} null is the default context; otherwise the boxes clipped to the build
+     * height, led by the seam box (the work volume grown by 1) when no box contains it. A new link when
+     * the work volume or dimension changes; answered by the {@code volumes} message carrying
+     * {@code requestId}.
+     */
+    public void setFromAgent(long requestId, String dimensionId, Box box, @Nullable List<Box> context) throws ProtocolException {
+        ServerLevel level = levelOf(dimensionId);
+        if (level == null) throw ProtocolException.refuse(ErrorCodes.WRONG_DIMENSION, requestId, "the server has no dimension " + dimensionId);
+        int minY = level.getMinBuildHeight(), maxY = level.getMaxBuildHeight() - 1;
+        if (box.minY() < minY || box.maxY() > maxY)
+            throw ProtocolException.refuse(ErrorCodes.BAD_VOLUMES, requestId, "the work volume " + box + " lies outside the build height " + minY + ".." + maxY);
+        int g;
+        List<Box> boxes = new ArrayList<>();
+        if (context == null) g = DEFAULT_GROW;
+        else {
+            g = 0;
+            for (Box b : context) {
+                Box c = clipY(b, minY, maxY);
+                if (c != null) boxes.add(c);
+            }
+            Box seam = clipY(box.grow(1), minY, maxY);
+            if (boxes.stream().noneMatch(b -> b.contains(seam))) boxes.add(0, seam);
+        }
+        long total = 0;
+        if (g > 0) total += clipY(box.grow(g), minY, maxY).volume();
+        for (Box b : boxes) total += b.volume();
+        long cap = contextCap.getAsLong();
+        if (total > cap) throw ProtocolException.refuse(ErrorCodes.BAD_VOLUMES, requestId, "the context holds " + total + " blocks, more than the cap of " + cap);
+        if (!box.equals(work) || !level.dimension().equals(dimension)) {
+            link++;
+            extended = null;
+        }
+        dimension = level.dimension();
+        work = box;
+        grow = g;
+        extra.clear();
+        extra.addAll(boxes);
+        refresh(requestId);
+    }
+
+    private @Nullable ServerLevel levelOf(String dimensionId) {
+        if (server == null) return null;
+        net.minecraft.resources.ResourceLocation id = net.minecraft.resources.ResourceLocation.tryParse(dimensionId);
+        return id == null ? null : server.getLevel(ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, id));
     }
 
     /** {@code context add}: adds a box (in the work volume's dimension). */
@@ -172,7 +225,7 @@ public final class VolumeManager {
 
     private void checkCap(ServerLevel level, Box w, int g, List<Box> boxes) throws Refused {
         long total = 0;
-        Box grown = clip(level, w.grow(g));
+        Box grown = g > 0 ? clip(level, w.grow(g)) : null;
         if (grown != null) total += grown.volume();
         for (Box b : boxes) total += b.volume();
         long cap = contextCap.getAsLong();
@@ -197,25 +250,36 @@ public final class VolumeManager {
         if (work == null || server == null) return null;
         ServerLevel level = server.getLevel(dimension);
         List<Box> context = new ArrayList<>();
-        Box grown = level == null ? work.grow(grow) : clip(level, work.grow(grow));
-        context.add(grown == null ? work : grown);
+        if (grow > 0) {
+            Box grown = level == null ? work.grow(grow) : clip(level, work.grow(grow));
+            context.add(grown == null ? work : grown);
+        }
         context.addAll(extra);
         return new LinkVolumes(link, dimension, work, extended, context);
     }
 
     /** The {@code volumes} message for the current state. */
     public Frame volumesFrame() {
+        return volumesMessage().encode();
+    }
+
+    private Messages.Volumes volumesMessage() {
         LinkVolumes v = current();
-        if (v == null) return Messages.Volumes.none(link).encode();
-        return new Messages.Volumes(link, v.dimension().location().toString(), v.work(), v.context(), v.extended()).encode();
+        if (v == null) return Messages.Volumes.none(link);
+        return new Messages.Volumes(link, v.dimension().location().toString(), v.work(), v.context(), v.extended());
     }
 
     /** Re-publishes after a change: holder listeners, chunk tickets, then {@code volumes} to the MCP. */
     public void refresh() {
+        refresh(null);
+    }
+
+    /** As {@link #refresh()}; with a request id, the {@code volumes} sent confirms that {@code volumes.set}. */
+    public void refresh(@Nullable Long requestId) {
         LinkVolumes v = current();
         holder.set(v);
         updateTickets();
-        bridge.send(volumesFrame());
+        bridge.send(requestId == null ? volumesFrame() : volumesMessage().confirming(requestId).encode());
     }
 
     /** Tickets are held while linked: a work volume is set and an MCP is connected (M4). */

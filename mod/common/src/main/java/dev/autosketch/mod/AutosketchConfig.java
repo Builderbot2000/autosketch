@@ -68,6 +68,10 @@ public final class AutosketchConfig implements ConfigData {
     @ConfigEntry.Gui.TransitiveObject
     public Prompts prompts = new Prompts();
 
+    @ConfigEntry.Category("scan")
+    @ConfigEntry.Gui.TransitiveObject
+    public Scan scan = new Scan();
+
     @ConfigEntry.Category("discovery")
     @ConfigEntry.Gui.TransitiveObject
     public Discovery discovery = new Discovery();
@@ -124,6 +128,20 @@ public final class AutosketchConfig implements ConfigData {
     public static final class Discovery {
         @ConfigEntry.Gui.Tooltip(count = 2)
         public boolean pointer = true;
+    }
+
+    /** {@code /autosketch scan} (13, B4): the grant a scan request gives the MCP to read. */
+    public static final class Scan {
+        @ConfigEntry.Gui.Tooltip
+        public int scanChunks = 4;
+        @ConfigEntry.Gui.Tooltip
+        public int scanChunksMax = 12;
+        @ConfigEntry.Gui.Tooltip
+        public int scanBelow = 32;
+        @ConfigEntry.Gui.Tooltip
+        public int scanAbove = 64;
+        @ConfigEntry.Gui.Tooltip
+        public long scanCap = 4_194_304L;
     }
 
     // ── keys: file layout, comments, ranges ───────────────────────────────────────────────────
@@ -189,7 +207,20 @@ public final class AutosketchConfig implements ConfigData {
                     "so a local Autosketch MCP can find this game (14, *Instance discovery*). Off: no file is written and this game's old one is removed."),
                     null, c -> c.discovery.pointer, (c, v) -> {
                         if (v instanceof Boolean b) c.discovery.pointer = b;
+                    }),
+            intKey("scan", "scanChunks", 0, 32, c -> c.scan.scanChunks, (c, v) -> c.scan.scanChunks = v,
+                    "Default radius of /autosketch scan, in chunks around the player's chunk (4: 9x9 chunks, 144 blocks across)."),
+            intKey("scan", "scanChunksMax", 0, 32, c -> c.scan.scanChunksMax, (c, v) -> c.scan.scanChunksMax = v,
+                    "Largest scan radius in chunks; a larger request is clipped with a warning (12: 25x25 chunks, 400 blocks across)."),
+            intKey("scan", "scanBelow", 0, 4096, c -> c.scan.scanBelow, (c, v) -> c.scan.scanBelow = v,
+                    "How far below the player's feet the full-block part of a scan reaches."),
+            intKey("scan", "scanAbove", 0, 4096, c -> c.scan.scanAbove, (c, v) -> c.scan.scanAbove = v,
+                    "How far above the player's feet the full-block part of a scan reaches."),
+            new Key("scan", "scanCap", List.of("Most blocks the full-block part of a scan may cover; its width shrinks to fit (default: the context cap)."),
+                    "1 ~ " + (1L << 40), c -> c.scan.scanCap, (c, v) -> {
+                        if (v instanceof Long l) c.scan.scanCap = Math.max(1L, Math.min(1L << 40, l));
                     }));
+
 
     static boolean validTracker(String s) {
         return s.equals("hook") || s.equals("scan") || s.equals("both");

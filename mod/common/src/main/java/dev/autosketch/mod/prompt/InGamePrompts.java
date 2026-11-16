@@ -13,6 +13,7 @@ import dev.autosketch.mod.protocol.Box;
 import dev.autosketch.mod.protocol.Frame;
 import dev.autosketch.mod.protocol.Json;
 import dev.autosketch.mod.protocol.Messages;
+import dev.autosketch.mod.world.ScanGrants;
 import dev.autosketch.mod.protocol.ProtocolException;
 import dev.autosketch.mod.prompt.ChatRules.LogMode;
 import java.util.ArrayList;
@@ -165,6 +166,29 @@ public final class InGamePrompts {
         }
         out.actionBar(player, Component.literal("Autosketch: asking the agent…").withStyle(ChatFormatting.GRAY));
         return 1;
+    }
+
+    /**
+     * {@code /autosketch scan [radius] [text]} (13, B4): a {@code scan} request carrying the grant sized
+     * from the config around the player ({@code radius} negative: {@code scanChunks}). The grant takes
+     * effect as the request goes out, replacing any earlier one. A radius over {@code scanChunksMax} is
+     * clipped, with a warning on the action bar.
+     */
+    public static int scan(ServerPlayer player, int radius, String text, Bridge bridge) {
+        AutosketchConfig.Scan cfg = AutosketchConfig.get().scan;
+        Messages.ScanGrant[] sized = {null};
+        int sent = request(player, "scan", text, bridge, () -> {
+            BlockPos feet = player.blockPosition();
+            Level level = player.level();
+            Messages.ScanGrant g = ScanGrants.size(radius, cfg.scanChunks, cfg.scanChunksMax, feet.getX(), feet.getY(), feet.getZ(),
+                    level.getMinBuildHeight(), level.getMaxBuildHeight() - 1, cfg.scanBelow, cfg.scanAbove, cfg.scanCap);
+            ScanGrants.set(level.dimension(), g);
+            sized[0] = g;
+            return g;
+        });
+        if (sent == 1 && sized[0].clipped())
+            out.actionBar(player, Component.literal("Autosketch: scanning " + sized[0].radius() + " chunks around you (the most scanChunksMax allows), asking the agent…").withStyle(ChatFormatting.YELLOW));
+        return sent;
     }
 
     /** The action-bar text for a request mode the MCP doesn't accept (its hello doesn't list it). */

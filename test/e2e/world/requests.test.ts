@@ -181,24 +181,24 @@ describe.skipIf(!ENABLED)("e2e world: in-game requests (B4, B6)", () => {
     expect(mcp.link.bridge.volumes).toEqual(before);
   }, 60_000);
 
-  it("pairs in protocol 2 with every feature listed; a protocol-1 hello is refused naming the MCP as older", async () => {
+  it("pairs in protocol 3 with every feature listed; a protocol-2 hello is refused naming the MCP as older", async () => {
     inGame.close();
     await mcp.close();
     mcp = undefined as unknown as Mcp;
     const bridge = new Bridge({ instanceDir: SERVER_DIR, volatile: DEFAULT_VOLATILE, reconnect: false });
     const hello = await bridge.connect();
-    expect(hello.protocol).toBe(2);
-    expect(hello.features).toEqual(expect.arrayContaining(["modes", "scan", "volumes.set"]));
+    expect(hello.protocol).toBe(3);
+    expect(hello.features).toEqual(expect.arrayContaining(["modes", "scan", "volumes.set", "registry", "upgrade"]));
     bridge.close();
-    // The mod speaks only protocol 2 (N−1 support is the MCP's: it speaks 2 and 1, unit-tested against the frozen v1 fake host).
+    // The mod speaks only protocol 3 (N−1 support is the MCP's: it speaks 3 and 2, unit-tested against a protocol-2 fake host).
     const p = await readPairing(SERVER_DIR);
     const s = connect(p.port, p.host);
     await new Promise<void>((ok, fail) => (s.once("connect", () => ok()), s.once("error", fail)));
     const reader = new FrameReader();
     const reply = new Promise<ReturnType<typeof decodeMessage>>((ok) => s.on("data", (d) => { const f = reader.push(d)[0]; if (f) ok(decodeMessage(f, "mod")); }));
-    s.write(encodeMessage({ type: "hello", protocol: 1, token: p.token, client: { name: "old", version: "0" }, volatile: {} }));
+    s.write(encodeMessage({ type: "hello", protocol: 2, token: p.token, client: { name: "old", version: "0" }, volatile: {} }));
     const m = await reply;
     s.destroy();
-    expect(m).toMatchObject({ type: "error", code: "protocol_mismatch", protocol: 2 });
+    expect(m).toMatchObject({ type: "error", code: "protocol_mismatch", protocol: 3 });
   }, 60_000);
 });

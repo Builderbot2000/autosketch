@@ -29,7 +29,7 @@ export function renderScopeTree(el, model, { selected, onSelect, now = Date.now(
       h("span", { class: "swatch" }),
       h("b", {}, s.id === "base" ? model.doc ?? "base" : s.id),
       h("span", { class: "status" }, s.id === "base" ? "base" : s.status),
-      h("span", { class: "meta" }, `${age}${age ? " · " : ""}${s.ops} ops${s.lastTool ? " · " + s.lastTool : ""}${s.refusals.length ? ` · ${s.refusals.length} refused` : ""}`),
+      h("span", { class: "meta" }, `${age}${age ? " · " : ""}${s.ops} ops${s.lastTool ? " · " + s.lastTool : ""}${s.refusals.length ? ` · ${s.refusals.length} refused` : ""}${spendText(model.spend?.scopeTotals(s.id))}`),
       s.id !== "base" ? h("div", { class: "brief" }, s.brief) : null,
     );
     return h("div", { class: "node" }, row, children.length ? h("div", { class: "children" }, children.map(node)) : null);
@@ -48,9 +48,72 @@ export function renderFeed(el, model, filters, limit = 400) {
         h("span", { class: "seq" }, e.seq ?? ""),
         h("span", { class: "doc", style: `--hue:${scopeHue(e.doc ?? "base")}` }, e.doc ?? ""),
         h("span", { class: "kind" }, e.kind),
-        h("span", { class: "text" }, describe(e)),
+        h("span", { class: "text" }, describe(e) + (e.kind === "call.end" ? actionLabel(model.spend?.label(e.call)) : "")),
       ),
     ),
+  );
+}
+
+/** "12.3k" style token counts. */
+export const tok = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e4 ? `${Math.round(n / 1e3)}k` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(Math.round(n)));
+const usd = (c) => `$${c < 1 ? c.toFixed(3) : c.toFixed(2)}`;
+const allTokens = (t) => t.input + t.output + t.cacheRead + t.cacheWrite;
+
+function spendText(t) {
+  return t ? ` · ${tok(allTokens(t))} tok · ${usd(t.cost)}` : "";
+}
+
+/** A call's tokens (13 B3): the issuing request's output tokens, split across its tool calls, and the result size. */
+function actionLabel(l) {
+  if (!l) return "";
+  const parts = [];
+  if (l.outputTokens !== undefined) parts.push(`${tok(l.outputTokens)} out tok${l.shared > 1 ? ` (1/${l.shared} of a request)` : ""}`);
+  if (l.bytes !== undefined) parts.push(`result ${tok(l.bytes)} B`);
+  return parts.length ? ` · ${parts.join(", ")}` : "";
+}
+
+/**
+ * Token spend from Claude Code's OpenTelemetry (13 B3): per-prompt totals by token type with cost,
+ * counting up as batches arrive. `otel` is /info's `otel` (live sessions only): with no records yet,
+ * a notice with the setup snippet.
+ */
+export function renderSpend(el, spend, otel) {
+  if (!spend.records) {
+    if (!otel) {
+      el.replaceChildren(h("div", { class: "dim spend-note" }, "no token data in this log"));
+      return;
+    }
+    const snippet = JSON.stringify({ env: otel.setup }, null, 2);
+    el.replaceChildren(
+      h(
+        "div",
+        { class: "spend-note" },
+        "No token data from Claude Code yet. To see per-prompt and per-action token spend, add this to ~/.claude/settings.json (a repository's .claude/settings.json can't set exporters) and restart Claude Code:",
+        h("pre", { class: "snippet" }, snippet),
+        otel.portPinned
+          ? null
+          : h("div", { class: "warn" }, `This viewer is on a free port this launch (${otel.setup.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT.replace(/^.*:(\d+)\/.*$/, "$1")}), which changes every launch. Pin it in Settings (observe.http) so the endpoint stays valid.`),
+      ),
+    );
+    return;
+  }
+  const t = spend.total;
+  const row = (label, x, cls = "") =>
+    h("div", { class: `spend-row ${cls}` },
+      h("span", { class: "spend-label" }, label),
+      h("span", { title: "input" }, `in ${tok(x.input)}`),
+      h("span", { title: "output" }, `out ${tok(x.output)}`),
+      h("span", { title: "cache read" }, `cache r ${tok(x.cacheRead)}`),
+      h("span", { title: "cache write" }, `cache w ${tok(x.cacheWrite)}`),
+      h("b", {}, usd(x.cost)),
+    );
+  const prompts = spend.promptList().slice(0, 12);
+  el.replaceChildren(
+    row(`session · ${t.requests} requests`, t, "total"),
+    ...prompts.map((p, i) => {
+      const what = p.command ? `/${p.command}` : p.text ? p.text.slice(0, 40) : `prompt ${spend.prompts.size - i}${p.length !== undefined ? ` (${p.length} chars)` : ""}`;
+      return row(what, p.tokens);
+    }),
   );
 }
 

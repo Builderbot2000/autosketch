@@ -89,7 +89,7 @@ Settled: the goal is modpack-, loader- and version-agnostic. Publishing to sever
 
 **Build layout (settled).** The MultiLoader template's layout: a `common` module (everything that uses only vanilla types) and one thin module per loader, with no runtime library for players to install (Architectury would add one). Version differences inside a module go through Stonecutter (version-conditional lines in one source tree) rather than one git branch per Minecraft version.
 
-**Config across loaders (proposed: Cloth Config).** NeoForge and Forge have a built-in config system (`ModConfigSpec`, what the mod uses today); Fabric has none. A config library that exists on every loader removes the difference. Checked in the user's four packs (2026-11-15):
+**Config across loaders (settled: Cloth Config).** NeoForge and Forge have a built-in config system (`ModConfigSpec`, what the mod uses today); Fabric has none. A config library that exists on every loader removes the difference. Checked in the user's four packs (2026-11-15):
 
 | Library | Craftoria (NeoForge 1.21.1) | ATM10 (NeoForge 1.21.1) | NightfallCraft (Forge 1.20.1) | Fabulously Optimized (Fabric 1.21.11) |
 |---|---|---|---|---|
@@ -98,7 +98,7 @@ Settled: the goal is modpack-, loader- and version-agnostic. Publishing to sever
 | Resourceful Config | ✓ | ✓ | ✓ | — |
 | Forge Config API Port | built-in API | built-in API | built-in API | ✓ |
 
-Cloth Config is the proposal: it is in every pack checked, on all three loaders and from 1.20.1 to 1.21.11, so most players already have it, and CurseForge and the Modrinth App install a required dependency on their own. Its AutoConfig writes a plain config file on a dedicated server and gives a config screen on the client for free. The cost is one required dependency and rewriting `AutosketchConfig` (one file) away from `ModConfigSpec`; config files written by the current build are read once and migrated. YetAnotherConfigLib is as widespread but built around its client screens; Forge Config API Port would keep today's code but adds a mod on Fabric only.
+Cloth Config is the choice (settled with the user 2026-11-15): it is in every pack checked, on all three loaders and from 1.20.1 to 1.21.11, so most players already have it, and CurseForge and the Modrinth App install a required dependency on their own. Its AutoConfig writes a plain config file on a dedicated server and gives a config screen on the client for free. The cost is one required dependency and rewriting `AutosketchConfig` (one file) away from `ModConfigSpec`; config files written by the current build are read once and migrated. YetAnotherConfigLib is as widespread but built around its client screens; Forge Config API Port would keep today's code but adds a mod on Fabric only.
 
 **Tests across versions (settled for now).** Each extra version or loader gets a smoke test only: it builds, the GameTest server starts with the mod, and the bridge pairs. The full GameTest suite and the end-to-end tier keep running on the Craftoria profile only. Full coverage of the other targets remains to be done (`10`).
 
@@ -194,7 +194,6 @@ Deferred by the user until later development. What was found, for when it comes 
 ## Open questions
 
 - Instance records of the Modrinth App, ATLauncher and GDLauncher: read on a machine that has them.
-- Config across loaders: confirm Cloth Config.
 - How Axiom upgrades an older `.bp` (not documented publicly): check in the game before relying on the `.schem` treatment.
 - The registry report's format and size on Craftoria (532 mods), measured before the file layout is fixed.
 
@@ -207,7 +206,8 @@ Deferred by the user until later development. What was found, for when it comes 
 - **The mod targets every pack, loader and version it can, published as one project per site** (settled as the goal; the range is open).
 - **Model-agnostic operator deferred** (settled).
 - **First release on Craftoria's profile** (NeoForge 1.21.1, settled). Reason: it is the pack the user builds on and the one every test runs against.
-- **MultiLoader layout with Stonecutter** (settled). Reason: no runtime library for players, and one source tree for every version.
+- **MultiLoader layout with Stonecutter** (settled).
+- **Cloth Config for the mod's config on every loader** (settled). Reason: it is already in every pack checked, on all three loaders, and gives a config file on servers and a screen on clients. Reason: no runtime library for players, and one source tree for every version.
 - **Smoke tests only for extra targets, for now** (settled); full coverage is recorded as outstanding in `10`.
 - **Released as *Autosketch*, jars named by the MultiLoader convention, with the support rules above** (settled; the rules were proposed and accepted as a starting point).
 - **`AGPL-3.0-or-later` for both the mod and the MCP** (settled). Reason: one license to explain, and later license versions apply without relicensing.

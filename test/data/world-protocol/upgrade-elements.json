@@ -1,10 +1,10 @@
 {
-  "description": "Upgrade a 1.20.1 schematic's elements: palette states as the file names them, a sign with its pre-1.20 text layout, an armor stand",
+  "description": "Upgrade a 1.19.4 schematic's elements: palette states as the file names them, a sign with its pre-1.20 text layout, an armor stand",
   "sender": "mcp",
   "header": {
     "type": "upgrade",
     "id": 60,
-    "from": 3465,
+    "from": 3337,
     "kind": "elements"
   },
   "body": {

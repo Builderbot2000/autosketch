@@ -1,5 +1,5 @@
 {
-  "description": "The upgraded elements, in the request's order: grass became short_grass, the unknown block passed through, the sign gained front_text and back_text",
+  "description": "The upgraded elements, in the request's order: grass became short_grass, the unknown block passed through, the sign's text moved to front_text and back_text (the game keeps the old keys too; left out here)",
   "sender": "mod",
   "header": {
     "type": "upgrade.result",

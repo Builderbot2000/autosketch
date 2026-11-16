@@ -118,6 +118,11 @@ public final class DataGameTests {
         check(out != null && out.getInt("DataVersion") == Upgrades.currentVersion(), "stamped with the running version");
         check(out.getList("palette", 10).getCompound(0).getString("Name").equals("minecraft:short_grass"), "the palette is upgraded: " + out);
         check(r.failed() == 0, "nothing failed");
+
+        // A structure without a DataVersion is read as 500, as the game does: a grass path is a dirt path since 1.17.
+        CompoundTag old = snbt("{size:[1,1,1],palette:[{Name:\"minecraft:grass_path\"}],blocks:[{pos:[0,0,0],state:0}],entities:[]}");
+        CompoundTag up = Upgrades.upgrade(500, UpgradeData.structure(old)).data().structure();
+        check(up.getList("palette", 10).getCompound(0).getString("Name").equals("minecraft:dirt_path"), "from 500: " + up);
         h.succeed();
     }
 

@@ -386,16 +386,16 @@ vector("chat-reply", "mcp", "The agent's reply closing a request", { type: "chat
   });
   vector("registry-result-unchanged", "mod", "The MCP already holds this report: no body", { type: "registry.result", id: 51, hash, dataVersion: 3955, unchanged: true });
 }
-vector("upgrade-elements", "mcp", "Upgrade a 1.20.1 schematic's elements: palette states as the file names them, a sign with its pre-1.20 text layout, an armor stand", {
+vector("upgrade-elements", "mcp", "Upgrade a 1.19.4 schematic's elements: palette states as the file names them, a sign with its pre-1.20 text layout, an armor stand", {
   type: "upgrade",
   id: 60,
-  from: 3465,
+  from: 3337,
   kind: "elements",
   states: ["minecraft:grass", "minecraft:oak_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]", "othermod:gizmo[lit=true]"],
   blockEntities: [S('{id:"minecraft:sign",Text1:"{\\"text\\":\\"North\\"}",Text2:"{\\"text\\":\\"\\"}",Text3:"{\\"text\\":\\"\\"}",Text4:"{\\"text\\":\\"\\"}",Color:"black",GlowingText:0b}')],
   entities: [S('{id:"minecraft:armor_stand",Rotation:[90.0f,0.0f],Invisible:0b}')],
 });
-vector("upgrade-result-elements", "mod", "The upgraded elements, in the request's order: grass became short_grass, the unknown block passed through, the sign gained front_text and back_text", {
+vector("upgrade-result-elements", "mod", "The upgraded elements, in the request's order: grass became short_grass, the unknown block passed through, the sign's text moved to front_text and back_text (the game keeps the old keys too; left out here)", {
   type: "upgrade.result",
   id: 60,
   to: 3955,
@@ -415,14 +415,14 @@ vector("upgrade-result-failed", "mod", "An upgrade where the fixer threw on one 
   entities: [],
 });
 {
-  const structure = S('{DataVersion:500,size:[1,1,1],palette:[{Name:"minecraft:grass"}],blocks:[{pos:[0,0,0],state:0}],entities:[]}');
+  const structure = S('{size:[1,1,1],palette:[{Name:"minecraft:grass_path"}],blocks:[{pos:[0,0,0],state:0}],entities:[]}');
   vector("upgrade-structure", "mcp", "Upgrade a whole structure file (STRUCTURE fix type); it has no DataVersion, so from is 500 as the game assumes", { type: "upgrade", id: 62, from: 500, kind: "structure", structure });
   vector("upgrade-result-structure", "mod", "The upgraded structure, stamped with the running version", {
     type: "upgrade.result",
     id: 62,
     to: 3955,
     kind: "structure",
-    structure: S('{DataVersion:3955,size:[1,1,1],palette:[{Name:"minecraft:short_grass"}],blocks:[{pos:[0,0,0],state:0}],entities:[]}'),
+    structure: S('{DataVersion:3955,size:[1,1,1],palette:[{Name:"minecraft:dirt_path"}],blocks:[{pos:[0,0,0],state:0}],entities:[]}'),
   });
 }
 

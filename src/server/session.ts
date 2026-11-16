@@ -14,6 +14,7 @@ import { BASE, refusal, ScopeManager } from "../scope/scopes.js";
 import type { ScopeLimits } from "../scope/settings.js";
 import type { LinkOpenOptions, WorldLink } from "../world/link.js";
 import type { InGameReplies } from "../world/prompt.js";
+import type { InstanceContext } from "./context.js";
 
 /**
  * One document per session (docs/design/04-document.md). Documents live in the workspace as
@@ -54,8 +55,39 @@ export interface CallHook {
   after?(call: CallInfo, result: CallToolResult): Promise<CallToolResult> | CallToolResult;
 }
 
+/** Locator hints for `loadInstance` (as `setup --version` / `--base-jar` save them). */
+export interface InstanceLoadOptions {
+  version?: string;
+  baseJar?: string;
+}
+
+/**
+ * How the entry point loads an instance after startup, and what tools say while there is none
+ * (docs/design/14-distribution.md, *Setup*: an unconfigured server still starts). Installed as
+ * `session.setup`; a session without it can only be given an instance with `setInstance`.
+ */
+export interface InstanceSetup {
+  /** Loads the instance folder into a context (the registry, palette, plugins…). */
+  load(path: string, opts?: InstanceLoadOptions): Promise<InstanceContext>;
+  /**
+   * The instance config.toml names now, if any: one saved since startup (`autosketch setup`, or by
+   * hand) is loaded in place on the next tool call, with no restart.
+   */
+  saved?(): ({ path: string } & InstanceLoadOptions) | undefined;
+  /** The text of the `not_configured` answer: discovered instances, a `setup` command for each, the UI's URL. */
+  notConfigured(): Promise<string>;
+}
+
 export class Session {
   doc?: Document;
+  /** Loads instances after startup and explains their absence (`InstanceSetup`); set by the entry point. */
+  setup?: InstanceSetup;
+  /** The instance the tools use: loaded, loading or failed; undefined while not configured. */
+  private instanceCtx?: Promise<InstanceContext>;
+  private instanceFailed = false;
+  private instanceWaiters: ((c: InstanceContext) => void)[] = [];
+  private instanceReady?: InstanceContext;
+  private savedFailure?: { key: string; error: unknown };
   /** The observability sinks set by the entry point (12); `events` hands out the fan-out over them. */
   private observeSink: EventSink = NO_EVENTS;
   private observeSinkFor?: (doc: string) => EventSink;
@@ -118,6 +150,81 @@ export class Session {
    */
   subscribe(fn: EventListener): () => void {
     return this.fanout.subscribe(fn);
+  }
+
+  /** The instance tools use (loaded, still loading, or failed), or undefined while not configured (`14`, *Setup*). */
+  get instance(): Promise<InstanceContext> | undefined {
+    return this.instanceCtx;
+  }
+
+  /** True while an instance is loaded or loading, so `loadInstance` would be refused. */
+  get hasInstance(): boolean {
+    return this.instanceCtx !== undefined && !this.instanceFailed;
+  }
+
+  /** Gives the session the instance it starts with (the entry point's launch or config.toml instance). */
+  setInstance(ctx: Promise<InstanceContext>): void {
+    this.instanceCtx = ctx;
+    this.instanceFailed = false;
+    ctx.then(
+      (c) => {
+        if (this.instanceCtx !== ctx) return;
+        this.instanceReady = c;
+        for (const w of this.instanceWaiters.splice(0)) w(c);
+      },
+      () => {
+        if (this.instanceCtx === ctx) this.instanceFailed = true;
+      },
+    );
+  }
+
+  /** Resolves once an instance has loaded (at startup or by `loadInstance`); never rejects. */
+  whenInstance(): Promise<InstanceContext> {
+    if (this.instanceReady) return Promise.resolve(this.instanceReady);
+    return new Promise((ok) => this.instanceWaiters.push(ok));
+  }
+
+  /**
+   * Loads an instance in place, without a restart (`15`, *Instance tab and first-run setup*: the
+   * first choice). Only while nothing is loaded or loading: switching away from a loaded instance
+   * is refused (`instance_loaded`), since the registry, atlas and open documents are built on it;
+   * that needs config.toml and a restart. Allowed after a failed load. A failed load leaves the
+   * session unconfigured again and rejects with the reason. Does not write config.toml.
+   */
+  async loadInstance(path: string, opts: InstanceLoadOptions = {}): Promise<InstanceContext> {
+    return this.startLoad(path, opts);
+  }
+
+  /** `loadInstance`'s synchronous start, so a second call made at once is already refused. */
+  private startLoad(path: string, opts: InstanceLoadOptions): Promise<InstanceContext> {
+    if (this.hasInstance) return Promise.reject(refusal("instance_loaded", "An instance is already loaded; choosing another one is saved in config.toml and takes effect when the server restarts."));
+    if (!this.setup) return Promise.reject(new Error("This server can't load an instance in place."));
+    const p = this.setup.load(path, opts);
+    this.setInstance(p);
+    return p.catch((e: unknown) => {
+      if (this.instanceCtx === p) {
+        this.instanceCtx = undefined;
+        this.instanceFailed = false;
+      }
+      throw e;
+    });
+  }
+
+  /**
+   * The instance for a tool call: the current one, else one config.toml names now (saved since
+   * startup), loaded in place; undefined while not configured.
+   */
+  instanceForCall(): Promise<InstanceContext> | undefined {
+    if (this.instanceCtx && !this.instanceFailed) return this.instanceCtx;
+    const saved = this.setup?.saved?.();
+    if (!saved) return this.instanceCtx;
+    // A saved choice that already failed isn't retried on every call; changing config.toml retries it.
+    const key = JSON.stringify(saved);
+    if (this.savedFailure?.key === key) return Promise.reject(this.savedFailure.error);
+    const { path, ...opts } = saved;
+    const p = this.startLoad(path, opts);
+    p.catch((error: unknown) => (this.savedFailure = { key, error }));
+    return p;
   }
 
   pathFor(name: string): string {

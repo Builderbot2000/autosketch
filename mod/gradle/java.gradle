@@ -1,0 +1,20 @@
+// Settings shared by every module (applied from common/build.gradle and neoforge/build.gradle).
+version = mod_version
+group = mod_group_id
+
+// Mojang ships Java 21 for 1.21.1. The foojay resolver (settings.gradle) downloads it if missing.
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+repositories {
+    mavenCentral()
+    // Cloth Config (14, *Config across loaders*).
+    maven {
+        url = 'https://maven.shedaniel.me/'
+        content { includeGroup 'me.shedaniel.cloth' }
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.compilerArgs << '-Xlint:deprecation' << '-Xlint:unchecked'
+}

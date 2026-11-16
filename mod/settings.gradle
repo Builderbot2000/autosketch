@@ -10,3 +10,8 @@ plugins {
 }
 
 rootProject.name = 'autosketch-mod'
+
+// The MultiLoader layout (docs/design/14-distribution.md, *Build layout*): `common` holds every
+// class that uses only vanilla types and is compiled into each loader's jar; `neoforge` is the thin
+// NeoForge module (entry point, events, GameTests).
+include 'common', 'neoforge'

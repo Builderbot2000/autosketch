@@ -1,0 +1,69 @@
+// The common module (14, *Build layout*): every class that uses only vanilla types, compiled into
+// each loader's jar. It compiles against vanilla Minecraft alone (NeoForm, no loader), so a loader
+// import here fails the build.
+plugins {
+    id 'java-library'
+    id 'net.neoforged.moddev'
+}
+
+apply from: rootProject.file('gradle/java.gradle')
+
+neoForge {
+    neoFormVersion = project.neo_form_version
+
+    parchment {
+        mappingsVersion = project.parchment_mappings_version
+        minecraftVersion = project.parchment_minecraft_version
+    }
+}
+
+// Plain JUnit tests (codec, socket, config) see the game's classes without booting the game.
+neoForge.addModdingDependenciesTo(sourceSets.test)
+
+dependencies {
+    // The change tracker's mixin (13, M9) and its config plugin; the loader provides Mixin at runtime.
+    compileOnly "net.fabricmc:sponge-mixin:${mixin_version}"
+    compileOnly "org.ow2.asm:asm-tree:${asm_version}"
+    compileOnly "org.jetbrains:annotations:${jetbrains_annotations_version}"
+    // Cloth Config's AutoConfig API (14, *Config across loaders*). Its classes are the same on every
+    // loader; the loader module depends on that loader's Cloth Config jar.
+    compileOnly "me.shedaniel.cloth:cloth-config-neoforge:${cloth_config_version}"
+    testImplementation "me.shedaniel.cloth:cloth-config-neoforge:${cloth_config_version}"
+    testCompileOnly "org.jetbrains:annotations:${jetbrains_annotations_version}"
+
+    testImplementation platform('org.junit:junit-bom:5.11.4')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// The golden vectors shared with the TypeScript side (13, *Golden vectors*): the only files both
+// sides read. Tests find them through this property, so nothing is copied into mod/.
+def goldenDir = rootProject.file('../test/data/world-protocol').absolutePath
+
+tasks.named('test', Test) {
+    useJUnitPlatform()
+    systemProperty 'autosketch.goldenDir', goldenDir
+    inputs.dir(goldenDir).withPropertyName('goldenVectors').withPathSensitivity(PathSensitivity.RELATIVE)
+    testLogging {
+        events 'failed'
+        exceptionFormat 'full'
+    }
+}
+
+// The loader modules compile these sources and resources into their own jar (the MultiLoader
+// template's pattern), so the common module never ships as a jar of its own.
+configurations {
+    commonJava {
+        canBeResolved = false
+        canBeConsumed = true
+    }
+    commonResources {
+        canBeResolved = false
+        canBeConsumed = true
+    }
+}
+
+artifacts {
+    commonJava sourceSets.main.java.sourceDirectories.singleFile
+    commonResources sourceSets.main.resources.sourceDirectories.singleFile
+}

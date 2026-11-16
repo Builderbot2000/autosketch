@@ -16,6 +16,7 @@ import nbt from "prismarine-nbt";
 import { PNG } from "pngjs";
 import { describe, expect, it } from "vitest";
 import { decodeBlueprint, encodeBlueprint, splitBlueprint } from "../../src/formats/axiom.js";
+import { decodeLitematic, encodeLitematic } from "../../src/formats/litematic.js";
 import { readNbt } from "../../src/formats/nbt.js";
 import { snapshotOf, type Snapshot } from "../../src/formats/snapshot.js";
 import { decodeSponge, encodeSponge, type DecodeOptions } from "../../src/formats/sponge.js";
@@ -58,6 +59,7 @@ const FORMATS: Format[] = [
     },
     dropsNbt: true,
   },
+  { file: "cottage.litematic", encode: (s) => encodeLitematic(s, { author: "autosketch-golden", date: DATE }), decode: decodeLitematic, trees: nbtTree },
 ];
 
 /** Everything observable in a snapshot, independent of palette order. */

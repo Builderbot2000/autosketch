@@ -49,6 +49,7 @@ import { CLI_COMMANDS, runCli } from "../cli/index.js";
 import { bakerFor } from "./tools/shared.js";
 import { LiveLink } from "../world/live-link.js";
 import { watchGameReport } from "../assets/report.js";
+import { bridgeUpgrader } from "../world/upgrade.js";
 import { promptSettings, worldSettings } from "../world/settings.js";
 import { CHANNEL_INSTRUCTIONS, CHANNEL_METHOD, InGameRequests } from "../world/prompt.js";
 import { autoSyncHook, syncLink } from "../world/sync.js";
@@ -144,6 +145,7 @@ async function main(): Promise<void> {
   }
   link.setSync(syncLink);
   session.world = link;
+  session.upgrader = () => bridgeUpgrader(link.bridge);
   session.callHooks.push(autoSyncHook(() => session.world));
   const server = createServer(session.instance, { session, hideTools, log, channel: { instructions: CHANNEL_INSTRUCTIONS } });
   // In-game requests (13, *Prompting from the game*): pushed into the session as Claude Code channel

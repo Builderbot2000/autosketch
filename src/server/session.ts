@@ -14,9 +14,9 @@ import { BASE, refusal, ScopeManager } from "../scope/scopes.js";
 import type { ScopeLimits } from "../scope/settings.js";
 import type { LinkOpenOptions, WorldLink } from "../world/link.js";
 import type { InGameReplies } from "../world/prompt.js";
-import { bridgeUpgrader } from "../world/upgrade.js";
 import type { Registry } from "../assets/registry.js";
 import type { ImportUpgrade } from "../formats/index.js";
+import type { SchematicUpgrader } from "../formats/upgrade.js";
 import type { InstanceContext } from "./context.js";
 
 /**
@@ -112,10 +112,16 @@ export class Session {
    * mod serves `upgrade`, else the registry report's version, else the instance's (`fallback`).
    */
   schematicVersion(registry: Registry | undefined, fallback: number | undefined): ImportUpgrade {
-    const upgrader = this.world ? bridgeUpgrader(this.world.bridge) : undefined;
+    const upgrader = this.upgrader?.();
     const dataVersion = upgrader?.dataVersion ?? (this.world?.bridge.connected ? this.world.bridge.hello?.game.dataVersion : undefined) ?? registry?.report?.dataVersion ?? fallback;
     return { ...(dataVersion ? { dataVersion } : {}), ...(upgrader ? { upgrader } : {}) };
   }
+  /**
+   * The linked game's data fixer, when there is one (undefined while unlinked or the mod lacks
+   * `upgrade`). Injected by the entry point, which wires `world/` in (`world/upgrade.ts`); tools reach
+   * it only through `schematicVersion`.
+   */
+  upgrader?: () => SchematicUpgrader | undefined;
   /** Answers to in-game requests (13, *Prompting from the game*), for `world_reply`; set beside `world`. */
   inGame?: InGameReplies;
   /** Hooks around each tool call, in order (see `CallHook`). */

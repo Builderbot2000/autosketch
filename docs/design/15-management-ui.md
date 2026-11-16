@@ -2,19 +2,19 @@
 
 The live viewer (`12`) grows into the user's general UI for the MCP: one localhost page with tabs for watching a build, changing settings, managing the library (`07`) and choosing the instance, including first-run setup (`14`). Players who aren't developers can then run Autosketch without editing environment variables or JSON.
 
-Status: being designed. *Settled* marks points agreed with the user; *proposed* marks points still to confirm.
+Status: designed, settled with the user 2026-11-16; not built. Which settings become live is decided per setting while building (open questions).
 
 ## Principles
 
 1. **For the human, never the model** (from `12`). No tool reads the UI, and nothing shown there is returned to an agent. The agent sees the *results* of what the user changes, through what it already reads: library files on its next call, settings as behaviour.
 2. **Files stay the source of truth.** The UI edits the same files a user could edit by hand (`~/.autosketch/config.toml`, the library folders). It keeps no state of its own, and anything it does can be done without it.
-3. **Show where each value comes from.** A setting can be set in several places, so the UI shows which one won. A value fixed by the MCP client's command line or environment is shown as locked, with the reason, never as a control that silently does nothing.
+3. **The UI has priority, and shows what it overrides.** What the user saves in the UI (or with the `autosketch setup` and `autosketch config` commands, which write the same file) wins over the server's launch command and environment. A launch value that loses is never dropped silently: its row says what was ignored and where it came from (settled 2026-11-16).
 4. **Never slows the build** (from `12`). UI requests are served off the tool-call path, and no op waits for the UI.
 5. **Local, and guarded where it writes.** Loopback only, as today. Every request that changes something carries a per-launch token (*Security*).
 
 `12`'s second principle, *read-only*, still holds for observability itself: the event stream, deltas and observe panels never mutate anything. The writing parts are the Settings, Library and Instance tabs, which go through their own endpoints.
 
-## App shell (proposed)
+## App shell (settled 2026-11-16)
 
 The page served at the viewer URL becomes an app with four tabs. The current viewer becomes the first one, unchanged.
 
@@ -29,13 +29,18 @@ The page served at the viewer URL becomes an app with four tabs. The current vie
 - **Standalone: `autosketch ui`.** A subcommand of the existing bin, beside `autosketch observe`, serves the same app with no MCP session, so the library and settings can be managed between sessions. It prints the URL, opens it unless `--no-open`, and runs until interrupted. Observe there opens finished logs, like `autosketch observe`.
 - **No build step** (as `12`, *Packaging*): plain ESM in `viewer/`, with the tabs as separate modules loaded when first opened, so the Observe tab costs nothing more than today.
 
-## Settings tab (proposed)
+## Settings tab (settled 2026-11-16)
 
-**A new layer: `config.toml`.** Settings are read today from `--set`, a flag alias, `AUTOSKETCH_<KEY>`, then the default (`12`, *Settings*). The UI needs somewhere to write, and `14` already plans `~/.autosketch/config.toml` for `setup`. Settings go into a `[settings]` table there, read after the environment and before the default:
+**A new layer: `config.toml`, first.** Settings are read today from `--set`, a flag alias, `AUTOSKETCH_<KEY>`, then the default (`12`, *Settings*). The UI needs somewhere to write, and `14` already plans `~/.autosketch/config.toml` for `setup`. Settings go into a `[settings]` table there, and the file comes **before** every other source (settled 2026-11-16):
 
 ```
---set <key>=<value>  >  flag alias  >  AUTOSKETCH_<KEY>  >  config.toml [settings]  >  default
+config.toml [settings]  >  --set <key>=<value>  >  flag alias  >  AUTOSKETCH_<KEY>  >  default
 ```
+
+- **One store, two ways to change it.** The UI and the command line (`autosketch setup`, `autosketch config set <key> <value>`, `autosketch config unset <key>`, `14`) edit the same file, so a change made either way shows in the other. The UI watches the file and reloads when it changes.
+- **Launch values are fallbacks.** `--set`, flag aliases and `AUTOSKETCH_*` given in the MCP client's config still apply to every key `config.toml` doesn't set, so `claude mcp add … -- npx -y autosketch --instance <path>` keeps working with no setup step.
+- **Conflicts are shown in the UI only.** When a launch value loses to `config.toml`, the setting's row says so ("launch command sets `observe.snapshots=off`; ignored, config.toml says `merge`"), and the server's log on stderr says it once at startup. No tool result mentions it (principle 1).
+- Reason: the user wants the UI to be the one place settings are decided. A launch value buried in an MCP client's config should not silently beat what the user chose on screen.
 
 ```toml
 # ~/.autosketch/config.toml
@@ -59,7 +64,7 @@ Values are stored as text and go through each setting's own `parse`, so a hand-e
 
 The control follows the parser: a toggle for `parseBool`, a select for `parseOneOf`, a number field with bounds for `parseInt0`, a list editor for `parseList`, a text field otherwise.
 
-**Each row shows** the effective value, its source (`command line`, `environment: AUTOSKETCH_SCOPE_MAX_DEPTH`, `config.toml`, `default`), and a *restart needed* note when a saved value differs from the running one. If the source is above `config.toml`, the control is locked and says where to change it (usually the MCP client config). *Reset* removes the key from `config.toml`.
+**Each row shows** the effective value, its source (`config.toml`, `command line`, `environment: AUTOSKETCH_SCOPE_MAX_DEPTH`, `default`), any launch value it overrides (above), and a *restart needed* note when a saved value differs from the running one. No control is ever locked. *Reset* removes the key from `config.toml`, so the launch value (or the default) applies again.
 
 **Live versus restart.** Settings are read once at startup today. A setting marked `live` must be read through the `Settings` object on each use, which re-reads `config.toml` when the file changes. A setting is marked `live` only once its code does that. Everything starts as `restart`, and settings move over one by one.
 
@@ -72,7 +77,7 @@ The control follows the parser: a toggle for `parseBool`, a select for `parseOne
 | `library.axiom` | `true` | Include the instance's Axiom blueprints as a root |
 | `library.hidden` | none | Entries to leave out of every listing, as `<kind>/<name>` (`prefabs/park_bench`), so a starter or Axiom entry can be hidden without deleting it |
 
-## Library tab (proposed)
+## Library tab (settled 2026-11-16)
 
 **Roots.** One row per root in search order: label, path, kind, writable or read-only, entry counts, with a link that opens the folder in the OS file manager.
 
@@ -84,6 +89,8 @@ The control follows the parser: a toggle for `parseBool`, a select for `parseOne
 | Palette | Roles with each member's texture from the atlas and its weight | Weights, add or remove members, rename roles (the `palette_edit` operations, `03`) |
 | Procedure | Header (summary and `@param` lines) and the source | Source, in a plain text editor |
 | Knowledge pack | Frontmatter fields and the rendered Markdown | Frontmatter and text, in a plain text editor |
+
+**Built in two steps** (settled): browsing and the actions below first, then the editors in the *Editable* column. Each step is usable on its own.
 
 **Actions.**
 
@@ -100,15 +107,16 @@ The control follows the parser: a toggle for `parseBool`, a select for `parseOne
 
 **Choosing.** The tab lists what discovery found (`14`, *Instance discovery*, the same list `autosketch instances` prints) and offers a folder field for anything else. Choosing one writes `instance` to `config.toml`, exactly as `autosketch setup --instance` does.
 
-**First run.** This reverses `14`'s "no graphical wizard" decision, at the user's request (2026-11-16):
+**Setup wizard: the UI first, then remembered** (settled 2026-11-16, reversing `14`'s "no graphical wizard"):
 
-- An unconfigured server still starts (`14`). The HTTP server starts with it, since the viewer already works without an instance (flat colours, `12`), and unless `observe.open=false` the browser opens on the Instance tab.
-- Tools still answer `not_configured`, and the answer now gives the UI's URL as well as the `setup` commands, so the agent can point the user at either.
+- **When the server starts with no instance remembered** (no `instance` in `config.toml`), it opens the UI on the Instance tab at once, as a setup wizard. This is the one exception to opening the viewer on the first tool call (`12`): the server has nothing useful to do until an instance is chosen. The HTTP server starts with it, since the viewer already works without an instance (flat colours, `12`). `observe.open=false` still stops the browser opening.
+- **A launch `--instance` is offered, not imposed.** If the launch command or environment names an instance, the server loads it meanwhile so tools work, and the wizard shows it first, marked as the launch value, ready to keep with one click. Keeping it, or choosing another, writes `config.toml`.
+- **Remembered until unlinked.** Once `config.toml` names an instance, later starts load it with no wizard, and the viewer opens on the first tool call as usual. The Instance tab's *Unlink instance* (and `autosketch config unset instance`) removes it, so the next start shows the wizard again. This is about which Minecraft instance the MCP reads assets from. It is separate from the live world link (`13`).
 - **No restart for the first choice.** With nothing loaded there is nothing to tear down, so the server loads the chosen instance in place and the tools start working. Switching away from a loaded instance writes `config.toml` and needs a restart, because the registry, atlas and open documents are built on the old one.
-- The command line stays the scriptable route and keeps priority: an `--instance` on the server command line locks the tab's choice.
+- Until an instance is loaded, tools answer `not_configured`, and the answer gives the UI's URL as well as the `setup` commands, so the agent can point the user at either.
 - In an environment with no browser (SSH, a container), `observe.open` fails quietly as today, and the `not_configured` answer carries the `setup` command.
 
-## Security (proposed)
+## Security (settled 2026-11-16)
 
 The viewer only reads today, so binding to `127.0.0.1` and refusing other `Host` headers (DNS rebinding) is enough. Once endpoints write, any web page open in the user's browser can send a cross-origin request to `127.0.0.1:<port>`, with a `Host` header that passes. So:
 
@@ -118,7 +126,7 @@ The viewer only reads today, so binding to `127.0.0.1` and refusing other `Host`
 - **No raw paths.** Library entries are addressed as `<root label>/<kind>/<name>` and resolved by the server, which refuses anything that resolves outside its root. Folder paths are accepted only for `library.roots` and the instance field. Both are settings the user could set by hand anyway, and the server only reads them as a library root or an instance.
 - The token is also written into `observe/<session>/url`, which sits in the user's own workspace.
 
-## Endpoints (proposed)
+## Endpoints (settled 2026-11-16)
 
 Beside `12`'s endpoints. Every write needs the token.
 
@@ -133,6 +141,7 @@ POST   /api/library/<root>/<kind>/<name>/rename | /duplicate | /copy | /hide | /
 POST   /api/library/<root>/trash/<id>/restore,  DELETE /api/library/<root>/trash
 GET    /api/instance                          current instance, source, registry and link status, discovered list
 PUT    /api/instance                          {id | path}  → config.toml; loads in place when unconfigured
+DELETE /api/instance                          unlink: remove `instance` from config.toml (the wizard shows on the next start)
 ```
 
 ## Phases
@@ -142,7 +151,7 @@ PUT    /api/instance                          {id | path}  → config.toml; load
 | U1 | App shell with tabs around the existing viewer; token and Origin check; `/api` routing |
 | U2 | `config.toml` `[settings]` layer in `core/settings.ts`; `summary`/`group`/`applies` on settings; the Settings tab |
 | U3 | `library.*` settings; the Library tab (browse, metadata and text editing, rename, copy, hide, trash) |
-| U4 | Instance tab; first-run setup with loading in place; the URL in `not_configured` |
+| U4 | Instance tab; the setup wizard at startup with loading in place; unlink; the URL in `not_configured` |
 | U5 | `autosketch ui` |
 
 U4 depends on `14`'s `config.toml` and discovery, so it lands with or after them.
@@ -157,7 +166,9 @@ U4 depends on `14`'s `config.toml` and discovery, so it lands with or after them
 ## Decisions
 
 - **The viewer becomes a general management UI for the MCP** (settled, proposed by the user 2026-11-16). Reason: it already runs a local server with the instance's textures, and players shouldn't need environment variables or JSON to run Autosketch.
-- **The UI may do first-run setup** (settled 2026-11-16, reversing `14`'s "no graphical wizard"). Reason: an unconfigured server can already open a browser, and choosing an instance from a list is the easiest path for players. The command line stays and keeps priority.
-- **Files stay the source of truth; the UI writes `config.toml` and library files** (proposed). Reason: nothing becomes UI-only, and hand edits and the UI never disagree.
-- **`config.toml` becomes a settings layer below the environment** (proposed). Reason: the MCP client's own config keeps priority, so the UI can't silently override what the client set.
-- **Writes need a per-launch token and a matching Origin** (proposed). Reason: loopback binding and the Host check don't stop cross-origin writes from other pages.
+- **The UI is the setup wizard** (settled 2026-11-16, reversing `14`'s "no graphical wizard"). A server with no remembered instance opens the UI on the Instance tab at startup; the choice is kept in `config.toml` until the user unlinks it. Reason: choosing an instance from a list is the easiest path for players, and a remembered choice means the wizard is seen once.
+- **The UI has priority over the launch command** (settled 2026-11-16, reversing the earlier "command line keeps priority"). `config.toml` comes before `--set`, flag aliases and the environment; launch values fill only keys it doesn't set. Conflicts are shown in the UI and the server log, never to the agent. Reason: the user wants one place where settings are decided, and that place is the UI.
+- **One store, edited both ways** (settled 2026-11-16). The UI and the `autosketch setup` / `autosketch config` commands write the same `config.toml`. Reason: each route sees the other's changes, so they never disagree.
+- **Files stay the source of truth; the UI writes `config.toml` and library files** (settled 2026-11-16). Reason: nothing becomes UI-only, and hand edits and the UI never disagree.
+- **Writes need a per-launch token and a matching Origin** (settled 2026-11-16). Reason: loopback binding and the Host check don't stop cross-origin writes from other pages.
+- **The full Library tab, in two steps** (settled 2026-11-16): browse and actions, then editors. Reason: the first step already covers copy, hide and recoverable delete, and the editors can follow without blocking it.

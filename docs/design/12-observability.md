@@ -62,7 +62,7 @@ Locks are not separate events. A fork takes its lock and a merge or abandon rele
 
 ## Live viewer
 
-The MCP process also serves a dashboard on `127.0.0.1:<port>` (stdio stays reserved for MCP). It binds to loopback only and is on by default on a free port, so it boots with every session; `observe.http=false` turns it off. On start, the server prints the URL to stderr, writes it to `observe/<session-id>/url` and, unless `observe.open=false`, opens it in the default browser on the first tool call (not at startup, since clients start the server with every session) (`src/observe/open.ts`: `open` on macOS, `start` on Windows, `wslview` then `cmd.exe /c start` under WSL, `xdg-open` elsewhere; detached, stdio untouched, failures only logged).
+The MCP process also serves a dashboard on `127.0.0.1:<port>` (stdio stays reserved for MCP). It binds to loopback only and is on by default on a free port, so it boots with every session; `observe.http=false` turns it off. On start, the server prints the URL to stderr, writes it to `observe/<session-id>/url` and, unless `observe.open=false`, opens it in the default browser on the first tool call (not at startup, since clients start the server with every session), except when no instance is remembered: then it opens at startup on the management UI's Instance tab, as the setup wizard (`15`) (`src/observe/open.ts`: `open` on macOS, `start` on Windows, `wslview` then `cmd.exe /c start` under WSL, `xdg-open` elsewhere; detached, stdio untouched, failures only logged).
 
 ### Endpoints
 

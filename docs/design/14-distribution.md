@@ -30,11 +30,12 @@ Settled: one-command install is the goal; listings on these platforms are for cr
 
 ### Setup (settled: command-line options, plus the management UI)
 
-The MCP client starts the server and owns its stdin and stdout, so the server can never show a prompt of its own. Setup is command-line options, the way `claude mcp add` works, with no interactive terminal wizard. The management UI (`15`) can also make the first choice: an unconfigured server opens it on its Instance tab, and choosing there writes the same `config.toml` as `setup` (settled 2026-11-16, replacing the earlier "no graphical wizard").
+The MCP client starts the server and owns its stdin and stdout, so the server can never show a prompt of its own. There is no interactive terminal wizard. The management UI (`15`) is the setup wizard: a server with no remembered instance opens it on its Instance tab at startup, and the choice is kept in `config.toml` until the user unlinks it (settled 2026-11-16, replacing the earlier "no graphical wizard"). The command line edits the same file, for scripts and READMEs.
 
 - **`npx autosketch instances`** lists what discovery found, one line per instance with a short id, the pack's name, Minecraft version, loader, launcher and folder.
 - **`npx autosketch setup --instance <id | path>`** saves the choice to `~/.autosketch/config.toml`, with optional `--workspace`, `--version` and `--base-jar` (as the server takes today). `--client claude` also registers the server with that agent client, printing the exact command it runs (`claude mcp add …`).
-- **The server command line still takes the same options** and they override the config, so `claude mcp add autosketch -- npx -y autosketch --instance <path>` works with no setup step at all.
+- **`npx autosketch config set <key> <value>` / `config unset <key>`** edit `[settings]` (and `config unset instance` unlinks the instance), the same file and the same parsing the UI uses (`15`, *Settings tab*).
+- **`config.toml` has priority** over the server's launch command and environment (settled 2026-11-16, `15`). Launch options still fill whatever `config.toml` leaves unset, so `claude mcp add autosketch -- npx -y autosketch --instance <path>` works with no setup step. With no instance remembered, the wizard still opens and offers that launch instance first, to keep with one click.
 - **An unconfigured server still starts.** Every tool except `instance_info` answers `not_configured` with the discovered instances, the exact `setup` command for each and the management UI's URL (`15`), so the agent can tell the user what to run instead of failing silently.
 - Reason: the audience already works in a terminal, since the agent CLI runs there, and options can be scripted, documented in one line and pasted from a README.
 
@@ -54,6 +55,8 @@ The same method the Modrinth App and GDLauncher use to import instances from oth
   | GDLauncher (Carbon) | App data folder `gdlauncher_carbon` in the OS data folder (`%APPDATA%`, `~/Library/Application Support`, `$XDG_DATA_HOME` or `~/.local/share`). The runtime path is `<app data>/data/`, or the path in the one-line text file `<app data>/runtime_path_override` when the user moved it. Instances: `<runtime path>/instances/<shortpath>/instance.json` (name, Minecraft version, loader), with the game folder in `instance/` beneath it. | Every instance, version and loader |
 
   Sources: each launcher's open repository (modrinth/code `packages/app-lib`, ATLauncher `FileSystem.java` and `Instance.java`, GDLauncher-Carbon's own docs *Anatomy of an Instance Folder* and *Runtime path vs app data*), read 2026-11-15.
+
+  **Reading `app.db`** uses Node's built-in `node:sqlite` (settled 2026-11-16), so `engines` rises to `node >=22.13`, the first release where it needs no flag. Reason: no new dependency, and no native module, which would break "pure JavaScript, runs everywhere with `npx`" (`better-sqlite3` needs prebuilt binaries per OS and Node version). Its "experimental" warning goes to stderr, which never reaches the MCP channel, and is filtered out of the log.
 
   **Credentials live next to some of these records.** Modrinth's `app.db` also holds Minecraft account data, and GDLauncher's `gdl_conf.db` holds account and refresh tokens. So the Modrinth reader opens `app.db` read-only and queries only `instances`, `instance_content_sets` (or the old `profiles`) and `settings.custom_dir`, and the GDLauncher reader never opens its database at all: the `instance.json` files have everything needed.
 
@@ -137,7 +140,7 @@ Nothing before 1.21.6 needs work, so Craftoria and every 1.18–1.21.5 pack are 
 
 **Modpack-specific: nothing in the mod.** The mod already treats every block as a state plus NBT and never names a mod. Pack variation reaches it in only two ways, both already handled: mods that write blocks without `setBlockState` (Axiom), covered by `tracker = "both"`, and multi-block structures, which the MCP's plugins describe (`09`). Pack knowledge lives in the MCP, in the asset registry (read from the instance) and in the plugins, and plugins are where versions of a single mod differ (Create 0.5 against Create 6 NBT, for example).
 
-### Version-specific data lives in the mod (proposed)
+### Version-specific data lives in the mod (settled 2026-11-16)
 
 **The problem.** The MCP carries its own per-version tables: release to `DataVersion` (`src/core/version.ts`, ending at 1.21.5) and every vanilla block's properties and default state (`data/vanilla/<version>.json`, fetched from minecraft-data). Each new release means new tables, and modded blocks aren't covered at all: the MCP guesses their properties from blockstate files, which miss properties that don't change the model (Create's `waterlogged`, FramedBlocks' `solid`; `13`, open question on modded states). **Where versions actually meet.** A document is transient: it belongs to the world it was made for, and anything meant to last is exported to a schematic format (`08`). So the version gap shows up when a lasting file comes in, not when a document is reopened: importing a `.schem`, `.bp` or `.nbt` made on another version (`doc_open({ path })`), and stamping prefabs, which the library keeps as `.schem` (`07`). Such a file can hold ids or NBT the running game rejects or reads differently (`grass` became `short_grass` in 1.20.3; item stacks in block entities moved to data components in 1.20.5). Import upgrades today with a small hand-kept table of vanilla renames (`src/formats/renames.ts`), which covers renamed ids only: no property changes, no NBT, no modded blocks.
 
@@ -151,6 +154,8 @@ Nothing before 1.21.6 needs work, so Craftoria and every 1.18–1.21.5 pack are 
 - **Written at game start.** The mod writes the report to a file beside its pointer file (`<user.home>/.autosketch/games/<hash>.registry.json.gz`), so the MCP has it even when the game isn't running, once the game has been started with the mod. A protocol request returns the same report while linked, for a modset changed since.
 - **Upgrades follow the established practice for schematic files** (below), with the mod as the host of the game's data fixer, since the MCP runs outside the game. This replaces the rename table while linked.
 - **Order of trust in the MCP:** the mod's report, then the instance's files as today (`02`), then the bundled vanilla tables as the last fallback, kept only for drafting before the game has ever run with the mod. Unlinked imports fall back to the rename table.
+
+**It also answers `13`'s modded-state question.** The registry report carries every property of every modded block, including the ones blockstate files leave out because they don't change the model (Create's `waterlogged`), so a typed `create:cogwheel` gets its full state and the game no longer rejects it as `unknown_state`. The two smaller options considered there were set aside: learning states from the link only knows blocks already seen in the world, and asking the mod per block works only while linked and does nothing for imports.
 
 **What stays in the MCP.** Textures and models. A dedicated server has no client assets, and the mod is server-side, so rendering keeps reading the instance (`02`). Only data moves.
 
@@ -179,9 +184,9 @@ So, for Autosketch:
 - **Vanilla only.** The data fixer covers vanilla's changes. Modded renames depend on each mod's own remapping, so modded blocks the running game doesn't know are reported by id, not guessed.
 - **The mod's per-version code grows a little** (registry access and the data fixer API differ between versions), but that code lives in the mod's version branches (above), where version-specific code belongs anyway, and the MCP stops having any.
 
-## Version skew between mod and MCP (proposed)
+## Version skew between mod and MCP (settled 2026-11-16)
 
-Today a protocol mismatch closes the link, which is right (`13`, *Version check*), but with separate releases it becomes common.
+Today a protocol mismatch closes the link, which is right (`13`, *Version check*), but with separate releases it becomes common. Built with the first protocol change after the live link shipped (the request modes and scan messages of `13`'s backlog), so no pairing breaks from then on.
 
 - The MCP supports its own protocol version and the one before it, so updating the MCP first never breaks a working setup. The mod speaks one version.
 - Features gate on what the `hello`s list, as B6's `modes` do (`13`), not on version numbers.
@@ -204,7 +209,9 @@ Deferred by the user until later development. What was found, for when it comes 
 
 ## Decisions
 
-- **Setup by command-line options, or the management UI** (settled; the UI part added 2026-11-16, `15`). `autosketch instances` lists candidates and `autosketch setup --instance` picks one. The UI can pick on first run too, and the command line keeps priority.
+- **The management UI is the setup wizard, and has priority** (settled 2026-11-16, `15`, replacing "command line keeps priority"). A server with no remembered instance opens the UI at startup; the choice stays in `config.toml` until unlinked. `autosketch instances`, `setup` and `config` edit the same file for scripts. Launch options fill only what `config.toml` leaves unset. Reason: the user wants one place where setup is decided, seen once.
+- **`node:sqlite` for Modrinth's instance list; `engines` raised to `>=22.13`** (settled 2026-11-16). Reason: no dependency and no native module.
+- **The MCP speaks protocol `N` and `N−1`** (settled 2026-11-16). Reason: the mod and the MCP release separately, so updating either side first must never break a working setup.
 - **Discovery reads launchers' own instance records first** (from the dev machine's CurseForge, Prism and vanilla files). Reason: they already hold folder, version and loader and follow moved folders, so nothing is guessed.
 - **One-command install, with platform listings for credibility** (settled). Reason: the barrier for players is setup, and listings are where players judge trust.
 - **No free-ranging search of the user's files** (settled). Reason: users don't want a tool roaming their home folder. Known locations, launcher configs and the mod's pointer cover the real cases.
@@ -216,4 +223,4 @@ Deferred by the user until later development. What was found, for when it comes 
 - **Smoke tests only for extra targets, for now** (settled); full coverage is recorded as outstanding in `10`.
 - **Released as *Autosketch*, jars named by the MultiLoader convention, with the support rules above** (settled; the rules were proposed and accepted as a starting point).
 - **`AGPL-3.0-or-later` for both the mod and the MCP** (settled). Reason: one license to explain, and later license versions apply without relicensing.
-- **Version-specific data comes from the mod, not MCP tables** (proposed by the user). Reason: the mod runs on the world's exact version and modset, so its registry report and the game's data fixer are correct by construction, and the MCP needs no table per release.
+- **Version-specific data comes from the mod, not MCP tables** (proposed by the user, settled 2026-11-16). Reason: the mod runs on the world's exact version and modset, so its registry report and the game's data fixer are correct by construction, and the MCP needs no table per release. It also resolves `13`'s modded-state question.

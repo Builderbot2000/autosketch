@@ -12,12 +12,16 @@ export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64   # any JDK >= 17
 ./gradlew build                # loader check, compile, JUnit tests, the jar (below)
 ./gradlew test                 # codec, dispatch and config tests in common (golden vectors from ../test/data/world-protocol)
 ./gradlew runGameTestServer    # headless GameTests (neoforge/src/gametest), exits non-zero on failure
+./gradlew runSmokeTestServer   # the per-target smoke test alone: server starts, pointer file, bridge pairs
+./gradlew releaseInfo          # the jar's release metadata, in neoforge/versions/<v>/build/release/release.properties
 ./gradlew runServer            # a dev dedicated server in run/ (needs run/eula.txt accepted)
 ```
 
 Task names run in every module that has them; to name one project, prefix it: `./gradlew :neoforge:1.21.1:runGameTestServer`, `./gradlew :common:1.21.1:test`. The jar is `neoforge/versions/1.21.1/build/libs/autosketch-neoforge-1.21.1-<version>.jar` (`test/e2e/world/server.sh` picks it up from there). GameTests run in `run/gametest/`.
 
-The smoke script `scripts/mod-bridge-smoke.ts` (repository root) plays the MCP against a running game with the mod: `npx tsx scripts/mod-bridge-smoke.ts <instance dir> [--seconds 120] [--extend]`. It checks a wrong token and a wrong protocol are refused, pairs, and prints every `volumes` message while you mark volumes in-game.
+**CI and releases.** `.github/workflows/mod.yml` runs the smoke test for every target (no JUnit tests, so the golden-vector test never blocks a target) and the full suite on the Craftoria profile. `.github/workflows/mod-release.yml` publishes to CurseForge and Modrinth when a tag `mod-v<version>` matching `mod_version` is pushed; the tag must be annotated, and its message is the changelog. It needs the repository secrets `CURSEFORGE_TOKEN` and `MODRINTH_TOKEN` and the variables `CURSEFORGE_PROJECT_ID` and `MODRINTH_PROJECT_ID`; without them it stops in preflight and publishes nothing (`mod/release/preflight.sh` checks the same locally). Running the workflow by hand is the dry run.
+
+The bridge smoke script `scripts/mod-bridge-smoke.ts` (repository root) plays the MCP against a running game with the mod: `npx tsx scripts/mod-bridge-smoke.ts <instance dir> [--seconds 120] [--extend]`. It checks a wrong token and a wrong protocol are refused, pairs, and prints every `volumes` message while you mark volumes in-game.
 
 The JUnit tests read the protocol's golden vectors straight from `../test/data/world-protocol/` (the only files shared with the TypeScript side), so they need the whole repository checked out.
 
@@ -58,6 +62,7 @@ Silos register from their own package: the registration code is a `setup(Autoske
 
 ## Using it
 
+- **Pointer file.** On server start the mod also writes `~/.autosketch/games/<hash of the game folder>.toml` (`docs/design/14-distribution.md`, *Pointer file format*) so a local Autosketch MCP finds this game, and deletes pointer files whose game folder is gone. `discovery.pointer = false` in `config/autosketch.toml` turns it off and removes this game's file. `AUTOSKETCH_HOME` (or `-Dautosketch.home`) replaces `~/.autosketch`; Gradle's dev and GameTest runs use `run/autosketch-home/`.
 - **Pairing.** On server start (a dedicated server, or a singleplayer world opening) the mod listens on `127.0.0.1` and writes `config/autosketch-bridge.toml` with the port and a fresh token; the MCP reads it. Set a fixed port with `port` under `[bridge]` in `config/autosketch.toml` (0 = a free port each start).
 - **Commands** (op level 2, cheats on in singleplayer): `/autosketch wand` gives the wand (a blaze rod marked with `custom_data`). Left click a block sets corner 1, right click corner 2 of the current mode's box; the swap-hands key (F) cycles the mode, or `/autosketch mode work|context|…`. `/autosketch pos1|pos2 [x y z]` does the same at your feet or the given position. `/autosketch context add` adds the box marked in context mode, `context grow <n>` makes the context the work volume grown by `n`, `context clear` goes back to the default (grown by 3). `/autosketch clear` removes the work volume (unlinks). `/autosketch show` toggles outlines when not holding the wand, `/autosketch notices on|off` the action-bar notices, `/autosketch status` shows the link.
 - **From the console or RCON** (no player): `/autosketch mode work|context`, `/autosketch pos1|pos2 <x y z>` and `/autosketch context add` work too, with one shared set of corners in the source's dimension; each `pos1` + `pos2` pair names one box. The end-to-end tests set volumes this way.

@@ -49,10 +49,15 @@ The same method the Modrinth App and GDLauncher use to import instances from oth
   | CurseForge | `%APPDATA%\CurseForge\agent\GameInstances\MinecraftGameInstance.json`: a list with `name`, `installPath`, `gameVersion`, `baseModLoader.name` (e.g. `neoforge-21.1.262`, `forge-47.4.4`, `fabric-0.19.2-1.21.11`) | Every instance, wherever it lives. The modding folder itself is `minecraftRoot` in `storage.json` → `minecraft-settings`. |
   | Prism Launcher / MultiMC | `InstanceDir` in `prismlauncher.cfg` (relative to the launcher's data folder unless absolute), then one folder per instance with `instance.cfg` and `mmc-pack.json` | Folders, versions, loaders. The Modrinth App's import ignores a moved `InstanceDir` (modrinth/code#4490), which is why reading the config matters. |
   | Vanilla launcher | `launcher_profiles.json`: per profile `gameDir` (absent = `.minecraft`) and `lastVersionId` | Folders and versions; the loader from the version id |
-  | Modrinth App | A SQLite database in its app folder (default `ModrinthApp`, formerly `com.modrinth.theseus`; movable in its settings, or `ModrinthAppData` beside the executable in portable mode). *To read on a machine that has it.* | — |
-  | ATLauncher, GDLauncher | *To read on a machine that has them.* | — |
+  | Modrinth App | SQLite `app.db` in the settings folder (the OS data folder + `ModrinthApp`, e.g. `%APPDATA%\ModrinthApp`; formerly `com.modrinth.theseus`). Instances: table `instances` (`id`, `path`, `name`, `applied_content_set_id`) joined to `instance_content_sets` (`game_version`, `loader`, `loader_version`), since the mid-2026 migration; before it, one `profiles` table with `path`, `name`, `game_version`, `mod_loader`, `mod_loader_version`. Folder: `<config dir>/profiles/<path>`, where the config dir is `settings.custom_dir` when the user moved it, else the settings folder. Mods are real files in the instance's `mods/` (hard links or copies from its content store), so the asset registry reads them as usual. | Every instance, version and loader |
+  | ATLauncher | No fixed data folder: everything sits beside the launcher (`user.dir`; the Windows installer puts it in `%APPDATA%\ATLauncher`). Instances: `<base>/instances/<name>/instance.json`, with `id` (Minecraft version), `launcher.name`, `launcher.loaderVersion.type` and `.version`. | Folders, versions, loaders, at the default location only |
+  | GDLauncher (Carbon) | App data folder `gdlauncher_carbon` in the OS data folder (`%APPDATA%`, `~/Library/Application Support`, `$XDG_DATA_HOME` or `~/.local/share`). The runtime path is `<app data>/data/`, or the path in the one-line text file `<app data>/runtime_path_override` when the user moved it. Instances: `<runtime path>/instances/<shortpath>/instance.json` (name, Minecraft version, loader), with the game folder in `instance/` beneath it. | Every instance, version and loader |
 
-  These files are the launchers' internal formats, not documented interfaces, so each reader tolerates missing fields and falls back to the launcher's default instance folder, with a warning that names the launcher.
+  Sources: each launcher's open repository (modrinth/code `packages/app-lib`, ATLauncher `FileSystem.java` and `Instance.java`, GDLauncher-Carbon's own docs *Anatomy of an Instance Folder* and *Runtime path vs app data*), read 2026-11-15.
+
+  **Credentials live next to some of these records.** Modrinth's `app.db` also holds Minecraft account data, and GDLauncher's `gdl_conf.db` holds account and refresh tokens. So the Modrinth reader opens `app.db` read-only and queries only `instances`, `instance_content_sets` (or the old `profiles`) and `settings.custom_dir`, and the GDLauncher reader never opens its database at all: the `instance.json` files have everything needed.
+
+  These files are the launchers' internal formats, not documented interfaces (Modrinth's schema changed in 2026), so each reader tolerates missing tables and fields and falls back to listing the launcher's instance folder, with a warning that names the launcher.
 - **Launcher defaults** when there is no record: each launcher's default instance folder per OS (for CurseForge, `C:\Users\<user>\curseforge\minecraft\Instances` on Windows and `~/Documents/curseforge/minecraft/Instances` on macOS).
 - **The mod's pointer file**, for anything else (an unknown launcher, a server folder). When the game starts, the mod writes `<user.home>/.autosketch/games/<hash of the game folder>.toml` with the game folder, Minecraft version, loader and pairing-file path, and deletes it when the game folder is gone. `user.home` is where the MCP already looks: the same home on one OS, and the Windows profile folder that WSL resolves (below). The mod's config can turn it off (`discovery.pointer`, default on). It is one small file per instance and the user opted in by installing the mod; *to check* against each site's rules on writing outside the game folder.
 - **WSL.** When the server runs in WSL, it asks Windows for the user's profile folder (`cmd.exe /c echo %USERPROFILE%`, then `wslpath`, verified on the dev machine) and reads the same locations under it. It never searches all of `/mnt/c/Users`.
@@ -159,7 +164,7 @@ Every format we read records the version it was written on, and every major tool
 | Structure `.nbt` (vanilla, Create) | `DataVersion` | The game upgrades the whole file with the `STRUCTURE` fix type when it differs from the running version, on every load (not cached). A file without one is treated as 500. |
 | Litematica `.litematic` | `MinecraftDataVersion` | Runs the vanilla data fixer by default; warns when a file is more than 100 data versions ahead of the game; blocks the game lacks load as air. |
 | MCEdit `.schematic` | None (numeric ids, pre-1.13) | Flattening maps from numeric ids to block states (Litematica's `BlockStateFlattening` maps; our legacy table, `08`), then the data fixer from 1.13 on. |
-| Axiom `.bp` | `DataVersion` inside the block data (`08`) | Not documented publicly. *To check* in Axiom's behaviour; until then treated like `.schem`. |
+| Axiom `.bp` | `DataVersion` inside the block data (`08`) | Not documented: Axiom is closed source, and its docs (axiomdocs.moulberry.com, *Blueprint Browser*, *File*) say nothing about versions on load. The only version feature documented is exporting schematics for older versions (1.7 to 1.19), for Commercial License users. Treated like `.schem` until checked in game (open questions). |
 
 So, for Autosketch:
 
@@ -193,8 +198,8 @@ Deferred by the user until later development. What was found, for when it comes 
 
 ## Open questions
 
-- Instance records of the Modrinth App, ATLauncher and GDLauncher: read on a machine that has them.
-- How Axiom upgrades an older `.bp` (not documented publicly): check in the game before relying on the `.schem` treatment.
+- The launcher readers above come from source and docs; only CurseForge, Prism and vanilla were seen on a real machine. Check the others on a machine that has them.
+- How Axiom treats an older `.bp` (closed source, undocumented). In-game check: write a `.bp` with `DataVersion` 3465 (1.20.1) holding `minecraft:grass` into Axiom's blueprint folder, open it in Axiom on 1.21.1, and see whether it places `short_grass` (upgraded), nothing or an error.
 - The registry report's format and size on Craftoria (532 mods), measured before the file layout is fixed.
 
 ## Decisions

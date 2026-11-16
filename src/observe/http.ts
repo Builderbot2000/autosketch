@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import { dirname, extname, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { LoggedEvent, ObserveEvent } from "../core/events.js";
+import { configPath } from "../core/config.js";
 import type { Settings } from "../core/settings.js";
 import type { Document } from "../document/document.js";
 import type { BlockBaker } from "../perception/render/bake.js";
@@ -12,6 +13,7 @@ import { Atlas, bakeModels } from "./atlas.js";
 import type { EventBus } from "./bus.js";
 import { BodyTooLarge, newToken, ownOrigin, readBody, refuseWrite, WRITE_METHODS } from "./guard.js";
 import { MAX_OTLP_BYTES, otelSetup, otlpRecords } from "./otel.js";
+import { InstanceApi, type InstanceHost } from "./instance-api.js";
 import { SettingsApi, type ApiReply } from "./settings-api.js";
 import type { LogTables } from "./states.js";
 import { encodeVoxels, parseBoxParam } from "./voxels.js";
@@ -34,6 +36,7 @@ import { encodeVoxels, parseBoxParam } from "./voxels.js";
  * tabs are ESM modules under `viewer/js/tabs/`, loaded when first opened, talking to `/api/…`:
  *
  *   GET    /api/settings, PUT|DELETE /api/settings/<key>   settings-api.ts
+ *   GET|PUT|DELETE /api/instance                            instance-api.ts
  *   POST   /v1/logs                Claude Code's OTLP/HTTP JSON log events (13, B3; otel.ts)
  *
  * Every request that changes something goes through `guard.ts` (POST/PUT/DELETE only, the
@@ -90,6 +93,8 @@ export interface ObserveHttpOptions {
   publish?: (e: ObserveEvent) => void;
   /** The per-launch write token; random by default. */
   token?: string;
+  /** The session's instance, discovery and link: enables the Instance tab's endpoints (15). */
+  instance?: InstanceHost;
 }
 
 interface Client {
@@ -134,6 +139,7 @@ export class ObserveHttp {
   otelRecords = 0;
   private port = 0;
   private readonly settingsApi?: SettingsApi;
+  private readonly instanceApi?: InstanceApi;
   private server?: Server;
   private ring: LoggedEvent[] = [];
   private readonly clients = new Set<Client>();
@@ -147,6 +153,7 @@ export class ObserveHttp {
     this.token = opts.token ?? newToken();
     const path = opts.configPath ?? opts.settings?.config?.path;
     if (opts.settings && path) this.settingsApi = new SettingsApi(opts.settings, path, opts.log ? { log: opts.log } : {});
+    if (opts.instance) this.instanceApi = new InstanceApi(opts.instance, path ?? configPath(), opts.log);
   }
 
   /** Bus subscriber: buffers and schedules; never writes to a socket synchronously. */
@@ -247,7 +254,7 @@ export class ObserveHttp {
         const why = refuseWrite(req, this.token, this.port);
         if (why) return json(res, 403, { error: why });
       }
-      return this.api(path.slice(4), method, req, res);
+      return this.api(path.slice(4), method, req, res, url);
     }
     if (!read) return json(res, 405, { error: "GET only" });
     if (path === "/events") return this.events(url, req, res);
@@ -280,7 +287,7 @@ export class ObserveHttp {
    * `/api/…` (15, *Endpoints*); `rel` is the path after `/api`. Writes reach here only past the
    * guard. A GET never changes anything, so a GET of a write-only path is refused.
    */
-  private async api(rel: string, method: string, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  private async api(rel: string, method: string, req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
     const read = method === "GET" || method === "HEAD";
     const settings = /^\/settings(?:\/([^/]+))?\/?$/.exec(rel);
     if (settings) {
@@ -291,6 +298,14 @@ export class ObserveHttp {
       if (method === "PUT") return reply(res, api.put(key, await jsonBody(req)));
       if (method === "DELETE") return reply(res, api.remove(key, await jsonBody(req)));
       return json(res, 405, { error: "PUT /api/settings/<key> {value} saves a setting; DELETE resets it" });
+    }
+    if (rel === "/instance" || rel === "/instance/") {
+      const api = this.instanceApi;
+      if (!api) return json(res, 404, { error: "the instance isn't available here" });
+      if (read) return json(res, 200, await api.view(url.searchParams.has("refresh")));
+      if (method === "PUT") return reply(res, await api.put(await jsonBody(req)));
+      if (method === "DELETE") return reply(res, api.remove(await jsonBody(req)));
+      return json(res, 405, { error: "PUT /api/instance {id | path} chooses an instance; DELETE unlinks it" });
     }
     return json(res, 404, { error: "no such endpoint" });
   }
@@ -348,6 +363,7 @@ export class ObserveHttp {
       deltas: d ? { on: true, capped: d.capped, bytes: d.bytes } : { on: false },
       assets: !!this.opts.getBaker,
       settings: !!this.settingsApi,
+      instance: !!this.instanceApi,
       // B3 (13): how many Claude Code log records have arrived, and the setup that sends them here.
       // A free port changes with every launch, so the endpoint only stays valid with a pinned `observe.http`.
       ...(this.opts.publish && this.opts.live !== false ? { otel: { records: this.otelRecords, portPinned: this.opts.port !== 0, setup: otelSetup(this.port) } } : {}),

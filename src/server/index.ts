@@ -37,6 +37,7 @@ import { configFromEnv, launchOptions, loadInstanceContext, startupArgNotes } fr
 import { createServer, SERVER_VERSION } from "./server.js";
 import { SERVER_HIDE_TOOLS } from "./settings.js";
 import { defaultWorkspace, Session } from "./session.js";
+import { makeInstanceHost } from "./instance-host.js";
 import { INSTANCE_TAB_FRAGMENT, makeInstanceSetup, wantsSetupWizard, withFragment } from "./setup.js";
 import { CLI_COMMANDS, runCli } from "../cli/index.js";
 import { bakerFor } from "./tools/shared.js";
@@ -82,7 +83,7 @@ async function main(): Promise<void> {
     hideTools = settings.get(SERVER_HIDE_TOOLS);
     // Without an instance the viewer draws flat colours (12); the baker exists once one is loaded.
     const getBaker = () => session.instance?.then(bakerFor) ?? Promise.reject(new Error("no instance loaded"));
-    observer = startObserve({ workspace, settings, version: SERVER_VERSION, getDoc: () => session.doc, getScopeDoc: (id) => session.scopes.scopes.get(id)?.doc, getBaker, log });
+    observer = startObserve({ workspace, settings, version: SERVER_VERSION, getDoc: () => session.doc, getScopeDoc: (id) => session.scopes.scopes.get(id)?.doc, getBaker, log, instance: makeInstanceHost({ session, argv, env: process.env, file }) });
   } catch (e) {
     log((e as Error).message);
     process.exit(2);

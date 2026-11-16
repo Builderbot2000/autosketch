@@ -119,3 +119,13 @@ body:not([data-tab="observe"]) .obs-only { display: none; }
 .spend-note { color: var(--dim); }
 .spend-note .snippet { background: #111316; border: 1px solid var(--line); padding: 6px; border-radius: 4px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: all; }
 .spend-note .warn { color: #fc6; }
+
+/* Instance and Library tabs (15). */
+.tab table.kv th { text-align: left; color: var(--dim); font-weight: 400; padding: 1px 12px 1px 0; vertical-align: top; }
+.tab table.list { width: 100%; border-collapse: collapse; }
+.tab table.list th { text-align: left; color: var(--dim); font-weight: 400; font-size: 12px; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+.tab table.list td { padding: 4px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.tab .small { font-size: 11px; }
+.tab .bad { color: var(--refused); }
+.tab .control { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 4px 0; }
+.tab .control input[type="text"] { flex: 1; min-width: 160px; }

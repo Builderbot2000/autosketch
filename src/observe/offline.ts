@@ -64,7 +64,9 @@ export async function serveLog(opts: OfflineOptions): Promise<OfflineViewer> {
     ...(opts.log ? { log: opts.log } : {}),
   });
   for (const e of log.events) http.onEvent(e);
-  const url = await http.start();
+  // A finished log has nothing to write, so its URL carries no token (15, *Security*).
+  await http.start();
+  const url = http.url!;
   return {
     url,
     log,

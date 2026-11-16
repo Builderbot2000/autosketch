@@ -19,9 +19,9 @@ const parseRatio = (raw: string): number | undefined => {
   return Number.isFinite(n) && n > 0 && n <= 1 ? n : undefined;
 };
 
-export const SCOPE_MAX_WORK_RATIO = setting("scope.maxWorkRatio", 0.5, "a number above 0 and at most 1", parseRatio);
-export const SCOPE_MIN_WORK_BLOCKS = setting("scope.minWorkBlocks", 512, "an integer 1..1000000000", parseInt0(1, 1_000_000_000));
-export const SCOPE_MAX_DEPTH = setting("scope.maxDepth", 3, "an integer 1..16", parseInt0(1, 16));
+export const SCOPE_MAX_WORK_RATIO = setting("scope.maxWorkRatio", 0.5, "a number above 0 and at most 1", parseRatio, { group: "Scopes", summary: "Largest work volume a forked job may take, as a share of its parent's." });
+export const SCOPE_MIN_WORK_BLOCKS = setting("scope.minWorkBlocks", 512, "an integer 1..1000000000", parseInt0(1, 1_000_000_000), { group: "Scopes", summary: "Smallest work volume a forked job may take, in blocks." });
+export const SCOPE_MAX_DEPTH = setting("scope.maxDepth", 3, "an integer 1..16", parseInt0(1, 16), { group: "Scopes", summary: "Deepest fork below the base build." });
 
 export const DEFAULT_SCOPE_LIMITS: ScopeLimits = { maxWorkRatio: 0.5, minWorkBlocks: 512, maxDepth: 3 };
 

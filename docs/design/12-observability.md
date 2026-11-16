@@ -42,12 +42,13 @@ The server publishes typed events on an in-process bus. A buffered writer append
 | `scope.fork` | scope, parent, depth, work box and context box (base and local frames), translation, brief, whole-block extensions, stale-context overlaps | `scope_fork` |
 | `scope.merge` | scope, report, diff stats, changed box (base frame), the parent's journal `seq` for the merge | `scope_merge` |
 | `scope.abandon` | scope, reason (`call`, `restart`) | `scope_abandon`, shutdown |
-| `call.start` / `call.end` | tool, scope, duration, ok, response size (text characters, image count and pixels) | server adapter |
+| `call.start` / `call.end` | tool, scope, duration, ok, response size (text characters, image count and pixels); `call.start` also carries `input`, the call's top-level scalar arguments (strings cut to 80 characters, at most 16), for matching Claude Code's telemetry (`13`, *Backlog* B3) | server adapter |
 | `call.refused` | tool, scope, refusal code (`lock_overlap`, `nest_too_large`, `nest_too_small`, `nest_depth`, `outside_work_volume`, `scope_required`, `sync_barrier`, `world_disconnected`, `world_no_volume` (13), …), message | server adapter |
 | `render.produced` | view, size, scope, optional thumbnail path | perception |
 | `world.link` | state (`linked`, `relinked`, `unlinked`, `connected`, `disconnected`), dimension, work box (local), blocks added by whole-block extension, context box count, reason | world link (13) |
 | `world.patch` | patch id, journal `seq`s, blocks sent, forced, ack counts (applied, skipped, rejected, overwritten, normalized), or `dropped` with a reason when it wasn't sent or confirmed | world link (13) |
 | `world.sync` | reason (`ack`, `context`, `dirty`, `reconnect`, `manual`), blocks changed, journal `seq` | world link (13) |
+| `otel` | `record`: one Claude Code OpenTelemetry log record, exactly as received at `/v1/logs` | viewer HTTP server (`13`, *Backlog* B3) |
 
 Locks are not separate events. A fork takes its lock and a merge or abandon releases it, so the lock set at any `seq` can be derived from the log.
 
@@ -73,7 +74,10 @@ GET /doc/<doc>/region?box=…    voxels of one box, for drill-in and resync
 GET /assets/atlas.png          texture atlas from the user's instance (02)
 GET /assets/models.json        baked block models keyed by stateId
 GET /log/deltas?offset&length  raw delta records, for replay
+POST /v1/logs                  Claude Code's OpenTelemetry log events, OTLP/HTTP JSON (13, Backlog B3)
 ```
+
+The management UI's `/api/…` endpoints, and the token in the URL that guards them, are in `15`. The URL printed, opened and written to `observe/<session-id>/url` carries that token in its fragment (`…/#t=<token>`).
 
 When a client misses events (buffer overflow, or the tab was in the background), the server sends `resync`. The client then fetches the snapshot and continues from the latest `seq`.
 

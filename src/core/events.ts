@@ -36,7 +36,9 @@ export type ObserveEvent =
   | { kind: "doc.undo" | "doc.redo"; jseq: number; op: string; changed: number; box?: PublicBox; shift?: [number, number, number]; delta?: DeltaRef }
   | { kind: "state.add"; id: number; state: string }
   | { kind: "doc.checkpoint"; name: string; jseq: number }
-  | { kind: "call.start"; call: number; tool: string; scope?: string }
+  // `input`: the call's top-level scalar arguments (strings cut to 80 characters), so the viewer can
+  // match Claude Code's `tool_result` telemetry to this call (13, *Backlog* B3, "Per action").
+  | { kind: "call.start"; call: number; tool: string; scope?: string; input?: Record<string, string | number | boolean> }
   | { kind: "call.end"; call: number; tool: string; scope?: string; ms: number; ok: boolean; chars: number; images: number; pixels: number }
   | { kind: "call.refused"; call: number; tool: string; scope?: string; code: string; message: string }
   | { kind: "render.produced"; view: string; size: [number, number]; scope?: string; source?: "tool" | "snapshot"; path?: string }
@@ -47,7 +49,10 @@ export type ObserveEvent =
   // Live world link (13): emitted by src/world/ through the base document's sink.
   | { kind: "world.link"; state: "linked" | "relinked" | "unlinked" | "connected" | "disconnected"; dimension?: string; work?: PublicBox; extended?: number; context?: number; reason?: string }
   | { kind: "world.patch"; patch: number; jseq: number[]; blocks: number; forced?: boolean; applied: number; skipped: number; rejected: number; overwritten: number; normalized: number; dropped?: string }
-  | { kind: "world.sync"; reason: "ack" | "context" | "dirty" | "reconnect" | "manual"; changed: number; jseq?: number };
+  | { kind: "world.sync"; reason: "ack" | "context" | "dirty" | "reconnect" | "manual"; changed: number; jseq?: number }
+  // Claude Code's OpenTelemetry log records, received at the viewer's /v1/logs and kept unchanged
+  // (13, *Backlog* B3; src/observe/otel.ts).
+  | { kind: "otel"; record: Record<string, unknown> };
 
 export type ObserveKind = ObserveEvent["kind"];
 

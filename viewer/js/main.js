@@ -13,7 +13,7 @@
 
 import { VoxelView } from "./gl.js";
 import { Activity, SessionModel, scopeHue, toLocal } from "./model.js";
-import { renderActivity, renderFeed, renderScopeTree, renderTimeline } from "./panels.js";
+import { renderActivity, renderFeed, renderScopeTree, renderSpend, renderTimeline } from "./panels.js";
 import { Replayer, activityAt, copyRegion, modelAt, recordsOf, scopeSteps } from "./replay.js";
 import { VoxelGrid, decodeRecords, decodeVoxels } from "./voxels.js";
 
@@ -28,6 +28,7 @@ let selected = null;
 let assets = null; // { models, atlasVersion } once loaded
 let drill = null; // { scope, grid, view, seq }
 let fitted = false;
+let otelInfo = null; // /info `otel` (live sessions): the token-spend notice and setup snippet (13 B3)
 
 // Replay state.
 let live = true; // a live session (false: a finished log)
@@ -425,6 +426,7 @@ function renderPanels() {
   const now = shown.now ?? (live ? Date.now() : m.now);
   renderScopeTree($("scopes"), m, { selected, onSelect: select, now });
   renderFeed($("feed"), m, filters);
+  renderSpend($("spend"), m.spend, otelInfo);
   renderTimeline($("timeline"), m, { selected, onSelect: select, ...(replaying() ? { now } : {}) });
   renderActivity($("activity"), shown.activity, m);
   updateOverlays();
@@ -561,6 +563,7 @@ async function main() {
     const info = await getJson("info");
     live = info.live !== false;
     deltasOn = !!info.deltas?.on;
+    otelInfo = info.otel ?? null;
     $("docname").textContent = info.doc ?? "(no document open)";
     $("session").textContent = `${live ? "session" : "finished log"} ${info.session}`;
     $("replay-live").textContent = live ? "Live" : "End";

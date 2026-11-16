@@ -94,17 +94,18 @@ async function setup() {
     getScopeDoc: (id) => (id === "s1" ? sandbox : undefined),
     getBaker: async () => baker,
   });
-  const url = (await obs.ready)!;
+  const page = (await obs.ready)!;
+  const url = page.replace(/#.*$/, "");
   obs.bus.publish("base", { kind: "session.open", name: "keep" });
   doc.events = obs.sink();
   sandbox.events = obs.sink("s1");
-  return { workspace, doc, sandbox, obs, url };
+  return { workspace, doc, sandbox, obs, url, page };
 }
 
 describe("viewer HTTP server (12, phase 3)", () => {
   it("binds loopback, writes the url file, and serves info, voxels, deltas and assets", async () => {
-    const { workspace, doc, sandbox, obs, url } = await setup();
-    expect(url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/$/);
+    const { workspace, doc, sandbox, obs, url, page } = await setup();
+    expect(page).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/#t=[\w-]{32}$/);
     fill(doc, {}, box([0, 0, 0], [1, 0, 0]), "test:red");
     fill(doc, {}, box([0, 1, 0], [0, 1, 0]), "minecraft:stone");
     fill(sandbox, {}, box([0, 0, 0], [0, 0, 0]), "minecraft:glass");
@@ -145,7 +146,7 @@ describe("viewer HTTP server (12, phase 3)", () => {
     expect((await get(url + "info", { host: "evil.example:80" })).status).toBe(403);
     expect((await get(url + "../package.json")).status).toBe(404);
     await obs.close();
-    expect(readFileSync(join(workspace, "keep", "observe", "s", "url"), "utf8")).toBe(url + "\n");
+    expect(readFileSync(join(workspace, "keep", "observe", "s", "url"), "utf8")).toBe(page + "\n");
   });
 
   it("streams events over SSE from `since`, then live", async () => {
@@ -167,7 +168,7 @@ describe("viewer HTTP server (12, phase 3)", () => {
     const tables = new LogTables((e) => bus.publish("base", e));
     const http = new ObserveHttp({ bus, tables, sessionId: "s", dirFor: () => tempWorkspace(), docFor: () => undefined, port: 0, bufferEvents: 4 });
     bus.subscribe(http.onEvent);
-    const url = await http.start();
+    const url = (await http.start()).replace(/#.*$/, "");
     for (let i = 0; i < 10; i++) bus.publish("base", { kind: "doc.checkpoint", name: `c${i}`, jseq: i });
     const msgs = await sse(url + "events?since=0", (m) => m.length >= 2);
     expect(msgs[0]).toEqual({ event: "resync", data: { seq: 10, from: expect.any(Number) } });
@@ -178,7 +179,7 @@ describe("viewer HTTP server (12, phase 3)", () => {
   it("is on by default on a free port, and off with observe.http=false", async () => {
     const on = startObserve({ workspace: tempWorkspace(), settings: Settings.from([], {}), sessionId: "s", getDoc: () => undefined });
     expect(on.http).toBeDefined();
-    expect(await on.ready).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/$/);
+    expect(await on.ready).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/#t=/);
     await on.close();
     const obs = startObserve({ workspace: tempWorkspace(), settings: Settings.from(["--set", "observe.http=false"], {}), sessionId: "s", getDoc: () => undefined });
     expect(obs.http).toBeUndefined();

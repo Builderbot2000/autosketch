@@ -145,7 +145,7 @@ describe("tool-call events (12, phase 1)", () => {
     await observeCall(() => sink, "plain", async () => text("hello"))();
 
     expect(seen.map((e) => ({ ...e, t: 0, ...("ms" in e ? { ms: 0 } : {}) }))).toEqual([
-      { v: 1, seq: 1, t: 0, doc: "base", kind: "call.start", call: expect.any(Number), tool: "scope_fork", scope: "s2" },
+      { v: 1, seq: 1, t: 0, doc: "base", kind: "call.start", call: expect.any(Number), tool: "scope_fork", scope: "s2", input: { scope: "s2" } },
       { v: 1, seq: 2, t: 0, doc: "base", kind: "call.refused", call: expect.any(Number), tool: "scope_fork", scope: "s2", code: "lock_overlap", message: "work volume overlaps job s1" },
       { v: 1, seq: 3, t: 0, doc: "base", kind: "call.end", call: expect.any(Number), tool: "scope_fork", scope: "s2", ms: 0, ok: false, chars: 27, images: 0, pixels: 0 },
       { v: 1, seq: 4, t: 0, doc: "base", kind: "call.start", call: expect.any(Number), tool: "render" },

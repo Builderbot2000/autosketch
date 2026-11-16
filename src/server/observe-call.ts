@@ -30,7 +30,8 @@ export function observeCall<A extends unknown[]>(
     const s = (args[0] as { scope?: unknown } | undefined)?.scope;
     const scope = typeof s === "string" ? { scope: s } : {};
     const t0 = performance.now();
-    events.emit({ kind: "call.start", call, tool, ...scope });
+    const input = scalarInput(args[0]);
+    events.emit({ kind: "call.start", call, tool, ...scope, ...(input ? { input } : {}) });
     let result: CallToolResult | undefined;
     try {
       result = await handler(...args);
@@ -45,6 +46,25 @@ export function observeCall<A extends unknown[]>(
       events.emit({ kind: "call.end", call, tool, ...scope, ms, ok, ...size });
     }
   };
+}
+
+/**
+ * The call's top-level scalar arguments, strings cut to 80 characters, at most 16 of them: enough
+ * for the viewer to tell apart same-named calls when matching Claude Code's `tool_result` telemetry
+ * (13, *Backlog* B3, "Per action"), without copying block lists or scripts into the log.
+ */
+export function scalarInput(args: unknown): Record<string, string | number | boolean> | undefined {
+  if (typeof args !== "object" || args === null) return undefined;
+  const out: Record<string, string | number | boolean> = {};
+  let n = 0;
+  for (const [k, v] of Object.entries(args)) {
+    if (n >= 16) break;
+    if (typeof v === "string") out[k] = v.slice(0, 80);
+    else if (typeof v === "boolean" || (typeof v === "number" && Number.isFinite(v))) out[k] = v;
+    else continue;
+    n++;
+  }
+  return n ? out : undefined;
 }
 
 /** Text characters, image count and total image pixels of a result (12, `call.end`). */

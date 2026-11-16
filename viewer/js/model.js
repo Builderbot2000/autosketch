@@ -30,6 +30,8 @@ export class SessionModel {
     this.states = new Map();
     this.pendingWaits = new Map();
     this.now = 0;
+    /** Token spend from Claude Code's OpenTelemetry (`otel` events, 13 B3). */
+    this.spend = new Spend();
   }
 
   /** Applies one event. Returns false for an event already seen (seq at or below lastSeq). */
@@ -70,8 +72,15 @@ export class SessionModel {
           s.lastTool = e.tool;
           s.lastT = e.t;
         }
+        this.spend.addCall(e);
         break;
       }
+      case "call.end":
+        this.spend.addCall(e);
+        break;
+      case "otel":
+        this.spend.addOtel(e);
+        break;
       case "call.refused": {
         const r = { seq: e.seq, t: e.t, tool: e.tool, scope: e.scope ?? "base", code: e.code, message: e.message };
         this.refusals.push(r);
@@ -163,7 +172,9 @@ export function filterEvents(events, f = {}) {
       (!f.kind || e.kind === f.kind || e.kind.startsWith(f.kind + ".")) &&
       (!f.tool || (e.tool ?? "").includes(f.tool)) &&
       (!f.refusals || e.kind === "call.refused") &&
-      (f.states || e.kind !== "state.add"),
+      (f.states || e.kind !== "state.add") &&
+      // Telemetry records are many and summed in the Spend panel; listed only when asked for.
+      (f.kind === "otel" || e.kind !== "otel"),
   );
 }
 
@@ -186,6 +197,13 @@ export function describe(e) {
     case "scope.fork": return `fork ${e.scope} from ${e.parent || "base"}: ${e.brief} work ${fmtBox(e.work)}`;
     case "scope.merge": return `merge ${e.scope}: ${e.report ?? ""}`;
     case "scope.abandon": return `abandon ${e.scope} (${e.reason})`;
+    case "otel": {
+      const o = otelEvent(e.record);
+      const a = o.attrs;
+      return o.name === "api_request" ? `api_request ${a.model ?? ""} in ${a.input_tokens ?? 0} out ${a.output_tokens ?? 0}${a.cost_usd !== undefined ? ` $${Number(a.cost_usd).toFixed(4)}` : ""}`
+        : o.name === "tool_result" ? `tool_result ${a.tool_name ?? ""}${a.success === false || a.success === "false" ? " failed" : ""}`
+        : o.name;
+    }
     default: return e.kind;
   }
 }
@@ -235,5 +253,240 @@ export class Activity {
     const per = changed / (w * d);
     if (w * d > 65536) return; // too coarse to be useful; skip rather than flood the map
     for (let x = box.min[0]; x <= box.max[0]; x++) for (let z = box.min[2]; z <= box.max[2]; z++) this.add(x, z, per);
+  }
+}
+
+// -- token spend (13, *Backlog* B3) ----------------------------------------------------------------
+//
+// Built from Claude Code's OpenTelemetry log records as they come (`otel` events, kept unchanged by
+// src/observe/otel.ts), with its own event names and attributes: `user_prompt`, `api_request`
+// (input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd, request_id),
+// `tool_result` (tool_name, tool_parameters, tool_input, request_id, tool_result_size_bytes) and
+// `prompt.id`, `agent_id`, `event.timestamp`, `event.sequence` on every record.
+
+/** An OTLP JSON AnyValue as a plain value (int64s arrive as strings). */
+export function otelValue(v) {
+  if (v === null || typeof v !== "object") return v;
+  if ("stringValue" in v) return v.stringValue;
+  if ("intValue" in v) return Number(v.intValue);
+  if ("doubleValue" in v) return Number(v.doubleValue);
+  if ("boolValue" in v) return v.boolValue;
+  if ("arrayValue" in v) return (v.arrayValue?.values ?? []).map(otelValue);
+  if ("kvlistValue" in v) return Object.fromEntries((v.kvlistValue?.values ?? []).map((kv) => [kv.key, otelValue(kv.value)]));
+  return undefined;
+}
+
+/** A log record's event name (without `claude_code.`), attributes, time (ms) and sequence. */
+export function otelEvent(record) {
+  const attrs = {};
+  for (const a of record?.attributes ?? []) if (a && typeof a.key === "string") attrs[a.key] = otelValue(a.value);
+  const name = String(attrs["event.name"] ?? otelValue(record?.body) ?? "").replace(/^claude_code\./, "");
+  const ts = Date.parse(attrs["event.timestamp"]) || Number(record?.timeUnixNano ?? 0) / 1e6 || 0;
+  return { name, attrs, ts, seq: Number(attrs["event.sequence"] ?? 0) || 0 };
+}
+
+const num = (v) => Number(v) || 0;
+const TOKEN_KEYS = [["input", "input_tokens"], ["output", "output_tokens"], ["cacheRead", "cache_read_tokens"], ["cacheWrite", "cache_creation_tokens"]];
+export const zeroTokens = () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, requests: 0 });
+function addTokens(into, t) {
+  for (const k of ["input", "output", "cacheRead", "cacheWrite", "cost", "requests"]) into[k] += t[k];
+}
+
+/** The autosketch tool a `tool_result` is for, or null when it is another tool (or details are off). */
+export function autosketchTool(attrs) {
+  let p = attrs.tool_parameters;
+  if (typeof p === "string") {
+    try {
+      p = JSON.parse(p);
+    } catch {
+      p = null;
+    }
+  }
+  if (p && typeof p === "object" && p.mcp_server_name) return /autosketch/i.test(p.mcp_server_name) ? (p.mcp_tool_name ?? null) : null;
+  const m = /^mcp__(.+?)__(.+)$/.exec(String(attrs.tool_name ?? ""));
+  return m && /autosketch/i.test(m[1]) ? m[2] : null;
+}
+
+/**
+ * Whether a call's logged scalar arguments (`call.start` `input`) agree with Claude Code's
+ * `tool_input`. Keys only one side has are skipped (defaults, stripped keys), and a `tool_input`
+ * cut off before it parses doesn't decide anything: order alone does then.
+ */
+export function inputAgrees(callInput, toolInput) {
+  if (!callInput || toolInput === undefined || toolInput === null) return true;
+  let parsed = toolInput;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return true;
+    }
+  }
+  if (!parsed || typeof parsed !== "object") return true;
+  for (const [k, v] of Object.entries(callInput)) {
+    if (!(k in parsed)) continue;
+    const p = typeof parsed[k] === "string" ? parsed[k].slice(0, 80) : parsed[k];
+    if (typeof p === typeof v && p !== v) return false;
+  }
+  return true;
+}
+
+/** A tool_result may be logged up to this long after its call ended. */
+const MATCH_WINDOW_MS = 120_000;
+/** Clock slack: the tool_result's timestamp may read slightly before our call.end. */
+const MATCH_SLACK_MS = 2_000;
+
+export class Spend {
+  constructor() {
+    /** Records seen (after dropping exporter retries). */
+    this.records = 0;
+    this.seen = new Set();
+    /** prompt.id → { id, t, length, command, tokens }. */
+    this.prompts = new Map();
+    /** request_id → { id, prompt, agent, tokens, results } (`results`: tool_results it issued). */
+    this.requests = new Map();
+    /** agent_id ("" for the main agent) → tokens. */
+    this.agents = new Map();
+    /** agent_id → scope id, learned from matched calls that named a scope. */
+    this.agentScope = new Map();
+    /** call number → { call, tool, scope, input, endT, result? }. */
+    this.calls = new Map();
+    this.unmatchedCalls = [];
+    this.pendingResults = [];
+    this.total = zeroTokens();
+  }
+
+  addCall(e) {
+    if (e.kind === "call.start") {
+      this.calls.set(e.call, { call: e.call, tool: e.tool, scope: e.scope, input: e.input, startT: e.t });
+      return;
+    }
+    const c = this.calls.get(e.call) ?? { call: e.call, tool: e.tool, scope: e.scope };
+    c.endT = e.t;
+    this.calls.set(e.call, c);
+    this.unmatchedCalls.push(c);
+    this.match();
+  }
+
+  addOtel(e) {
+    const o = otelEvent(e.record);
+    const a = o.attrs;
+    // An exporter retry sends the same records again.
+    if (a["session.id"] !== undefined && a["event.sequence"] !== undefined) {
+      const key = `${a["session.id"]}:${a["event.sequence"]}`;
+      if (this.seen.has(key)) return;
+      this.seen.add(key);
+    }
+    this.records++;
+    const promptId = a["prompt.id"] === undefined ? null : String(a["prompt.id"]);
+    const prompt = () => {
+      if (promptId === null) return null;
+      let p = this.prompts.get(promptId);
+      if (!p) this.prompts.set(promptId, (p = { id: promptId, t: o.ts || e.t, tokens: zeroTokens() }));
+      return p;
+    };
+    switch (o.name) {
+      case "user_prompt": {
+        const p = prompt();
+        if (!p) break;
+        p.t = o.ts || p.t;
+        if (a.prompt_length !== undefined) p.length = num(a.prompt_length);
+        if (a.command_name) p.command = String(a.command_name);
+        if (typeof a.prompt === "string") p.text = a.prompt;
+        break;
+      }
+      case "api_request": {
+        const t = zeroTokens();
+        for (const [k, attr] of TOKEN_KEYS) t[k] = num(a[attr]);
+        t.cost = num(a.cost_usd);
+        t.requests = 1;
+        addTokens(this.total, t);
+        const p = prompt();
+        if (p) addTokens(p.tokens, t);
+        const agent = a.agent_id === undefined ? "" : String(a.agent_id);
+        if (!this.agents.has(agent)) this.agents.set(agent, zeroTokens());
+        addTokens(this.agents.get(agent), t);
+        if (a.request_id !== undefined) Object.assign(this.request(String(a.request_id)), { prompt: promptId, agent, tokens: t, model: a.model });
+        break;
+      }
+      case "tool_result": {
+        if (a.request_id !== undefined) this.request(String(a.request_id)).results++;
+        const tool = autosketchTool(a);
+        if (!tool) break;
+        this.pendingResults.push({ tool, ts: o.ts || e.t, seq: o.seq, attrs: a });
+        this.match();
+        break;
+      }
+    }
+  }
+
+  request(id) {
+    let r = this.requests.get(id);
+    if (!r) this.requests.set(id, (r = { id, prompt: null, agent: "", tokens: null, results: 0 }));
+    return r;
+  }
+
+  /**
+   * Pairs autosketch `tool_result` records with our `call.end` events (13 B3, "Per action"): by
+   * tool name in order (`event.timestamp`, then `event.sequence`), within a time window, skipping
+   * calls whose logged arguments disagree with `tool_input`. The MCP never sees the client's
+   * `tool_use_id`, so this is the only join there is.
+   */
+  match() {
+    if (!this.pendingResults.length || !this.unmatchedCalls.length) return;
+    this.pendingResults.sort((x, y) => x.ts - y.ts || x.seq - y.seq);
+    const left = [];
+    for (const r of this.pendingResults) {
+      const i = this.unmatchedCalls.findIndex(
+        (c) => c.tool === r.tool && c.endT <= r.ts + MATCH_SLACK_MS && c.endT >= r.ts - MATCH_WINDOW_MS && inputAgrees(c.input, r.attrs.tool_input),
+      );
+      if (i < 0) {
+        left.push(r);
+        continue;
+      }
+      const c = this.unmatchedCalls.splice(i, 1)[0];
+      c.result = r;
+      if (r.attrs.agent_id !== undefined && c.scope) this.agentScope.set(String(r.attrs.agent_id), c.scope);
+    }
+    this.pendingResults = left.slice(-500);
+    // Calls too old for any later tool_result to claim (no telemetry came for them).
+    const newest = Math.max(0, ...this.unmatchedCalls.map((c) => c.endT ?? 0));
+    this.unmatchedCalls = this.unmatchedCalls.filter((c) => (c.endT ?? 0) >= newest - 4 * MATCH_WINDOW_MS);
+  }
+
+  /**
+   * The label for one of our calls: the `output_tokens` of the API request that issued it, split
+   * across the tool calls that request issued, and the result's size. `input_tokens` grows with the
+   * whole context, so it isn't charged to one action. Undefined until the telemetry arrives.
+   */
+  label(call) {
+    const r = this.calls.get(call)?.result;
+    if (!r) return undefined;
+    const reqId = r.attrs.request_id === undefined ? undefined : String(r.attrs.request_id);
+    const req = reqId === undefined ? undefined : this.requests.get(reqId);
+    const out = { request: reqId };
+    if (r.attrs.tool_result_size_bytes !== undefined) out.bytes = num(r.attrs.tool_result_size_bytes);
+    if (req?.tokens) {
+      out.outputTokens = Math.round(req.tokens.output / Math.max(1, req.results));
+      out.shared = Math.max(1, req.results);
+    }
+    return out;
+  }
+
+  /** Tokens per scope: a subagent's on the scope its calls named, the main agent's on "base". */
+  scopeTotals(scope) {
+    const t = zeroTokens();
+    let any = false;
+    for (const [agent, tokens] of this.agents) {
+      if ((agent === "" ? "base" : this.agentScope.get(agent)) !== scope) continue;
+      addTokens(t, tokens);
+      any = true;
+    }
+    return any ? t : undefined;
+  }
+
+  /** Prompts, newest first. */
+  promptList() {
+    return [...this.prompts.values()].sort((a, b) => b.t - a.t);
   }
 }

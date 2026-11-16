@@ -78,19 +78,48 @@ export const settingGroup = (s: Setting<unknown>): string => s.group ?? s.key.sp
 
 export const settingApplies = (s: Setting<unknown>): SettingApplies => s.applies ?? "restart";
 
+/**
+ * The Settings tab's control for a setting (`15`, *Settings tab*: "the control follows the parser"):
+ * a toggle for `parseBool`, a select for `parseOneOf`, a number field with bounds for `parseInt0`, a
+ * list editor for `parseList`, a text field for anything else.
+ */
+export type SettingControl =
+  | { type: "toggle" }
+  | { type: "select"; options: string[] }
+  | { type: "number"; min: number; max: number }
+  | { type: "list" }
+  | { type: "text" };
+
+/** Controls of the parsers made by `parseInt0` and `parseOneOf` (the plain parsers are compared by identity). */
+const controls = new WeakMap<object, SettingControl>();
+
+export function settingControl(s: Setting<unknown>): SettingControl {
+  if (s.parse === parseBool) return { type: "toggle" };
+  if (s.parse === parseList) return { type: "list" };
+  return controls.get(s.parse) ?? { type: "text" };
+}
+
 export const parseBool = (raw: string): boolean | undefined => {
   const s = raw.trim().toLowerCase();
   return ["1", "true", "on", "yes"].includes(s) ? true : ["0", "false", "off", "no"].includes(s) ? false : undefined;
 };
 
-export const parseInt0 = (min: number, max: number) => (raw: string): number | undefined => {
-  const n = Number(raw.trim());
-  return Number.isInteger(n) && n >= min && n <= max ? n : undefined;
+export const parseInt0 = (min: number, max: number) => {
+  const parse = (raw: string): number | undefined => {
+    const n = Number(raw.trim());
+    return Number.isInteger(n) && n >= min && n <= max ? n : undefined;
+  };
+  controls.set(parse, { type: "number", min, max });
+  return parse;
 };
 
-export const parseOneOf = <T extends string>(values: readonly T[]) => (raw: string): T | undefined => {
-  const s = raw.trim();
-  return (values as readonly string[]).includes(s) ? (s as T) : undefined;
+export const parseOneOf = <T extends string>(values: readonly T[]) => {
+  const parse = (raw: string): T | undefined => {
+    const s = raw.trim();
+    return (values as readonly string[]).includes(s) ? (s as T) : undefined;
+  };
+  controls.set(parse, { type: "select", options: [...values] });
+  return parse;
 };
 
 /** A comma-separated list of non-empty, trimmed entries. */

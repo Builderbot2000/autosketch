@@ -52,7 +52,7 @@ instance = "C:/Users/me/curseforge/minecraft/Instances/Craftoria"
 "library.roots" = ["~/autosketch/library", "~/shared/castle-kit"]
 ```
 
-Values are stored as text and go through each setting's own `parse`, so a hand-edited file and the UI agree on what's valid. A number, boolean or list in the file is read as the text a launch value would carry (a list becomes `a, b`). An invalid value in the file is reported in the UI and the server log and skipped, so the next source applies: the launch value if there is one, else the default. Reason: a hand-editing mistake should fall back to what the user had before saving, not to a value nobody chose. (An invalid launch value still stops the server, as before: it is a mistake in the MCP client's config, which the user sees at once.)
+Values are stored as text and go through each setting's own `parse`, so a hand-edited file and the UI agree on what's valid. A number, boolean or list in the file is read as the text a launch value would carry (a list becomes `a, b`). An invalid value in the file is reported in the UI and the server log and skipped, so the next source applies: the launch value if there is one, else the default. Reason: a hand-editing mistake should fall back to what the user had before saving, not to a value nobody chose. Only invalid `config.toml` values are skipped: an invalid launch value (a `--set`, flag alias or `AUTOSKETCH_*` value) still stops the server, as today, since it is a mistake in the MCP client's config, which the user sees at once.
 
 **Generated, not hand-written.** Each `setting(…)` gains three optional fields, and the tab is built from the registry, so a new setting appears in the UI with no UI change:
 
@@ -163,7 +163,8 @@ U4 depends on `14`'s `config.toml` and discovery, so it lands with or after them
 | U2: `config.toml` `[settings]` layer | Done (the server side): `src/core/settings.ts` reads `config.toml [settings]` (`src/core/config.ts`, `14`, *Implementation status*) before `--set`, the flag alias and `AUTOSKETCH_<KEY>`. `Settings.from(argv, env, readConfig())`; `resolve(setting)` returns the value, its `source` (`kind` and the label shown: `config.toml`, `--set`, `--mod-order`, `AUTOSKETCH_…`, `default`), the `raw` text, the launch value it `overrides`, an `invalid` config value, or an `error` for an invalid launch value (which `get` still throws); it never throws itself. `resolveAll()` covers every registered setting, `notes()` gives the startup lines (one per overridden launch value whose meaning differs, per invalid or unknown `config.toml` key, per read problem), and `reload(snapshot)` swaps in a newer read for `live` settings. An invalid `config.toml` value is skipped and the next source applies (the launch value if any, else the default). No tool result changed. |
 | U2: `summary`, `group`, `applies` | Done as optional fields on `setting(…)`, with `settingGroup()` (default: the key's first segment, capitalised) and `settingApplies()` (default `restart`). `setting(…)` registers the key for `registeredSettings()`; declaring a key again replaces it. No setting sets them yet. |
 | U2: Settings tab, file watching | Not built (silo K) |
-| U1, U3–U5 | Not built |
+| U4 (server side) | Done by silo J (`14`, *Implementation status*): discovery, `chooseInstance`, `session.loadInstance`, the `not_configured` answer with the URL, and the startup signal (`wantsSetupWizard`, `#tab=instance`). The tab, `/api/instance` and the wizard view are silo K's. |
+| U1, U3, U4 (UI), U5 | Not built |
 
 ## Open questions
 

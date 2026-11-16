@@ -48,7 +48,7 @@ export function registerDocumentTools({ tool, session }: ToolDeps): void {
         "Opens a saved document by name and makes it current (the previous one is saved and closed). With path, imports a schematic file instead " +
         "(.schem v1–v3, Axiom .bp, Create/structure .nbt, Litematica .litematic, legacy MCEdit .schematic, .autosketch) as a new workspace document named name (default: the file name). Unknown blocks and block-entity NBT are kept. " +
         "Undo history of a saved document continues where it left off; an imported file starts fresh. " +
-        "With world:true, links to the world loaded in the game instead (Autosketch mod; the player marks a work and context volume with /autosketch wand): the document holds those volumes, re-origined to the work volume's corner, and every edit goes to the game as a patch that never overwrites the player's hand edits. Text.",
+        "With world:true, links to the world loaded in the game instead (Autosketch mod; the player marks a work and context volume with /autosketch wand): the document holds those volumes, re-origined to the work volume's corner, and every edit goes to the game as a patch that never overwrites the player's hand edits. The server normally links on its own when the player marks a work volume; call it to link explicitly or to relink after an unlink. Text.",
       inputSchema: {
         name: z.string().optional().describe("Workspace document name (required unless path is given)"),
         path: z.string().optional().describe("Schematic file to import"),

@@ -28,7 +28,7 @@ With the companion mod (`mod/`) and the live world link (`docs/design/13-live-wo
 claude --dangerously-load-development-channels server:autosketch
 ```
 
-(`--channels server:autosketch` is the form for an approved channel.) This works only in interactive sessions. Without it, the world link still works, and in-game requests are dropped silently by Claude Code. The server can't detect that, so the player is told "delivered".
+The server connects to the game on its own once it is running, and links as soon as you mark a work volume with `/autosketch wand` (turn this off with `--set world.autoLink=false`, then the agent links with `doc_open({world: true})`). (`--channels server:autosketch` is the form for an approved channel.) This works only in interactive sessions. Without it, the world link still works, and in-game requests are dropped silently by Claude Code. The server can't detect that, so the player is told "delivered".
 
 **Who may ask.** A request turns into a prompt to an agent that can run commands on your machine, so the MCP checks every request against an allowlist before anything reaches the session. In singleplayer the host is always allowed. Anyone else, and everyone on a dedicated server, has to be listed by UUID (safer) or name: `--set world.promptPlayers=<uuid>,<name>`. Op level 2 is required in the game as well. Other settings: `world.promptIdleMs` (a request's chat stream closes after this long with no tool calls, default 5 minutes) and `world.activityMs` (at most one activity chat message per interval, default 2 s). In the game, `/autosketch log off|mine|all` picks what each player sees.
 

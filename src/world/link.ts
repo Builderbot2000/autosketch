@@ -89,6 +89,11 @@ export interface WorldLink {
    * implement it.
    */
   open?(opts: LinkOpenOptions): Promise<{ doc: Document; report: string }>;
+  /**
+   * Links now if automatic linking is on and the player has a work volume (an in-game request
+   * arriving unlinked). Resolves whether the document is linked. Optional, like `open`.
+   */
+  ensureLinked?(): Promise<boolean>;
 }
 
 export interface LinkOpenOptions {

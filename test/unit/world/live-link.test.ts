@@ -330,6 +330,70 @@ describe("connection (13, Lifecycle, W1)", () => {
   });
 });
 
+describe("automatic linking (13, Automatic linking)", () => {
+  const autoSetup = (instanceDir: string) => {
+    const session = new Session(tempDir());
+    link = new LiveLink(session, { ackWaitMs: 2000, backoff: { minMs: 20, maxMs: 50 }, autoRetryMs: 20 });
+    link.setSync(syncLink);
+    session.world = link;
+    session.callHooks.push(autoSyncHook(() => session.world));
+    link.autoLink({ instanceDir, plugins: [], palettes: new PaletteBook() });
+    return session;
+  };
+
+  it("waits for the game, connects when it starts, and links once the player marks a work volume", async () => {
+    const dir = tempDir();
+    const session = autoSetup(dir);
+    await new Promise((r) => setTimeout(r, 60)); // a few failed attempts: no pairing file yet
+    expect(link!.state).toBe("disconnected");
+    host = await FakeHost.start({ instanceDir: dir, volumes: null });
+    host.set(w([0, 0, 0]), STONE);
+    await host.waitFor(() => link!.state === "connected");
+    expect(session.doc).toBeUndefined(); // no work volume: nothing to link
+    host.setVolumes({ work: WORK });
+    await host.waitFor(() => link!.state === "linked");
+    expect(session.doc!.meta.name).toBe("world");
+    expect(session.doc!.getState(0, 0, 0)).toBe(STONE);
+    expect(link!.volumes?.origin).toEqual(O);
+    // Clearing the work volume unlinks; marking a new one links again without being asked.
+    host.setVolumes(null);
+    await host.waitFor(() => link!.state === "connected");
+    host.setVolumes({ work: WORK });
+    await host.waitFor(() => link!.state === "linked");
+  });
+
+  it("doesn't replace another open document on its own, but an in-game request links anyway", async () => {
+    host = await FakeHost.start({ volumes: null });
+    const session = autoSetup(host.instanceDir);
+    await host.waitFor(() => link!.state === "connected");
+    const other = await session.create({ name: "tower", mcVersion: "1.21.1", palettes: new PaletteBook() });
+    host.setVolumes({ work: WORK });
+    await host.waitFor(() => !!link!.bridge.volumes?.work);
+    await link!.settle();
+    expect(session.doc).toBe(other);
+    expect(link!.state).toBe("connected");
+    expect(await link!.ensureLinked()).toBe(true);
+    expect(link!.state).toBe("linked");
+    expect(session.doc!.meta.name).toBe("world");
+  });
+
+  it("doesn't link while scoped jobs are open", async () => {
+    host = await FakeHost.start({ volumes: { work: WORK } });
+    const session = autoSetup(host.instanceDir);
+    await host.waitFor(() => link!.state === "linked");
+    const doc = session.doc!;
+    host.setVolumes(null);
+    await host.waitFor(() => link!.state === "connected");
+    Object.defineProperty(session.scopes, "openCount", { get: () => 1, configurable: true });
+    host.setVolumes({ work: WORK });
+    await host.waitFor(() => !!link!.bridge.volumes?.work);
+    await link!.settle();
+    expect(link!.state).toBe("connected");
+    expect(await link!.ensureLinked()).toBe(false);
+    expect(session.doc).toBe(doc);
+  });
+});
+
 describe("plugins and events (13, Hashing, W8)", () => {
   it("sends plugin volatile keys in hello and publishes world.patch with ack counts", async () => {
     const events: ObserveEvent[] = [];

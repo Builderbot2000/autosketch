@@ -1,4 +1,4 @@
-import { parseInt0, parseList, parseText, setting, type Settings } from "../core/settings.js";
+import { parseBool, parseInt0, parseList, parseText, setting, type Settings } from "../core/settings.js";
 
 /** Live world link settings (docs/design/13-live-world.md). */
 
@@ -10,6 +10,12 @@ import { parseInt0, parseList, parseText, setting, type Settings } from "../core
 export const WORLD_GAME_DIR = setting("world.gameDir", "", "a folder path", parseText);
 
 /**
+ * Link the world without `doc_open({world: true})`: connect as soon as the game is up, and link
+ * the base document whenever the player marks a work volume (13, *Automatic linking*).
+ */
+export const WORLD_AUTO_LINK = setting("world.autoLink", true, "true or false", parseBool);
+
+/**
  * How long a tool call waits, after its body returns, for the acks of the patches it sent, so the
  * `world:` line lands in its own result (13, *Agent → world*). Later acks go to the next result.
  */
@@ -18,11 +24,12 @@ export const WORLD_ACK_WAIT_MS = setting("world.ackWaitMs", 1500, "milliseconds 
 export interface WorldSettings {
   gameDir?: string;
   ackWaitMs: number;
+  autoLink: boolean;
 }
 
 export function worldSettings(s: Settings): WorldSettings {
   const dir = s.get(WORLD_GAME_DIR);
-  return { ...(dir ? { gameDir: dir } : {}), ackWaitMs: s.get(WORLD_ACK_WAIT_MS) };
+  return { ...(dir ? { gameDir: dir } : {}), ackWaitMs: s.get(WORLD_ACK_WAIT_MS), autoLink: s.get(WORLD_AUTO_LINK) };
 }
 
 /**

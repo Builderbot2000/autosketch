@@ -72,6 +72,8 @@ export interface LiveLinkOptions {
   apply?: ApplyWorldState;
   /** Bridge reconnect backoff (tests shorten it). */
   backoff?: { minMs: number; maxMs: number };
+  /** How often automatic linking retries the first connection (default 2 s; tests shorten it). */
+  autoRetryMs?: number;
   log?: (msg: string) => void;
 }
 
@@ -191,10 +193,85 @@ export class LiveLink implements WorldLink {
     return this.serial(() => this.doOpen({ ...o, name: o.name ?? DEFAULT_NAME }, false));
   }
 
+  /**
+   * Automatic linking (setting `world.autoLink`): connects to the game as soon as it is up,
+   * retrying until the first connection (the bridge reconnects by itself after that), and links
+   * the base document whenever the player has a work volume and the session isn't busy with
+   * another document (`autoOpen`). An in-game request links even then (`ensureLinked`).
+   */
+  autoLink(o: LinkOpenOptions): void {
+    this.auto = o;
+    this.tryConnect();
+  }
+
+  /** Links now if it can (automatic linking on, a work volume set, no scoped jobs). Resolves whether linked. */
+  ensureLinked(): Promise<boolean> {
+    return this.current() ? Promise.resolve(true) : this.queueAutoOpen(true);
+  }
+
   /** Disconnects and stops (server shutdown). */
   close(): void {
+    this.closed = true;
+    clearTimeout(this.autoTimer);
     this.tap?.close();
     this.bridge.close();
+  }
+
+  // -- automatic linking ----------------------------------------------------------------------
+
+  private auto?: LinkOpenOptions;
+  private autoTimer?: NodeJS.Timeout;
+  private autoError?: string;
+  private closed = false;
+
+  private tryConnect(): void {
+    clearTimeout(this.autoTimer);
+    if (this.closed || !this.auto) return;
+    if (this.bridge.connected) return void this.queueAutoOpen(false);
+    this.connect(this.auto).then(
+      () => {
+        this.autoError = undefined;
+        this.opts.log?.("world: connected to the game");
+        void this.queueAutoOpen(false);
+      },
+      (e: Error) => {
+        if (this.bridge.connected) return void this.queueAutoOpen(false); // another attempt won
+        if (e.message !== this.autoError) this.opts.log?.(`world: waiting for the game: ${e.message}`);
+        this.autoError = e.message;
+        if (e instanceof BridgeError && e.refusal === "protocol_mismatch") return; // retrying won't help
+        this.autoTimer = setTimeout(() => this.tryConnect(), this.opts.autoRetryMs ?? 2000);
+        this.autoTimer.unref?.();
+      },
+    );
+  }
+
+  /** Runs `autoOpen` once no call is running, in turn with other link changes. */
+  private queueAutoOpen(force: boolean): Promise<boolean> {
+    if (!this.auto) return Promise.resolve(!!this.current());
+    return new Promise((resolve) => this.whenIdle(() => this.serial(() => this.autoOpen(force)).then(resolve, () => resolve(false))));
+  }
+
+  /**
+   * Links the player's volumes without being asked. Not while scoped jobs are open, and, unless
+   * `force` (the player asked from the game), not over a document that isn't a world document.
+   */
+  private async autoOpen(force: boolean): Promise<boolean> {
+    if (this.current()) return true;
+    const o = this.auto;
+    const v = this.bridge.volumes;
+    if (!o || !this.bridge.connected || !v || v.work === null || this.host.scopes.openCount) return false;
+    const open = this.host.doc;
+    if (!force && open && !open.meta.source?.startsWith("world:")) return false;
+    try {
+      const r = await this.doOpen({ ...o, name: this.openedWith?.name ?? DEFAULT_NAME }, false);
+      this.opts.log?.(`world: ${r.report.split("\n")[0]}`);
+      this.note(`world: linked automatically${open && open !== r.doc ? ` (document "${open.meta.name}" was saved and closed)` : ""}. ${r.report}`);
+      return true;
+    } catch (e) {
+      this.opts.log?.(`world: automatic link failed: ${(e as Error).message}`);
+      this.note(`world: couldn't link automatically: ${(e as Error).message}`);
+      return false;
+    }
   }
 
   // -- linking --------------------------------------------------------------------------------
@@ -213,7 +290,14 @@ export class LiveLink implements WorldLink {
     return run;
   }
 
-  private async connect(o: LinkOpenOptions): Promise<void> {
+  private connectRun?: Promise<void>;
+
+  /** One connection attempt at a time, shared by `doc_open` and automatic linking. */
+  private connect(o: LinkOpenOptions): Promise<void> {
+    return (this.connectRun ??= this.doConnect(o).finally(() => (this.connectRun = undefined)));
+  }
+
+  private async doConnect(o: LinkOpenOptions): Promise<void> {
     this.volatile = mergeVolatile(DEFAULT_VOLATILE, ...o.plugins.map((p) => p.volatileKeys ?? {}));
     this.bridge.setVolatile(this.volatile);
     if (this.bridge.connected) return;
@@ -382,6 +466,7 @@ export class LiveLink implements WorldLink {
 
   private onVolumes(m: VolumesMessage): void {
     const f = this.frame;
+    if ((!f || !this.current()) && m.work !== null) return void this.queueAutoOpen(false);
     if (!f || !this.current() || (m.work !== null && m.extended && sameBox(m.work, f.work) && m.dimension === f.dimension && m.link === f.link && sameBoxes(m.context, f.context))) return;
     this.whenIdle(() => this.serial(() => this.followVolumes(m)));
   }

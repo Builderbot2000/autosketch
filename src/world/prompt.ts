@@ -112,6 +112,7 @@ export class InGameRequests implements InGameReplies {
       this.link.bridge.send({ type: "prompt.result", id: m.id, delivered: false, reason });
     };
     if (!promptAllowed(m.player, this.opts.promptPlayers, this.link.bridge.hello)) return refuse("not_allowed");
+    if (this.link.state !== "linked") await this.link.ensureLinked?.();
     const doc = this.link.doc, volumes = this.link.volumes;
     if (this.link.state !== "linked" || !doc || !volumes) return refuse("no_link");
     if (!this.opts.listening()) return refuse("no_listener");

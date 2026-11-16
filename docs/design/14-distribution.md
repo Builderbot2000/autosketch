@@ -206,8 +206,8 @@ Deferred by the user until later development. What was found, for when it comes 
 - **The mod targets every pack, loader and version it can, published as one project per site** (settled as the goal; the range is open).
 - **Model-agnostic operator deferred** (settled).
 - **First release on Craftoria's profile** (NeoForge 1.21.1, settled). Reason: it is the pack the user builds on and the one every test runs against.
-- **MultiLoader layout with Stonecutter** (settled).
-- **Cloth Config for the mod's config on every loader** (settled). Reason: it is already in every pack checked, on all three loaders, and gives a config file on servers and a screen on clients. Reason: no runtime library for players, and one source tree for every version.
+- **MultiLoader layout with Stonecutter** (settled). Reason: no runtime library for players, and one source tree for every version.
+- **Cloth Config for the mod's config on every loader** (settled). Reason: it is already in every pack checked, on all three loaders, and gives a config file on servers and a screen on clients.
 - **Smoke tests only for extra targets, for now** (settled); full coverage is recorded as outstanding in `10`.
 - **Released as *Autosketch*, jars named by the MultiLoader convention, with the support rules above** (settled; the rules were proposed and accepted as a starting point).
 - **`AGPL-3.0-or-later` for both the mod and the MCP** (settled). Reason: one license to explain, and later license versions apply without relicensing.

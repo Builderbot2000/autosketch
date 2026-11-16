@@ -6,6 +6,7 @@ import { EventBus } from "./bus.js";
 import { DeltaWriter } from "./deltas.js";
 import { ObserveHttp } from "./http.js";
 import type { InstanceHost } from "./instance-api.js";
+import type { LibraryHost } from "./library-api.js";
 import { EventLog, newSessionId, sessionDir } from "./log.js";
 import { OBSERVE_DELTAS, OBSERVE_HTTP, OBSERVE_LOG, OBSERVE_MAX_DELTA_BYTES, OBSERVE_RETAIN_SESSIONS, OBSERVE_SNAPSHOTS } from "./settings.js";
 import { SnapshotScheduler } from "./snapshots.js";
@@ -35,6 +36,8 @@ export interface ObserveOptions {
   log?: (msg: string) => void;
   /** The session's instance, discovery and live link, for the management UI's Instance tab (15). */
   instance?: InstanceHost;
+  /** Library roots, thumbnails and the baker for previews, for the management UI's Library tab (15). */
+  library?: LibraryHost;
   /** Overrides for tests. */
   flushMs?: number;
   debounceMs?: number;
@@ -113,6 +116,7 @@ export function startObserve(opts: ObserveOptions): Observer {
       port: port as number,
       settings: opts.settings,
       ...(opts.instance ? { instance: opts.instance } : {}),
+      ...(opts.library ? { library: opts.library } : {}),
       publish: (e) => void bus.publish("base", e),
       ...(opts.getBaker ? { getBaker: opts.getBaker } : {}),
       ...(deltas ? { deltas } : {}),

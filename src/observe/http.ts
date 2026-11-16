@@ -14,6 +14,7 @@ import type { EventBus } from "./bus.js";
 import { BodyTooLarge, newToken, ownOrigin, readBody, refuseWrite, WRITE_METHODS } from "./guard.js";
 import { MAX_OTLP_BYTES, otelSetup, otlpRecords } from "./otel.js";
 import { InstanceApi, type InstanceHost } from "./instance-api.js";
+import { LibraryApi, type LibraryHost } from "./library-api.js";
 import { SettingsApi, type ApiReply } from "./settings-api.js";
 import type { LogTables } from "./states.js";
 import { encodeVoxels, parseBoxParam } from "./voxels.js";
@@ -37,6 +38,7 @@ import { encodeVoxels, parseBoxParam } from "./voxels.js";
  *
  *   GET    /api/settings, PUT|DELETE /api/settings/<key>   settings-api.ts
  *   GET|PUT|DELETE /api/instance                            instance-api.ts
+ *   /api/library/…                                          library-api.ts
  *   POST   /v1/logs                Claude Code's OTLP/HTTP JSON log events (13, B3; otel.ts)
  *
  * Every request that changes something goes through `guard.ts` (POST/PUT/DELETE only, the
@@ -95,6 +97,8 @@ export interface ObserveHttpOptions {
   token?: string;
   /** The session's instance, discovery and link: enables the Instance tab's endpoints (15). */
   instance?: InstanceHost;
+  /** Library roots, thumbnails and the baker for previews: enables the Library tab's endpoints (15). */
+  library?: LibraryHost;
 }
 
 interface Client {
@@ -140,6 +144,7 @@ export class ObserveHttp {
   private port = 0;
   private readonly settingsApi?: SettingsApi;
   private readonly instanceApi?: InstanceApi;
+  private readonly libraryApi?: LibraryApi;
   private server?: Server;
   private ring: LoggedEvent[] = [];
   private readonly clients = new Set<Client>();
@@ -154,6 +159,7 @@ export class ObserveHttp {
     const path = opts.configPath ?? opts.settings?.config?.path;
     if (opts.settings && path) this.settingsApi = new SettingsApi(opts.settings, path, opts.log ? { log: opts.log } : {});
     if (opts.instance) this.instanceApi = new InstanceApi(opts.instance, path ?? configPath(), opts.log);
+    if (opts.library) this.libraryApi = new LibraryApi(opts.library, path ?? configPath(), this.atlas, opts.log);
   }
 
   /** Bus subscriber: buffers and schedules; never writes to a socket synchronously. */
@@ -307,6 +313,18 @@ export class ObserveHttp {
       if (method === "DELETE") return reply(res, api.remove(await jsonBody(req)));
       return json(res, 405, { error: "PUT /api/instance {id | path} chooses an instance; DELETE unlinks it" });
     }
+    if (rel === "/library" || rel.startsWith("/library/")) {
+      const api = this.libraryApi;
+      if (!api) return json(res, 404, { error: "the library isn't available here" });
+      const sub = rel.slice("/library".length).replace(/^\/|\/$/g, "");
+      if (!sub) return read ? json(res, 200, await api.view()) : json(res, 405, { error: "act on an entry at /api/library/<root>/<kind>/<name>/<action>" });
+      const r = await api.handle(sub, method, url.searchParams, () => jsonBody(req));
+      if ("data" in r) {
+        res.writeHead(200, { "content-type": r.type, "cache-control": "no-cache" });
+        return void res.end(r.data);
+      }
+      return reply(res, r);
+    }
     return json(res, 404, { error: "no such endpoint" });
   }
 
@@ -364,6 +382,7 @@ export class ObserveHttp {
       assets: !!this.opts.getBaker,
       settings: !!this.settingsApi,
       instance: !!this.instanceApi,
+      library: !!this.libraryApi,
       // B3 (13): how many Claude Code log records have arrived, and the setup that sends them here.
       // A free port changes with every launch, so the endpoint only stays valid with a pinned `observe.http`.
       ...(this.opts.publish && this.opts.live !== false ? { otel: { records: this.otelRecords, portPinned: this.opts.port !== 0, setup: otelSetup(this.port) } } : {}),

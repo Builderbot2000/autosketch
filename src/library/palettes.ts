@@ -5,7 +5,7 @@ import type { PaletteIndex } from "../palette/index.js";
 import type { NamedPalette, RoleMember } from "../palette/pick.js";
 import { didYouMean } from "../palette/sheet.js";
 import { walk } from "./files.js";
-import { checkEntryName, writableRoot, type LibraryRoot } from "./roots.js";
+import { checkEntryName, isHidden, writableRoot, type LibraryRoot } from "./roots.js";
 
 /**
  * Saved palettes (docs/design/07-library.md, Palettes; 03 named palettes): `palettes/<name>.json`
@@ -38,7 +38,7 @@ export async function listLibraryPalettes(roots: readonly LibraryRoot[], filter:
     const dir = join(root.path, "palettes");
     for (const rel of await walk(dir, (n) => n.endsWith(".json"), 1)) {
       const name = rel.slice(0, -5);
-      if (seen.has(name)) continue;
+      if (seen.has(name) || isHidden(root, "palettes", name)) continue;
       const file = join(dir, rel);
       try {
         seen.set(name, { ...parsePaletteFile(JSON.parse(await readFile(file, "utf8")), name), root: root.label, file });

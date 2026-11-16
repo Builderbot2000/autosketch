@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { asList, asText, parseFrontmatter, walk } from "./files.js";
-import type { LibraryRoot } from "./roots.js";
+import { isHidden, type LibraryRoot } from "./roots.js";
 
 /**
  * Knowledge packs (docs/design/07-library.md): markdown with light frontmatter, retrieved on
@@ -29,7 +29,7 @@ export async function listKnowledge(roots: readonly LibraryRoot[], filter: { kin
     const dir = join(root.path, "knowledge");
     for (const rel of await walk(dir, (n) => n.endsWith(".md") && n.toLowerCase() !== "readme.md")) {
       const name = rel.slice(0, -3);
-      if (seen.has(name)) continue;
+      if (seen.has(name) || isHidden(root, "knowledge", name)) continue;
       const file = join(dir, rel);
       const { data, body } = parseFrontmatter(await readFile(file, "utf8"));
       seen.set(name, {

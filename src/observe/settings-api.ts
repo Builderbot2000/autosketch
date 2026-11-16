@@ -97,6 +97,9 @@ export class SettingsApi {
     if (this.watching) return;
     this.watching = true;
     watchFile(this.path, { persistent: false, interval: intervalMs }, this.onChange);
+    // watchFile takes its first stat asynchronously; a change made before that is its baseline and
+    // never fires, so check once more after the first interval.
+    setTimeout(this.onChange, intervalMs * 1.5).unref();
   }
 
   close(): void {

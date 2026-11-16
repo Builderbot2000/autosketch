@@ -13,7 +13,7 @@ import { snapshotOf, type Snapshot } from "../formats/snapshot.js";
 import { encodeSponge } from "../formats/sponge.js";
 import type { PaletteIndex } from "../palette/index.js";
 import { walk, words } from "./files.js";
-import { checkEntryName, writableRoot, type LibraryRoot } from "./roots.js";
+import { checkEntryName, isHidden, writableRoot, type LibraryRoot } from "./roots.js";
 
 /**
  * Prefabs (docs/design/07-library.md): schematic files in any readable format (08) plus optional
@@ -56,7 +56,7 @@ export async function scanPrefabs(roots: readonly LibraryRoot[]): Promise<Prefab
   const seen = new Map<string, Prefab>();
   for (const root of roots) {
     const found = root.kind === "axiom" ? await scanAxiom(root) : await scanLibrary(root);
-    for (const p of found) if (!seen.has(p.id)) seen.set(p.id, p);
+    for (const p of found) if (!seen.has(p.id) && !isHidden(root, "prefabs", root.kind === "axiom" ? p.id.slice("axiom/".length) : p.id)) seen.set(p.id, p);
   }
   return [...seen.values()].sort((a, b) => a.id.localeCompare(b.id));
 }

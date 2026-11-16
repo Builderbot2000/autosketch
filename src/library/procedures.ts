@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { walk } from "./files.js";
-import type { LibraryRoot } from "./roots.js";
+import { isHidden, type LibraryRoot } from "./roots.js";
 
 /**
  * Procedures (docs/design/07-library.md): saved scripts (05) under `procedures/`, each starting
@@ -37,7 +37,7 @@ export async function listProcedures(roots: readonly LibraryRoot[], query?: stri
     const dir = join(root.path, "procedures");
     for (const rel of await walk(dir, (n) => n.endsWith(".js"))) {
       const name = rel.slice(0, -3);
-      if (seen.has(name)) continue;
+      if (seen.has(name) || isHidden(root, "procedures", name)) continue;
       const file = join(dir, rel);
       seen.set(name, { name, ...parseHeader(await readFile(file, "utf8")), root: root.label, file });
     }

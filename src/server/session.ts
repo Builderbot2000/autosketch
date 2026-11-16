@@ -274,7 +274,16 @@ export class Session {
   /** Runs a tool body through the call hooks (the `tool()` wrapper calls it inside `inScope`). */
   async runCall(call: CallInfo, run: () => Promise<CallToolResult> | CallToolResult): Promise<CallToolResult> {
     if (!this.callHooks.length) return run();
-    for (const h of this.callHooks) await h.before?.(call);
+    for (let i = 0; i < this.callHooks.length; i++) {
+      try {
+        await this.callHooks[i]!.before?.(call);
+      } catch (e) {
+        // A hook refused the call (13, B6: the request mode rule): the hooks that already ran their
+        // `before` must unwind too, or the world link counts this call as running forever.
+        for (const h of this.callHooks.slice(0, i)) if (h.after) await Promise.resolve(h.after(call, { content: [], isError: true })).catch(() => {});
+        throw e;
+      }
+    }
     let result: CallToolResult;
     try {
       result = await run();

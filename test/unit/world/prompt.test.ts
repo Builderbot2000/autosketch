@@ -322,9 +322,11 @@ describe("request modes, enforced (13, B6)", () => {
     await host.playerAsk(HOST, "what is this?", {}, { mode: "ask" });
     await host.waitFor(() => inGame!.current?.id === 1);
     expect((await client.callTool({ name: "fill", arguments: FILL })).isError).toBe(true);
+    expect(texts(await client.callTool({ name: "world_volumes", arguments: { work: { min: [0, 0, 0], max: [1, 1, 1] } } }))[0]).toContain("so world_volumes can't change the volumes");
     await client.callTool({ name: "world_reply", arguments: { lines: ["It's a wall."], done: true } });
     expect(inGame!.current).toBeUndefined();
-    expect((await client.callTool({ name: "fill", arguments: FILL })).isError).toBeFalsy(); // terminal work again
+    // A call refused by a hook before it ran (world_volumes in ask) unwinds the link's call count, so later results keep their world: line.
+    expect(texts(await client.callTool({ name: "fill", arguments: FILL })).join("\n")).toContain("world: 8 placed"); // terminal work again
     await host.playerAsk(HOST, "and this?", {}, { mode: "ask" });
     await host.waitFor(() => inGame!.current?.id === 2);
     expect((await client.callTool({ name: "clear", arguments: { sel: { min: [1, 0, 1], max: [1, 0, 1] } } })).isError).toBe(true);

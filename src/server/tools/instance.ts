@@ -20,6 +20,9 @@ export function registerInstanceTools({ tool }: ToolDeps): void {
         `${c.registry.size} blocks from ${ns.length} namespaces; ${c.palette.buildable().length} buildable material families, ${c.palette.series.size} dye series`,
         `largest mods: ${ns.slice(0, 8).map(([n, k]) => `${c.registry.modName(n)} (${k})`).join(", ")}`,
         `plugins active: ${c.plugins.map((p) => p.id).join(", ") || "none"}`,
+        c.registry.report
+          ? `block properties: from the game's registry report (DataVersion ${c.registry.report.dataVersion}, ${c.registry.report.source})`
+          : "block properties: from the instance's files (no registry report yet: start the game once with the Autosketch mod)",
       ];
       if (c.warnings.length) lines.push(`warnings (${c.warnings.length}): ${c.warnings.slice(0, 5).join("; ")}${c.warnings.length > 5 ? " …" : ""}`);
       return text(lines.join("\n"));
@@ -53,7 +56,7 @@ export function registerBlockInfoTool({ tool }: ToolDeps): void {
         const lines = [
           `${b.id}${b.displayName ? ` "${b.displayName}"` : ""} — ${c.registry.modName(b.namespace)}`,
           `shape: ${b.shape}; render: ${b.renderable}${b.light ? `; light ${b.light}` : ""}`,
-          props.length ? `properties: ${props.join("; ")}${b.exactProperties ? "" : " (inferred from assets; may be incomplete)"}` : "properties: none",
+          props.length ? `properties: ${props.join("; ")}${b.exactProperties ? "" : " (inferred from assets; may be incomplete)"}` : `properties: none${b.exactProperties ? "" : " known (inferred from assets)"}`,
         ];
         if (fam) {
           lines.push(`family: ${fam.id} (${fam.category}${st ? `, ${colorName(st.lab)}` : ""}${fam.buildable ? "" : `, excluded: ${fam.excludedBy}`})`);

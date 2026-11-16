@@ -44,8 +44,10 @@ export interface BlockInfo {
   transparent?: boolean;
   /** Layer that defines the block's blockstate (mod jar, base jar, …). */
   source: string;
-  /** Set when properties/defaults come from complete vanilla data rather than inferred from assets. */
+  /** Set when properties/defaults come from the game's registry report or complete vanilla data rather than inferred from assets. */
   exactProperties?: boolean;
+  /** The block has a block entity (from the registry report). */
+  blockEntity?: boolean;
 }
 
 export interface RegistryData {
@@ -65,6 +67,8 @@ const CACHE_VERSION = codeHash(import.meta.url, ["./registry", "./models", "./pa
 export class Registry {
   private readonly byId: Map<string, BlockInfo>;
   private tagIndex?: Map<string, BlockInfo[]>;
+  /** The companion mod's registry report applied on top (`assets/report.ts`), if any. */
+  report?: { hash: string; dataVersion: number; minecraft: string; source: string };
 
   constructor(readonly data: RegistryData) {
     this.byId = new Map(data.blocks.map((b) => [b.id, b]));
@@ -96,6 +100,11 @@ export class Registry {
         }
     }
     return this.tagIndex.get(tag.replace(/^#/, "")) ?? [];
+  }
+  /** Adds or replaces a block (the registry report, `assets/report.ts`). */
+  upsert(info: BlockInfo): void {
+    this.byId.set(info.id, info);
+    this.tagIndex = undefined;
   }
   namespaces(): Map<string, number> {
     const out = new Map<string, number>();

@@ -48,6 +48,7 @@ import { INSTANCE_TAB_FRAGMENT, makeInstanceSetup, wantsSetupWizard, withFragmen
 import { CLI_COMMANDS, runCli } from "../cli/index.js";
 import { bakerFor } from "./tools/shared.js";
 import { LiveLink } from "../world/live-link.js";
+import { refreshFromGame } from "../assets/report.js";
 import { promptSettings, worldSettings } from "../world/settings.js";
 import { CHANNEL_INSTRUCTIONS, CHANNEL_METHOD, InGameRequests } from "../world/prompt.js";
 import { autoSyncHook, syncLink } from "../world/sync.js";
@@ -173,6 +174,16 @@ async function main(): Promise<void> {
   session.callHooks.push(inGame.modeRule);
   // Once an instance loads (at startup, or later in place).
   if (autoLink) void session.whenInstance().then((c) => link.autoLink({ instanceDir: c.info.root, plugins: c.plugins, palettes: c.book }));
+  // The game's registry report on each connection (14, *Version-specific data lives in the mod*), when the
+  // mod serves it: the file read at startup may be from another modset, or out of reach (WSL).
+  link.bridge.onConnection((state) => {
+    if (state !== "up" || !link.bridge.supports("registry")) return;
+    void session
+      .whenInstance()
+      .then((c) => refreshFromGame(c.registry, (have) => link.bridge.request({ type: "registry", ...(have ? { have } : {}) })))
+      .then((r) => r && log(`registry report from the game: ${r.corrected} blocks corrected, ${r.added} added`))
+      .catch((e: Error) => log(`registry report from the game failed: ${e.message}`));
+  });
   const transport = new StdioServerTransport();
   // Save the open document before exiting, so a closed client never loses the last op.
   let closing = false;

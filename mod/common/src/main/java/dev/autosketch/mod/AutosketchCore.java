@@ -13,6 +13,7 @@ import dev.autosketch.mod.bridge.BridgeServer;
 import dev.autosketch.mod.bridge.Dispatcher;
 import dev.autosketch.mod.command.AutosketchCommand;
 import dev.autosketch.mod.command.VolumeCommands;
+import dev.autosketch.mod.discovery.PointerFile;
 import dev.autosketch.mod.feedback.Feedback;
 import dev.autosketch.mod.platform.Platform;
 import dev.autosketch.mod.protocol.Frame;
@@ -149,6 +150,7 @@ public final class AutosketchCore {
         } catch (IOException e) {
             LOG.error("Autosketch bridge failed to start (port {})", port, e);
         }
+        PointerFile.serverStarted(server, modVersion);
     }
 
     public void serverStopping() {

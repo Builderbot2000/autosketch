@@ -6,6 +6,7 @@
   "text.autoconfig.autosketch.category.volumes": "Volumes",
   "text.autoconfig.autosketch.category.feedback": "Feedback",
   "text.autoconfig.autosketch.category.prompts": "Prompts",
+  "text.autoconfig.autosketch.category.discovery": "Discovery",
   "text.autoconfig.autosketch.option.bridge.port": "Port",
   "text.autoconfig.autosketch.option.bridge.port.@Tooltip[0]": "TCP port for the MCP connection on 127.0.0.1 (0 to 65535).",
   "text.autoconfig.autosketch.option.bridge.port.@Tooltip[1]": "0 picks a free port on every start (written to config/autosketch-bridge.toml).",
@@ -27,5 +28,8 @@
   "text.autoconfig.autosketch.option.prompts.askAlias": "Ask alias",
   "text.autoconfig.autosketch.option.prompts.askAlias.@Tooltip": "A short top-level alias for /autosketch ask (e.g. \"as\"), or empty for none.",
   "text.autoconfig.autosketch.option.prompts.targetReach": "Target reach (blocks)",
-  "text.autoconfig.autosketch.option.prompts.targetReach.@Tooltip": "How far the crosshair block is looked for when a request attaches game context (1 to 512)."
+  "text.autoconfig.autosketch.option.prompts.targetReach.@Tooltip": "How far the crosshair block is looked for when a request attaches game context (1 to 512).",
+  "text.autoconfig.autosketch.option.discovery.pointer": "Pointer file",
+  "text.autoconfig.autosketch.option.discovery.pointer.@Tooltip[0]": "Write <user.home>/.autosketch/games/<hash>.toml on server start, so a local Autosketch MCP can find this game.",
+  "text.autoconfig.autosketch.option.discovery.pointer.@Tooltip[1]": "Off: nothing is written there and this game's old file is removed."
 }

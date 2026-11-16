@@ -147,3 +147,24 @@ export async function refreshFromGame(registry: Registry, ask: (have: string | u
   if ("unchanged" in r || r.hash === registry.report?.hash) return undefined;
   return applyReport(registry, parseReport(r.report, "the game"));
 }
+
+/** What `watchGameReport` uses of the bridge (structurally `world/bridge.ts`'s connection). */
+export interface ReportSource {
+  supports(feature: "registry"): boolean;
+  onConnection(fn: (state: "up" | "down") => void): () => void;
+  request(m: { type: "registry"; have?: string }): Promise<RegistryAnswer>;
+}
+
+/**
+ * Refreshes the registry from the game on every connection to a mod that serves `registry`
+ * (`refreshFromGame`). Returns the unsubscribe function.
+ */
+export function watchGameReport(bridge: ReportSource, registry: () => Promise<Registry>, log: (msg: string) => void = () => {}): () => void {
+  return bridge.onConnection((state) => {
+    if (state !== "up" || !bridge.supports("registry")) return;
+    void registry()
+      .then((r) => refreshFromGame(r, (have) => bridge.request({ type: "registry", ...(have ? { have } : {}) })))
+      .then((r) => r && log(`registry report from the game: ${r.corrected} blocks corrected, ${r.added} added`))
+      .catch((e: Error) => log(`registry report from the game failed: ${e.message}`));
+  });
+}

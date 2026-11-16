@@ -26,6 +26,8 @@ export async function mount(el, ctx) {
   async function load() {
     const v = await ctx.api("library");
     if (view && JSON.stringify(v) === JSON.stringify(view)) return;
+    // Don't redraw over an editor in use; a save reloads, and a stale save gets its 409.
+    if (view && document.activeElement?.closest?.(".detail")) return;
     view = v;
     if (trashOf) trash = (await ctx.api(`library/${encodeURIComponent(trashOf)}/trash`)).trash;
     render();
@@ -146,17 +148,116 @@ export async function mount(el, ctx) {
     const pane = h("div", { class: "detail" }, h("h3", {}, `${e.kind.replace(/s$/, "")}: ${e.name}`), h("div", { class: "flags" }, flags(e)), h("div", { class: "control" }, actions(e)));
     try {
       const d = await ctx.api(addr(e));
+      const canEdit = d.editable && ctx.canWrite();
       if (e.kind === "prefabs") {
         const m = d.meta ?? {};
         pane.append(
-          h("table", { class: "kv" }, [["Name", m.name], ["Tags", (m.tags ?? []).join(", ")], ["Front", m.front ?? ""], ["Size", m.footprint ? `${m.footprint[0]}×${m.height ?? "?"}×${m.footprint[1]}` : ""], ["Anchors", Object.keys(m.anchors ?? {}).join(", ")], ["Roles", Object.keys(m.roles ?? {}).join(", ")], ["Notes", m.notes ?? ""]].map(([k, v]) => h("tr", {}, h("th", {}, k), h("td", {}, v ?? "")))),
+          canEdit
+            ? prefabEditor(e, d, m)
+            : h("table", { class: "kv" }, [["Name", m.name], ["Tags", (m.tags ?? []).join(", ")], ["Front", m.front ?? ""], ["Size", m.footprint ? `${m.footprint[0]}×${m.height ?? "?"}×${m.footprint[1]}` : ""], ["Anchors", Object.keys(m.anchors ?? {}).join(", ")], ["Roles", Object.keys(m.roles ?? {}).join(", ")], ["Notes", m.notes ?? ""]].map(([k, v]) => h("tr", {}, h("th", {}, k), h("td", {}, v ?? "")))),
           h("button", { onclick: (ev) => void showPreview(e, ev.target) }, "3D preview"),
         );
+      } else if (e.kind === "palettes" && d.palette) pane.append(canEdit ? paletteEditor(e, d) : paletteTable(d.palette));
+      else if (canEdit) {
+        const area = h("textarea", { spellcheck: false }, d.text);
+        pane.append(area, h("div", { class: "control" }, h("button", { onclick: () => void save(e, { hash: d.hash, text: area.value }) }, "Save")));
       } else pane.append(h("pre", { class: "text" }, d.text));
     } catch (err) {
       pane.append(h("div", { class: "bad" }, err.message));
     }
     return pane;
+  }
+
+  // -- editors (U3b): each write sends the hash it started from; a 409 means the file changed meanwhile.
+
+  async function save(e, body) {
+    try {
+      const r = await ctx.api(addr(e), { method: "PUT", body });
+      message = { text: `Saved ${e.name}.${r.warnings?.length ? ` ${r.warnings.join("; ")}` : ""}`, cls: "msg" };
+    } catch (err) {
+      message = { text: err.status === 409 ? `${err.message}. The version on disk was kept and is shown again.` : err.message, cls: "bad" };
+    }
+    view = null;
+    await load();
+  }
+
+  const lines = (obj, fmt) => Object.entries(obj ?? {}).map(([k, v]) => `${k}: ${fmt(v)}`).join("\n");
+  const parseLines = (text, parse) => {
+    const out = {};
+    for (const line of text.split("\n")) {
+      const m = /^\s*([^:]+?)\s*:\s*(.*)$/.exec(line);
+      if (m) out[m[1]] = parse(m[2]);
+    }
+    return out;
+  };
+
+  function prefabEditor(e, d, m) {
+    const name = h("input", { type: "text", value: m.name ?? e.name });
+    const tags = h("input", { type: "text", value: (m.tags ?? []).join(", "), placeholder: "tags, comma-separated" });
+    const front = h("select", {}, ["", "north", "south", "east", "west"].map((f) => h("option", { value: f }, f || "(none)")));
+    front.value = m.front ?? "";
+    const notes = h("textarea", { class: "short" }, m.notes ?? "");
+    const anchors = h("textarea", { class: "short", placeholder: "one per line: name: x, y, z" }, lines(m.anchors, (v) => v.join(", ")));
+    const roles = h("textarea", { class: "short", placeholder: "one per line: role: block, block" }, lines(m.roles, (v) => v.join(", ")));
+    const submit = () => {
+      const metadata = {
+        name: name.value,
+        tags: tags.value.split(",").map((t) => t.trim()).filter(Boolean),
+        front: front.value,
+        notes: notes.value,
+        anchors: parseLines(anchors.value, (v) => v.split(",").map((n) => Number(n.trim()))),
+        roles: parseLines(roles.value, (v) => v.split(",").map((b) => b.trim()).filter(Boolean)),
+      };
+      void save(e, { hash: d.hash, metadata });
+    };
+    const row = (label, el) => h("tr", {}, h("th", {}, label), h("td", {}, el));
+    return h("div", {}, h("table", { class: "kv edit" }, row("Name", name), row("Tags", tags), row("Front", front), row("Notes", notes), row("Anchors", anchors), row("Roles", roles)), h("div", { class: "control" }, h("button", { onclick: submit }, "Save prefab.json")));
+  }
+
+  function paletteTable(p) {
+    return h("table", { class: "kv" }, Object.entries(p.roles ?? {}).map(([role, ms]) => h("tr", {}, h("th", {}, role), h("td", {}, ms.map((m) => `${m.block.replace(/^minecraft:/, "")} ${Math.round(m.weight * 100)}%`).join(", ")))));
+  }
+
+  function paletteEditor(e, d) {
+    const p = d.palette;
+    const tags = h("input", { type: "text", value: (p.tags ?? []).join(", "), placeholder: "tags, comma-separated" });
+    const notes = h("textarea", { class: "short" }, p.notes ?? "");
+    const roleEls = Object.entries(p.roles ?? {}).map(([role, ms]) => {
+      const rename = h("input", { type: "text", value: role, size: 10 });
+      const drop = h("input", { type: "checkbox" });
+      const members = ms.map((m) => ({ m, weight: h("input", { type: "number", min: 0.001, step: 0.05, value: Math.round(m.weight * 1000) / 1000, size: 5 }), remove: h("input", { type: "checkbox" }) }));
+      const add = h("input", { type: "text", placeholder: "add blocks by id, comma-separated" });
+      const el = h(
+        "div",
+        { class: "role" },
+        h("div", { class: "control" }, "Role ", rename, h("label", {}, drop, " drop role")),
+        h("table", { class: "kv" }, members.map((x) => h("tr", {}, h("th", {}, h("span", { title: x.m.family }, x.m.block.replace(/^minecraft:/, "")), x.m.color ? h("span", { class: "swatch", style: `background:${x.m.color}` }) : null), h("td", {}, x.weight, " ", h("label", {}, x.remove, " remove"))))),
+        add,
+      );
+      return { role, rename, drop, members, add, el };
+    });
+    const submit = () => {
+      const edit = { weights: {}, remove: {}, drop: [], rename: {} };
+      const addBlocks = {};
+      for (const r of roleEls) {
+        if (r.drop.checked) {
+          edit.drop.push(r.role);
+          continue;
+        }
+        const w = {};
+        for (const x of r.members) {
+          if (x.remove.checked) (edit.remove[r.role] ??= []).push(x.m.block);
+          else if (Number(x.weight.value) > 0 && Math.abs(Number(x.weight.value) - x.m.weight) > 1e-6) w[x.m.block] = Number(x.weight.value);
+        }
+        if (Object.keys(w).length) edit.weights[r.role] = Object.fromEntries(r.members.filter((x) => !x.remove.checked).map((x) => [x.m.block, Number(x.weight.value) || x.m.weight]));
+        const ids = r.add.value.split(",").map((s) => s.trim()).filter(Boolean);
+        if (ids.length) addBlocks[r.role] = ids;
+        if (r.rename.value.trim() && r.rename.value.trim() !== r.role) edit.rename[r.role] = r.rename.value.trim();
+      }
+      for (const k of Object.keys(edit)) if (!Object.keys(edit[k]).length) delete edit[k];
+      void save(e, { hash: d.hash, edit, addBlocks, tags: tags.value.split(",").map((t) => t.trim()).filter(Boolean), notes: notes.value });
+    };
+    return h("div", {}, h("table", { class: "kv edit" }, h("tr", {}, h("th", {}, "Tags"), h("td", {}, tags)), h("tr", {}, h("th", {}, "Notes"), h("td", {}, notes))), roleEls.map((r) => r.el), h("div", { class: "control" }, h("button", { onclick: submit }, "Save palette")), h("div", { class: "dim small" }, "Changing members needs a loaded instance; tags and notes don't."));
   }
 
   async function showPreview(e, button) {

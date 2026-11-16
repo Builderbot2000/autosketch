@@ -29,5 +29,6 @@ export function makeLibraryHost(session: Session): LibraryHost {
       return c ? bakerFor(c) : undefined;
     },
     registry: () => ctx()?.registry,
+    paletteIndex: () => ctx()?.palette,
   };
 }

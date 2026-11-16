@@ -145,6 +145,12 @@ body:not([data-tab="observe"]) .obs-only { display: none; }
 .detail { position: sticky; top: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
 .detail h3 { margin: 0; }
 .detail pre.text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 60vh; overflow: auto; background: #111316; padding: 8px; border-radius: 4px; margin: 0; }
+.detail textarea { width: 100%; min-height: 40vh; font: 12px/1.4 ui-monospace, monospace; background: #111316; color: var(--text); border: 1px solid var(--line); border-radius: 4px; padding: 8px; }
+.detail textarea.short { min-height: 4.5em; }
+.detail table.edit { width: 100%; }
+.detail table.edit td input[type="text"], .detail table.edit td select { width: 100%; }
+.detail .role { border-top: 1px solid var(--line); padding-top: 6px; }
+.detail .role input[type="text"]:last-child { width: 100%; }
 .logs { padding: 12px 16px; overflow: auto; }
 .log-row { display: flex; gap: 10px; align-items: center; padding: 3px 0; font-variant-numeric: tabular-nums; }
 canvas.preview { width: 100%; aspect-ratio: 4 / 3; display: block; border-radius: 4px; }

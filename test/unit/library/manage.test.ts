@@ -13,6 +13,7 @@ import { libraryRoots, starterRoot } from "../../../src/library/roots.js";
 import { EventBus } from "../../../src/observe/bus.js";
 import { ObserveHttp } from "../../../src/observe/http.js";
 import { LogTables } from "../../../src/observe/states.js";
+import { smallContext } from "../../helpers/context.js";
 import { tempDir } from "../../helpers/fixtures.js";
 
 /** The Library tab's library side (docs/design/15-management-ui.md, U3a): settings, listing, actions, trash. */
@@ -187,5 +188,88 @@ describe("Library tab endpoints (15, U3a)", () => {
     await send(`${base}/starter/prefabs/lamp_post/unhide`, { method: "POST", headers: write });
     expect(readConfig(path).config.settings["library.hidden"]).toBeUndefined();
     await http.close();
+  });
+});
+
+describe("Library editors (15, U3b)", () => {
+  async function server(withIndex: boolean) {
+    const dir = await userRoot();
+    const home = await tempDir();
+    const ctx = withIndex ? await smallContext() : undefined;
+    const roots = () => libraryRoots({ workspace: "/ws", env: { AUTOSKETCH_LIBRARY: dir } });
+    const http = new ObserveHttp({ bus: new EventBus(), tables: new LogTables(() => {}), sessionId: "s", dirFor: () => home, docFor: () => undefined, port: 0, configPath: join(home, "config.toml"), library: { roots, ...(ctx ? { paletteIndex: () => ctx.palette } : {}) } });
+    const page = await http.start();
+    const base = page.replace(/#.*$/, "") + "api/library";
+    const write = { origin: page.replace(/\/#.*$/, ""), "x-autosketch-token": /#t=(.+)$/.exec(page)![1]! };
+    return { dir, http, base, write };
+  }
+
+  it("saves text with the hash it started from; a file changed meanwhile answers 409 and keeps the agent's version", async () => {
+    const t = await server(false);
+    const url = `${t.base}/user/knowledge/styles/gothic`;
+    const d = (await send(url)).json();
+    expect(d).toMatchObject({ editable: true, hash: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    // The agent (or a hand edit) changes the pack after the page read it.
+    const file = join(t.dir, "knowledge/styles/gothic.md");
+    await writeFile(file, "agent's version\n");
+    const stale = await send(url, { method: "PUT", headers: t.write, body: { hash: d.hash, text: "mine" } });
+    expect(stale.status).toBe(409);
+    expect(await readFile(file, "utf8")).toBe("agent's version\n");
+    expect((await send(url, { method: "PUT", headers: { origin: t.write.origin }, body: { hash: d.hash, text: "mine" } })).status).toBe(403);
+    const fresh = (await send(url)).json();
+    const ok = await send(url, { method: "PUT", headers: t.write, body: { hash: fresh.hash, text: "mine\n" } });
+    expect(ok.status).toBe(200);
+    expect(await readFile(file, "utf8")).toBe("mine\n");
+    expect((await send(url)).json().hash).toBe(ok.json().hash);
+    // Read-only entries aren't editable.
+    const starter = (await send(`${t.base}/starter/knowledge/heuristics/roofs`)).json();
+    expect(starter.editable).toBe(false);
+    expect((await send(`${t.base}/starter/knowledge/heuristics/roofs`, { method: "PUT", headers: t.write, body: { hash: starter.hash, text: "x" } })).status).toBe(409);
+    await t.http.close();
+  });
+
+  it("edits prefab.json fields, keeping the others, and validates them", async () => {
+    const t = await server(false);
+    const url = `${t.base}/user/prefabs/park_bench`;
+    const file = join(t.dir, "prefabs/park_bench/prefab.json");
+    const before = JSON.parse(await readFile(file, "utf8"));
+    let d = (await send(url)).json();
+    expect((await send(url, { method: "PUT", headers: t.write, body: { hash: d.hash, metadata: { anchors: { seat: [1, "x", 0] } } } })).status).toBe(400);
+    expect((await send(url, { method: "PUT", headers: t.write, body: { hash: d.hash, metadata: { front: "up" } } })).status).toBe(400);
+    const r = await send(url, { method: "PUT", headers: t.write, body: { hash: d.hash, metadata: { name: "Bench", tags: ["Park", "seat", "park"], front: "east", notes: "for plazas", anchors: { seat: [1, 1, 0] }, roles: { wood: ["oak_planks"] } } } });
+    expect(r.status).toBe(200);
+    const after = JSON.parse(await readFile(file, "utf8"));
+    expect(after).toMatchObject({ name: "Bench", tags: ["park", "seat"], front: "east", notes: "for plazas", anchors: { seat: [1, 1, 0] }, roles: { wood: ["minecraft:oak_planks"] } });
+    expect(after.footprint).toEqual(before.footprint);
+    d = (await send(url)).json();
+    expect(d.meta).toMatchObject({ name: "Bench", front: "east" });
+    await t.http.close();
+  });
+
+  it("edits palettes: tags and notes always, members through palette_edit's operations with an instance", async () => {
+    const plain = await server(false);
+    const url = (b: string) => `${b}/user/palettes/stone`;
+    let d = (await send(url(plain.base))).json();
+    expect((await send(url(plain.base), { method: "PUT", headers: plain.write, body: { hash: d.hash, edit: { drop: ["wall"] } } })).status).toBe(409);
+    expect((await send(url(plain.base), { method: "PUT", headers: plain.write, body: { hash: d.hash, tags: ["Grey", "castle"], notes: "plain" } })).status).toBe(200);
+    expect(JSON.parse(await readFile(join(plain.dir, "palettes/stone.json"), "utf8"))).toMatchObject({ tags: ["grey", "castle"], notes: "plain" });
+    await plain.http.close();
+
+    const t = await server(true);
+    await writeFile(join(t.dir, "palettes/stone.json"), JSON.stringify({ name: "stone", tags: [], roles: { wall: [{ family: "minecraft:stone_bricks", block: "minecraft:stone_bricks", weight: 1, color: "#787878" }] } }));
+    d = (await send(url(t.base))).json();
+    const r = await send(url(t.base), { method: "PUT", headers: t.write, body: { hash: d.hash, addBlocks: { wall: ["cobblestone", "nope:block"] }, edit: { rename: { wall: "walls" } } } });
+    expect(r.status).toBe(200);
+    expect(r.json().warnings).toEqual(["wall: nope:block is not a building block in this instance; not added"]);
+    const saved = JSON.parse(await readFile(join(t.dir, "palettes/stone.json"), "utf8"));
+    expect(Object.keys(saved.roles)).toEqual(["walls"]);
+    expect(saved.roles.walls.map((m: { block: string; weight: number }) => [m.block, m.weight])).toEqual([["minecraft:stone_bricks", 0.5], ["minecraft:cobblestone", 0.5]]);
+    expect(saved.roles.walls[0].color).toBe("#787878");
+    d = (await send(url(t.base))).json();
+    const w = await send(url(t.base), { method: "PUT", headers: t.write, body: { hash: d.hash, edit: { weights: { walls: { stone_bricks: 3, cobblestone: 1 } } } } });
+    expect(w.status).toBe(200);
+    expect(JSON.parse(await readFile(join(t.dir, "palettes/stone.json"), "utf8")).roles.walls.map((m: { weight: number }) => m.weight)).toEqual([0.75, 0.25]);
+    expect((await send(url(t.base), { method: "PUT", headers: t.write, body: { hash: d.hash, notes: "late" } })).status).toBe(409);
+    await t.http.close();
   });
 });

@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import type { Registry } from "../assets/registry.js";
 import { ConfigConflictError, readConfig, writeConfig } from "../core/config.js";
 import { importFile } from "../formats/index.js";
@@ -5,6 +6,8 @@ import {
   copyToLibrary,
   deleteEntry,
   duplicateEntry,
+  editableFile,
+  entryHash,
   emptyTrash,
   ENTRY_KINDS,
   LibraryError,
@@ -13,8 +16,15 @@ import {
   renameEntry,
   resolveEntry,
   restoreEntry,
+  writeEntryText,
+  writePaletteFile,
+  writePrefabMeta,
   type ResolvedEntry,
 } from "../library/manage.js";
+import type { PaletteFileMember } from "../library/palettes.js";
+import { rgbToHex } from "../palette/color.js";
+import type { PaletteIndex } from "../palette/index.js";
+import { editPalette, type NamedPalette, type PaletteEdit, type RoleMember } from "../palette/pick.js";
 import type { Prefab } from "../library/prefabs.js";
 import { LIBRARY_HIDDEN, type LibraryRoot } from "../library/roots.js";
 import type { BlockBaker } from "../perception/render/bake.js";
@@ -35,6 +45,7 @@ import { encodeVoxels } from "./voxels.js";
  *   GET    /api/library/<root>/prefabs/<name>?preview      voxels and baked models for the 3D preview
  *   POST   /api/library/<root>/<kind>/<name>/rename        {to}
  *   POST   …/duplicate {to} | …/copy | …/hide | …/unhide | …/delete
+ *   PUT    /api/library/<root>/<kind>/<name>               {hash, text | metadata | palette edits} (U3b; 409 on a stale hash)
  *   GET    /api/library/<root>/trash                       what that root's trash holds
  *   POST   /api/library/<root>/trash/<id>/restore,  DELETE /api/library/<root>/trash
  *   POST   /api/library/<root>/open                        opens the root folder in the OS file manager
@@ -50,6 +61,19 @@ export interface LibraryHost {
   /** The block baker for 3D previews (undefined without an instance: blocks then draw in flat colours). */
   baker?(): Promise<BlockBaker | undefined>;
   registry?(): Registry | undefined;
+  /** The instance's palette index, for palette member edits (U3b). */
+  paletteIndex?(): PaletteIndex | undefined;
+}
+
+/** The body of an editor's write (`PUT /api/library/<root>/<kind>/<name>`, U3b). */
+interface EntryWrite {
+  hash?: unknown;
+  text?: unknown;
+  metadata?: unknown;
+  edit?: PaletteEdit;
+  addBlocks?: Record<string, string[]>;
+  tags?: string[];
+  notes?: string;
 }
 
 const ACTIONS = new Set(["rename", "duplicate", "copy", "hide", "unhide", "delete"]);
@@ -115,6 +139,10 @@ export class LibraryApi {
     const kind = second ?? "";
     let name = rest.join("/");
     let action: string | undefined;
+    if (method === "PUT") {
+      const e = await resolveEntry(roots, label, kind, name);
+      return this.put(e, ((await body()) ?? {}) as EntryWrite);
+    }
     if (!read) {
       action = rest[rest.length - 1];
       if (!action || !ACTIONS.has(action)) return { status: 405, body: { error: `POST …/<name>/{${[...ACTIONS].join("|")}}` } };
@@ -147,11 +175,92 @@ export class LibraryApi {
     const { rootRef: _r, target: _t, file, prefab, ...entry } = e;
     const out: Record<string, unknown> = { ...entry };
     if (prefab) out.meta = prefab.meta;
-    if (e.kind !== "prefabs") {
-      const { readFile } = await import("node:fs/promises");
-      out.text = await readFile(file, "utf8");
+    if (e.kind !== "prefabs") out.text = await readFile(file, "utf8");
+    if (e.kind === "palettes") {
+      try {
+        out.palette = JSON.parse(out.text as string);
+      } catch {
+        /* shown as text */
+      }
     }
+    // What an editor sends back with its write (U3b): the editable file's hash, and whether there is one.
+    out.hash = await entryHash(e);
+    out.editable = e.writable && editableFile(e) !== undefined;
     return out;
+  }
+
+  /**
+   * U3b: an editor's whole-entry write, refused with 409 when the file changed since the editor
+   * read it (`hash`). Text for procedures and knowledge packs, `prefab.json` fields for prefabs,
+   * and for palettes `tags`, `notes` and the `palette_edit` operations (`editPalette`, `03`) plus
+   * `addBlocks` (members by block id), which need the instance's palette index.
+   */
+  private async put(e: ResolvedEntry, b: EntryWrite): Promise<ApiReply> {
+    if (e.kind === "procedures" || e.kind === "knowledge") return { status: 200, body: { hash: await writeEntryText(e, b.text, b.hash) } };
+    if (e.kind === "prefabs") return { status: 200, body: { hash: await writePrefabMeta(e, b.metadata, b.hash) } };
+    if (typeof b.hash !== "string") throw new LibraryError(400, "a write needs the hash of the version it edits");
+    if ((await entryHash(e)) !== b.hash) throw new LibraryError(409, `palette "${e.name}" changed since it was opened (the agent may have saved it); reload it and edit again`);
+    let raw: Record<string, unknown> & { roles?: Record<string, PaletteFileMember[]> };
+    try {
+      raw = JSON.parse(await readFile(e.file, "utf8"));
+    } catch (err) {
+      throw new LibraryError(409, `palette "${e.name}" can't be read (${(err as Error).message}); fix the file by hand`);
+    }
+    const warnings: string[] = [];
+    const memberEdit = b.edit && Object.keys(b.edit).length ? b.edit : undefined;
+    if (memberEdit || (b.addBlocks && Object.keys(b.addBlocks).length)) {
+      const index = this.host.paletteIndex?.();
+      if (!index) throw new LibraryError(409, "changing a palette's members needs the instance's blocks: load an instance first (tags and notes can be edited without one)");
+      const colors = new Map<string, string>();
+      const roles: Record<string, RoleMember[]> = {};
+      for (const [role, ms] of Object.entries(raw.roles ?? {})) {
+        roles[role] = ms.map((m) => ({ family: m.family, block: m.block, weight: m.weight }));
+        for (const m of ms) if (m.color) colors.set(m.block, m.color);
+      }
+      for (const [role, ids] of Object.entries(b.addBlocks ?? {})) {
+        for (const id0 of ids) {
+          const id = id0.includes(":") ? id0.trim() : `minecraft:${id0.trim()}`;
+          const fam = index.familyOfBlock(id);
+          if (!fam) {
+            warnings.push(`${role}: ${id} is not a building block in this instance; not added`);
+            continue;
+          }
+          const cur = (roles[role] ??= []);
+          if (cur.some((m) => m.block === id)) continue;
+          const share = cur.length ? cur.reduce((sum, m) => sum + m.weight, 0) / cur.length : 1;
+          cur.push({ family: fam.id, block: id, weight: share });
+        }
+      }
+      let named: NamedPalette = { name: String(raw.name ?? e.name), roles, source: (raw.source as NamedPalette["source"]) ?? { sheet: "overview", page: 1 } };
+      if (memberEdit) {
+        try {
+          const r = editPalette(index, named, memberEdit);
+          named = r.palette;
+          warnings.push(...r.warnings);
+        } catch (err) {
+          throw new LibraryError(400, (err as Error).message);
+        }
+      }
+      const out: Record<string, PaletteFileMember[]> = {};
+      for (const [role, ms] of Object.entries(named.roles)) {
+        const total = ms.reduce((sum, m) => sum + m.weight, 0) || 1;
+        out[role] = ms.map((m) => {
+          const color = colors.get(m.block) ?? (index.stats(m.family) ? rgbToHex(index.stats(m.family)!.rgb) : undefined);
+          return { family: m.family, block: m.block, weight: Math.round((m.weight / total) * 1000) / 1000, ...(color ? { color } : {}) };
+        });
+      }
+      raw.roles = out;
+    }
+    if (b.tags !== undefined) {
+      if (!Array.isArray(b.tags) || !b.tags.every((t) => typeof t === "string")) throw new LibraryError(400, "tags must be a list of text");
+      raw.tags = [...new Set(b.tags.map((t) => t.trim().toLowerCase()).filter(Boolean))];
+    }
+    if (b.notes !== undefined) {
+      if (typeof b.notes !== "string") throw new LibraryError(400, "notes must be text");
+      if (b.notes.trim()) raw.notes = b.notes;
+      else delete raw.notes;
+    }
+    return { status: 200, body: { hash: await writePaletteFile(e, raw, b.hash), warnings } };
   }
 
   private async thumb(e: ResolvedEntry): Promise<ApiReply | { status: 200; type: string; data: Buffer }> {

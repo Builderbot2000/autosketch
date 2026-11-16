@@ -1,0 +1,141 @@
+# Companion mod release (docs/design/14-distribution.md, *Publishing*, *Release naming and support
+# rules*). Pushing a tag mod-v<version> (matching mod_version in mod/gradle.properties) builds every
+# target, runs its smoke test, checks the release can go out, then publishes the same jars to
+# CurseForge and Modrinth, with the tag's message as the changelog.
+#
+# Running it by hand (workflow_dispatch) is the dry run: it builds the jars, writes their metadata
+# to the run summary and the artifacts, reports what is missing, and publishes nothing.
+#
+# The user adds, under Settings > Secrets and variables > Actions:
+#   secrets    CURSEFORGE_TOKEN  (CurseForge author settings > API tokens)
+#              MODRINTH_TOKEN    (Modrinth personal access token with the "Create versions" scope)
+#   variables  CURSEFORGE_PROJECT_ID  (numeric id from the CurseForge project page)
+#              MODRINTH_PROJECT_ID    (id or slug of the Modrinth project)
+# Until all four exist, a tagged release fails in "preflight" and publishes nothing.
+name: mod-release
+
+on:
+  push:
+    tags: ["mod-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mod-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        # Stonecutter versions (mod/settings.gradle). Add a target here when it is added there.
+        target: ["1.21.1"]
+    defaults:
+      run:
+        working-directory: mod
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build, loader check, smoke GameTest, release metadata
+        run: >-
+          ./gradlew --console=plain
+          ":common:${{ matrix.target }}:checkNoLoaderImports"
+          ":neoforge:${{ matrix.target }}:assemble"
+          ":neoforge:${{ matrix.target }}:runSmokeTestServer"
+          ":neoforge:${{ matrix.target }}:releaseInfo"
+      - name: Summary
+        run: |
+          {
+            echo "### ${{ matrix.target }}"
+            echo '```properties'
+            grep -v '^jar=' "neoforge/versions/${{ matrix.target }}/build/release/release.properties"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            mod/neoforge/versions/${{ matrix.target }}/build/libs/autosketch-neoforge-*.jar
+            mod/neoforge/versions/${{ matrix.target }}/build/release/release.properties
+          if-no-files-found: error
+
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag, version, secrets and project ids
+        env:
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          CURSEFORGE_TOKEN: ${{ secrets.CURSEFORGE_TOKEN }}
+          MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
+          CURSEFORGE_PROJECT_ID: ${{ vars.CURSEFORGE_PROJECT_ID }}
+          MODRINTH_PROJECT_ID: ${{ vars.MODRINTH_PROJECT_ID }}
+        run: |
+          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref_type }}" == "tag" ]]; then
+            bash mod/release/preflight.sh
+          else
+            bash mod/release/preflight.sh --dry-run
+          fi
+
+  publish:
+    name: publish (${{ matrix.target }})
+    # Only a pushed tag publishes; a manual run stops after the dry run above.
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [build, preflight]
+    runs-on: ubuntu-latest
+    strategy:
+      # One target failing must not leave the others half-published silently; each job reports.
+      fail-fast: false
+      matrix:
+        target: ["1.21.1"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Changelog from the tag
+        id: changelog
+        run: |
+          git fetch --force origin "refs/tags/${{ github.ref_name }}:refs/tags/${{ github.ref_name }}"
+          text=$(git for-each-ref "refs/tags/${{ github.ref_name }}" --format='%(contents)')
+          if [[ "$(git cat-file -t "${{ github.ref_name }}")" != "tag" || -z "${text// }" ]]; then
+            echo "::error::${{ github.ref_name }} is not an annotated tag with a message; the message is the changelog (git tag -a ${{ github.ref_name }} -m '...')"
+            exit 1
+          fi
+          { echo "text<<CHANGELOG_EOF"; echo "$text"; echo "CHANGELOG_EOF"; } >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: release
+      - name: Release metadata
+        id: info
+        run: |
+          props=$(find release -name release.properties)
+          jar=$(find release -name 'autosketch-neoforge-*.jar')
+          [[ -f "$props" && -f "$jar" ]] || { echo "::error::release artifact incomplete"; exit 1; }
+          grep -v '^jar=' "$props" >> "$GITHUB_OUTPUT"
+          echo "jar=$jar" >> "$GITHUB_OUTPUT"
+          [[ "$(basename "$jar")" == "$(sed -n 's/^file_name=//p' "$props")" ]] || { echo "::error::jar name differs from the metadata"; exit 1; }
+      - uses: Kira-NT/mc-publish@v3.3.2
+        with:
+          modrinth-id: ${{ vars.MODRINTH_PROJECT_ID }}
+          modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
+          curseforge-id: ${{ vars.CURSEFORGE_PROJECT_ID }}
+          curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
+          files: ${{ steps.info.outputs.jar }}
+          name: ${{ steps.info.outputs.name }}
+          version: ${{ steps.info.outputs.version }}
+          changelog: ${{ steps.changelog.outputs.text }}
+          loaders: ${{ steps.info.outputs.loaders }}
+          game-versions: ${{ steps.info.outputs.game_versions }}
+          game-version-filter: none
+          java: ${{ steps.info.outputs.java }}
+          environment: ${{ steps.info.outputs.environment }}
+          dependencies: ${{ steps.info.outputs.dependencies }}
+          fail-mode: fail

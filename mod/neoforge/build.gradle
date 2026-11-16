@@ -125,3 +125,35 @@ var generateModMetadata = tasks.register('generateModMetadata', ProcessResources
 }
 sourceSets.main.resources.srcDir generateModMetadata
 neoForge.ideSyncTask generateModMetadata
+
+// What the release workflow publishes for this target (14, *Publishing*, *Release naming*), written
+// to build/release/release.properties. The same file drives the dry run and the publish step.
+tasks.register('releaseInfo') {
+    group = 'publishing'
+    description = 'Writes the jar and its CurseForge/Modrinth metadata for the release workflow.'
+    def jarFile = tasks.named('jar', Jar).flatMap { it.archiveFile }
+    def out = layout.buildDirectory.file('release/release.properties')
+    def expected = "${mod_id}-neoforge-${minecraft_version}-${mod_version}.jar".toString()
+    def info = [
+            mod_version  : mod_version,
+            version      : "${mod_version}+neoforge-${minecraft_version}".toString(),
+            name         : "${mod_name} ${mod_version} (NeoForge ${minecraft_version})".toString(),
+            loaders      : 'neoforge',
+            game_versions: release_game_versions,
+            java         : java_version,
+            // Required on the server, optional on the client (14, *Publishing*); mc-publish syntax.
+            environment  : 'server | client?',
+            dependencies : "cloth-config(required){modrinth:${cloth_config_modrinth_id}}{curseforge:${cloth_config_curseforge_id}}".toString(),
+    ]
+    inputs.properties info
+    inputs.file(jarFile)
+    outputs.file(out)
+    doLast {
+        def jar = jarFile.get().asFile
+        if (jar.name != expected) throw new GradleException("jar is named ${jar.name}, expected ${expected} (14, Release naming)")
+        def lines = ["jar=${jar.absolutePath}", "file_name=${jar.name}"] + info.collect { k, v -> "${k}=${v}" }
+        def f = out.get().asFile
+        f.parentFile.mkdirs()
+        f.text = lines.join('\n') + '\n'
+    }
+}

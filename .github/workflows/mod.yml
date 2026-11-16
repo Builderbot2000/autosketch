@@ -1,0 +1,74 @@
+# Companion mod CI (docs/design/14-distribution.md, *Tests across versions*; docs/design/10).
+#   smoke: per target (Minecraft version x loader), it builds, the GameTest server starts with the
+#          mod, the pointer file is written and the bridge pairs (runSmokeTestServer). No JUnit tests,
+#          so the protocol's golden-vector test (GoldenVectorsTest) never blocks a target's smoke.
+#   full:  the Craftoria profile only (1.21.1, NeoForge): JUnit tests, including GoldenVectorsTest
+#          against test/data/world-protocol, and the whole GameTest suite.
+name: mod
+
+on:
+  push:
+    branches: [main]
+    paths: ["mod/**", "test/data/world-protocol/**", ".github/workflows/mod.yml"]
+  pull_request:
+    paths: ["mod/**", "test/data/world-protocol/**", ".github/workflows/mod.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: smoke (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # Stonecutter versions (mod/settings.gradle). Add a target here when it is added there.
+        target: ["1.21.1"]
+    defaults:
+      run:
+        working-directory: mod
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build, loader check, smoke GameTest
+        run: ./gradlew --console=plain ":common:${{ matrix.target }}:checkNoLoaderImports" ":neoforge:${{ matrix.target }}:assemble" ":neoforge:${{ matrix.target }}:runSmokeTestServer"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mod-smoke-${{ matrix.target }}
+          path: |
+            mod/neoforge/versions/${{ matrix.target }}/build/libs/*.jar
+            mod/run/smoke/logs/
+          if-no-files-found: warn
+
+  full:
+    name: full suite (Craftoria profile)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: mod
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build, JUnit tests, all GameTests
+        run: ./gradlew --console=plain build :neoforge:1.21.1:runGameTestServer
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: mod-full-reports
+          path: |
+            mod/common/versions/*/build/reports/tests/
+            mod/run/gametest/logs/
+          if-no-files-found: ignore

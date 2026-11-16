@@ -110,6 +110,8 @@ export class Session {
   /** The scope the current tool call addresses ("base" outside any call). */
   private readonly addressed = new AsyncLocalStorage<string>();
   private savedRevision = -1;
+  /** The temporary document (`adoptTemporary`), never saved. */
+  private temporary?: Document;
   private timer?: NodeJS.Timeout;
   private saving: Promise<void> = Promise.resolve();
 
@@ -352,6 +354,20 @@ export class Session {
     return doc;
   }
 
+  /**
+   * Makes a temporary document current (13, B4: the scan probe): never saved to the workspace, and
+   * dropped when another document is opened. The current document is saved and closed first, as
+   * for any switch; refused while scoped jobs are open.
+   */
+  async adoptTemporary(doc: Document): Promise<Document> {
+    this.checkNoScopes("open the probe");
+    await this.close();
+    this.doc = doc;
+    this.temporary = doc;
+    this.observe(doc);
+    return doc;
+  }
+
   /** The open document's exports/ folder. */
   get exportsDir(): string | undefined {
     return this.doc && join(this.workspace, this.doc.meta.name, "exports");
@@ -388,7 +404,7 @@ export class Session {
     if (this.timer) clearTimeout(this.timer);
     this.timer = undefined;
     const doc = this.doc;
-    if (!doc || doc.revision === this.savedRevision) return this.saving;
+    if (!doc || doc === this.temporary || doc.revision === this.savedRevision) return this.saving;
     const rev = doc.revision;
     const path = this.pathFor(doc.meta.name);
     this.saving = this.saving
@@ -406,6 +422,7 @@ export class Session {
     await this.flush();
     if (this.doc && this.events.enabled) this.events.emit({ kind: "session.close", name: this.doc.meta.name });
     this.doc = undefined;
+    this.temporary = undefined;
   }
 
   /** Hands the sink to a newly current document and announces it (12, `session.open`). */

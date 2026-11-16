@@ -5,12 +5,14 @@ import com.google.gson.JsonObject;
 import dev.autosketch.mod.AutosketchConfig;
 import dev.autosketch.mod.api.Autosketch;
 import dev.autosketch.mod.api.Bridge;
+import dev.autosketch.mod.api.BridgeSession;
 import dev.autosketch.mod.api.CommandExtension;
 import dev.autosketch.mod.api.LinkVolumes;
 import dev.autosketch.mod.platform.Platform;
 import dev.autosketch.mod.protocol.Box;
 import dev.autosketch.mod.protocol.Frame;
 import dev.autosketch.mod.protocol.Json;
+import dev.autosketch.mod.protocol.Messages;
 import dev.autosketch.mod.protocol.ProtocolException;
 import dev.autosketch.mod.prompt.ChatRules.LogMode;
 import java.util.ArrayList;
@@ -122,38 +124,52 @@ public final class InGamePrompts {
         return IDS.incrementAndGet();
     }
 
-    /** The {@code prompt} message for a request (13, *Wire format*, {@code prompt}). */
-    public static Frame prompt(long id, ServerPlayer player, String text, double reach) {
-        JsonObject h = Json.header("prompt");
-        h.addProperty("id", id);
-        JsonObject who = new JsonObject();
-        who.addProperty("name", player.getGameProfile().getName());
-        who.addProperty("uuid", player.getUUID().toString());
-        h.add("player", who);
-        h.addProperty("text", text);
-        h.add("context", GameContext.capture(player, reach, focus(player)));
-        return new Frame(h);
+    /**
+     * The {@code prompt} message for a request (13, *Wire format*, {@code prompt}): the game context,
+     * the request's {@code mode} (B6) and, for a scan, its grant (B4).
+     */
+    public static Frame prompt(long id, ServerPlayer player, String text, double reach, String mode, Messages.@Nullable ScanGrant scan) {
+        Messages.Player who = new Messages.Player(player.getGameProfile().getName(), player.getUUID());
+        return new Messages.Prompt(id, who, text, GameContext.capture(player, reach, focus(player)), mode, scan).encode();
     }
 
     /**
-     * {@code /autosketch ask <text>}: sends the request with its game context. With no MCP connected,
-     * the player hears {@code no_link} at once (13: "When the mod has no connection at all, it tells
-     * the player no_link itself"). Returns the command result (1 sent, 0 not).
+     * {@code /autosketch ask|plan|build <text>} (13, B6): sends the request in that mode with its game
+     * context. With no MCP connected, the player hears {@code no_link} at once (13: "When the mod has
+     * no connection at all, it tells the player no_link itself"); a mode the MCP's hello doesn't list
+     * is refused here with {@code unsupported_mode}, and nothing is sent. Returns the command result
+     * (1 sent, 0 not).
      */
-    public static int ask(ServerPlayer player, String text, Bridge bridge) {
+    public static int request(ServerPlayer player, String mode, String text, Bridge bridge) {
+        return request(player, mode, text, bridge, () -> null);
+    }
+
+    /** As {@link #request(ServerPlayer, String, String, Bridge)}, with the scan grant sized only once the request may go out. */
+    public static int request(ServerPlayer player, String mode, String text, Bridge bridge, java.util.function.Supplier<Messages.@Nullable ScanGrant> scan) {
         long id = nextId();
         if (!bridge.connected()) {
             out.actionBar(player, refusal("no_link"));
             return 0;
         }
+        BridgeSession session = bridge.session();
+        if (session == null || !session.modes().contains(mode)) {
+            out.actionBar(player, Component.literal(unsupportedText(mode)).withStyle(ChatFormatting.RED));
+            return 0;
+        }
+        Messages.ScanGrant grant = scan.get();
         PENDING.put(id, player.getUUID());
-        if (!bridge.send(prompt(id, player, text, AutosketchConfig.get().prompts.targetReach))) {
+        if (!bridge.send(prompt(id, player, text, AutosketchConfig.get().prompts.targetReach, mode, grant))) {
             PENDING.remove(id);
             out.actionBar(player, refusal("no_link"));
             return 0;
         }
         out.actionBar(player, Component.literal("Autosketch: asking the agent…").withStyle(ChatFormatting.GRAY));
         return 1;
+    }
+
+    /** The action-bar text for a request mode the MCP doesn't accept (its hello doesn't list it). */
+    public static String unsupportedText(String mode) {
+        return "Autosketch: not sent: the Autosketch MCP server doesn't accept " + mode + " requests (update it; /autosketch build still works)";
     }
 
     private static Component refusal(String reason) {

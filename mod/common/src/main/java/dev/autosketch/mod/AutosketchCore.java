@@ -178,5 +178,5 @@ public final class AutosketchCore {
     }
 
     /** The protocol-2 features this build implements (13, *Versions and features*). */
-    static final List<String> FEATURES = List.of();
+    static final List<String> FEATURES = List.of(Messages.FEATURE_MODES);
 }

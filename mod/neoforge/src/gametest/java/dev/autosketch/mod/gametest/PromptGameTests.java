@@ -44,9 +44,16 @@ public final class PromptGameTests {
     private static final class RecordingBridge implements Bridge {
         final List<Frame> sent = new ArrayList<>();
         final boolean connected;
+        final List<String> modes;
 
         RecordingBridge(boolean connected) {
+            this(connected, List.of("ask", "plan", "build"));
+        }
+
+        /** Connected, to an MCP whose hello lists these request modes. */
+        RecordingBridge(boolean connected, List<String> modes) {
             this.connected = connected;
+            this.modes = modes;
         }
 
         @Override
@@ -56,7 +63,7 @@ public final class PromptGameTests {
 
         @Override
         public @Nullable BridgeSession session() {
-            return connected ? new BridgeSession(1, "test", "0", new JsonObject()) : null;
+            return connected ? new BridgeSession(1, "test", "0", new JsonObject(), modes) : null;
         }
 
         @Override
@@ -155,11 +162,13 @@ public final class PromptGameTests {
             helper.assertTrue(out.barOf(player).getLast().contains("clipped"), "the player is warned that the focus box was clipped");
             helper.assertTrue(PromptModule.FOCUS_MODE.outline(player).equals(List.of(new Box(origin.getX(), origin.getY(), origin.getZ(), origin.getX() + 3, origin.getY() + 1, origin.getZ() + 1))),
                     "the focus outline is the clipped box");
-            run(player, "autosketch ask put a balcony here");
+            run(player, "autosketch build put a balcony here");
         });
         helper.assertTrue(bridge.sent.size() == 1, "one prompt sent, got " + bridge.sent.size());
         JsonObject h = bridge.sent.getFirst().header();
         helper.assertTrue(h.get("type").getAsString().equals("prompt"), "type prompt");
+        helper.assertTrue(h.get("mode").getAsString().equals("build"), "mode build (B6): " + h.get("mode"));
+        helper.assertTrue(!h.has("scan"), "no scan grant outside scan mode");
         helper.assertTrue(h.get("text").getAsString().equals("put a balcony here"), "text");
         helper.assertTrue(h.getAsJsonObject("player").get("uuid").getAsString().equals(player.getUUID().toString()), "player uuid");
         helper.assertTrue(h.getAsJsonObject("player").get("name").getAsString().equals(player.getGameProfile().getName()), "player name");
@@ -214,6 +223,59 @@ public final class PromptGameTests {
         helper.assertTrue(down.sent.isEmpty(), "nothing sent while disconnected");
         helper.assertTrue(out.barOf(player).getLast().contains("no linked world"), "no_link on the action bar: " + out.barOf(player));
         leave(player);
+        helper.succeed();
+    }
+
+    /** B6: each subcommand sends its mode; a mode the MCP's hello doesn't list is refused here and nothing is sent. */
+    @GameTest(template = "empty")
+    public static void subcommandsSendTheirModeAndUnlistedModesAreRefused(GameTestHelper helper) {
+        ServerPlayer player = helper.makeMockServerPlayerInLevel();
+        Recorder out = new Recorder();
+        RecordingBridge all = new RecordingBridge(true);
+        with(all, fixed(null), out, () -> {
+            run(player, "autosketch ask what is this made of?");
+            run(player, "autosketch plan a gatehouse");
+            run(player, "autosketch build a gatehouse");
+        });
+        List<String> modes = all.sent.stream().map(f -> f.header().get("mode").getAsString()).toList();
+        helper.assertTrue(modes.equals(List.of("ask", "plan", "build")), "modes sent: " + modes);
+        helper.assertTrue(all.sent.getFirst().header().get("text").getAsString().equals("what is this made of?"), "text");
+
+        RecordingBridge buildOnly = new RecordingBridge(true, List.of("build"));
+        with(buildOnly, fixed(null), out, () -> run(player, "autosketch ask what is this?"));
+        helper.assertTrue(buildOnly.sent.isEmpty(), "an ask request to an MCP listing only build sends nothing");
+        helper.assertTrue(out.barOf(player).getLast().contains("doesn't accept ask requests"), "unsupported_mode on the action bar: " + out.barOf(player));
+        with(buildOnly, fixed(null), out, () -> run(player, "autosketch plan a wall"));
+        helper.assertTrue(buildOnly.sent.isEmpty() && out.barOf(player).getLast().contains("doesn't accept plan requests"), "plan refused too");
+
+        // The MCP refusing a mode itself shows the same way.
+        with(all, fixed(null), out, () -> {
+            run(player, "autosketch ask hello");
+            JsonObject result = Json.header("prompt.result");
+            result.addProperty("id", all.sent.getLast().id());
+            result.addProperty("delivered", false);
+            result.addProperty("reason", "unsupported_mode");
+            try {
+                InGamePrompts.onResult(result, player.getServer());
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        });
+        helper.assertTrue(out.barOf(player).getLast().contains("doesn't accept this request mode"), "prompt.result unsupported_mode: " + out.barOf(player));
+        leave(player);
+        helper.succeed();
+    }
+
+    /** B6: askAlias is a short root for the request subcommands. */
+    @GameTest(template = "empty")
+    public static void aliasIsAShortRootForRequests(GameTestHelper helper) {
+        var dispatcher = new com.mojang.brigadier.CommandDispatcher<net.minecraft.commands.CommandSourceStack>();
+        PromptModule.alias(dispatcher, "zz");
+        var root = dispatcher.getRoot().getChild("zz");
+        helper.assertTrue(root != null, "the alias is registered");
+        for (String m : List.of("ask", "plan", "build")) helper.assertTrue(root.getChild(m) != null, "/zz " + m);
+        PromptModule.alias(dispatcher, "Bad Name");
+        helper.assertTrue(dispatcher.getRoot().getChild("Bad Name") == null, "a malformed alias is skipped");
         helper.succeed();
     }
 

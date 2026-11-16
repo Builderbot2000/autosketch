@@ -53,7 +53,7 @@ One target is active today, Minecraft 1.21.1 on NeoForge (Java 21). A new versio
 | `…volume.WandEvents` | neoforge | N | NeoForge's click and swap-hands events for the wand |
 | `…world` | common | O | snapshots, section hashes, patch applier, change tracker (`WorldModule`) |
 | `…world.WorldEvents` | neoforge | O | NeoForge's setup and tick hooks for `WorldModule` |
-| `…prompt` | common | S | `/autosketch ask`, focus mode, chat (`PromptModule`) |
+| `…prompt` | common | S | `/autosketch ask\|plan\|build` (request modes, B6) and `scan` (B4), the `askAlias` root, focus mode, chat (`PromptModule`) |
 | `…prompt.PromptEvents` | neoforge | S | NeoForge's setup hook for `PromptModule` |
 | `…client` | neoforge | N | the config screen in the mod list (client only) |
 | `neoforge/src/gametest` | neoforge | all | GameTests; template `autosketch:empty` is a synthetic 3×3×3 of air |

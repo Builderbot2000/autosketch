@@ -175,7 +175,7 @@ public final class AutosketchConfig implements ConfigData {
                     null, c -> c.feedback.noticesDefault, (c, v) -> {
                         if (v instanceof Boolean b) c.feedback.noticesDefault = b;
                     }),
-            new Key("prompts", "askAlias", List.of("A short top-level alias for /autosketch ask (e.g. \"as\"), or empty for none."),
+            new Key("prompts", "askAlias", List.of("A short top-level root for the request commands (e.g. \"as\" gives /as build <text>, /as ask <text>), or empty for none."),
                     null, c -> c.prompts.askAlias, (c, v) -> {
                         if (v instanceof String s) c.prompts.askAlias = s;
                     }),

@@ -3,9 +3,6 @@ package dev.autosketch.mod.prompt;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
-import com.mojang.brigadier.builder.RequiredArgumentBuilder;
-import com.mojang.brigadier.context.CommandContext;
-import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.logging.LogUtils;
 import dev.autosketch.mod.AutosketchConfig;
 import dev.autosketch.mod.api.Autosketch;
@@ -25,7 +22,8 @@ import org.slf4j.Logger;
 
 /**
  * Registers in-game requests (13, *Prompting from the game*, M13) through the skeleton's hooks:
- * {@code /autosketch ask <text>} (and the configured alias), {@code /autosketch focus clear},
+ * {@code /autosketch ask|plan|build <text>} (B6: the subcommand names the request's mode; the
+ * configured alias is a short root for them), {@code /autosketch focus clear},
  * {@code /autosketch log off|mine|all}, the wand's {@code focus} mode, and the handlers for
  * {@code prompt.result} and {@code chat}. Each loader's setup event calls {@link #setup} (on
  * NeoForge, {@code PromptEvents}).
@@ -75,7 +73,7 @@ public final class PromptModule {
     };
 
     static void commands(CommandExtension.Registration r) {
-        r.root().then(Commands.literal("ask").then(askText()));
+        requests(r.root());
         r.root().then(Commands.literal("focus").then(Commands.literal("clear").executes(ctx -> {
             boolean had = InGamePrompts.clearFocus(ctx.getSource().getPlayerOrException());
             ctx.getSource().sendSuccess(() -> Component.literal(had ? "Autosketch: focus box cleared" : "Autosketch: no focus box was set"), false);
@@ -96,8 +94,21 @@ public final class PromptModule {
         alias(r.dispatcher(), AutosketchConfig.get().prompts.askAlias.trim());
     }
 
-    /** Registers the configured short alias for {@code ask}, unless it is empty, malformed or already a command. */
-    static void alias(CommandDispatcher<CommandSourceStack> dispatcher, String alias) {
+    /** The request modes with a plain {@code <text>} subcommand; {@code scan} has its own (B4). */
+    static final List<String> TEXT_MODES = List.of("ask", "plan", "build");
+
+    /** Adds the request subcommands under {@code root} ({@code /autosketch}, or the alias). */
+    static void requests(LiteralArgumentBuilder<CommandSourceStack> root) {
+        for (String mode : TEXT_MODES)
+            root.then(Commands.literal(mode).then(Commands.argument("text", StringArgumentType.greedyString())
+                    .executes(ctx -> InGamePrompts.request(ctx.getSource().getPlayerOrException(), mode, StringArgumentType.getString(ctx, "text"), Autosketch.bridge()))));
+    }
+
+    /**
+     * Registers the configured {@code askAlias} as a short root for the request subcommands
+     * ({@code /as build …}, 13, B6), unless it is empty, malformed or already a command.
+     */
+    public static void alias(CommandDispatcher<CommandSourceStack> dispatcher, String alias) {
         if (alias.isEmpty()) return;
         if (!alias.matches("[a-z0-9_-]{1,32}")) {
             LOG.warn("Autosketch: askAlias \"{}\" isn't a valid command name; no alias registered", alias);
@@ -107,14 +118,8 @@ public final class PromptModule {
             LOG.warn("Autosketch: askAlias \"{}\" is already a command; no alias registered", alias);
             return;
         }
-        dispatcher.register(Commands.literal(alias).requires(src -> src.hasPermission(CommandExtension.OP_LEVEL)).then(askText()));
-    }
-
-    private static RequiredArgumentBuilder<CommandSourceStack, String> askText() {
-        return Commands.argument("text", StringArgumentType.greedyString()).executes(PromptModule::ask);
-    }
-
-    private static int ask(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
-        return InGamePrompts.ask(ctx.getSource().getPlayerOrException(), StringArgumentType.getString(ctx, "text"), Autosketch.bridge());
+        LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal(alias).requires(src -> src.hasPermission(CommandExtension.OP_LEVEL));
+        requests(root);
+        dispatcher.register(root);
     }
 }

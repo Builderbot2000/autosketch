@@ -81,6 +81,7 @@ The agent has to understand (a) **what it can build with**: blocks, materials, p
 - `ops/` may use `perception/` read-only, for morphological selections (`enclosed`, `interior`, `heightmap`, `changed`: measured geometry, no labels) and render-seeded selections (`view_box`, `view_lasso`, from stored render cameras). The dependency is one way: `perception/` never imports `ops/`. It takes already-resolved masks (`core/mask.ts`), and callers resolve selections first.
 - `observe/` reads `document/`, `assets/` and `perception/` (time-lapse snapshots use the renderer) and never mutates. `document/` and `server/` publish to it only through the `EventSink` interface in `core/` (`12`). The one exception is the process entry point, `server/index.ts`, which starts the observer: it wires the layers together, so it may import any of them.
 - `world/` (the live world link, `13`) reads and writes `document/`, consumes the journal's events through `EventSink`, and uses `scope/`'s volume rules for the root scope (one way: `scope/` never imports `world/`); no tool or op imports it. `server/index.ts` wires it in, like `observe/`. The companion mod (`mod/`, Java) shares nothing with `src/` but the protocol.
+- `ui/` (the in-game UI's MCP side, `16`) reads `observe/`, `world/` (bridge, protocol), `document/`, `scope/`, `library/`, `formats/` and `core/`, and sends only display data to the game; it never mutates the world or a document, and no tool or op imports it. `server/index.ts` wires it in, like `observe/` and `world/`.
 - `server/` is a thin adapter: tool schemas plus calls into the layers above. All logic lives below it, so the same API powers the MCP tools, scripts and tests.
 
 ## Tech stack
@@ -102,13 +103,14 @@ src/
   ops/         selections, primitives, brushes, anchors
   script/      QuickJS sandbox and API bindings
   perception/  render, slice, analysis, diff
-  observe/     event bus, session log, viewer HTTP server, snapshots
+  observe/     event bus, session log, deltas, snapshots, OTLP receiver
   library/     prefabs, palettes, knowledge packs
   formats/     schem, bp, structure-nbt
   plugins/     plugin API + built-in plugins (framed, chisel, copycats, …)
   server/      MCP tool and resource definitions
-  world/       live world link: bridge client, root scope, patches, sync, in-game requests (planned, 13)
-mod/           companion NeoForge mod, Java (planned, 13)
+  world/       live world link: bridge client, root scope, patches, sync, in-game requests (13)
+  ui/          in-game UI, MCP side: overlay feed, ghosts, replay frames, request handlers (16)
+mod/           companion NeoForge mod, Java (13, 16)
 test/
   unit/  golden/  eval/
 ```

@@ -7,6 +7,7 @@ import dev.autosketch.mod.client.ui.AutosketchKeys;
 import dev.autosketch.mod.client.ui.LinkState;
 import dev.autosketch.mod.client.ui.UiClient;
 import dev.autosketch.mod.client.ui.UiToggles;
+import dev.autosketch.mod.client.ui.hud.HudOverlay;
 import dev.autosketch.mod.protocol.UiMessages.UiFlash;
 import dev.autosketch.mod.protocol.UiMessages.UiState;
 import net.minecraft.Util;
@@ -22,7 +23,7 @@ import org.slf4j.Logger;
 /**
  * Silo O's client entry (16, *Overlays in the world*, *HUD*): registers the {@code ui.state} and
  * {@code ui.flash} handlers on {@link UiClient}, the toggle keys' actions on {@link AutosketchKeys},
- * and the world overlay's render listener. A second client entry point of the mod (as
+ * the world overlay's render listener and the HUD layer. A second client entry point of the mod (as
  * the client test driver is), so {@code AutosketchClient} stays C's.
  *
  * <p>Owns the {@code seq} check's consequence: a {@code ui.state} change that doesn't follow the held
@@ -47,7 +48,7 @@ public final class OverlayClient {
                 resyncPending = false;
             }
         });
-        // Silo O's block in the key table: the job volume and flash toggles.
+        // Silo O's block in the key table: the job volume, flash and HUD toggles.
         AutosketchKeys.on(AutosketchKeys.TOGGLE_VOLUMES, () -> {
             UiToggles.toggleVolumes();
             say("job volumes " + (UiToggles.volumes ? "on" : "off"));
@@ -56,7 +57,9 @@ public final class OverlayClient {
             UiToggles.toggleFlashes();
             say("change flashes " + (UiToggles.flashes ? "on" : "off"));
         });
+        AutosketchKeys.on(AutosketchKeys.TOGGLE_HUD, () -> say("HUD " + HudOverlay.cycle()));
         NeoForge.EVENT_BUS.addListener(OverlayClient::render);
+        modBus.addListener(HudOverlay::register);
     }
 
     /** The held state (read by the HUD and by client tests). */

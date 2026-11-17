@@ -15,11 +15,19 @@ import org.jetbrains.annotations.Nullable;
  * The replay log list behind the menu's Replay button (16, *Replay in the world*, *Open*): the
  * workspace's session logs from {@code logs.list}, in the order the MCP sends them (newest first),
  * each with an Open button. Opening hands the log's id to {@link #setOpener the opener} the replay
- * feature installs (silo R: replay mode, frames, controls), and closes the screen; until one is
- * installed it sends {@code replay.open} itself.
+ * feature may install, and closes the screen; by default it runs {@code /autosketch replay <log>}
+ * ({@code live} for the running session), which reaches silo R's replay client.
  */
 public final class LogListScreen extends PaneScreen {
-    private static Consumer<String> opener = id -> Requests.send("replay.open", Requests.args("log", id), r -> {});
+    /**
+     * Opens a log the way {@code /autosketch replay <log>} does (the live one as {@code replay live}):
+     * the server half hands the action back to the replay client (silo R), which keeps the replay's
+     * state, so the screen and the command take one path.
+     */
+    private static Consumer<String> opener = id -> {
+        var mc = net.minecraft.client.Minecraft.getInstance();
+        if (mc.player != null) mc.player.connection.sendCommand("autosketch replay " + id);
+    };
 
     /** Replaces what Open does with a log id (silo R). */
     public static void setOpener(Consumer<String> open) {
@@ -59,7 +67,7 @@ public final class LogListScreen extends PaneScreen {
                 boolean live = l.has("live") && l.get("live").getAsBoolean();
                 put(p, Button.builder(tr("logs.open"), b -> {
                     minecraft.setScreen(null);
-                    opener.accept(id);
+                    opener.accept(live ? "live" : id);
                 }).size(50, 20).build(), 0, y);
                 text(p, 56, y + 1, Component.literal(str(l, "doc")).append(live ? Component.literal(" ").append(tr("logs.live")) : Component.empty()), live ? GOOD : TEXT);
                 text(p, 56, y + 11, Component.literal(str(l, "modified") + "  " + str(l, "session")), DIM);

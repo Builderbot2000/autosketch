@@ -80,6 +80,16 @@ public final class MenuClientTests {
             return true;
         }, 100);
         int[] before = new int[1];
+        s.step("Open the live log", () -> {
+            before[0] = Ui.requests(s, "replay.open").size();
+            s.clickWidget("Open");
+        });
+        s.waitUntil("the replay client asks for it (through /autosketch replay live)", () -> {
+            check(Ui.requests(s, "replay.open").size() > before[0], "no replay.open yet");
+            check(s.mc().screen == null, "the list should close");
+            return true;
+        }, 200);
+        s.step("close any replay", () -> s.command("autosketch replay close"));
         openMenu(s);
         s.step("click Ghost here", () -> {
             before[0] = Ui.requests(s, "ghost.anchor").size();

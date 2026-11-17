@@ -76,6 +76,14 @@ export type RequestMode = (typeof REQUEST_MODES)[number];
 export const MOD_FEATURES = ["modes", "scan", "volumes.set", "registry", "upgrade"] as const;
 export type ModFeature = (typeof MOD_FEATURES)[number];
 
+/**
+ * Optional capabilities the MCP's `hello` lists in `features` (*Versions and features*), mirroring
+ * the mod's list: the mod uses an addition only when the MCP lists it. `prompt.close`: the MCP
+ * handles the mod's `prompt.close` (`/autosketch done`, B6).
+ */
+export const MCP_FEATURES = ["prompt.close"] as const;
+export type McpFeature = (typeof MCP_FEATURES)[number];
+
 /** A world block as the mod reports it: canonical state, block-entity NBT when it has one. */
 export interface WorldBlock {
   pos: Vec3;
@@ -91,6 +99,8 @@ export interface ClientHello {
   volatile: VolatileList;
   /** Request modes the MCP enforces; the mod never sends another. Absent (protocol 1) means `["build"]`. */
   modes?: RequestMode[];
+  /** Optional capabilities (`MCP_FEATURES`; unknown names are kept and ignored). Absent means none. */
+  features?: string[];
 }
 
 export interface ModHello {
@@ -287,6 +297,16 @@ export interface PromptMessage {
   scan?: ScanGrant;
 }
 
+/**
+ * The player ended the open read-only request in game (`/autosketch done`, B6; MCP feature
+ * `prompt.close`). Only the player lifts a read-only mode: the MCP ends whichever `ask`, `plan` or
+ * `scan` request is open and answers on the player's action bar with a `notice`.
+ */
+export interface PromptClose {
+  type: "prompt.close";
+  player: PlayerRef;
+}
+
 export type PromptResult = { type: "prompt.result"; id: number; delivered: true } | { type: "prompt.result"; id: number; delivered: false; reason: PromptRefusal };
 
 /**
@@ -351,12 +371,17 @@ export interface ChatMessage {
 /** Messages the MCP sends. */
 export type McpMessage = ClientHello | ErrorMessage | VolumesExtend | VolumesSet | HashesRequest | SnapshotRequest | SurfaceRequest | PatchMessage | RegistryRequest | UpgradeRequest | PromptResult | NoticeMessage | ChatMessage;
 /** Messages the mod sends. */
-export type ModMessage = ModHello | ErrorMessage | VolumesMessage | HashesResult | SnapshotResult | SurfaceResult | PatchAck | DirtyMessage | PromptMessage | RegistryResult | UpgradeResult;
+export type ModMessage = ModHello | ErrorMessage | VolumesMessage | HashesResult | SnapshotResult | SurfaceResult | PatchAck | DirtyMessage | PromptMessage | PromptClose | RegistryResult | UpgradeResult;
 export type Message = McpMessage | ModMessage;
 export type Sender = "mcp" | "mod";
 
 /** Whether the mod's hello lists a feature (*Versions and features*: features gate on hellos, never on protocol numbers). */
 export function modHas(hello: ModHello | undefined, feature: ModFeature): boolean {
+  return hello?.features?.includes(feature) ?? false;
+}
+
+/** Whether the MCP's hello lists a feature (the mod's side of the same rule). */
+export function mcpHas(hello: Pick<ClientHello, "features"> | undefined, feature: McpFeature): boolean {
   return hello?.features?.includes(feature) ?? false;
 }
 

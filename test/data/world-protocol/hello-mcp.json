@@ -1,5 +1,5 @@
 {
-  "description": "MCP hello: protocol, pairing token, client, volatile-key list (the built-in default plus one plugin entry and one state-only type), and every request mode",
+  "description": "MCP hello: protocol, pairing token, client, volatile-key list (the built-in default plus one plugin entry and one state-only type), every request mode, and every MCP feature (prompt.close: the mod may send /autosketch done)",
   "sender": "mcp",
   "header": {
     "type": "hello",
@@ -89,6 +89,9 @@
       "scan",
       "plan",
       "build"
+    ],
+    "features": [
+      "prompt.close"
     ]
   }
 }

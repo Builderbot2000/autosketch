@@ -1,5 +1,5 @@
 {
-  "description": "MCP hello listing only the build mode: the mod refuses ask, scan and plan requests itself (unsupported_mode)",
+  "description": "MCP hello listing only the build mode and no features: the mod refuses ask, scan and plan requests itself (unsupported_mode), and /autosketch done (the MCP needs updating)",
   "sender": "mcp",
   "header": {
     "type": "hello",

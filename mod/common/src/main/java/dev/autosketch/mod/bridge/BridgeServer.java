@@ -362,7 +362,7 @@ public final class BridgeServer implements Bridge {
                 return false;
             }
             McpHello hello = McpHello.decode(f);
-            session = new BridgeSession(serials.incrementAndGet(), hello.clientName(), hello.clientVersion(), hello.volatileKeys(), hello.effectiveModes());
+            session = new BridgeSession(serials.incrementAndGet(), hello.clientName(), hello.clientVersion(), hello.volatileKeys(), hello.effectiveModes(), hello.effectiveFeatures());
             paired = true;
             serverThread.execute(() -> promote(this));
             return true;

@@ -146,6 +146,8 @@ export class FakeHost {
   readonly notices: NoticeMessage[] = [];
   /** The modes the MCP's last hello listed. */
   mcpModes: readonly RequestMode[] = [];
+  /** The features the MCP's last hello listed (absent: none). */
+  mcpFeatures: readonly string[] = [];
   /** The scan grant of the last scan request, while it lasts (*Wire format*, `prompt`, `scan`). */
   scanGrant: (ScanGrant & { dimension: string }) | null = null;
   /** Called before a patch is applied; may return a promise to hold it (later requests wait, as in the mod). */
@@ -162,6 +164,7 @@ export class FakeHost {
   extended: WireBox | null = null;
   private queue: Promise<void> = Promise.resolve();
   private promptId = 0;
+  private readonly noticeWaiters: { player: string; resolve: (n: NoticeMessage) => void }[] = [];
   private readonly prompts = new Map<number, (r: PromptResult) => void>();
   private ownsDir = false;
 
@@ -294,6 +297,21 @@ export class FakeHost {
     });
   }
 
+  /**
+   * A player runs `/autosketch done` (B6): ends the open read-only request. Sent as `prompt.close`
+   * only when the MCP's hello lists the `prompt.close` feature; otherwise the mod refuses it itself
+   * (`mcp_outdated`, on the action bar), and with no connection it says `no_link`. When sent,
+   * resolves with the MCP's answer: the next `notice` to that player.
+   */
+  playerDone(player: PlayerRef): Promise<{ local: "no_link" | "mcp_outdated" } | NoticeMessage> {
+    if (!this.connected) return Promise.resolve({ local: "no_link" });
+    if (!this.mcpFeatures.includes("prompt.close")) return Promise.resolve({ local: "mcp_outdated" });
+    return new Promise((resolve) => {
+      this.noticeWaiters.push({ player: player.uuid, resolve });
+      this.send({ type: "prompt.close", player });
+    });
+  }
+
   // ── connection control ─────────────────────────────────────────────────────────────────────
 
   /** Drops the current connection (the game stays up, same token and port). */
@@ -415,6 +433,7 @@ export class FakeHost {
           clearTimeout(timer);
           this.volatile = m.volatile;
           this.mcpModes = helloModes(m);
+          this.mcpFeatures = m.features ?? [];
           if (this.socket && this.socket !== s) {
             const old = this.socket;
             old.write(encodeMessage({ type: "error", id: null, code: "replaced", message: "a newer connection took over" }));
@@ -531,9 +550,12 @@ export class FakeHost {
         resolve?.(m);
         return;
       }
-      case "notice":
+      case "notice": {
         this.notices.push(m);
+        const i = this.noticeWaiters.findIndex((w) => w.player === m.player);
+        if (i >= 0) this.noticeWaiters.splice(i, 1)[0]!.resolve(m);
         return;
+      }
       case "chat":
         this.chats.push(m);
         return;

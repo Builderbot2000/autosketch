@@ -65,7 +65,7 @@ function split(m: Message): { header: Record<string, unknown>; body: Uint8Array 
     case "hello":
       if ("token" in m)
         return {
-          header: { type: m.type, protocol: m.protocol, token: m.token, client: { name: m.client.name, version: m.client.version }, volatile: m.volatile, ...(m.modes ? { modes: [...m.modes] } : {}) },
+          header: { type: m.type, protocol: m.protocol, token: m.token, client: { name: m.client.name, version: m.client.version }, volatile: m.volatile, ...(m.modes ? { modes: [...m.modes] } : {}), ...(m.features ? { features: [...m.features] } : {}) },
           body: none,
         };
       return {
@@ -141,6 +141,8 @@ function split(m: Message): { header: Record<string, unknown>; body: Uint8Array 
         header: { type: m.type, id: m.id, player: player(m.player), text: m.text, context: context(m.context), ...(m.mode ? { mode: m.mode } : {}), ...(m.scan ? { scan: scanGrant(m.scan) } : {}) },
         body: none,
       };
+    case "prompt.close":
+      return { header: { type: m.type, player: player(m.player) }, body: none };
     case "prompt.result":
       return { header: m.delivered ? { type: m.type, id: m.id, delivered: true } : { type: m.type, id: m.id, delivered: false, reason: m.reason }, body: none };
     case "notice":
@@ -228,7 +230,7 @@ export function decodeFrame(frame: Uint8Array, sender: Sender): Message {
 }
 
 const MCP_TYPES = new Set(["hello", "error", "volumes.extend", "volumes.set", "hashes", "snapshot", "patch", "registry", "upgrade", "prompt.result", "notice", "chat"]);
-const MOD_TYPES = new Set(["hello", "error", "volumes", "hashes.result", "snapshot.result", "patch.ack", "dirty", "prompt", "registry.result", "upgrade.result"]);
+const MOD_TYPES = new Set(["hello", "error", "volumes", "hashes.result", "snapshot.result", "patch.ack", "dirty", "prompt", "prompt.close", "registry.result", "upgrade.result"]);
 const BODY_TYPES = new Set(["snapshot.result", "patch", "patch.ack", "dirty", "registry.result", "upgrade", "upgrade.result"]);
 
 function decode(type: string, v: Fields, body: Uint8Array, sender: Sender): Message {
@@ -239,7 +241,7 @@ function decode(type: string, v: Fields, body: Uint8Array, sender: Sender): Mess
       if (sender === "mcp") {
         const client = v.obj("client");
         const modes = v.has("modes") ? { modes: v.arr("modes").map((_, i) => v.oneOfAt("modes", i, REQUEST_MODES)) } : {};
-        return { type, protocol: v.int("protocol"), token: v.str("token"), client: { name: client.str("name"), version: client.str("version") }, volatile: volatile(v.raw("volatile")), ...modes };
+        return { type, protocol: v.int("protocol"), token: v.str("token"), client: { name: client.str("name"), version: client.str("version") }, volatile: volatile(v.raw("volatile")), ...modes, ...(v.has("features") ? { features: v.strings("features") } : {}) };
       } else {
         const game = v.obj("game");
         return {
@@ -366,6 +368,8 @@ function decode(type: string, v: Fields, body: Uint8Array, sender: Sender): Mess
       }
       return { type, id: v.id("id"), player: playerRef(v.obj("player")), text: v.str("text"), context: ctx, ...mode, ...scan };
     }
+    case "prompt.close":
+      return { type, player: playerRef(v.obj("player")) };
     case "prompt.result": {
       const id = v.id("id");
       if (v.bool("delivered")) return { type, id, delivered: true };

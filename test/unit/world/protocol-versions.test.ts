@@ -70,12 +70,14 @@ describe("protocol 2 golden vectors (N−1)", () => {
 
   roundTrips(V2);
 
-  it("carry none of protocol 3's additions, and protocol 3 changed only the hellos and the mismatch example", () => {
+  it("carry none of protocol 3's additions, and protocol 3 changed only the hellos and the mismatch example (and gained prompt.close, a feature-gated addition)", () => {
     const v2 = (n: string) => splitFrame(new Uint8Array(readFileSync(join(V2, `${n}.bin`))).subarray(4)).header;
     expect(v2("hello-mcp")).toMatchObject({ protocol: 2 });
     expect(v2("hello-mod-singleplayer").features).toEqual(["modes", "scan", "volumes.set"]);
     expect(changedFrames(V2, DIR)).toEqual(["error-protocol-mismatch", "hello-mcp", "hello-mcp-build-only", "hello-mod-dedicated", "hello-mod-singleplayer"]);
     expect(addedFrames(V2, DIR)).toEqual([
+      "notice-prompt-closed",
+      "prompt-close",
       "registry",
       "registry-have",
       "registry-result",

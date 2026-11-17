@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { decodeFrame, encodeMessage } from "../../../src/world/protocol/codec.js";
 import { canonicalNbt, DEFAULT_VOLATILE, nbtHash, sectionHash } from "../../../src/world/protocol/hash.js";
-import { MOD_FEATURES, REQUEST_MODES, type Message, type PatchBlock, type Sender, type VolatileList, type WireBox } from "../../../src/world/protocol/messages.js";
+import { MCP_FEATURES, MOD_FEATURES, REQUEST_MODES, type Message, type PatchBlock, type Sender, type VolatileList, type WireBox } from "../../../src/world/protocol/messages.js";
 import { bytesToHex } from "../../../src/world/protocol/bytes.js";
 import { parseSnbt, toSnbt as snbtOf } from "../../../src/world/protocol/snbt.js";
 import { sidecarOf } from "./sidecar.js";
@@ -49,15 +49,16 @@ function vector(name: string, sender: Sender, description: string, m: Message, e
 mkdirSync(dir, { recursive: true });
 
 // ── handshake and control ──────────────────────────────────────────────────────────────────────
-vector("hello-mcp", "mcp", "MCP hello: protocol, pairing token, client, volatile-key list (the built-in default plus one plugin entry and one state-only type), and every request mode", {
+vector("hello-mcp", "mcp", "MCP hello: protocol, pairing token, client, volatile-key list (the built-in default plus one plugin entry and one state-only type), every request mode, and every MCP feature (prompt.close: the mod may send /autosketch done)", {
   type: "hello",
   protocol: 3,
   token: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
   client: { name: "autosketch", version: "1.0.0" },
   volatile: { ...DEFAULT_VOLATILE, "create:mechanical_press": ["Speed", "Network/Stress"], "create:belt": "state_only" },
   modes: [...REQUEST_MODES],
+  features: [...MCP_FEATURES],
 });
-vector("hello-mcp-build-only", "mcp", "MCP hello listing only the build mode: the mod refuses ask, scan and plan requests itself (unsupported_mode)", {
+vector("hello-mcp-build-only", "mcp", "MCP hello listing only the build mode and no features: the mod refuses ask, scan and plan requests itself (unsupported_mode), and /autosketch done (the MCP needs updating)", {
   type: "hello",
   protocol: 3,
   token: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
@@ -349,10 +350,12 @@ vector("prompt-scan", "mod", "A scan request (/autosketch scan 20 the tower and 
   mode: "scan",
   scan: { radius: 12, clipped: true, columns: { min: [-240, -176], max: [159, 223] }, box: { min: [-144, 36, -80], max: [62, 132, 126] } },
 });
+vector("prompt-close", "mod", "The player ran /autosketch done: end the open read-only request (sent only when the MCP's hello lists prompt.close)", { type: "prompt.close", player: { name: "Kev", uuid: UUID_KEV } });
 vector("prompt-result-delivered", "mcp", "Request delivered to the agent session", { type: "prompt.result", id: 1, delivered: true });
 vector("prompt-result-refused", "mcp", "Request refused: the player isn't on the allowlist", { type: "prompt.result", id: 2, delivered: false, reason: "not_allowed" });
 vector("prompt-result-unsupported-mode", "mcp", "Request refused: its mode isn't one the MCP's hello listed (the mod should have refused it itself)", { type: "prompt.result", id: 3, delivered: false, reason: "unsupported_mode" });
 vector("notice", "mcp", "Action-bar text for every player with notices on", { type: "notice", text: "Autosketch: 1,204 placed, 3 skipped", player: null });
+vector("notice-prompt-closed", "mcp", "The MCP's answer to prompt.close, on that player's action bar", { type: "notice", text: "Autosketch: ask request 3 ended; the agent may edit again.", player: UUID_KEV });
 vector("chat-activity", "mcp", "Activity lines following a request, to the requesting player", { type: "chat", request: 1, player: UUID_KEV, kind: "activity", lines: ["fill: 1,204 blocks", "world: 1,204 placed, 3 skipped (hand-edited), 0 rejected"] });
 vector("chat-reply", "mcp", "The agent's reply closing a request", { type: "chat", request: 1, player: UUID_KEV, kind: "reply", lines: ["Balcony added on the south face, 5 wide.", "Tell me if you want railings."] });
 

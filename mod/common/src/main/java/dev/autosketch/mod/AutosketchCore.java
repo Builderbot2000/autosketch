@@ -15,6 +15,7 @@ import dev.autosketch.mod.command.AutosketchCommand;
 import dev.autosketch.mod.command.VolumeCommands;
 import dev.autosketch.mod.discovery.PointerFile;
 import dev.autosketch.mod.feedback.Feedback;
+import dev.autosketch.mod.link.Link;
 import dev.autosketch.mod.platform.Platform;
 import dev.autosketch.mod.protocol.Frame;
 import dev.autosketch.mod.protocol.Messages;
@@ -74,6 +75,7 @@ public final class AutosketchCore {
         wand = new WandControl(players, Autosketch::wandModes, feedback);
         air = new AirMode(players, wand::mode, feedback);
         Autosketch.install(bridge, holder, PatchStatus.NONE, List.of());
+        Link.watch(bridge);
 
         bridge.addListener(new Bridge.Listener() {
             @Override
@@ -147,6 +149,7 @@ public final class AutosketchCore {
     public void serverStarted(MinecraftServer server) {
         AutosketchConfig.reload();
         players.clear();
+        Link.reset();
         feedback.serverStarted();
         volumes.serverStarted(server);
         int port = AutosketchConfig.get().bridge.port;

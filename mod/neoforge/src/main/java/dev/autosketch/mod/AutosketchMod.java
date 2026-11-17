@@ -2,6 +2,9 @@ package dev.autosketch.mod;
 
 import dev.autosketch.mod.api.Autosketch;
 import dev.autosketch.mod.api.AutosketchSetupEvent;
+import dev.autosketch.mod.link.Link;
+import dev.autosketch.mod.link.LinkPayloads;
+import dev.autosketch.mod.link.LinkStatus;
 import dev.autosketch.mod.platform.Platform;
 import dev.autosketch.mod.volume.AirPayloads;
 import dev.autosketch.mod.volume.WandEvents;
@@ -64,7 +67,11 @@ public final class AutosketchMod {
         NeoForge.EVENT_BUS.addListener((PlayerEvent.PlayerLoggedInEvent e) -> {
             if (e.getEntity() instanceof ServerPlayer p) core.air().sync(p);
         });
+        NeoForge.EVENT_BUS.addListener((PlayerEvent.PlayerLoggedInEvent e) -> {
+            if (e.getEntity() instanceof ServerPlayer p) Link.sendTo(p);
+        });
         modBus.addListener((RegisterPayloadHandlersEvent e) -> AirPayloads.register(e, core.air()));
+        modBus.addListener(LinkPayloads::register);
     }
 
     private void commonSetup(FMLCommonSetupEvent event) {
@@ -105,6 +112,11 @@ public final class AutosketchMod {
         @Override
         public void sendAirState(ServerPlayer player, boolean on, int reach, String wandItem) {
             AirPayloads.sendState(player, on, reach, wandItem);
+        }
+
+        @Override
+        public void sendLinkStatus(ServerPlayer player, LinkStatus status) {
+            LinkPayloads.sendStatus(player, status);
         }
     }
 }

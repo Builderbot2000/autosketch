@@ -135,6 +135,6 @@ public final class PromptModule {
         }
         LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal(alias).requires(src -> src.hasPermission(CommandExtension.OP_LEVEL));
         requests(root);
-        dispatcher.register(root);
+        dispatcher.register(dev.autosketch.mod.link.Link.lock(root)); // locked while no MCP is connected (16)
     }
 }

@@ -35,19 +35,12 @@ All are recorded in `16`'s *Decisions* or in `13`.
 
 ## Follow-ups
 
-**Needs the user's decision**
-- **`docs/ARCHITECTURE.md` has no dependency rule for `src/ui/`,** and its line about the "viewer HTTP server" is stale. silo-m describes `src/ui` this way:
-  - It reads `observe/`, `world/` (bridge, protocol, prompt types), `document/`, `scope/` types, `library/`, `formats/` and `core/`.
-  - It never mutates the world.
-  - Only `server/index.ts` imports it.
-  
-  Dependency rules are on the briefs' list of decisions not to make alone.
-
-**Checks nobody could run here**
-- **Dedicated-server boot** (`cd mod && ./gradlew runServer`). Permission checks blocked every automated attempt. The GameTest server loads the server half without client classes, so the risk is low.
-- **e2e world tier** (`test/e2e/world/`, needs `AUTOSKETCH_E2E_SERVER` and a running server). It hasn't run since L changed the harness.
-- **The CI `client` job** in `.github/workflows/mod.yml` has never run. Its boot time on the runner isn't recorded in `16` yet.
-- **In-game check by the user** on the real Craftoria client. `docs/briefs/world/test-setup.md` marks what the harness now automates.
+**Checks run after the merges** (2026-11-17)
+- **Dedicated server:** passed. The fresh jar booted on the Craftoria server pack (`test/e2e/world/server.sh start ~/servers/craftoria`, 537 mods) with the bridge listening and no Autosketch errors. The dev `runServer` still needs the user to accept the EULA in `mod/run`.
+- **e2e world tier:** 12 of 12 pass, with `AUTOSKETCH_E2E_SERVER=~/servers/craftoria` and `AUTOSKETCH_E2E_INSTANCE` set to the Craftoria CurseForge instance.
+- **CI `client` job:** it runs on every push to `main`, and the game boots on the runner in about 17 s. R's replay client tests fail there, though they pass locally every run, so a race is suspected. silo-r is fixing it on `fix/replay-client-tests-ci`.
+- **In-game check by the user** on the real Craftoria client: still to do. `docs/briefs/world/test-setup.md` marks what the harness now automates.
+- The `src/ui/` dependency rule was added to `docs/ARCHITECTURE.md` with the user's OK.
 
 **Small code follow-ups**
 - R draws replay job volumes and flashes with its own minimal line boxes. Switch them to O's overlay drawing now that both are on `main`.

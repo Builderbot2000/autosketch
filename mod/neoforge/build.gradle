@@ -96,10 +96,12 @@ neoForge {
         clientTest {
             client()
             sourceSet = sourceSets.gametest
-            gameDirectory = rootProject.file('run/clienttest')
+            // The report is report.txt in the game directory. clienttest-craftoria.sh points this at a
+            // directory whose mods/ holds the Craftoria pack's jars.
+            gameDirectory = rootProject.layout.projectDirectory.dir(providers.gradleProperty('clientTestGameDir').orElse('run/clienttest'))
+            jvmArguments.add providers.gradleProperty('clientTestXmx').orElse('3G').map { "-Xmx${it}".toString() }
             programArguments.addAll '--quickPlaySingleplayer', 'autosketch-clienttest'
             systemProperty 'autosketch.clienttest.world', 'autosketch-clienttest'
-            systemProperty 'autosketch.clienttest.report', rootProject.file('run/clienttest/report.txt').absolutePath
             // Comma-separated suite names, or "all" (./gradlew runClientTest -PclientTestSuites=basics).
             systemProperties.put 'autosketch.clienttest.suites', providers.gradleProperty('clientTestSuites').orElse('all')
             // Seconds before the driver's watchdog writes a failed report and halts the game.

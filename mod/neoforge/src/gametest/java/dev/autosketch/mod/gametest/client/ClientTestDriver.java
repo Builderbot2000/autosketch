@@ -53,7 +53,7 @@ import org.slf4j.LoggerFactory;
  * ({@code autosketch.clienttest.timeout}, seconds, default 900) writes a failed report and halts the
  * game if the run hangs (a stuck world load, an error screen).
  *
- * <p>Report ({@code autosketch.clienttest.report}): one line per step, {@code PASS}/{@code FAIL}/
+ * <p>Report ({@code report.txt} in the game directory, or {@code autosketch.clienttest.report}): one line per step, {@code PASS}/{@code FAIL}/
  * {@code SKIP}/{@code WARN}, the boot timings, and last {@code RESULT pass} or {@code RESULT fail}.
  * {@code mod/clienttest.sh} turns that into its exit code.
  */
@@ -83,7 +83,8 @@ public final class ClientTestDriver {
 
     public ClientTestDriver() {
         String selected = System.getProperty("autosketch.clienttest.suites");
-        reportPath = Path.of(System.getProperty("autosketch.clienttest.report", "clienttest-report.txt"));
+        String report = System.getProperty("autosketch.clienttest.report");
+        reportPath = report != null ? Path.of(report) : gameDir().resolve("report.txt");
         repo = Path.of(System.getProperty("autosketch.clienttest.repo", "."));
         if (selected == null) return;
         instance = this;
@@ -98,6 +99,8 @@ public final class ClientTestDriver {
         } catch (IOException e) {
             throw new IllegalStateException(e);
         }
+        line("INFO display " + System.getenv("DISPLAY") + ", LIBGL_ALWAYS_SOFTWARE=" + System.getenv("LIBGL_ALWAYS_SOFTWARE") + ", "
+                + ModList.get().size() + " mods");
         findSuites(selected);
         NeoForge.EVENT_BUS.addListener(this::tick);
         NeoForge.EVENT_BUS.addListener((RenderFrameEvent.Post e) -> {
@@ -174,6 +177,12 @@ public final class ClientTestDriver {
             switch (phase) {
                 case BOOT -> {
                     if (mc.getOverlay() instanceof LoadingOverlay || !mc.isRunning()) return;
+                    if (mc.screen instanceof net.neoforged.neoforge.client.gui.LoadingErrorScreen) {
+                        // Our own @Mod loaded (this listener runs), but another mod failed to load.
+                        fail("mod loading failed (the loading error screen is open; see logs/latest.log)");
+                        finish();
+                        return;
+                    }
                     timing("loading screen gone");
                     // A short view distance and no sound, for software rendering.
                     mc.options.renderDistance().set(4);

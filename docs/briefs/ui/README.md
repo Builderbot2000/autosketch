@@ -16,6 +16,8 @@ One brief per workstream in `16`'s *Work plan*, as of commit `6d169d8` (2026-11-
 | S | [Screens, menu, key bindings](S-screens.md) | 1, then 2 | mod | C, H; G's block drawing for the 3D preview (wave 2) |
 | X | [Removal and CLI](X-removal-cli.md) | 2 | MCP, docs | M's move of `model.js` and `replay.js` |
 
+**Status (2026-11-17):** the work stopped mid-wave and moved to another session. See [HANDOFF.md](HANDOFF.md) for where every silo stands.
+
 ```
 wave 0 (contracts, harness, lock)    wave 1                                   wave 2
 C: schemas, vectors, codecs, ───┬──► M: move, feed, ghosts, frames, requests ─► X: removal, CLI, docs

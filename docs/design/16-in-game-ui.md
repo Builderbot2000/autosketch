@@ -2,7 +2,7 @@
 
 Every operation the player does moves into the game, and the browser UI (`12`'s live viewer, `15`'s management UI) is removed. The command line keeps startup and anything outside the game: installing, choosing the instance, configuration with no game running. Inside the game, the companion mod's client half shows what the agents are doing in the world itself (work volumes, edits, sandboxes before merge, replay), and gives the player screens for settings and the library.
 
-Status: designed with the user 2026-11-17 (*Decisions*); nothing built. Supersedes `15` entirely and `12`'s *Live viewer* section. The event log, deltas, snapshots and replay data in `12` stay; only the browser that read them goes.
+Status: designed with the user 2026-11-17 (*Decisions*); built 2026-11-17 by silos C, H, L, M, O, G, R, S and X (*Implementation status*), with follow-ups listed in `docs/briefs/ui/HANDOFF.md`. Supersedes `15` entirely and `12`'s *Live viewer* section. The event log, deltas, snapshots and replay data in `12` stay; only the browser that read them goes.
 
 ## Principles
 

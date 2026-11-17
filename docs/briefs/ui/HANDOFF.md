@@ -1,66 +1,61 @@
-# Handoff: in-game UI silos (`16`), 2026-11-17
+# In-game UI silos (`16`): completion record and follow-ups
 
-Written for the next lead session, which will run under another account and can't resume the agents of this one. It records where every silo stands, what was decided along the way, and how to pick the work up. Read this set's [README](README.md) and the silo briefs first; `16` stays the source of truth.
+Written for whoever picks up work after `16`. Every silo in this set (C, H, L, M, O, G, R, S, X) was merged into `main` on 2026-11-17. Their branches and worktrees are deleted. `16`'s *Implementation status* describes what was built. This file keeps what the merges left open.
 
-## How this session ran
+## State at completion (`main`)
 
-- The lead (main session) started one named background agent per silo (`silo-c`, `silo-h`, …), each in its own git worktree under `.claude/worktrees/`, on a branch `silo/ui-<letter>-<slug>`. Agents committed and never merged or pushed. The lead reviewed, ran every tier, merged into `main` with `--no-ff` and pushed.
-- Tiers run before each merge: `npm run typecheck`, `npm test`, `cd mod && JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 ./gradlew build test runGameTestServer`, and `mod/clienttest.sh` (all client suites).
-- The user's standing instruction: decide small points within the specs, keep merging and starting waves until the work plan is done, and record decisions in `16`'s *Decisions*. Still stop for the briefs' "decisions you should not make alone", for permission refusals, and for anything that loses work.
-- All agents stopped together on an account usage limit. Their uncommitted work was committed by the lead as one "work in progress at handoff" commit per branch, and every silo branch was pushed to `origin`. **Those WIP commits were not built or tested as a whole.**
+- `npm run typecheck` clean; `npm test` 971 passed, 13 skipped (opt-in local and e2e tiers).
+- `cd mod && JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 ./gradlew build test runGameTestServer`: build and JUnit pass, all 51 GameTests pass.
+- `mod/clienttest.sh` (all suites: basics, ghost, ghost-measure, link, overlay, replay, screen): 455 steps, passing three runs in a row after the harness fix below.
+- `npm pack --dry-run`: no `viewer/` or `three`.
 
-## State of `main` (pushed, `5d8bd35` plus this file)
+## How the work ran
 
-Merged and verified (typecheck clean; `npm test` 963 passed, 13 skipped; 49 GameTests; client suites 65 steps passing):
+- One named background agent per silo, each in its own worktree on `silo/ui-<letter>-<slug>`. The lead reviewed contracts, merged with `--no-ff` after running every tier above, and pushed.
+- Early merges kept dependent silos unblocked: L's test change (L1), M's move of the viewer's model files (M1), R's client-action relay op, and G's block drawing (G1).
+- All agents stopped once on an account usage limit. Their uncommitted work was committed as one WIP commit per branch and pushed. The same session then resumed them, and each silo split or replaced its WIP commit before it was merged.
 
-| Silo | What's on main |
-|---|---|
-| C | All of it: `ui` schemas and request kinds in `13`, golden vectors, TS and Java codecs, fake host with `ui`, `test/support/fake-mcp.ts`, the `autosketch:ui` relay (ops 0 frame part, 1 request, 2 link state), client skeleton (`UiClient`, `UiToggles`, `AutosketchKeys`, `LinkState`), `16` *Implementation status* rows |
-| H | All of it: `mod/clienttest.sh`, `clientTest` run, `ClientTestSuite` driver (`@ClientTest("<suite>")`), fake MCP wiring, air mode, `/autosketch done`, xdotool and `LinkState` client tests, CI `client` job (never run yet), boot timings in `16` |
-| L | All of it: tests connect a fake MCP first (`FakeMcp.java`), link state, the offline lock (`Link.requireConnected`, `Link.requireUi`, `Link.lock` wrapping every `/autosketch` node except `status`), `/autosketch status` link line, M14 in `13` |
-| M | Part 1 only: `src/observe/session-model.ts`, `src/observe/replay.ts` (moved from `viewer/js/`), tests moved |
-| R | Part only: relay op 3 `CLIENT_ACTION` (`UiRelay.sendAction`, `UiClient.onAction`) and the replay command's server half (`d5e3942`) |
-| G | Part 1 only: block drawing (`client/ui/blocks/`: `PaletteRegion`, `BlockMesher`, `BlockDrawer`, `BlockMesh`) |
+## Decisions taken during the work
 
-## Silo branches (all pushed to `origin`)
+All are recorded in `16`'s *Decisions* or in `13`.
 
-| Silo | Branch | Ahead of main | State when stopped | Left to do |
-|---|---|---|---|---|
-| M | `silo/ui-m-mcp-ui-core` | 4 (feed, ghost regions, replay frames, WIP) | Committed: `src/ui` feed (`ui.state`, `ui.flash`), ghost regions, replay frames. WIP: request handlers (`src/ui/requests.ts`, `settings.ts`, `library.ts`, `errors.ts`, `index.ts`), a fake-host integration test being written, a small `src/world/live-link.ts` change | Finish handlers and the fake-host test; wire `src/ui` into `server/index.ts`; list `ui` in the bridge's `features` (C made the default hello omit it until M answers requests); reduce `http.ts` to `/v1/logs` and `guard.ts` to Origin/Host checks; delete `settings-api.ts`, `library-api.ts`, `library-host.ts` once replaced; latency measurement; rebase (2 behind) |
-| O | `silo/ui-o-overlays-hud` | 1 (WIP) | Job volumes, flashes, `seq` check and resync, HUD, overlay and HUD client tests written; was about to run the full checks | Run all tiers; fix what fails; rebase (behind main); final report items. Known flake: see *Open items* (FakeMcp orphan) |
-| G | `silo/ui-g-ghosts` | 1 (WIP) | Ghost client suite passed on the last run; was checking a screenshot by eye. WIP: section meshing, sandbox and anchored ghosts (`client/ui/ghost/`, `mod/common/.../ui/ghost/`, `GhostEvents.java`), `/autosketch ghost`, a measurement suite (`ghost-measure`) | Run all tiers; mesh timings into `16`; use `UiClient.onAction` for `ghost.here`/`ghost.clear`; the Craftoria modded-block check is skipped (deferred, *Decisions*) |
-| R | `silo/ui-r-replay` | 4 | Overrides, live-update mixin, detached camera, keys, HUD strip, chunk-resend GameTests, client tests, `16` status. Was re-verifying after a rebase; no uncommitted work | Run all tiers; final report; merge |
-| S | `silo/ui-s-screens` | 1 (WIP) | Menu on `Home`, toggles, keys, settings screen, library screen with thumbnails all passing their client tests (before the WIP). WIP includes the Cloth Config fix (approved, see *Decisions*), the 3D preview on G's API, lang strings, and a mod-list config test | Finish the preview and its test; run all tiers; final report |
-| X | `silo/ui-x-removal-cli` | 3 (X1, X2, WIP) | X1 deleted `viewer/`, `autosketch ui` and `observe`, `observe.open`, `three`; X2 automatic instance choice. WIP: doc edits to `12`, `13`, `14`, `15` | Finish docs (`README.md`, `world/test-setup.md` with what H automates, the release README's *Release gate*: replace K's U4 wizard with automatic instance choice); `16` *Cost* numbers; anything blocked on M's five files (X was told not to touch `http.ts`, `guard.ts`, `settings-api.ts`, `library-api.ts`, `library-host.ts`); `npm pack --dry-run` check; rebase (2 behind) |
+- The offline lock covers the server console and RCON too.
+- The Craftoria-sized client run is deferred, because neither the server pack nor the current client pack boots on the dev profile (NeoForge 21.1.249).
+- Relay op 3 `CLIENT_ACTION` is generic. Server commands (`/autosketch replay`, `/autosketch ghost`) hand actions to the client half, and the client sends its own `ui.request`.
+- `ui` overlays go to one player set. Jobs, flashes, ghosts and frames from another dimension are kept but not drawn.
+- C added the request kinds `library.trash` and `ghost.clear` and the error `internal`.
+- The automatic instance choice is not saved to `config.toml` (X).
+- Sandbox ghosts show only positions that differ from the base. A finished log replays at the current link or ghost anchor, because logs don't record a world origin (M).
+- `AutosketchConfig`'s static fields are excluded from the Cloth Config screen; building entries for them crashed the screen (S).
+- No reference screenshots are committed. Pixel checks compare frames from the same run.
 
-Suggested merge order: R, then G, O, S (mod side, independent), M, then X last (it may need follow-up deletions after M).
+## Fixed at the end
 
-## Decisions taken this session (all in `16` or `13` unless noted)
+- **Harness: leaked fake MCPs.** `FakeMcp.close()` stopped `tsx` but not its child node process. The orphan kept reconnecting and fought the next test's fake MCP, which failed S's settings tests and O's offline wait intermittently. Fixed with the user's go-ahead: `close()` now stops the process's descendants too.
 
-- The offline lock covers the server console and RCON too (`16`, *Decisions*).
-- The Craftoria-sized client run is deferred: neither the server pack nor the current client pack boots on the dev profile (NeoForge 21.1.249) (`16`, *Decisions*).
-- Relay op 3 `CLIENT_ACTION` (server tells a client half to run a named action; mod-internal, same jar) is generic, shared by replay and ghosts (`13`, *Relay to the client*).
-- `ui` overlays go to one player set (the allowlist); a client keeps but doesn't draw jobs, flashes, ghosts and replay frames from another dimension (`13`).
-- C added request kinds `library.trash` and `ghost.clear`, and error `internal`; the real MCP's default hello omits `ui` until M answers requests.
-- S may fix `AutosketchConfig` (another silo's file, additive): `@ConfigEntry.Gui.Excluded` on its static fields, because AutoConfig tried to build entries for them and the Cloth Config screen crashed on `main` (from the mod list too). The fix is in S's WIP commit, not on `main` yet.
-- The client harness keeps no reference screenshots (game renders); pixel checks compare two frames of the same run.
+## Follow-ups
 
-## Open items needing the user
+**Needs the user's decision**
+- **`docs/ARCHITECTURE.md` has no dependency rule for `src/ui/`,** and its line about the "viewer HTTP server" is stale. silo-m describes `src/ui` this way:
+  - It reads `observe/`, `world/` (bridge, protocol, prompt types), `document/`, `scope/` types, `library/`, `formats/` and `core/`.
+  - It never mutates the world.
+  - Only `server/index.ts` imports it.
+  
+  Dependency rules are on the briefs' list of decisions not to make alone.
 
-- **FakeMcp orphan process** (flaky client tests). `FakeMcp.close()` (`mod/neoforge/src/gametest/.../client/FakeMcp.java`) destroys the `tsx` process but not its child node process, which reconnects and keeps the link `connected`, so a following "offline" wait can time out. Suggested fix: collect `process.descendants()`, destroy them and the process, then `destroyForcibly()` the children. silo-o's attempt to edit the file was refused by a permission check, so the lead didn't apply it; it waits on the user's go-ahead.
-- **Dedicated-server boot check** (`./gradlew runServer`) wasn't completed: silo-l's run was inconclusive and silo-c's and the lead's attempts were refused by permission checks. GameTests load the server half without client classes, so the risk is low, but it should be run once by hand.
-- **`JAVA_HOME`** in `~/.bash_profile` line 7 points at JDK 11; Gradle needs 17+. Prefix Gradle with `JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64` or change that line (the lead wasn't allowed to edit the profile).
-- **e2e tier** (`test/e2e/world/`) hasn't run since L changed it; it needs a running server (`test/e2e/world/server.sh start ~/servers/craftoria`, `AUTOSKETCH_E2E_SERVER`).
+**Checks nobody could run here**
+- **Dedicated-server boot** (`cd mod && ./gradlew runServer`). Permission checks blocked every automated attempt. The GameTest server loads the server half without client classes, so the risk is low.
+- **e2e world tier** (`test/e2e/world/`, needs `AUTOSKETCH_E2E_SERVER` and a running server). It hasn't run since L changed the harness.
+- **The CI `client` job** in `.github/workflows/mod.yml` has never run. Its boot time on the runner isn't recorded in `16` yet.
+- **In-game check by the user** on the real Craftoria client. `docs/briefs/world/test-setup.md` marks what the harness now automates.
 
-## Resuming
-
-1. `git fetch origin` and check each `silo/ui-*` branch against the table above.
-2. For each unfinished silo, start a fresh agent (worktree isolation; `worktree.baseRef` defaults to `origin/<default>`, so check out the silo branch in it) with: the brief, this file's row for that silo, "your branch already holds your earlier work, the last commit is an untested WIP commit: build and test first, then finish the *Left to do* column", and the environment notes (`JAVA_HOME` prefix, `npm install` if `node_modules` is missing).
-3. Agent teams: `.claude/settings.local.json` (git-ignored, this machine only) sets `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`; teammates start through the Agent tool with a `name`. On another machine or account, set it again.
-4. Merge in the suggested order, running every tier; push `main`; remove each finished silo's worktree and branches.
-
-## Leftovers to clean up
-
-- Locked worktree of finished silo H: `.claude/worktrees/agent-a359a5f851afb8573` (branch `silo/ui-h-harness`, merged). Remove once no agent holds it (`git worktree remove -f -f`), then delete the branch.
-- Stale local branches `worktree-agent-*` (created by worktree isolation, all behind `main` with nothing of their own): delete with `git branch -d`.
-- Silo worktrees under `.claude/worktrees/` (`silo-m`, `silo-o`, `silo-r`, `silo-s`, `agent-a4086e9a85853c0d3` for G, `agent-ab4f54de1cecfee07` for X): local to this machine; the branches on `origin` hold everything.
+**Small code follow-ups**
+- R draws replay job volumes and flashes with its own minimal line boxes. Switch them to O's overlay drawing now that both are on `main`.
+- S's log list opens a replay through `/autosketch replay <log>`, because `ReplayClient.open` is package-private. Either keep that, or have R install its opener (`AutosketchScreens.setReplayOpener`, `LogListScreen.setOpener`).
+- `OPEN_REPLAY` key: S attached it to the log list. Check that R and S agree on it.
+- Ghost meshing runs on the render thread with a 4 ms budget per frame. A solid 256³ ghost takes about 45 s to fill in. A scattered 256³ ghost needs 3.3 GiB of meshes. Possible follow-ups: mesh off the render thread, or cap quads or distance.
+- Dead code: `library/manage.ts`'s editor writes (`writeEntryText`, `writePrefabMeta`, `writePaletteFile`) have no callers now.
+- Old "management UI" wording in comments in `core/config.ts`, `core/settings.ts`, `cli/index.ts`, `library/roots.ts` and `assets/discover/types.ts`.
+- An intermittent `npm test` failure was seen twice, once by silo-c and once at R's merge. It didn't recur in later reruns, and the failing test wasn't identified.
+- `JAVA_HOME` in the user's `~/.bash_profile` points at JDK 11; Gradle needs 17 or later. Prefix Gradle as above, or change that line.
+- The Craftoria-sized client run (`mod/clienttest-craftoria.sh`) waits for a newer NeoForge on the dev profile, or a curated list of mods to leave out.

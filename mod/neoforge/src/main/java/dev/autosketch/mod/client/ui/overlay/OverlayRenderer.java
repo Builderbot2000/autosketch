@@ -123,7 +123,9 @@ public final class OverlayRenderer {
         if (text.length() < l.text().length()) text = font.plainSubstrByWidth(l.text(), 320 - font.width("…")) + "…";
         float x = -font.width(text) / 2f;
         int background = (int) (Minecraft.getInstance().options.getBackgroundOpacity(0.25f) * 255f) << 24;
-        font.drawInBatch(text, x, 0, 0xFF000000 | l.colour(), false, pose.last().pose(), buffers, Font.DisplayMode.SEE_THROUGH, background, LightTexture.FULL_BRIGHT);
+        // As name tags: faint through blocks, then full strength where in view.
+        font.drawInBatch(text, x, 0, 0x60000000 | l.colour(), false, pose.last().pose(), buffers, Font.DisplayMode.SEE_THROUGH, background, LightTexture.FULL_BRIGHT);
+        font.drawInBatch(text, x, 0, 0xFF000000 | l.colour(), false, pose.last().pose(), buffers, Font.DisplayMode.NORMAL, 0, LightTexture.FULL_BRIGHT);
         pose.popPose();
     }
 

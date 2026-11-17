@@ -211,7 +211,7 @@ describe("world_volumes (13, B4)", () => {
     expect(texts(old)[0]).toContain('doesn\'t support setting the volumes (its hello doesn\'t list "volumes.set")');
     expect(host.received.some((m) => m.type === "volumes.set")).toBe(false);
     // A plan request (the mod side of plan arrives with silo Y): the rule reads the open request.
-    inGame!.stream.open({ id: 9, player: HOST, mode: "plan" });
+    inGame!.open({ id: 9, player: HOST, mode: "plan" });
     const plan = await client.callTool({ name: "world_volumes", arguments: { work: { min: [18, 2, 18], max: [20, 4, 20] } } });
     expect(texts(plan)[0]).toContain("The open in-game plan request (request 9 from Dev) allows looking and proposing only, so world_volumes can't change the volumes.");
   });

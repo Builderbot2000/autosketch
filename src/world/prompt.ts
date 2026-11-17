@@ -6,8 +6,8 @@ import type { PaletteBook } from "../palette/pick.js";
 import { refusal } from "../scope/scopes.js";
 import { ActivityStream, type OpenRequest } from "./chat-stream.js";
 import type { LinkVolumes, WorldLink } from "./link.js";
-import { MODE_ALLOWS, modeOf, RequestModeRule } from "./modes.js";
-import type { GameContext, ModHello, PlayerRef, PromptMessage, PromptRefusal, WireBox } from "./protocol/messages.js";
+import { MODE_ALLOWS, modeOf, READ_ONLY_MODES, RequestModeRule, type ModeRequest } from "./modes.js";
+import type { GameContext, ModHello, PlayerRef, PromptClose, PromptMessage, PromptRefusal, RequestMode, WireBox } from "./protocol/messages.js";
 import { loadProbe, probeText, type Probe } from "./probe.js";
 import { setVolumes, type ContextArg, type VolumesFrame } from "./set-volumes.js";
 import type { PromptSettings } from "./settings.js";
@@ -36,6 +36,12 @@ import type { PromptSettings } from "./settings.js";
  * 5. **One channel event** with the fixed text shape `13` shows, opening with the mode and what it
  *    allows, then the handoff facts; then `prompt.result` delivered, and the request's chat stream
  *    opens. While it is open, its mode is enforced (`modes.ts`, `modeRule`).
+ *
+ * A read-only request (`ask`, `plan`, `scan`) holds its mode until the player lifts it: the mode is
+ * the player's permission over their world, so only the player ends it (settled with the user
+ * 2026-11-16). The agent's `world_reply` with `done` answers the request and closes its activity
+ * stream, but the mode stays in force until `/autosketch done` (`prompt.close`), the player's next
+ * delivered request, or the game disconnecting.
  */
 
 /** Claude Code's channel notification (Claude Code docs, *Channels reference*). */
@@ -53,8 +59,12 @@ export interface InGameReplies {
   readonly connected: boolean;
   /** The open request stream, if any. */
   readonly current: OpenRequest | undefined;
-  /** Sends reply lines; `done` closes the request's stream. `open` says whether the request answered was the open one. */
-  reply(lines: string[], opts?: { done?: boolean; request?: number }): { request: OpenRequest | undefined; open: boolean };
+  /**
+   * Sends reply lines; `done` marks the request answered and closes its stream. `open` says whether
+   * the request answered was the open one; `held` names the read-only mode still in force after it
+   * (only the player ends that, B6).
+   */
+  reply(lines: string[], opts?: { done?: boolean; request?: number }): { request: OpenRequest | undefined; open: boolean; held?: RequestMode };
   /** Sets the player's volumes (`world_volumes`, B4) in the coordinates of the open probe or linked document; resolves with the result text. */
   setVolumes(work: PublicBox, context?: ContextArg): Promise<string>;
 }
@@ -106,6 +116,11 @@ export class InGameRequests implements InGameReplies {
   private readonly offs: (() => void)[] = [];
   /** The latest scan probe (B4); open while it is still the session's document. */
   private probe?: Probe;
+  /**
+   * The read-only request whose mode is in force (B6): set on delivery, ended only by the player
+   * (`prompt.close`, the next delivered request) or a disconnect, never by the agent's `done`.
+   */
+  private held?: ModeRequest;
 
   constructor(
     private readonly link: WorldLink,
@@ -113,15 +128,19 @@ export class InGameRequests implements InGameReplies {
   ) {
     this.stream = new ActivityStream({ subscribe: opts.subscribe, send: (m) => link.bridge.send(m), linked: () => link.state === "linked" || this.probeOpen() !== undefined, activityMs: opts.activityMs, idleMs: opts.idleMs });
     this.modeRule = new RequestModeRule(
-      () => {
-        const r = this.stream.current;
-        return r && { id: r.id, player: r.player, mode: modeOf(r) };
-      },
+      () => this.held,
       () => (link.state === "linked" ? link.doc : undefined),
     );
     this.offs.push(link.bridge.on("prompt", (m) => void this.onPrompt(m)));
+    this.offs.push(link.bridge.on("prompt.close", (m) => this.onClose(m)));
     // The activity stream listens only while a game is connected, so an unlinked session pays nothing.
-    this.offs.push(link.bridge.onConnection((s) => (s === "up" ? this.stream.start() : this.stream.stop())));
+    this.offs.push(
+      link.bridge.onConnection((s) => {
+        if (s === "up") return this.stream.start();
+        this.stream.stop();
+        this.held = undefined;
+      }),
+    );
     if (link.bridge.connected) this.stream.start();
   }
 
@@ -133,8 +152,40 @@ export class InGameRequests implements InGameReplies {
     return this.stream.current;
   }
 
-  reply(lines: string[], opts: { done?: boolean; request?: number } = {}): { request: OpenRequest | undefined; open: boolean } {
-    return this.stream.reply(lines, opts);
+  reply(lines: string[], opts: { done?: boolean; request?: number } = {}): { request: OpenRequest | undefined; open: boolean; held?: RequestMode } {
+    const r = this.stream.reply(lines, opts);
+    return this.held ? { ...r, held: this.held.mode } : r;
+  }
+
+  /** The read-only request whose mode is in force, if any (B6). */
+  get heldRequest(): ModeRequest | undefined {
+    return this.held;
+  }
+
+  /**
+   * The player ran `/autosketch done` (`prompt.close`, B6): ends the open read-only request, so its
+   * mode no longer holds. The answer goes on that player's action bar as a `notice`: the MCP owns
+   * the request state, so it is the side that knows whether one was open.
+   */
+  onClose(m: PromptClose): void {
+    const tell = (text: string) => this.link.bridge.send({ type: "notice", text, player: m.player.uuid });
+    if (!promptAllowed(m.player, this.opts.promptPlayers, this.link.bridge.hello)) {
+      this.opts.log?.(`in-game done from ${m.player.name} refused: not_allowed`);
+      return tell("Autosketch: you aren't allowed to send requests (world.promptPlayers), so you can't end one either.");
+    }
+    const r = this.held;
+    if (!r) return tell("Autosketch: no ask, plan or scan request is open.");
+    this.held = undefined;
+    if (this.stream.current?.id === r.id) this.stream.closeRequest();
+    this.opts.log?.(`in-game ${r.mode} request ${r.id} ended by ${m.player.name}`);
+    tell(`Autosketch: ${r.mode} request ${r.id} ended; the agent may edit again.`);
+  }
+
+  /** Opens a delivered request's stream and, for a read-only mode, holds the mode (replacing any held one). */
+  open(r: OpenRequest): void {
+    const mode = modeOf(r);
+    this.held = READ_ONLY_MODES.has(mode) ? { id: r.id, player: r.player, mode } : undefined;
+    this.stream.open({ id: r.id, player: r.player, mode });
   }
 
   /** The scan probe while it is the session's open document. */
@@ -182,7 +233,7 @@ export class InGameRequests implements InGameReplies {
     }
     this.modeRule.attach(doc);
     this.link.bridge.send({ type: "prompt.result", id: m.id, delivered: true });
-    this.stream.open({ id: m.id, player: m.player, mode: modeOf(m) });
+    this.open({ id: m.id, player: m.player, mode: modeOf(m) });
   }
 
   /**
@@ -214,7 +265,7 @@ export class InGameRequests implements InGameReplies {
       return refuse("no_listener");
     }
     this.link.bridge.send({ type: "prompt.result", id: m.id, delivered: true });
-    this.stream.open({ id: m.id, player: m.player, mode: "scan" });
+    this.open({ id: m.id, player: m.player, mode: "scan" });
   }
 }
 

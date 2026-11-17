@@ -274,7 +274,7 @@ describe("request modes, enforced (13, B6)", () => {
   const refusalText = (mode: string, id: number, tool: string) =>
     `The open in-game ${mode} request (request ${id} from Dev) allows ${mode === "ask" ? "reading and looking only" : mode === "plan" ? "looking and proposing only" : "looking and setting the volumes only"}, ` +
     `so ${tool} can't edit the linked document. Nothing was written. To have it built, the player sends /autosketch build <text>. ` +
-    `Answer with world_reply. Only if the user at the terminal asked for this, close the request first with world_reply({ request: ${id}, lines: […], done: true }).`;
+    "Answer with world_reply. Only the player can end this request, in game with /autosketch done or by sending a new request; if the user at the terminal wants this edit, tell them so.";
 
   it("an ask request opens with its mode; fill is refused with request_mode and nothing reaches the world; looking still works", async () => {
     const { client, host, events, session } = await setup();
@@ -317,21 +317,76 @@ describe("request modes, enforced (13, B6)", () => {
     expect(host.get(w([5, 0, 5])).state).toBe("minecraft:air");
   });
 
-  it("ends with world_reply done, or the next request, after which edits pass again", async () => {
+  it("world_reply done answers a read-only request but keeps its mode; only the player's /autosketch done ends it", async () => {
     const { client, host } = await setup();
     await host.playerAsk(HOST, "what is this?", {}, { mode: "ask" });
     await host.waitFor(() => inGame!.current?.id === 1);
     expect((await client.callTool({ name: "fill", arguments: FILL })).isError).toBe(true);
     expect(texts(await client.callTool({ name: "world_volumes", arguments: { work: { min: [0, 0, 0], max: [1, 1, 1] } } }))[0]).toContain("so world_volumes can't change the volumes");
-    await client.callTool({ name: "world_reply", arguments: { lines: ["It's a wall."], done: true } });
-    expect(inGame!.current).toBeUndefined();
+    const reply = await client.callTool({ name: "world_reply", arguments: { lines: ["It's a wall."], done: true } });
+    expect(texts(reply)[0]).toBe("ok · world_reply · 1 line to Dev (request 1) · request answered; its ask mode stays in force until the player ends it in game (/autosketch done) or sends a new request");
+    await host.waitFor(() => chats(host, "reply").length === 1);
+    expect(inGame!.current).toBeUndefined(); // answered: the activity stream closed as before
+    // The mode still holds: the agent can't lift it.
+    const seq = link!.doc!.journal.headSeq;
+    const again = await client.callTool({ name: "fill", arguments: FILL });
+    expect(texts(again)[0]).toBe(refusalText("ask", 1, "fill"));
+    expect(link!.doc!.journal.headSeq).toBe(seq);
+    expect(host.patchLog).toHaveLength(0);
+    // The player ends it in game.
+    expect(await host.playerDone(HOST)).toEqual({ type: "notice", text: "Autosketch: ask request 1 ended; the agent may edit again.", player: HOST.uuid });
+    expect(inGame!.heldRequest).toBeUndefined();
     // A call refused by a hook before it ran (world_volumes in ask) unwinds the link's call count, so later results keep their world: line.
     expect(texts(await client.callTool({ name: "fill", arguments: FILL })).join("\n")).toContain("world: 8 placed"); // terminal work again
-    await host.playerAsk(HOST, "and this?", {}, { mode: "ask" });
+    // Nothing left to end.
+    expect(await host.playerDone(HOST)).toMatchObject({ text: "Autosketch: no ask, plan or scan request is open." });
+  });
+
+  it("/autosketch done ends an open read-only request before any reply, and closes its stream", async () => {
+    const { client, host } = await setup();
+    await host.playerAsk(HOST, "how would you roof this?", {}, { mode: "plan" });
+    await host.waitFor(() => inGame!.current?.id === 1);
+    expect(await host.playerDone(HOST)).toMatchObject({ text: "Autosketch: plan request 1 ended; the agent may edit again." });
+    expect(inGame!.current).toBeUndefined();
+    expect((await client.callTool({ name: "fill", arguments: FILL })).isError).toBeFalsy();
+  });
+
+  it("/autosketch done: a build request is not ended by it; a player off the allowlist is refused", async () => {
+    const { client, host } = await setup({ singleplayer: false, promptPlayers: ["Dev"] });
+    await host.playerAsk(HOST, "look", {}, { mode: "ask" });
+    await host.waitFor(() => inGame!.current?.id === 1);
+    expect(await host.playerDone(KEV)).toEqual({ type: "notice", text: "Autosketch: you aren't allowed to send requests (world.promptPlayers), so you can't end one either.", player: KEV.uuid });
+    expect(inGame!.heldRequest?.id).toBe(1);
+    await host.playerAsk(HOST, "build", {}, { mode: "build" });
     await host.waitFor(() => inGame!.current?.id === 2);
-    expect((await client.callTool({ name: "clear", arguments: { sel: { min: [1, 0, 1], max: [1, 0, 1] } } })).isError).toBe(true);
+    expect(await host.playerDone(HOST)).toMatchObject({ text: "Autosketch: no ask, plan or scan request is open." });
+    expect(inGame!.current?.id).toBe(2); // the build request's stream stays open
+    const r = await client.callTool({ name: "world_reply", arguments: { lines: ["Built."], done: true } });
+    expect(texts(r)[0]).toBe("ok · world_reply · 1 line to Dev (request 2) · request closed");
+  });
+
+  it("the mod sends /autosketch done only to an MCP that lists prompt.close", async () => {
+    const { host } = await setup();
+    expect(host.mcpFeatures).toEqual(["prompt.close"]);
+    host.mcpFeatures = []; // as an MCP from before the feature
+    await host.playerAsk(HOST, "look", {}, { mode: "ask" });
+    await host.waitFor(() => inGame!.current?.id === 1);
+    expect(await host.playerDone(HOST)).toEqual({ local: "mcp_outdated" });
+    expect(host.sent.some((m) => m.type === "prompt.close")).toBe(false);
+    expect(inGame!.heldRequest?.id).toBe(1);
+  });
+
+  it("ends with the next request, after which edits pass again", async () => {
+    const { client, host } = await setup();
+    await host.playerAsk(HOST, "and this?", {}, { mode: "ask" });
+    await host.waitFor(() => inGame!.current?.id === 1);
+    expect((await client.callTool({ name: "fill", arguments: FILL })).isError).toBe(true);
+    await client.callTool({ name: "world_reply", arguments: { lines: ["Stone."], done: true } });
+    expect((await client.callTool({ name: "fill", arguments: FILL })).isError).toBe(true);
     await host.playerAsk(HOST, "now build it", {}, { mode: "build" });
-    await host.waitFor(() => inGame!.current?.id === 3);
+    await host.waitFor(() => inGame!.current?.id === 2);
+    expect(inGame!.heldRequest).toBeUndefined();
+    expect((await client.callTool({ name: "fill", arguments: FILL })).isError).toBeFalsy();
     const r = await client.callTool({ name: "clear", arguments: { sel: { min: [1, 0, 1], max: [1, 0, 1] } } });
     expect(r.isError).toBeFalsy();
     await host.waitFor(() => host.get(w([1, 0, 1])).state === "minecraft:air");
@@ -350,12 +405,15 @@ describe("request modes, enforced (13, B6)", () => {
     expect(inGame!.current).toBeUndefined();
   });
 
-  it("ends when the game disconnects", async () => {
-    const { host } = await setup();
+  it("ends when the game disconnects, answered or not", async () => {
+    const { client, host } = await setup();
     await host.playerAsk(HOST, "look", {}, { mode: "ask" });
     await host.waitFor(() => inGame!.current?.id === 1);
+    await client.callTool({ name: "world_reply", arguments: { lines: ["Grass."], done: true } });
+    expect(inGame!.heldRequest?.id).toBe(1);
     host.dropConnection();
-    await host.waitFor(() => inGame!.current === undefined);
+    await host.waitFor(() => inGame!.heldRequest === undefined);
+    expect(inGame!.current).toBeUndefined();
   });
 });
 
@@ -369,7 +427,7 @@ describe("request mode rule (13, B6), unit", () => {
     const rule = new RequestModeRule(() => current, () => d);
     expect(() => rule.before({ tool: "world_volumes" })).toThrow(
       "The open in-game ask request (request 7 from Dev) allows reading and looking only, so world_volumes can't change the volumes. Nothing was sent. To have the agent set them, the player sends /autosketch scan [radius] [text]. " +
-        "Answer with world_reply. Only if the user at the terminal asked for this, close the request first with world_reply({ request: 7, lines: […], done: true }).",
+        "Answer with world_reply. Only the player can end this request, in game with /autosketch done or by sending a new request; if the user at the terminal wants this edit, tell them so.",
     );
     current = req("plan");
     expect(() => rule.before({ tool: "world_volumes" })).toThrow(expect.objectContaining({ refusal: "request_mode" }) as never);
@@ -389,7 +447,7 @@ describe("request mode rule (13, B6), unit", () => {
     const rule = new RequestModeRule(() => current, () => undefined);
     expect(() => rule.before({ tool: "scope_fork" })).toThrow(
       "The open in-game plan request (request 7 from Dev) allows looking and proposing only, in words only, so scope_fork can't draft in a sandbox or another document either. Nothing was changed. Describe the idea in world_reply; to have it built, the player sends /autosketch build <text>. " +
-        "Answer with world_reply. Only if the user at the terminal asked for this, close the request first with world_reply({ request: 7, lines: […], done: true }).",
+        "Answer with world_reply. Only the player can end this request, in game with /autosketch done or by sending a new request; if the user at the terminal wants this edit, tell them so.",
     );
     for (const mode of ["ask", "plan", "scan"] as const) {
       current = req(mode);

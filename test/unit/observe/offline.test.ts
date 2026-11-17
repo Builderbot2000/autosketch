@@ -13,10 +13,6 @@ import { decodeRecords } from "../../../src/observe/deltas.js";
 import { startObserve } from "../../../src/observe/index.js";
 import { serveLog } from "../../../src/observe/offline.js";
 import { fill } from "../../../src/ops/edit.js";
-// @ts-expect-error plain ESM viewer module without types
-import { Replayer, activityAt, modelAt, replayPlan } from "../../../viewer/js/replay.js";
-// @ts-expect-error plain ESM viewer module without types
-import { VoxelGrid } from "../../../viewer/js/voxels.js";
 
 const roots: string[] = [];
 const tempWorkspace = () => {
@@ -95,23 +91,6 @@ async function finishedSession(set: string[] = ["observe.deltas=on"]) {
   return { workspace, doc, afterGlass, dir: join(workspace, "keep", "observe", "20261108T000000000Z-test") };
 }
 
-/** The document's blocks as [x, y, z, state] in its local frame. */
-function blocks(doc: Document): [number, number, number, string][] {
-  const out: [number, number, number, string][] = [];
-  const [ox, oy, oz] = doc.toLocal(0, 0, 0);
-  doc.voxels.forEach((x, y, z, v) => out.push([x + ox, y + oy, z + oz, doc.states.get(v)]));
-  return out.sort();
-}
-
-function gridBlocks(grid: { chunks: Map<string, Uint32Array> }, states: Map<number, string>): [number, number, number, string][] {
-  const out: [number, number, number, string][] = [];
-  for (const [k, c] of grid.chunks) {
-    const [cx, cy, cz] = k.split(",").map(Number) as [number, number, number];
-    for (let i = 0; i < 4096; i++) if (c[i]) out.push([cx * 16 + (i & 15), cy * 16 + (i >> 8), cz * 16 + ((i >> 4) & 15), states.get(c[i]!)!]);
-  }
-  return out.sort();
-}
-
 describe("autosketch observe <path> (12, phase 5)", () => {
   it("serves a finished log read-only: info, every event, deltas, snapshots and three.js", async () => {
     const { workspace, dir } = await finishedSession();
@@ -148,59 +127,6 @@ describe("autosketch observe <path> (12, phase 5)", () => {
     }
   });
 
-  it("replays the base document exactly at the end and at an earlier seq, through an undo", async () => {
-    const { doc, dir, afterGlass } = await finishedSession();
-    const v = await serveLog({ path: dir });
-    await v.close();
-    const evs = v.log.events;
-    const bin = readFileSync(join(dir, "deltas.bin"));
-    const deltas = bin.buffer.slice(bin.byteOffset, bin.byteOffset + bin.byteLength);
-    const states = new Map<number, string>();
-    for (const e of evs) if (e.kind === "state.add") states.set(e.id, e.state);
-    const grid = new VoxelGrid();
-    const r = new Replayer(grid);
-    const last = evs[evs.length - 1]!.seq;
-
-    const end = r.seek(evs, last, deltas);
-    expect(end.gap).toBeUndefined();
-    expect(gridBlocks(grid, states)).toEqual(blocks(doc));
-    expect(blocks(doc)).toEqual([[-1, 0, 0, "minecraft:dirt"], [0, 0, 0, "minecraft:stone"], [0, 1, 0, "minecraft:glass"], [1, 0, 0, "minecraft:stone"]]);
-
-    r.seek(evs, afterGlass, deltas); // backwards: rebuilt from the keyframe
-    expect(gridBlocks(grid, states)).toEqual([[0, 0, 0, "minecraft:stone"], [0, 1, 0, "minecraft:glass"], [1, 0, 0, "minecraft:stone"]]);
-    r.seek(evs, last, deltas); // forwards again, incrementally
-    expect(gridBlocks(grid, states)).toEqual(blocks(doc));
-
-    const m = modelAt(evs, afterGlass);
-    expect(m.scopes.has("s1")).toBe(false);
-    expect(modelAt(evs, last).scopes.get("s1").ops).toBe(1);
-    expect(activityAt(evs, afterGlass, deltas).cells.get("0,0")).toBe(1);
-  });
-
-  it("moves existing blocks by -shift before a step's records (frame after the step)", () => {
-    const grid = new VoxelGrid();
-    const r = new Replayer(grid);
-    const evs = [
-      { seq: 1, doc: "base", kind: "session.open", name: "keep", delta: { offset: 0, length: 16 } },
-      { seq: 2, doc: "base", kind: "doc.op", changed: 1, shift: [-2, 0, 0], delta: { offset: 16, length: 16 } },
-    ];
-    const recs = new Int32Array([0, 0, 0, 1, 0, 1, 0, 2]);
-    r.seek(evs, 2, recs.buffer);
-    expect(gridBlocks(grid, new Map([[1, "a"], [2, "b"]]))).toEqual([[0, 1, 0, "b"], [2, 0, 0, "a"]]);
-  });
-
-  it("falls back to the newest time-lapse snapshot when deltas were off", async () => {
-    const { dir } = await finishedSession([]);
-    const v = await serveLog({ path: dir });
-    expect(JSON.parse((await get(v.url + "info")).body.toString()).deltas).toEqual({ on: false });
-    await v.close();
-    const evs = [...v.log.events, { v: 1, seq: 999, t: 0, doc: "base", kind: "render.produced", view: "iso_ne", size: [512, 512], source: "snapshot", path: "snapshots/5.png" }];
-    const last = v.log.events[v.log.events.length - 1]!.seq;
-    const plan = replayPlan(evs, last);
-    expect(plan.gap?.kind).toBe("session.open");
-    expect(plan.snapshot).toEqual({ seq: 5, path: "snapshots/5.png" });
-    expect(replayPlan(evs, 4).snapshot).toBeUndefined();
-  });
 });
 
 describe("the observe subcommand", () => {

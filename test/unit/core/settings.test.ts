@@ -118,4 +118,11 @@ describe("settings: config.toml layer (15, Settings tab)", () => {
       ["observe.log", true, "default"],
     ]);
   });
+
+  it("reports observe.open, removed with the browser UI (16), as an unknown setting", async () => {
+    await import("../../../src/observe/settings.js");
+    expect(registeredSettings().map((s) => s.key)).not.toContain("observe.open");
+    const s = Settings.from([], {}, parseConfig('[settings]\n"observe.open" = false\n'));
+    expect(s.notes()).toContain("config.toml: unknown setting observe.open, ignored");
+  });
 });

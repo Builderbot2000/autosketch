@@ -5,11 +5,10 @@ import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { Candidate, Discovery } from "../../../src/assets/discover/index.js";
-import { parseConfig } from "../../../src/core/config.js";
 import type { InstanceContext } from "../../../src/server/context.js";
 import { createServer } from "../../../src/server/server.js";
 import { Session, type InstanceSetup } from "../../../src/server/session.js";
-import { INSTANCE_TAB_FRAGMENT, makeInstanceSetup, notConfiguredText, setupCommand, wantsSetupWizard, withFragment } from "../../../src/server/setup.js";
+import { makeInstanceSetup, notConfiguredText, setupCommand } from "../../../src/server/setup.js";
 import { smallContext } from "../../helpers/context.js";
 
 const workspace = mkdtempSync(join(tmpdir(), "autosketch-unconf-"));
@@ -56,13 +55,13 @@ function stubSetup(over: Partial<InstanceSetup> = {}): InstanceSetup & { loads: 
       loads.push(path);
       return smallContext();
     },
-    notConfigured: async () => notConfiguredText(found, "http://127.0.0.1:4000/#tab=instance"),
+    notConfigured: async () => notConfiguredText(found),
     ...over,
   };
 }
 
 describe("not configured (14, Setup)", () => {
-  it("answers not_configured from every tool but instance_info, with candidates, commands and the UI URL", async () => {
+  it("answers not_configured from every tool but instance_info, with candidates and commands", async () => {
     const session = new Session(workspace);
     session.setup = stubSetup();
     const client = await connect(session);
@@ -70,9 +69,8 @@ describe("not configured (14, Setup)", () => {
     expect(r.isError).toBe(true);
     expect(textOf(r)).toBe(
       [
-        "not_configured: Autosketch has no Minecraft instance to read blocks from yet. Ask the user to choose one, then call the tool again (no restart needed):",
-        "- in the browser: http://127.0.0.1:4000/#tab=instance (Instance tab)",
-        "- or in a terminal, one of:",
+        "not_configured: Autosketch has no Minecraft instance to read blocks from yet. Ask the user to choose one in a terminal, then call the tool again (no restart needed):",
+        "- one of:",
         "  npx -y autosketch setup --instance /games/Craftoria   # Craftoria (Minecraft 1.21.1, neoforge 21.1.262, CurseForge, 532 mods)",
         '  npx -y autosketch setup --instance "/games/My Broken Pack"   # Broken Pack (Minecraft 1.21.1, Modrinth App, 3 mods); can\'t load yet: base game jar not found',
       ].join("\n"),
@@ -136,38 +134,26 @@ describe("not configured (14, Setup)", () => {
   });
 });
 
-describe("setup helpers (15, Instance tab and first-run setup)", () => {
-  it("adds the Instance tab fragment beside an existing one", () => {
-    expect(withFragment("http://127.0.0.1:1/", INSTANCE_TAB_FRAGMENT)).toBe("http://127.0.0.1:1/#tab=instance");
-    expect(withFragment("http://127.0.0.1:1/#t=abc", INSTANCE_TAB_FRAGMENT)).toBe("http://127.0.0.1:1/#t=abc&tab=instance");
-    expect(withFragment("http://127.0.0.1:1/#", INSTANCE_TAB_FRAGMENT)).toBe("http://127.0.0.1:1/#tab=instance");
-  });
-
-  it("opens the wizard at startup only when config.toml remembers no instance", () => {
-    expect(wantsSetupWizard(parseConfig(""))).toBe(true);
-    expect(wantsSetupWizard(parseConfig('workspace = "/w"'))).toBe(true);
-    expect(wantsSetupWizard(parseConfig('instance = "/games/x"'))).toBe(false);
-  });
-
+describe("setup helpers (14, Setup; 16, Command line)", () => {
   it("quotes setup commands only when needed, and says when nothing was found", () => {
     expect(setupCommand("C:/Users/me/curseforge/minecraft/Instances/Craftoria")).toBe("npx -y autosketch setup --instance C:/Users/me/curseforge/minecraft/Instances/Craftoria");
     expect(setupCommand('/a b/"c"')).toBe('npx -y autosketch setup --instance "/a b/\\"c\\""');
     expect(notConfiguredText({ candidates: [], warnings: [] })).toBe(
-      "Autosketch has no Minecraft instance to read blocks from yet. Ask the user to choose one, then call the tool again (no restart needed):\n" +
-        '- or in a terminal: npx -y autosketch setup --instance "<instance folder>"  (no instance was found in the known launcher folders)',
+      "Autosketch has no Minecraft instance to read blocks from yet. Ask the user to choose one in a terminal, then call the tool again (no restart needed):\n" +
+        '- npx -y autosketch setup --instance "<instance folder>"  (no instance was found in the known launcher folders)',
     );
   });
 
-  it("reads a saved instance from config.toml and builds the answer from discovery and the UI URL", async () => {
+  it("reads a saved instance from config.toml and builds the answer from discovery", async () => {
     const dir = mkdtempSync(join(tmpdir(), "autosketch-setup-"));
     const path = join(dir, "config.toml");
     let runs = 0;
-    const setup = makeInstanceSetup({ launch: {}, uiUrl: async () => "http://127.0.0.1:5/#t=x", configPath: path, discover: async () => (runs++, found) });
+    const setup = makeInstanceSetup({ launch: {}, configPath: path, discover: async () => (runs++, found) });
     expect(setup.saved!()).toBeUndefined();
     writeFileSync(path, 'instance = "/games/Craftoria"\nversion = "1.21.1"\n');
     expect(setup.saved!()).toEqual({ path: "/games/Craftoria", version: "1.21.1" });
     const text = await setup.notConfigured();
-    expect(text).toContain("- in the browser: http://127.0.0.1:5/#t=x&tab=instance (Instance tab)");
+    expect(text).toContain("  npx -y autosketch setup --instance /games/Craftoria   # Craftoria");
     await setup.notConfigured();
     expect(runs).toBe(1); // one discovery serves answers for a while
     rmSync(dir, { recursive: true, force: true });

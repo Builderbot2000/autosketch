@@ -50,7 +50,7 @@ export function observeCall<A extends unknown[]>(
 
 /**
  * The call's top-level scalar arguments, strings cut to 80 characters, at most 16 of them: enough
- * for the viewer to tell apart same-named calls when matching Claude Code's `tool_result` telemetry
+ * for the session model to tell apart same-named calls when matching Claude Code's `tool_result` telemetry
  * (13, *Backlog* B3, "Per action"), without copying block lists or scripts into the log.
  */
 export function scalarInput(args: unknown): Record<string, string | number | boolean> | undefined {

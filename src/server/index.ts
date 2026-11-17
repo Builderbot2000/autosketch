@@ -81,14 +81,16 @@ async function main(): Promise<void> {
     process.exit(2);
   }
   // First-run setup (14, *Setup*; 16, *Command line*): the server starts with or without an
-  // instance. Without one, tools answer not_configured until `autosketch setup` chooses one, which
-  // then loads in place.
-  session.setup = makeInstanceSetup({ launch, log });
+  // instance. With none saved, it picks one when exactly one candidate is found (preferring games
+  // the mod has run in) and says so; otherwise tools answer not_configured with the candidates
+  // until `autosketch setup` chooses one, which then loads in place. No wizard.
+  const setup = makeInstanceSetup({ launch, log });
+  session.setup = setup;
   if (cfg) {
     const ctx = loadInstanceContext(cfg, log);
     ctx.catch((e: Error) => log(`failed to load instance: ${e.message}`));
     session.setInstance(ctx);
-  } else log(`no instance configured: tools answer not_configured until one is chosen with \`autosketch setup --instance <path>\` (saved in ${file.path})`);
+  } else void setup.autoChoose(session);
   session.events = observer.sink("base");
   session.eventsFor = (doc) => observer.sink(doc);
   // The live world link (13), wired in here like observe/: tools reach it only through the session.

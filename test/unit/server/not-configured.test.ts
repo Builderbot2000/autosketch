@@ -8,7 +8,8 @@ import type { Candidate, Discovery } from "../../../src/assets/discover/index.js
 import type { InstanceContext } from "../../../src/server/context.js";
 import { createServer } from "../../../src/server/server.js";
 import { Session, type InstanceSetup } from "../../../src/server/session.js";
-import { makeInstanceSetup, notConfiguredText, setupCommand } from "../../../src/server/setup.js";
+import { AUTO_SOURCE, chooseAutomatically, makeInstanceSetup, notConfiguredText, setupCommand } from "../../../src/server/setup.js";
+import { instanceSourceText } from "../../../src/server/tools/instance.js";
 import { smallContext } from "../../helpers/context.js";
 
 const workspace = mkdtempSync(join(tmpdir(), "autosketch-unconf-"));
@@ -157,5 +158,86 @@ describe("setup helpers (14, Setup; 16, Command line)", () => {
     await setup.notConfigured();
     expect(runs).toBe(1); // one discovery serves answers for a while
     rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe("automatic instance choice (16, Command line)", () => {
+  const vanilla = candidate({ id: "minecraft", name: "Minecraft", launcher: "vanilla", folder: "/home/me/.minecraft", gameDir: "/home/me/.minecraft", loader: undefined, check: { ok: true, mods: 0, detail: "Minecraft 1.21.1" } });
+  const withMod = candidate({ pointer: true });
+  const broken = found.candidates[0]!;
+
+  /** A session with the real setup (discovery stubbed) and a stub load; what it logged and loaded. */
+  async function start(discovery: Discovery) {
+    const logs: string[] = [];
+    const loads: string[] = [];
+    const setup = makeInstanceSetup({ launch: {}, configPath: join(workspace, "no-config.toml"), discover: async () => discovery, log: (m) => logs.push(m) });
+    const session = new Session(workspace);
+    session.setup = { ...setup, load: async (path) => (loads.push(path), smallContext()) };
+    const client = await connect(session);
+    const pick = await setup.autoChoose(session);
+    return { session, client, pick, logs, loads };
+  }
+
+  it("picks the one candidate found, and reports it on stderr and in the first tool result only", async () => {
+    const { session, client, pick, logs, loads } = await start({ candidates: [withMod], warnings: [] });
+    expect(pick?.folder).toBe("/games/Craftoria");
+    expect(loads).toEqual(["/games/Craftoria"]);
+    const note =
+      "Autosketch chose the Minecraft instance Craftoria (Minecraft 1.21.1, neoforge 21.1.262, CurseForge, 532 mods) at /games/Craftoria automatically: it is the only instance found. " +
+      "It isn't saved; to keep it or choose another, the user runs npx -y autosketch setup --instance /games/Craftoria.";
+    expect(logs).toEqual([note]);
+    await session.whenInstance();
+    const first = await client.callTool({ name: "doc_list", arguments: {} });
+    expect(first.isError).toBeFalsy();
+    expect((first.content as Content)[0]).toEqual({ type: "text", text: note });
+    const second = await client.callTool({ name: "doc_list", arguments: {} });
+    expect(textOf(second)).not.toContain("chose the Minecraft instance");
+    // instance_info names how it was chosen (the real load tags the context with AUTO_SOURCE).
+    expect(instanceSourceText(AUTO_SOURCE)).toBe("automatic choice");
+  });
+
+  it("prefers the one game the mod has run in over others without a pointer file, and ignores ones that can't load", async () => {
+    const { pick, logs, loads } = await start({ candidates: [vanilla, withMod, broken], warnings: [] });
+    expect(pick?.id).toBe("craftoria");
+    expect(loads).toEqual(["/games/Craftoria"]);
+    expect(logs[0]).toContain("automatically: it is the only one the Autosketch mod has run in (3 found). It isn't saved; to keep it or choose another, the user runs npx -y autosketch setup --instance /games/Craftoria; `npx -y autosketch instances` lists the others.");
+    expect(chooseAutomatically({ candidates: [vanilla, broken], warnings: [] })).toBe(vanilla);
+    expect(chooseAutomatically({ candidates: [withMod, { ...vanilla, pointer: true }], warnings: [] })).toBeUndefined();
+  });
+
+  it("lists several candidates with the setup command, and loads nothing", async () => {
+    const { session, client, pick, logs, loads } = await start({ candidates: [vanilla, candidate({})], warnings: [] });
+    expect(pick).toBeUndefined();
+    expect(loads).toEqual([]);
+    expect(session.instance).toBeUndefined();
+    expect(logs).toEqual(["no instance configured and 2 found, none chosen automatically: choose one with `npx -y autosketch setup --instance <id|path>` (`npx -y autosketch instances` lists them)"]);
+    const r = await client.callTool({ name: "doc_list", arguments: {} });
+    expect(r.isError).toBe(true);
+    expect(textOf(r)).toContain("  npx -y autosketch setup --instance /home/me/.minecraft   # Minecraft (Minecraft 1.21.1, Minecraft Launcher, 0 mods)");
+    expect(textOf(r)).toContain("  npx -y autosketch setup --instance /games/Craftoria   # Craftoria");
+  });
+
+  it("says how to set one when none is found", async () => {
+    const { client, pick, logs } = await start({ candidates: [], warnings: [] });
+    expect(pick).toBeUndefined();
+    expect(logs).toEqual(['no instance configured and none found: choose one with `npx -y autosketch setup --instance "<instance folder>"`']);
+    expect(textOf(await client.callTool({ name: "doc_list", arguments: {} }))).toContain('- npx -y autosketch setup --instance "<instance folder>"  (no instance was found in the known launcher folders)');
+  });
+
+  it("answers a call made while discovery ran with the choice, which is loading", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const setup = makeInstanceSetup({ launch: {}, configPath: join(workspace, "no-config.toml"), discover: async () => (await gate, { candidates: [withMod], warnings: [] }) });
+    const session = new Session(workspace);
+    session.setup = { ...setup, load: async () => smallContext() };
+    const client = await connect(session);
+    const chosen = setup.autoChoose(session);
+    const early = client.callTool({ name: "doc_list", arguments: {} });
+    await new Promise((r) => setTimeout(r, 20));
+    release();
+    await chosen;
+    expect(textOf(await early)).toMatch(/^not_configured: Autosketch chose the Minecraft instance Craftoria .* It is loading now: call the tool again\.$/);
+    // Said once: the next result carries no note.
+    expect(textOf(await client.callTool({ name: "doc_list", arguments: {} }))).not.toContain("chose the Minecraft instance");
   });
 });

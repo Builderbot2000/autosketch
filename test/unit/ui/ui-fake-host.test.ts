@@ -49,7 +49,7 @@ async function until(cond: () => boolean, ms = 3000): Promise<void> {
   }
 }
 
-async function setup(opts: { linked?: boolean; features?: string[] } = {}) {
+async function setup(opts: { features?: string[] } = {}) {
   host = await FakeHost.start({ volumes: { work: WORK }, ...(opts.features ? { features: opts.features } : {}) });
   const workspace = await tempDir("autosketch-ui-ws-");
   const session = new Session(workspace);
@@ -80,9 +80,8 @@ async function setup(opts: { linked?: boolean; features?: string[] } = {}) {
     linkFrame: () => (link!.volumes ? { dimension: link!.volumes.dimension, origin: link!.volumes.origin } : undefined),
     intervalMs: 20,
   });
-  if (opts.linked !== false) await session.linkWorld({ instanceDir: host.instanceDir, plugins: [], palettes: new PaletteBook() });
-  else await link.bridge.connect({ instanceDir: host.instanceDir } as never).catch(() => link!.bridge);
-  await until(() => host!.connected && host!.uiOn);
+  await session.linkWorld({ instanceDir: host.instanceDir, plugins: [], palettes: new PaletteBook() });
+  await until(() => host!.connected && host!.uiEnabled);
   return { session, host, configPath, png };
 }
 
@@ -262,13 +261,13 @@ describe("against the fake host, unlinked", () => {
   it("anchors the open document's ghost at the player's position (result first), places jobs there, clears it", async () => {
     host = await FakeHost.start({ volumes: null });
     const session = new Session(await tempDir("autosketch-ui-ws-"));
-    link = new LiveLink(session, { backoff: { minMs: 20, maxMs: 50 }, features: ["prompt.close", "ui"] });
+    link = new LiveLink(session, { gameDir: host.instanceDir, backoff: { minMs: 20, maxMs: 50 }, features: ["prompt.close", "ui"] });
     session.world = link;
     const configPath = join(session.workspace, "c.toml");
     ui = startUi({ bridge: link.bridge, subscribe: (fn) => session.subscribe(fn), workspace: session.workspace, sessionId: "s", settings: Settings.from([], {}, readConfig(configPath)), configPath, promptPlayers: () => [], library: { roots: () => [] }, baseDoc: () => session.doc, scopes: session.scopes, linkFrame: () => undefined, intervalMs: 20 });
     expect(await (async () => {
-      await link!.bridge.connect(host!.instanceDir);
-      await until(() => host!.uiOn);
+      await link!.bridge.connect();
+      await until(() => host!.uiEnabled);
       return ask(HOST, "ghost.anchor", { dimension: "minecraft:overworld", pos: [40, 70, 12] });
     })()).toMatchObject({ ok: false, error: "not_found" }); // no document open
     const { Document } = await import("../../../src/document/document.js");

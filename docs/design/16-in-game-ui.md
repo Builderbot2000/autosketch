@@ -205,6 +205,12 @@ H harness (from day one, used by O, G, R, S)
 X removal (once M has moved model.js and replay.js)
 ```
 
+## Implementation status
+
+| Feature | Stream | Status |
+|---|---|---|
+| Offline lock, link state, `/autosketch status` (`13` M14) | L | Built. One check in `mod/common/.../link/Link.java`: `requireConnected` (today's features) and `requireUi` (this document's), each sending the one action-bar line (`OFFLINE_LINE`, `TOO_OLD_LINE`) and returning false; the status (`LinkStatus`) comes from the bridge's session and its hello's `features`. `Link.lock` wraps every `/autosketch` subcommand except `status` (and the request alias root) once all extensions have registered, so a new silo's subcommand is locked offline without code of its own; console and RCON get the line as a command failure. The wand's clicks stay cancelled but only show the line; air clicks likewise; volume outlines, the mode line and the air preview particles aren't drawn while offline. Volumes are kept in memory across a disconnect (they were never saved with the world) and re-sent in the next hello's `volumes`. The status goes to clients on bridge connect and disconnect and on join (`Platform.sendLinkStatus`); interim payload `autosketch:link_state` (`mod/neoforge/.../link/LinkPayloads.java`) with the client copy in `LinkPayloads.clientStatus`, read by the air-mode client half, until C's `ui` channel (op `LINK`) and `client.ui.LinkState` replace both. GameTests: `LinkGameTests` (every locked command, the wand and air offline; volumes across a disconnect; an MCP without `ui`; statuses sent to the client); existing tests connect a `FakeMcp` first. Not yet: the client test of `LinkState` on H's harness (the harness isn't merged). |
+
 ## Open questions
 
 None at the moment.

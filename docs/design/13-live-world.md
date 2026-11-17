@@ -769,6 +769,7 @@ The player can ask the agent for something without leaving the game: stand in th
 | M11 | Action-bar notices and outline particles, toggleable. |
 | M12 | Leaves entities alone. |
 | M13 | `/autosketch ask|plan|build <text>` and `/autosketch scan [radius] [text]` (the request's mode, B6; the scan grant, B4), with the configured alias as a short root for them, `/autosketch done` (ends the open read-only request, sent as `prompt.close` only to an MCP listing the feature; B6), and `/autosketch focus clear`; focus box set in the wand's focus mode, clipped to the work and context volumes; game context (position, eye position, facing as yaw and pitch, crosshair block and face, focus box) attached to each `prompt`; delivery result on the action bar; `chat` lines shown to their target, styled by kind; `/autosketch log off|mine|all`. |
+| M14 | Locked while no MCP is connected (`16`, *Mod side*): the wand, air mode and every `/autosketch` subcommand but `status` (and the request alias) answer with one action-bar line and do nothing else; no outlines or air preview are drawn; marked volumes are kept and show again on connect. With an MCP whose hello lacks `ui`, today's features work and only `16`'s in-game UI is refused with a too-old line. The link state (`offline`, `too_old`, `connected`) goes to the client half on change and on join; `/autosketch status` reports it (for `too_old`, the MCP's protocol and features). |
 
 ## MCP requirements
 

@@ -2,9 +2,9 @@
 
 The live viewer (`12`) grows into the user's general UI for the MCP: one localhost page with tabs for watching a build, changing settings, managing the library (`07`) and choosing the instance, including first-run setup (`14`). Players who aren't developers can then run Autosketch without editing environment variables or JSON.
 
-> **Superseded by `16`** (2026-11-17): the browser UI is being removed entirely. Instance choice moves to the command line, Settings and Library become in-game screens, Observe becomes overlays and replay in the world. This document records what was built until the removal lands.
+> **Superseded by `16` entirely** (2026-11-17). The browser UI is removed: instance choice is command-line only, with automatic choice when exactly one candidate is found (`16`, *Command line*); Settings and Library are in-game screens (`16`, *Settings screen*, *Library screen*); Observe is overlays, ghosts and replay in the world. `viewer/`, `autosketch ui`, the Instance tab's server side (`src/server/instance-host.ts`), the setup wizard and `observe.open` are deleted; the Settings and Library endpoints are being rewritten as bridge request handlers (`16`, *MCP side*), reusing `core/settings.ts`, `library/manage.ts` and `library/roots.ts` unchanged. This document is kept as the record of what was built and why; read `16` for the current design.
 
-Status: designed, settled with the user 2026-11-16; the `config.toml` settings layer, the app shell (U1) and the Settings tab (U2) are built (*Implementation status*); U3–U5 are not. Which settings become live is decided per setting while building (open questions).
+Status: superseded by `16`. Everything in *Implementation status* was built and its browser half has been removed; the `config.toml` settings layer, the settings metadata (`summary`, `group`, `applies`) and the library management in `src/library/` remain in use.
 
 ## Principles
 
@@ -160,6 +160,8 @@ U4 depends on `14`'s `config.toml` and discovery, so it lands with or after them
 
 ## Implementation status
 
+Since `16` (2026-11-17): the rows for U1, U3, U4 and U5 describe code that has been removed (the page and its tabs, `instance-host.ts`, `ui-command.ts`, the wizard signal) or is being rewritten as bridge request handlers (`http.ts`, `guard.ts`, `settings-api.ts`, `library-api.ts`, `library-host.ts`). The settings layer (U2's first two rows) and `src/library/manage.ts` and `roots.ts` (U3a) are unchanged.
+
 | Piece | Status |
 |---|---|
 | U2: `config.toml` `[settings]` layer | Done (the server side): `src/core/settings.ts` reads `config.toml [settings]` (`src/core/config.ts`, `14`, *Implementation status*) before `--set`, the flag alias and `AUTOSKETCH_<KEY>`. `Settings.from(argv, env, readConfig())`; `resolve(setting)` returns the value, its `source` (`kind` and the label shown: `config.toml`, `--set`, `--mod-order`, `AUTOSKETCH_…`, `default`), the `raw` text, the launch value it `overrides`, an `invalid` config value, or an `error` for an invalid launch value (which `get` still throws); it never throws itself. `resolveAll()` covers every registered setting, `notes()` gives the startup lines (one per overridden launch value whose meaning differs, per invalid or unknown `config.toml` key, per read problem), and `reload(snapshot)` swaps in a newer read for `live` settings. An invalid `config.toml` value is skipped and the next source applies (the launch value if any, else the default). No tool result changed. |
@@ -177,7 +179,7 @@ U4 depends on `14`'s `config.toml` and discovery, so it lands with or after them
 - **Which settings can become live**, and whether any `restart` setting should restart the session itself (the MCP client would need to restart the server; there is no general way to ask it to).
 - **How long trash is kept.** For now, until emptied.
 - **Text editing.** A plain `<textarea>` keeps the no-build-step rule. Is a vendored editor with Markdown and JavaScript highlighting worth it later?
-- **A Claude Code panel** (`12`, open question) is answered by this doc: one web UI rather than a second surface to maintain.
+- **A Claude Code panel** (`12`, open question) was answered by this doc (one web UI rather than a second surface), and then by `16`: no web UI at all.
 
 ## Decisions
 

@@ -4,11 +4,11 @@ Shows the user what the agents are doing while they work: which jobs are open, w
 
 ## Principles
 
-1. **For the human, never the model.** Scoped sessions keep block detail out of model attention, and nothing here undoes that. No tool reads the event log or the viewer, and nothing shown in the viewer is returned to an agent. Agents keep using `scope_list`, reports and renders.
+1. **For the human, never the model.** Scoped sessions keep block detail out of model attention, and nothing here undoes that. No tool reads the event log or the in-game UI (`16`), and nothing shown there is returned to an agent. Agents keep using `scope_list`, reports and renders.
 2. **Read-only.** Observability subscribes to the document and server layers. It never mutates a document, takes a lock or changes a tool result. (The management UI's Settings, Library and Instance tabs, served from the same page, do write, through their own guarded endpoints: `15`.)
-3. **Never slows the build.** Ops emit an event and return. Writing, serving and rendering for the viewer happen off the tool-call path. When a consumer falls behind, it gets dropped and resyncs from a snapshot. Ops never wait for it.
+3. **Never slows the build.** Ops emit an event and return. Writing the log and sending to the in-game UI (`16`) happen off the tool-call path. When a consumer falls behind, it gets dropped and resyncs from a snapshot. Ops never wait for it.
 4. **One frame.** Every box and position in an event is given in the base document's coordinates, so one view can place every job. Local sandbox coordinates are included as well, for drill-in.
-5. **One source of truth.** The live viewer, replay, time-lapse and eval metrics all read the same event stream.
+5. **One source of truth.** The in-game UI (`16`), replay, time-lapse and eval metrics all read the same event stream.
 
 ## Event stream
 
@@ -48,7 +48,7 @@ The server publishes typed events on an in-process bus. A buffered writer append
 | `world.link` | state (`linked`, `relinked`, `unlinked`, `connected`, `disconnected`), dimension, work box (local), blocks added by whole-block extension, context box count, reason | world link (13) |
 | `world.patch` | patch id, journal `seq`s, blocks sent, forced, ack counts (applied, skipped, rejected, overwritten, normalized), or `dropped` with a reason when it wasn't sent or confirmed | world link (13) |
 | `world.sync` | reason (`ack`, `context`, `dirty`, `reconnect`, `manual`), blocks changed, journal `seq` | world link (13) |
-| `otel` | `record`: one Claude Code OpenTelemetry log record, exactly as received at `/v1/logs` | viewer HTTP server (`13`, *Backlog* B3) |
+| `otel` | `record`: one Claude Code OpenTelemetry log record, exactly as received at `/v1/logs` | OTLP receiver (`13`, *Backlog* B3) |
 
 Locks are not separate events. A fork takes its lock and a merge or abandon releases it, so the lock set at any `seq` can be derived from the log.
 
@@ -59,48 +59,13 @@ Locks are not separate events. A fork takes its lock and a merge or abandon rele
 - **Sandbox ops** are logged in the sandbox's own frame and tagged with the sandbox's `doc`, so a drill-in view can replay them. Doc 11 discards a sandbox's journal at merge, and that still holds for everything the model can reach. The log keeps a separate copy for the human only.
 - **Keyframes.** `session.open` carries a delta with every block of the document as it opened (an empty range for an empty document), so a session that opened or imported existing content can be rebuilt from `deltas.bin` alone: clear at each `session.open`, then apply every range in `seq` order.
 - **Merges** log a single delta for the whole patch in the base frame, so a viewer that follows only the base document stays correct.
-- **Size:** deltas are off by default for sessions with no viewer attached and no replay requested. A per-session cap (`observe.maxDeltaBytes`, default 512 MB) applies. Past the cap the log records `doc.op` events without deltas, and replay falls back to the time-lapse snapshots.
+- **Size:** deltas are off by default for sessions with no live view attached and no replay requested. A per-session cap (`observe.maxDeltaBytes`, default 512 MB) applies. Past the cap the log records `doc.op` events without deltas, and replay falls back to the time-lapse snapshots.
 
-## Live viewer
+## Live viewer (removed; see `16`)
 
-> **Superseded by `16`** (2026-11-17): the browser viewer is being removed; overlays, ghosts and replay move into the game. The event log, deltas, snapshots and the replay data below stay.
+The browser viewer this section described (a dashboard on `127.0.0.1`, its 3D view, panels, `autosketch observe <path>` for finished logs, `observe.open`) was removed by `16` (2026-11-17), with `15`'s management UI that grew out of it. What it showed now appears in the game: job volumes, flashed changes and the HUD (`16`, *Overlays in the world*, *HUD*), sandboxes before merge as ghost blocks (*Ghost blocks*), and replay of a live or finished log in the world (*Replay in the world*). The scope tree, feed and token totals are computed by the session model (`src/observe/session-model.ts`) and replay planning by `src/observe/replay.ts`, both moved from the viewer's JavaScript with their tests.
 
-The MCP process also serves a dashboard on `127.0.0.1:<port>` (stdio stays reserved for MCP). It binds to loopback only and is on by default on port 47100, so it boots with every session and Claude Code's telemetry URL (`13`, B3) stays the same across launches. When 47100 is taken (a second session, another program), it falls back to a free port and logs that; a port the user sets is used as given, never replaced (settled with the user 2026-11-16); `observe.http=false` turns it off. On start, the server prints the URL to stderr, writes it to `observe/<session-id>/url` and, unless `observe.open=false`, opens it in the default browser on the first tool call (not at startup, since clients start the server with every session), except when no instance is remembered: then it opens at startup on the management UI's Instance tab, as the setup wizard (`15`) (`src/observe/open.ts`: `open` on macOS, `start` on Windows, `wslview` then `cmd.exe /c start` under WSL, `xdg-open` elsewhere; detached, stdio untouched, failures only logged).
-
-### Endpoints
-
-```
-GET /events?since=<seq>        SSE stream of events (replays from seq, then goes live)
-GET /doc/<doc>/snapshot        current voxels of a document (base or scope), chunked binary
-GET /doc/<doc>/region?box=…    voxels of one box, for drill-in and resync
-GET /assets/atlas.png          texture atlas from the user's instance (02)
-GET /assets/models.json        baked block models keyed by stateId
-GET /log/deltas?offset&length  raw delta records, for replay
-POST /v1/logs                  Claude Code's OpenTelemetry log events, OTLP/HTTP JSON (13, Backlog B3)
-```
-
-The management UI's `/api/…` endpoints, and the token in the URL that guards them, are in `15`. The URL printed, opened and written to `observe/<session-id>/url` carries that token in its fragment (`…/#t=<token>`).
-
-When a client misses events (buffer overflow, or the tab was in the background), the server sends `resync`. The client then fetches the snapshot and continues from the latest `seq`.
-
-### Panels
-
-Listed in build order:
-
-1. **3D view of the base document.** WebGL (three.js) using the same baked models and atlas the rasterizer uses. Overlays:
-   - each open job's work volume as a box, coloured per job and labelled with its brief
-   - context volumes as wireframes
-   - recently changed blocks, briefly highlighted when an op or merge lands
-2. **Scope tree.** The base document, then forks, then nested forks, with status (open, merged, abandoned, lost at restart), age, brief, op count and last tool call. This is a live, human-readable `scope_list()`.
-3. **Event feed.** Filterable by document, kind and tool. Refusals are highlighted: they are the clearest signal of agent behaviour (lock contention, over-nesting, writes outside the volume).
-4. **Top-down activity map.** A heatmap of edit density with lock rectangles. Unlike the 3D view, it stays readable on very large builds.
-5. **Job timeline.** One bar per job from fork to merge, nested under its parent. It marks lock waits (a refused fork followed by a successful one) and refusals. This is where over-eager forking shows: many short jobs, or the same brief forked several times.
-6. **Sandbox drill-in.** Opens one job in its local frame, with the context volume ghosted (the same convention as `render({ context: "ghost" })`, `06`) and the job's own ops streaming in.
-7. **Replay.** A scrubber over `seq` that rebuilds the views from `deltas.bin`. It works on a live session or on a finished log opened with `autosketch observe <path>`.
-
-### Packaging
-
-The viewer is a static bundle in `viewer/` (plain ESM, three.js vendored, no build step), served by the same process. The core server keeps its no-browser, no-GPU stack. Only a human opening the page uses WebGL.
+What stays from this section: the event stream, `deltas.bin` and its keyframes, the time-lapse snapshots and the replay data, which the in-game UI reads the same way the viewer did, and one HTTP endpoint, the OTLP receiver at `POST /v1/logs` for Claude Code's telemetry (`13`, B3), on `127.0.0.1:<observe.http>` (default 47100; when it is taken, a free port, but only for the default). `16` (*What goes, what stays, what moves*) reduces `src/observe/http.ts` to that receiver.
 
 ## Time-lapse snapshots
 
@@ -126,17 +91,16 @@ The server never sees model tokens. It records response sizes, and the eval runn
 | Setting | Default | Meaning |
 |---|---|---|
 | `observe.log` | `true` | Write `events.ndjson`. Small: no block data. |
-| `observe.deltas` | `"auto"` | `"auto"` (on when the viewer is enabled), `"on"` or `"off"` |
+| `observe.deltas` | `"auto"` | `"auto"` (on with `observe.http`), `"on"` or `"off"` |
 | `observe.maxDeltaBytes` | 512 MB | Per-session cap on `deltas.bin` |
-| `observe.http` | `47100` (a free port when taken) | Port number, `true` for a free port, or `false` for no viewer |
-| `observe.open` | `true` | Open the live viewer in the default browser on the first tool call |
+| `observe.http` | `47100` (a free port when taken) | Port of the OTLP receiver (`/v1/logs`): a number, `true` for a free port, or `false` for none |
 | `observe.snapshots` | `"off"` | `"merge"`, `"checkpoint"` or `"off"` |
 | `observe.retainSessions` | 20 | Older session folders are pruned at startup |
 | `scope.maxWorkRatio` | 0.5 | Largest child work volume as a share of the parent's (`11`) |
 | `scope.minWorkBlocks` | 512 | Smallest work volume a fork may take (`11`) |
 | `scope.maxDepth` | 3 | Deepest fork below the base build (`11`) |
 
-Settings are one server-wide system (`src/core/settings.ts`), not specific to observability. Every setting is read, highest priority first, from the user's `~/.autosketch/config.toml` `[settings]` table (written by the management UI and `autosketch config`, `15`, *Settings tab*), then `--set <key>=<value>`, then a flag alias if the setting declares one, then `AUTOSKETCH_<KEY>` (key upper-cased, `.` and camel-case humps become `_`), then its default. Each area declares its keys next to the code that uses them. A flag alias exists only to keep a flag that predates the module working; new settings don't add one. The settings outside this doc:
+Settings are one server-wide system (`src/core/settings.ts`), not specific to observability. Every setting is read, highest priority first, from the user's `~/.autosketch/config.toml` `[settings]` table (written by `autosketch config` and the in-game settings screen, `16`, *Settings screen*), then `--set <key>=<value>`, then a flag alias if the setting declares one, then `AUTOSKETCH_<KEY>` (key upper-cased, `.` and camel-case humps become `_`), then its default. Each area declares its keys next to the code that uses them. A flag alias exists only to keep a flag that predates the module working; new settings don't add one. The settings outside this doc:
 
 | Setting | Aliases | Declared in | Doc |
 |---|---|---|---|
@@ -149,13 +113,13 @@ The instance location flags (`--instance`, `--version`, `--base-jar`, `--workspa
 
 1. The event bus, `events.ndjson`, and `EventSink` hooks in document commits, scope tools and the server adapter.
 2. Time-lapse snapshots.
-3. The HTTP server with SSE and snapshots, plus the first three panels: 3D view with lock overlays, scope tree, event feed.
+3. The HTTP server with SSE and snapshots, plus the first three panels: 3D view with lock overlays, scope tree, event feed (the browser parts removed by `16`).
 4. `deltas.bin`, then the timeline, the activity map and drill-in.
-5. Replay and `autosketch observe <path>`, then the eval-runner join.
+5. Replay and `autosketch observe <path>` (removed by `16`: replay plays in the world), then the eval-runner join.
 
 ## Implementation status
 
-Phases 1–5 are built. Scoped sessions (`11`) emit `scope.fork`, `scope.merge` and `scope.abandon`, and `server/index.ts` passes `getScopeDoc`, so the scope panels, sandbox deltas and drill-in show real jobs.
+Phases 1–5 are built; the browser viewer and `autosketch observe` were removed by `16` (2026-11-17), and their rows below say so. Scoped sessions (`11`) emit `scope.fork`, `scope.merge` and `scope.abandon`, and `server/index.ts` passes `getScopeDoc`, so the scope panels, sandbox deltas and drill-in show real jobs.
 
 | Piece | Status |
 |-------|--------|
@@ -166,14 +130,14 @@ Phases 1–5 are built. Scoped sessions (`11`) emit `scope.fork`, `scope.merge` 
 | Settings | `src/core/settings.ts` (general: `--set key=value`, then an optional flag alias, then `AUTOSKETCH_<KEY>`, then the default). `modOrder` and `tintBiome` (`src/assets/settings.ts`) moved onto it, keeping their old flags and variables as aliases. Observe keys in `src/observe/settings.ts`: `observe.log`, `observe.snapshots`, `observe.retainSessions`. The others in the table come with phases 3–4. |
 | Time-lapse | `src/observe/snapshots.ts`. `flat`, `iso_ne`, 512² into `snapshots/<seq>.png`, plus a `render.produced` event with `source: "snapshot"`. |
 | Wiring | `src/server/index.ts` (the process entry point) calls `startObserve()` and gives the session `observer.sink("base")`. Shutdown closes the session, waits up to 3 s for a pending snapshot, then flushes the log. |
-| `deltas.bin`, `state.add` | `src/observe/deltas.ts`, `src/observe/states.ts`. A bus *annotator* (`EventBus.annotate`, runs before the event gets its `seq`) finds the journal entry named by `doc.op`/`doc.undo`/`doc.redo`, maps its palette ids to the log-wide table (publishing `state.add` first, so it precedes the op in `seq` order; id 0 is air), reserves `16 × changed` bytes and adds `delta: { offset, length }`. Encoding and positional writes run on a 50 ms timer from the entry's own arrays. Records: int32 x, y, z in the emitting document's local frame after the step, uint32 state id, little-endian; an op logs the after-state, an undo the before-state. One table and one `deltas.bin` per log folder. Sandbox ops are tagged with the scope's `doc` and use its frame (`getScopeDoc` is wired in `server/index.ts`). `observe.deltas` (`auto` = on with the viewer) and `observe.maxDeltaBytes` (default 512 MB, accepts `512M`); past the cap, later ops carry no `delta`. `session.open` gets a keyframe (see *Block deltas*), copied on the call path in one pass over the blocks (the same order of work as loading the document) and encoded with the others. `doc.undo`/`doc.redo` carry `shift` like `doc.op` (origin now minus origin before the step), so a reader can keep the frame across them. |
-| HTTP server | `src/observe/http.ts`. `observe.http` = port (default `DEFAULT_HTTP_PORT` 47100, with `fallbackToFreePort` only while it is the default), or `true`/`0` for a free port. Binds `127.0.0.1` only and refuses other `Host` headers (DNS rebinding). Prints `observe: viewer at <url>` to stderr and writes `observe/<session>/url` on each `session.open`. `/events?since=` (SSE; honours `Last-Event-ID`; 50 000-event ring; `resync` when `since` is older than the ring, or after a client's socket backed up past 4 MB and drained), `/doc/<doc>/snapshot`, `/doc/<doc>/region?box=x0,y0,z0,x1,y1,z1` (`src/observe/voxels.ts`: `"ASVX"`, header JSON with the `seq` it is current as of and the state ids used, then delta-format records), `/assets/atlas.png` and `/assets/models.json` (`src/observe/atlas.ts`: baked in memory at runtime from the user's instance through `BlockBaker`, append-only shelf atlas, UVs in pixels, quads with tint × shade, cull face and an occlusion mask), `/log/deltas?offset&length`, `/info` (an addition: session, `live`, current document, latest seq, deltas and assets availability), `/log/snapshots/<seq>.png` (time-lapse files, for replay's fallback) and `/vendor/three/…` (three.js's `build/three.{module,core}.js` and `examples/jsm/**`, served from the installed `three` package found with `createRequire`; nothing is copied into the repository). Deltas are read through a small `DeltaSource` interface, so the same server also serves a finished log (`live: false`: no document, nothing written into the folder). The bus subscriber only appends to the ring and schedules a `setImmediate` write. |
-| Viewer | `viewer/` (plain ESM, no build step, added to `package.json` `files`). The 3D views (`viewer/js/gl.js`) use three.js (`three` is a dependency; an import map in `index.html` points `three` and `three/addons/` at `/vendor/three/`): one opaque (alpha-tested) and one blended mesh per 16³ chunk, rebuilt when dirty from `meshChunk` in `voxels.js`, a small shader that multiplies the atlas by the baked tint × shade and desaturates ghosts, `OrbitControls` (drag: orbit; right- or shift-drag: pan; wheel: zoom), line and fill overlays drawn through blocks. Blocks without a model draw as flat colour cubes, so the viewer works without an instance. Panels: 3D view with open jobs' work volumes (filled, labelled with the brief) and context volumes (wireframe), changed boxes flashed; scope tree (status open/merged/abandoned/lost, age, brief, ops, last tool, refusals); event feed (filter by document, kind, tool, refusals only; refusals highlighted); job timeline (bars nested under parents, refusal ticks, lock waits = a `lock_overlap` refusal on `scope_fork` until the same parent's next fork); top-down activity map (edit density from delta records, or op boxes without deltas, plus lock rectangles); sandbox drill-in (the scope's document in its local frame with the context ghosted; if the server can't serve the sandbox, the base context region moved into the sandbox frame plus the job's own deltas). `viewer/js/model.js` and `viewer/js/voxels.js` are pure and tested in Node. |
-| Wiring | `startObserve` takes `getScopeDoc` (wired to the session's open scopes in `server/index.ts`) and exposes `ready` (the viewer URL) and `close()` stops the viewer and flushes deltas. |
-| Replay | `viewer/js/replay.js` (pure, tested in Node) and a scrubber under the panels. The base grid at seq S: clear at the last `session.open` at or before S, apply the base `doc.op`/`doc.undo`/`doc.redo` ranges after it in order, moving existing blocks by `-shift` first. Moving forward applies only the new steps; moving back rebuilds from the keyframe. The scope tree, feed, timeline and activity map are rebuilt from the events up to S; drill-in shows the replayed base context in the sandbox frame plus the job's own deltas up to S. A base step that changed blocks with no delta (deltas off or capped; for `session.open`, no keyframe) is a gap: the view then shows the newest snapshot whose file seq is at most S, or says that none exists. On a live session, **Live** returns to following the document; ▶ steps through the visible events. |
-| `autosketch observe <path>` | `src/observe/offline.ts`, a subcommand of the existing bin (`server/index.ts`; with no subcommand the MCP server starts as before). `<path>` is a session folder, a document's `observe/` folder or a document folder (newest session). It rebuilds the state table from `state.add`, serves the log with `live: false` on `127.0.0.1` (`--port`, default a free port), prints the URL on stdout and runs until interrupted. Textures come from `--instance`/`AUTOSKETCH_INSTANCE` when set, flat colours otherwise. The viewer always shows a finished log through replay, following its end. |
+| `deltas.bin`, `state.add` | `src/observe/deltas.ts`, `src/observe/states.ts`. A bus *annotator* (`EventBus.annotate`, runs before the event gets its `seq`) finds the journal entry named by `doc.op`/`doc.undo`/`doc.redo`, maps its palette ids to the log-wide table (publishing `state.add` first, so it precedes the op in `seq` order; id 0 is air), reserves `16 × changed` bytes and adds `delta: { offset, length }`. Encoding and positional writes run on a 50 ms timer from the entry's own arrays. Records: int32 x, y, z in the emitting document's local frame after the step, uint32 state id, little-endian; an op logs the after-state, an undo the before-state. One table and one `deltas.bin` per log folder. Sandbox ops are tagged with the scope's `doc` and use its frame (`getScopeDoc` is wired in `server/index.ts`). `observe.deltas` (`auto` = on with `observe.http`) and `observe.maxDeltaBytes` (default 512 MB, accepts `512M`); past the cap, later ops carry no `delta`. `session.open` gets a keyframe (see *Block deltas*), copied on the call path in one pass over the blocks (the same order of work as loading the document) and encoded with the others. `doc.undo`/`doc.redo` carry `shift` like `doc.op` (origin now minus origin before the step), so a reader can keep the frame across them. |
+| HTTP server | `src/observe/http.ts`. `observe.http` = port (default `DEFAULT_HTTP_PORT` 47100, with `fallbackToFreePort` only while it is the default), or `true`/`0` for a free port. Binds `127.0.0.1` only and refuses other `Host` headers (DNS rebinding). Prints `observe: viewer at <url>` to stderr and writes `observe/<session>/url` on each `session.open`. `/events?since=` (SSE; honours `Last-Event-ID`; 50 000-event ring; `resync` when `since` is older than the ring, or after a client's socket backed up past 4 MB and drained), `/doc/<doc>/snapshot`, `/doc/<doc>/region?box=x0,y0,z0,x1,y1,z1` (`src/observe/voxels.ts`: `"ASVX"`, header JSON with the `seq` it is current as of and the state ids used, then delta-format records), `/assets/atlas.png` and `/assets/models.json` (`src/observe/atlas.ts`: baked in memory at runtime from the user's instance through `BlockBaker`, append-only shelf atlas, UVs in pixels, quads with tint × shade, cull face and an occlusion mask), `/log/deltas?offset&length`, `/info` (an addition: session, `live`, current document, latest seq, deltas and assets availability), `/log/snapshots/<seq>.png` (time-lapse files, for replay's fallback) and `/vendor/three/…` (three.js from the installed `three` package; since `16` removed the dependency it finds nothing). `16` reduces this server to the OTLP receiver (`/v1/logs`); until that lands the other routes remain with nothing to read them. Deltas are read through a small `DeltaSource` interface, so the same server also serves a finished log (`live: false`: no document, nothing written into the folder). The bus subscriber only appends to the ring and schedules a `setImmediate` write. |
+| Viewer | **Removed** by `16` (2026-11-17): `viewer/` (page, 3D view with three.js, panels, tabs, CSS, `voxels.js`) and the `three` dependency are gone. Its session model and replay planner moved to `src/observe/session-model.ts` and `src/observe/replay.ts` with their tests. |
+| Wiring | `startObserve` takes `getScopeDoc` (wired to the session's open scopes in `server/index.ts`) and exposes `ready` (the HTTP server's URL) and `close()` stops it and flushes deltas. Nothing opens a browser any more (`observe.open` and `src/observe/open.ts`'s use at startup removed by `16`). |
+| Replay | The planner is `src/observe/replay.ts` (moved from `viewer/js/replay.js` by `16`, tested in Node): the base grid at seq S is cleared at the last `session.open` at or before S, then the base `doc.op`/`doc.undo`/`doc.redo` ranges after it are applied in order, moving existing blocks by `-shift` first. A base step that changed blocks with no delta (deltas off or capped; for `session.open`, no keyframe) is a gap, filled from the newest snapshot whose file seq is at most S. The browser scrubber is removed; replay plays in the world (`16`, *Replay in the world*). |
+| `autosketch observe <path>` | **Removed** by `16` (2026-11-17), with `src/observe/offline.ts`: finished logs are replayed in the game through the running MCP. |
 | Log reader, eval join | `src/observe/reader.ts`: `parseEventLog`, `readSessionLog`, `resolveSessionDir`, and `readWorkspaceEvents` (moved from `test/eval/join.ts`). The eval harness (`10`, tier 3) imports it; the join itself (`joinCalls`, `jobTable`) stays in `test/eval/join.ts`, since only the harness has transcripts. |
-| Tests | `test/unit/observe/`: replay of a finished session rebuilt exactly at the end and at an earlier seq (backwards and forwards, through an undo), `shift` handling, the snapshot fallback plan, every offline endpoint (read-only, no `url` file), the three.js vendor route and its path filter, the `observe` subcommand spawned from source; the reader; kinds-table payloads and `seq` order for ops, checkpoint, undo and redo; tool results identical with the log on and off, and with the viewer and deltas on; refusals; a stalled disk never blocking `emit`; op latency with and without the log, and with deltas; snapshots; delta records for ops, undo, redo and sandbox ops, the cap; every HTTP endpoint on an ephemeral port, SSE `since` and `resync`, the host check; the viewer's session model on synthetic fork/merge/abandon/refusal events, meshing, culling and ghosting. `test/unit/core/settings.test.ts`. |
+| Tests | `test/unit/observe/`: replay of a finished session rebuilt exactly at the end and at an earlier seq (backwards and forwards, through an undo), `shift` handling, the snapshot fallback plan, the reader; kinds-table payloads and `seq` order for ops, checkpoint, undo and redo; tool results identical with the log on and off, and with the viewer and deltas on; refusals; a stalled disk never blocking `emit`; op latency with and without the log, and with deltas; snapshots; delta records for ops, undo, redo and sandbox ops, the cap; every HTTP endpoint on an ephemeral port, SSE `since` and `resync`, the host check; the session model on synthetic fork/merge/abandon/refusal events (`session-model.test.ts`). The offline, vendor-route, subcommand and meshing tests went with the code `16` removed. `test/unit/core/settings.test.ts`. |
 | Not built | Showing the saved document when a log has neither deltas nor snapshots (the document may have changed since). Scope events are emitted by scoped sessions (`11`), not here. |
 
 Decisions made while building phases 1–2:
@@ -193,7 +157,7 @@ Decisions made while building phases 3–4:
 - **Sandbox frame.** The viewer reads a fork's `translation` as *base = local + translation*, relative to the base document even for nested forks (principle 4), falling back to the work box's minimum corner. Scoped sessions emit it that way (`src/scope/scopes.ts`).
 - **Merges** need no special delta: a merge is a base-document op, so its `doc.op` carries the whole patch in the base frame.
 - **Voxel endpoints use the log's state ids,** the same as `deltas.bin` and `models.json`, so one table serves everything. Serving a snapshot can publish `state.add` for states not yet seen.
-- **Snapshots are encoded synchronously** on request (16 bytes per non-air block). Fine for the build sizes seen so far; see *Large documents in the browser*.
+- **Snapshots are encoded synchronously** on request (16 bytes per non-air block). Fine for the build sizes seen so far.
 - **`delta` is added by an annotator,** not by `document/`, so the document hook stays unchanged and pays nothing when deltas are off.
 
 Decisions made while building phase 5:
@@ -205,7 +169,6 @@ Decisions made while building phase 5:
 
 ## Open questions
 
-- **Large documents in the browser.** At what size does the 3D view need chunked meshing with level of detail, or should it switch to the top-down map automatically? It should be measured on a large Craftoria build before deciding.
-- **Many concurrent jobs.** If a session ever has dozens of open scopes, the scope tree and overlays need grouping (by parent, by brief). Doc 11 expects few concurrent jobs, so this waits until a log shows otherwise.
-- **Claude Code panel.** Answered by `15`: the viewer becomes the one management UI, rather than a second surface to maintain.
+- **Many concurrent jobs.** If a session ever has dozens of open scopes, the in-game overlays need grouping (by parent, by brief). Doc 11 expects few concurrent jobs, so this waits until a log shows otherwise.
+- **Claude Code panel.** Answered by `15`, then by `16`: there is no browser UI; the game is the one surface.
 - **In-game preview.** Superseded by the live world link (`13`): agent edits are written into the loaded world as conditional patches that never overwrite a hand edit without an explicit request, which is the non-destructive condition this question set. A ghost preview (showing a merge before it lands) remains a possible addition to the companion mod.

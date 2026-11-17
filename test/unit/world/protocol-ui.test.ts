@@ -1,10 +1,13 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { Bridge } from "../../../src/world/bridge.js";
 import { decodePreviewBody, encodePreviewBody } from "../../../src/world/protocol/body.js";
 import { decodeFrame, decodeMessage, encodeMessage, ProtocolError } from "../../../src/world/protocol/codec.js";
-import { UI_PART_BYTES, uiEnabled, type Message, type UiGhost } from "../../../src/world/protocol/messages.js";
+import { DEFAULT_VOLATILE } from "../../../src/world/protocol/hash.js";
+import { UI_PART_BYTES, uiEnabled, type McpFeature, type Message, type UiGhost, type UiRequest } from "../../../src/world/protocol/messages.js";
+import { FakeHost } from "../../support/fake-host.js";
 
 /** The in-game UI messages (docs/design/13-live-world.md, *In-game UI*; feature `ui`). */
 
@@ -109,5 +112,65 @@ describe("ui codec", () => {
     expect(uiEnabled({ features: ["prompt.close"] }, mod(["ui"]))).toBe(false);
     expect(uiEnabled({ features: ["ui"] }, mod(["modes"]))).toBe(false);
     expect(uiEnabled({}, undefined)).toBe(false);
+  });
+});
+
+describe("ui through the bridge and the fake host", () => {
+  const open: { close(): unknown }[] = [];
+  afterEach(async () => {
+    for (const o of open.splice(0)) await o.close();
+  });
+  const ALEX = { name: "Alex", uuid: "7c9e6679-7425-40de-944b-e07fc1f90ae7" };
+  const state = { type: "ui.state" as const, players: [KEV], seq: 1, full: true, jobs: [], request: null, tokens: null, refusal: null };
+
+  async function pair(hostFeatures: string[] | undefined, mcpFeatures: McpFeature[] | undefined) {
+    const host = await FakeHost.start(hostFeatures ? { features: hostFeatures } : {});
+    open.push(host);
+    const bridge = new Bridge({ instanceDir: host.instanceDir, volatile: DEFAULT_VOLATILE, reconnect: false, ...(mcpFeatures ? { features: mcpFeatures } : {}) });
+    open.push(bridge);
+    await bridge.connect();
+    return { host, bridge };
+  }
+
+  it("sends ui messages only when both hellos list ui", async () => {
+    const both = await pair(undefined, ["prompt.close", "ui"]);
+    expect(both.bridge.ui).toBe(true);
+    both.bridge.send(state);
+    await both.host.waitFor(() => both.host.ui.length === 1);
+    expect(both.host.uiFor(KEV)).toEqual([state]);
+    expect(both.host.uiFor(ALEX.uuid)).toEqual([]);
+
+    const mcpOld = await pair(undefined, undefined); // the default hello leaves ui out until M answers requests
+    expect(mcpOld.host.mcpFeatures).toEqual(["prompt.close"]);
+    expect(mcpOld.bridge.ui).toBe(false);
+    const modOld = await pair(["modes", "scan", "volumes.set", "registry", "upgrade"], ["prompt.close", "ui"]);
+    expect(modOld.bridge.ui).toBe(false);
+    for (const { bridge, host } of [mcpOld, modOld]) {
+      bridge.send(state);
+      bridge.send({ type: "notice", text: "after", player: null });
+      await host.waitFor(() => host.notices.length === 1);
+      expect(host.ui).toEqual([]);
+      expect(host.uiUngated).toEqual([]);
+      expect(await host.playerUiRequest(ALEX, { kind: "resync" })).toEqual({ local: "mcp_outdated" });
+    }
+  });
+
+  it("playerUiRequest sends a ui.request numbered by request and resolves with its ui.result", async () => {
+    const { host, bridge } = await pair(undefined, ["prompt.close", "ui"]);
+    const seen: UiRequest[] = [];
+    bridge.on("ui.request", (r) => {
+      seen.push(r);
+      bridge.send({ type: "ui.result", request: r.request, player: r.player.uuid, ok: true, result: { echoed: r.kind } });
+    });
+    const a = await host.playerUiRequest(ALEX, { kind: "logs.list" });
+    const b = await host.playerUiRequest(ALEX, { kind: "replay.seek", args: { replay: "r1", step: 4 } });
+    expect(seen.map((r) => [r.request, r.kind, r.player.uuid])).toEqual([
+      [1, "logs.list", ALEX.uuid],
+      [2, "replay.seek", ALEX.uuid],
+    ]);
+    expect(a).toEqual({ type: "ui.result", request: 1, player: ALEX.uuid, ok: true, result: { echoed: "logs.list" } });
+    expect(b).toMatchObject({ request: 2, ok: true });
+    host.dropConnection();
+    expect(await host.playerUiRequest(ALEX, { kind: "resync" })).toEqual({ local: "no_link" });
   });
 });

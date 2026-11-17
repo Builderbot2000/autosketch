@@ -247,6 +247,8 @@ public final class ReplayClientTests {
      * mod's hello: a link state still showing the old MCP as connected must not count.
      */
     static void setUp(ClientTestSuite s, boolean withDelta) {
+        s.waitUntil("the previous fake MCP has paired (or exited), so stopping it stops its whole process tree",
+                () -> s.mcp() == null || !s.mcp().alive() || !s.mcp().received("hello").isEmpty(), 600);
         s.step("stop the previous fake MCP", s::stopMcp);
         s.waitUntil("offline, no replay open", () -> !LinkState.connected() && !ReplayClient.isOpen(), 400);
         s.step("fake MCP with the replay script", () -> s.startMcp(script(s, withDelta)));

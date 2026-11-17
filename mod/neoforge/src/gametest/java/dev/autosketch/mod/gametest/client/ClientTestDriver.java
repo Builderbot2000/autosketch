@@ -192,7 +192,9 @@ public final class ClientTestDriver {
                     phaseStartTick = tick;
                 }
                 case MCP_WAIT -> {
-                    if (Autosketch.bridge().connected()) {
+                    // Connected on the bridge, and the client half has heard so (L's link state; when
+                    // C's channel lands this is client.ui.LinkState).
+                    if (Autosketch.bridge().connected() && dev.autosketch.mod.link.LinkPayloads.clientStatus != dev.autosketch.mod.link.LinkStatus.OFFLINE) {
                         if (suiteIndex == 0) timing("fake MCP connected");
                         phase = Phase.STEPS;
                         stepIndex = 0;
@@ -205,7 +207,8 @@ public final class ClientTestDriver {
                 }
                 case STEPS -> step();
                 case MCP_STOP -> {
-                    if (!Autosketch.bridge().connected() || tick - phaseStartTick > 20 * 10) nextSuite();
+                    if ((!Autosketch.bridge().connected() && dev.autosketch.mod.link.LinkPayloads.clientStatus == dev.autosketch.mod.link.LinkStatus.OFFLINE)
+                            || tick - phaseStartTick > 20 * 10) nextSuite();
                 }
                 case DONE -> {
                 }

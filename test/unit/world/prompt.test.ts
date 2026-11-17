@@ -280,7 +280,7 @@ describe("request modes, enforced (13, B6)", () => {
     const { client, host, events, session } = await setup();
     expect(await host.playerAsk(HOST, "what is this?", {}, { mode: "ask" })).toMatchObject({ delivered: true });
     await host.waitFor(() => events.length === 1);
-    expect(events[0]!.content.startsWith('In-game ask request from Dev: "what is this?". Ask mode: read and look only; edits and volume changes are refused while this request is open. Work volume 16×16×16')).toBe(true);
+    expect(events[0]!.content.startsWith('In-game ask request from Dev: "what is this?". Ask mode: read and look only; edits, drafts (sandboxes, other documents) and volume changes are refused while this request is open. Work volume 16×16×16')).toBe(true);
     const seq = session.doc!.journal.headSeq;
     const r = await client.callTool({ name: "fill", arguments: FILL });
     expect(r.isError).toBe(true);
@@ -382,6 +382,28 @@ describe("request mode rule (13, B6), unit", () => {
     expect(d.edit("fill", "fill", (tx) => tx.set(0, 0, 0, "minecraft:stone")).changed).toBe(1);
     current = undefined;
     rule.before({ tool: "world_volumes" });
+  });
+
+  it("read-only modes are text only: no sandboxes, no other documents, no edits in an open sandbox", () => {
+    let current: ReturnType<typeof req> | undefined = req("plan");
+    const rule = new RequestModeRule(() => current, () => undefined);
+    expect(() => rule.before({ tool: "scope_fork" })).toThrow(
+      "The open in-game plan request (request 7 from Dev) allows looking and proposing only, in words only, so scope_fork can't draft in a sandbox or another document either. Nothing was changed. Describe the idea in world_reply; to have it built, the player sends /autosketch build <text>. " +
+        "Answer with world_reply. Only if the user at the terminal asked for this, close the request first with world_reply({ request: 7, lines: […], done: true }).",
+    );
+    for (const mode of ["ask", "plan", "scan"] as const) {
+      current = req(mode);
+      for (const tool of ["scope_fork", "doc_new", "doc_open"]) expect(() => rule.before({ tool })).toThrow(expect.objectContaining({ refusal: "request_mode" }) as never);
+      expect(() => rule.before({ tool: "fill", scope: "job-1", mutating: true })).toThrow(expect.objectContaining({ refusal: "request_mode" }) as never);
+      rule.before({ tool: "render", scope: "job-1", mutating: false }); // looking at a sandbox is fine
+      rule.before({ tool: "scope_abandon", scope: "job-1", mutating: false });
+      rule.before({ tool: "fill", scope: "base", mutating: true }); // the guard judges base edits
+    }
+    current = req("build");
+    rule.before({ tool: "scope_fork" });
+    rule.before({ tool: "fill", scope: "job-1", mutating: true });
+    current = undefined;
+    rule.before({ tool: "doc_new" });
   });
 
   it("guards only the linked document, and world syncs pass", () => {

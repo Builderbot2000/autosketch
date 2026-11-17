@@ -75,7 +75,7 @@ The control follows the parser: a toggle for `parseBool`, a select for `parseOne
 | `library.roots` | `<workspace>/library` | User roots in order; the first is writable. `AUTOSKETCH_LIBRARY` keeps working as an alias |
 | `library.starter` | `true` | Include the starter library |
 | `library.axiom` | `true` | Include the instance's Axiom blueprints as a root |
-| `library.hidden` | none | Entries to leave out of every listing, as `<kind>/<name>` (`prefabs/park_bench`), so a starter or Axiom entry can be hidden without deleting it |
+| `library.hidden` | none | Entries to leave out of every listing, as `<kind>/<name>` (`prefabs/park_bench`), so a starter or Axiom entry can be hidden without deleting it. Applies to read-only roots only (settled with the user 2026-11-16): a copy made with *copy to my library* has the same name and must stay visible; entries in a writable root are deleted (to trash) instead |
 
 ## Library tab (settled 2026-11-16)
 
@@ -186,3 +186,4 @@ U4 depends on `14`'s `config.toml` and discovery, so it lands with or after them
 - **Files stay the source of truth; the UI writes `config.toml` and library files** (settled 2026-11-16). Reason: nothing becomes UI-only, and hand edits and the UI never disagree.
 - **Writes need a per-launch token and a matching Origin** (settled 2026-11-16). Reason: loopback binding and the Host check don't stop cross-origin writes from other pages.
 - **The full Library tab, in two steps** (settled 2026-11-16): browse and actions, then editors. Reason: the first step already covers copy, hide and recoverable delete, and the editors can follow without blocking it.
+- **`library.hidden` applies to read-only roots only** (settled 2026-11-16). Reason: a copy in the user's own library shares the original's name, so hiding by name everywhere would hide the copy too.

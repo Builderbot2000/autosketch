@@ -13,8 +13,11 @@ import type { PlayerRef, RequestMode } from "./protocol/messages.js";
  *   restore step that runs its write guards, whatever tool or script makes it (`world_sync` entries
  *   bring the world in and run no guards). They are refused in `ask`, `plan` and `scan`. Only
  *   journal entries on the linked document reach the world, so this is exactly "nothing happens to
- *   the world". Saved selections, cameras, checkpoints, exports, the library and sandboxes forked
- *   from the linked document are not edits on it; merging a sandbox is.
+ *   the world". Saved selections, cameras, checkpoints, exports and the library are not edits on it.
+ * - **Drafts** are refused too (settled with the user 2026-11-16: read-only requests are text only):
+ *   forking a sandbox, opening or creating another document (`DRAFT_TOOLS`), and any mutating call
+ *   addressed to an existing sandbox. So `ask`, `plan` and `scan` answer in words (and `scan` with
+ *   volumes); nothing is built anywhere, not even in a scratch copy.
  * - **Volume changes** are the volume tools (`VOLUME_TOOLS`, B4's `world_volumes`): refused in `ask`
  *   and `plan`, allowed in `scan` and `build`.
  *
@@ -27,14 +30,16 @@ import type { PlayerRef, RequestMode } from "./protocol/messages.js";
 export const READ_ONLY_MODES: ReadonlySet<RequestMode> = new Set(["ask", "plan", "scan"]);
 /** Modes that allow volume changes. */
 export const VOLUME_MODES: ReadonlySet<RequestMode> = new Set(["scan", "build"]);
+/** Tools that start a draft away from the linked document: refused in read-only modes. */
+export const DRAFT_TOOLS: ReadonlySet<string> = new Set(["scope_fork", "doc_new", "doc_open"]);
 /** Tools that change the player's volumes (B4). */
 export const VOLUME_TOOLS: ReadonlySet<string> = new Set(["world_volumes"]);
 
 /** The line the channel event gives each mode, right after the request (B6). */
 export const MODE_ALLOWS: Record<RequestMode, string> = {
-  ask: "Ask mode: read and look only; edits and volume changes are refused while this request is open.",
-  plan: "Plan mode: look, then propose what you would build in a world_reply; edits and volume changes are refused while this request is open.",
-  scan: "Scan mode: look around and set the volumes with world_volumes; edits are refused while this request is open.",
+  ask: "Ask mode: read and look only; edits, drafts (sandboxes, other documents) and volume changes are refused while this request is open.",
+  plan: "Plan mode: look, then propose what you would build in words, in a world_reply; edits, drafts (sandboxes, other documents) and volume changes are refused while this request is open.",
+  scan: "Scan mode: look around and set the volumes with world_volumes; edits and drafts (sandboxes, other documents) are refused while this request is open.",
   build: "Build mode: you may edit the linked document.",
 };
 
@@ -60,12 +65,14 @@ export const modeOf = (r: { mode?: RequestMode } | undefined): RequestMode => r?
  * The `request_mode` refusal: names the mode, what it allows, the subcommand the player would use
  * instead, and how terminal work gets past an open request (only the user can ask for that).
  */
-export function requestModeRefusal(r: ModeRequest, attempt: { edit: string } | { volumes: string }): Error & { refusal: string } {
+export function requestModeRefusal(r: ModeRequest, attempt: { edit: string } | { volumes: string } | { draft: string }): Error & { refusal: string } {
   const head = `The open in-game ${r.mode} request (request ${r.id} from ${r.player.name}) allows ${ALLOWS[r.mode]}`;
   const what =
     "edit" in attempt
       ? `, so ${attempt.edit} can't edit the linked document. Nothing was written. To have it built, the player sends /autosketch build <text>.`
-      : `, so ${attempt.volumes} can't change the volumes. Nothing was sent. To have the agent set them, the player sends /autosketch scan [radius] [text].`;
+      : "draft" in attempt
+        ? `, in words only, so ${attempt.draft} can't draft in a sandbox or another document either. Nothing was changed. Describe the idea in world_reply; to have it built, the player sends /autosketch build <text>.`
+        : `, so ${attempt.volumes} can't change the volumes. Nothing was sent. To have the agent set them, the player sends /autosketch scan [radius] [text].`;
   const close = ` Answer with world_reply. Only if the user at the terminal asked for this, close the request first with world_reply({ request: ${r.id}, lines: […], done: true }).`;
   return refusal("request_mode", head + what + close);
 }
@@ -97,10 +104,13 @@ export class RequestModeRule {
   }
 
   /** The call hook (`Session.callHooks`). */
-  before(call: { tool: string }): void {
+  before(call: { tool: string; scope?: string; mutating?: boolean }): void {
     const doc = this.linkedDoc();
     if (doc) this.attach(doc);
     const r = this.current();
-    if (r && VOLUME_TOOLS.has(call.tool) && !VOLUME_MODES.has(r.mode)) throw requestModeRefusal(r, { volumes: call.tool });
+    if (!r) return;
+    if (VOLUME_TOOLS.has(call.tool) && !VOLUME_MODES.has(r.mode)) throw requestModeRefusal(r, { volumes: call.tool });
+    if (READ_ONLY_MODES.has(r.mode) && (DRAFT_TOOLS.has(call.tool) || (call.mutating && call.scope !== undefined && call.scope !== "base")))
+      throw requestModeRefusal(r, { draft: call.tool });
   }
 }

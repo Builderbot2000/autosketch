@@ -122,7 +122,7 @@ describe("the probe (13, B4)", () => {
     expect(surfaces(host)).toEqual([expect.not.objectContaining({ ceiling: expect.anything() })]);
     expect(events[0]!.content).toBe(
       'In-game scan request from Dev: "the tower and the courtyard". ' +
-        "Scan mode: look around and set the volumes with world_volumes; edits are refused while this request is open. " +
+        "Scan mode: look around and set the volumes with world_volumes; edits and drafts (sandboxes, other documents) are refused while this request is open. " +
         'The probe is open as the read-only document "probe" (nothing is linked yet): the surface of 3×3 chunks (48×48 columns, local x 0–47, z 0–47), and full blocks in local (16, 0, 16)–(31, 12, 31) (16×13×16). ' +
         'Outside the full-block box each column holds only its top block: render({views:["top"]}) is a map of the surface. Set the volumes with world_volumes({work, context}) in this document\'s coordinates. ' +
         'Looking at minecraft:oak_planks (west face), saved as "target". Standing at (24, 4, 24) facing south; your view is saved as camera "player". ' +

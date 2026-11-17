@@ -69,6 +69,7 @@ The agent has to understand (a) **what it can build with**: blocks, materials, p
 | 13 | Live world link | Companion mod plus world link: the player sets a work and context volume in-game, which makes the linked document the root scope (`11`); agent edits reach the world as conditional patches, hand edits sync back; the world is authoritative; the player can prompt the agent from the game | [design/13-live-world.md](design/13-live-world.md) |
 | 14 | Distribution | One-command install and setup, instance discovery in known places only, the mod on CurseForge and Modrinth, what changes across versions and loaders, version skew between mod and MCP | [design/14-distribution.md](design/14-distribution.md) |
 | 15 | Management UI | The viewer grown into the user's UI for the MCP: Observe, Settings (generated from the registry, written to `config.toml`), Library (browse, edit metadata, rename, copy, hide, recoverable delete) and Instance (including first-run setup) tabs; token-guarded writes | [design/15-management-ui.md](design/15-management-ui.md) |
+| 16 | In-game UI | Replaces the browser UI (`15`, `12`'s viewer): command line for startup and outside actions, the mod's client half for everything else; thin client over the existing bridge; overlays, HUD, ghost blocks, replay in the world, settings and library screens; headless real-client tests | [design/16-in-game-ui.md](design/16-in-game-ui.md) |
 
 ## Dependency rules
 

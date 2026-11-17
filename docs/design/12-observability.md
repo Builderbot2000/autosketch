@@ -63,6 +63,8 @@ Locks are not separate events. A fork takes its lock and a merge or abandon rele
 
 ## Live viewer
 
+> **Superseded by `16`** (2026-11-17): the browser viewer is being removed; overlays, ghosts and replay move into the game. The event log, deltas, snapshots and the replay data below stay.
+
 The MCP process also serves a dashboard on `127.0.0.1:<port>` (stdio stays reserved for MCP). It binds to loopback only and is on by default on port 47100, so it boots with every session and Claude Code's telemetry URL (`13`, B3) stays the same across launches. When 47100 is taken (a second session, another program), it falls back to a free port and logs that; a port the user sets is used as given, never replaced (settled with the user 2026-11-16); `observe.http=false` turns it off. On start, the server prints the URL to stderr, writes it to `observe/<session-id>/url` and, unless `observe.open=false`, opens it in the default browser on the first tool call (not at startup, since clients start the server with every session), except when no instance is remembered: then it opens at startup on the management UI's Instance tab, as the setup wizard (`15`) (`src/observe/open.ts`: `open` on macOS, `start` on Windows, `wslview` then `cmd.exe /c start` under WSL, `xdg-open` elsewhere; detached, stdio untouched, failures only logged).
 
 ### Endpoints

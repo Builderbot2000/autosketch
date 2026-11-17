@@ -2,6 +2,8 @@
 
 The live viewer (`12`) grows into the user's general UI for the MCP: one localhost page with tabs for watching a build, changing settings, managing the library (`07`) and choosing the instance, including first-run setup (`14`). Players who aren't developers can then run Autosketch without editing environment variables or JSON.
 
+> **Superseded by `16`** (2026-11-17): the browser UI is being removed entirely. Instance choice moves to the command line, Settings and Library become in-game screens, Observe becomes overlays and replay in the world. This document records what was built until the removal lands.
+
 Status: designed, settled with the user 2026-11-16; the `config.toml` settings layer, the app shell (U1) and the Settings tab (U2) are built (*Implementation status*); U3–U5 are not. Which settings become live is decided per setting while building (open questions).
 
 ## Principles

@@ -48,7 +48,6 @@
     "prismarine-nbt": "^2.8.0",
     "quickjs-emscripten": "^0.32.0",
     "smol-toml": "^1.9.1",
-    "three": "0.186.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {
@@ -72,7 +71,6 @@
     "library/knowledge",
     "library/palettes",
     "library/prefabs",
-    "viewer",
     "server.json",
     "README.md",
     "LICENSE"

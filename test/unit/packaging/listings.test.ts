@@ -31,7 +31,7 @@ describe("package and listings (14)", () => {
   it("ship what the server reads at runtime, and no game assets", () => {
     expect(pkg.bin).toEqual({ autosketch: "dist/server/index.js" });
     expect(readFileSync(join(ROOT, "src/server/index.ts"), "utf8").startsWith("#!/usr/bin/env node\n")).toBe(true);
-    expect(pkg.files).toEqual(["dist/**/*.js", "data", "library/knowledge", "library/palettes", "library/prefabs", "viewer", "server.json", "README.md", "LICENSE"]);
+    expect(pkg.files).toEqual(["dist/**/*.js", "data", "library/knowledge", "library/palettes", "library/prefabs", "server.json", "README.md", "LICENSE"]);
     // data/ holds only minecraft-data's block table (MIT; ids and properties, no assets).
     expect(readdirSync(join(ROOT, "data"), { recursive: true }).filter((f) => String(f).includes("."))).toEqual(["vanilla/1.21.1.json"]);
     expect(pkg.engines.node).toBe(">=22.13");

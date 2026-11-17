@@ -27,9 +27,6 @@ export const DEFAULT_HTTP_PORT = 47100;
 /** On by default, so the viewer boots with every MCP session. */
 export const OBSERVE_HTTP = setting<number | false>("observe.http", DEFAULT_HTTP_PORT, "a port 1..65535, true (a free port) or false", parseHttp, { group: "Observe", summary: `Port of this page. Default ${DEFAULT_HTTP_PORT}, or a free port when that one is taken; a number pins a port, true always takes a free one, false turns the page off.` });
 
-/** `observe.open`: open the live viewer in the default browser on the first tool call (MCP server only). */
-export const OBSERVE_OPEN = setting("observe.open", true, "true or false", parseBool, { group: "Observe", summary: "Open this page in the browser on the first tool call." });
-
 export const DELTA_MODES = ["auto", "on", "off"] as const;
 export type DeltaMode = (typeof DELTA_MODES)[number];
 /** `"auto"` turns deltas on when the viewer is enabled (12, *Block deltas*). */

@@ -46,6 +46,11 @@ export interface Candidate {
   baseJar?: string;
   /** How it was found: the launcher's own record, a listing of its instance folder, or a pointer file. */
   via: "record" | "folder" | "pointer";
+  /**
+   * The companion mod wrote a pointer file for this game folder: the game has run with the mod.
+   * Set however the candidate was found; automatic instance choice prefers these (16, *Command line*).
+   */
+  pointer?: true;
   check: InstanceCheck;
   warnings: string[];
 }

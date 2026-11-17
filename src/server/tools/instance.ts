@@ -30,9 +30,9 @@ export function registerInstanceTools({ tool }: ToolDeps): void {
   );
 }
 
-/** How the instance was chosen (`15`, *Instance tab*): `config.toml`, `command line (--instance)`, `environment (AUTOSKETCH_INSTANCE)`. */
+/** How the instance was chosen: `config.toml`, `command line (--instance)`, `environment (AUTOSKETCH_INSTANCE)`, `automatic choice` (`16`, *Command line*). */
 export function instanceSourceText(s: SettingSource): string {
-  return s.kind === "config" ? "config.toml" : s.kind === "env" ? `environment (${s.label})` : `command line (${s.label})`;
+  return s.kind === "config" ? "config.toml" : s.kind === "env" ? `environment (${s.label})` : s.kind === "default" ? s.label : `command line (${s.label})`;
 }
 
 /** block_info is registered after the palette tools to keep the established tool order. */

@@ -93,36 +93,6 @@ describe("app shell security (15, *Security*)", () => {
     expect((await send(key.replace("127.0.0.1", "localhost"), { method: "DELETE", headers: { ...write, origin: origin.replace("127.0.0.1", "localhost") } })).status).toBe(200);
     await http.close();
   });
-
-  it("puts the token in the URL fragment and the url file, and serves the shell without extra requests for Observe", async () => {
-    const { http, page, base, dir } = await settingsServer();
-    expect(page).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/#t=[\w-]{32}$/);
-    const html = await send(base);
-    expect(html.status).toBe(200);
-    // The Observe tab's static requests are what they were before the shell: the stylesheet and main.js
-    // (plus three.js, by main.js's imports). Other tabs are only reached through import() on first open.
-    const statics = [...html.body.matchAll(/(?:src|href)="([^"]+)"/g)].map((m) => m[1]);
-    expect(statics).toEqual(["style.css", "js/main.js"]);
-    expect([...html.body.matchAll(/import\(/g)]).toHaveLength(1);
-    expect(html.body).toMatch(/settings: "\.\/js\/tabs\/settings\.js"/);
-    const graph = new Set<string>();
-    const walk = (file: string) => {
-      if (graph.has(file)) return;
-      graph.add(file);
-      const src = readFileSync(join(import.meta.dirname, "..", "..", "..", "viewer", "js", file), "utf8");
-      expect(src).not.toMatch(/\bimport\((?!"\.\/voxels\.js"\))/); // (a JSDoc type reference is not a load)
-      expect(src).not.toMatch(/tabs\//);
-      for (const m of src.matchAll(/^import .* from "\.\/([\w./]+)";$/gm)) walk(m[1]!);
-    };
-    walk("main.js");
-    expect([...graph].sort()).toEqual(["gl.js", "main.js", "model.js", "panels.js", "replay.js", "voxels.js"]);
-    expect((await send(`${base}js/tabs/settings.js`)).status).toBe(200);
-    // The url file is written once a document opens (session.open).
-    http.onEvent({ v: 1, seq: 1, t: 0, doc: "base", kind: "session.open", name: "keep" });
-    await new Promise((r) => setTimeout(r, 50));
-    expect(readFileSync(join(dir, "url"), "utf8")).toBe(page + "\n");
-    await http.close();
-  });
 });
 
 describe("Settings tab endpoints (15, *Settings tab*)", () => {
@@ -212,7 +182,7 @@ describe("Settings tab endpoints (15, *Settings tab*)", () => {
 
   it("picks the control from the parser", () => {
     const byKey = new Map(registeredSettings().map((s) => [s.key, settingControl(s)]));
-    expect(byKey.get("observe.open")).toEqual({ type: "toggle" });
+    expect(byKey.get("observe.log")).toEqual({ type: "toggle" });
     expect(byKey.get("observe.http")).toEqual({ type: "text" });
     expect(byKey.get("world.promptPlayers")).toEqual({ type: "list" });
     expect(byKey.get("observe.deltas")).toEqual({ type: "select", options: ["auto", "on", "off"] });

@@ -243,7 +243,9 @@ describe("instance discovery (14, Instance discovery)", () => {
     });
     const { candidates, warnings } = await discover(linux(home));
     expect(candidates.map((c) => [c.name, c.launcher])).toEqual([["CF Pack", "curseforge"], ["Craftoria server", "pointer"]]);
-    expect(byName(candidates, "Craftoria server")).toMatchObject({ via: "pointer", folder: server, mcVersion: "1.21.1", loader: { name: "neoforge", version: "21.1.262" } });
+    expect(byName(candidates, "Craftoria server")).toMatchObject({ via: "pointer", pointer: true, folder: server, mcVersion: "1.21.1", loader: { name: "neoforge", version: "21.1.262" } });
+    // The launcher's candidate wins, and still notes the mod's pointer for its folder (16, *Command line*).
+    expect(byName(candidates, "CF Pack")).toMatchObject({ launcher: "curseforge", pointer: true });
     expect(warnings).toEqual([`Autosketch mod: pointer file ${join(games, "1111111111111111.toml")} skipped (format 2, this version reads 1)`]);
   });
 

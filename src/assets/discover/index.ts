@@ -85,6 +85,8 @@ export async function discover(opts: DiscoverOptions = {}): Promise<Discovery> {
   for (const roots of profiles.slice(1)) take(await readPointers(join(roots.home, ".autosketch", "games"), roots), roots.label);
 
   // One candidate per game folder: launcher records first, pointers only for folders no launcher knows.
+  // A launcher's candidate still notes that the mod wrote a pointer for its folder (16, *Command line*).
+  const pointed = new Set(found.filter((f) => f.via === "pointer").map((f) => folderKey(f.gameDir)));
   const seen = new Set<string>();
   const unique: Found[] = [];
   for (const f of found) {
@@ -97,7 +99,7 @@ export async function discover(opts: DiscoverOptions = {}): Promise<Discovery> {
   const candidates = await Promise.all(
     unique.map(async (f): Promise<Candidate> => {
       const check = await checkInstance(f.folder, f.gameDir, { ...(f.version ? { version: f.version } : {}), ...(f.baseJar ? { baseJar: f.baseJar } : {}) });
-      return { id: "", ...f, check };
+      return { id: "", ...f, ...(pointed.has(folderKey(f.gameDir)) ? { pointer: true as const } : {}), check };
     }),
   );
   for (const c of candidates) c.id = uniqueId(c, ids);

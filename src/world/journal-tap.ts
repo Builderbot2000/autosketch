@@ -6,7 +6,7 @@ import { pushes } from "./no-push.js";
 /**
  * The patch sender's view of the journal (docs/design/13-live-world.md, *Agent → world: patches*,
  * W3): every committed step on the linked base document, from the same `doc.op`, `doc.undo` and
- * `doc.redo` events that feed the viewer (through the session's event fan-out), grouped into the
+ * `doc.redo` events that feed the event log and the in-game UI (through the session's event fan-out), grouped into the
  * batches that each become one patch.
  *
  * - One batch per committed entry, undo or redo; sandboxes' events (`doc` ≠ "base") are ignored,

@@ -92,7 +92,7 @@ export function renderSpend(el, spend, otel) {
         h("pre", { class: "snippet" }, snippet),
         otel.portPinned
           ? null
-          : h("div", { class: "warn" }, `This viewer is on a free port this launch (${otel.setup.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT.replace(/^.*:(\d+)\/.*$/, "$1")}), which changes every launch. Pin it in Settings (observe.http) so the endpoint stays valid.`),
+          : h("div", { class: "warn" }, `This viewer is on a free port this launch (${otel.setup.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT.replace(/^.*:(\d+)\/.*$/, "$1")}), because its usual port was taken or observe.http is set to true. The port changes every launch, so telemetry may not reach it; close the other session or pin a port in Settings (observe.http).`),
       ),
     );
     return;

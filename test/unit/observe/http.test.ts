@@ -176,6 +176,25 @@ describe("viewer HTTP server (12, phase 3)", () => {
     await http.close();
   });
 
+  it("falls back to a free port when the default port is taken, but never for a port the user set", async () => {
+    const { createServer } = await import("node:net");
+    const blocker = createServer();
+    await new Promise<void>((ok) => blocker.listen(0, "127.0.0.1", () => ok()));
+    const taken = (blocker.address() as { port: number }).port;
+    const make = (fallbackToFreePort: boolean) => {
+      const bus = new EventBus();
+      const tables = new LogTables((e) => bus.publish("base", e));
+      return new ObserveHttp({ bus, tables, sessionId: "s", dirFor: () => tempWorkspace(), docFor: () => undefined, port: taken, fallbackToFreePort });
+    };
+    const fallback = make(true);
+    await fallback.start();
+    expect(fallback.port).not.toBe(taken);
+    await fallback.close();
+    const pinned = make(false);
+    await expect(pinned.start()).rejects.toMatchObject({ code: "EADDRINUSE" });
+    await new Promise<void>((ok) => blocker.close(() => ok()));
+  });
+
   it("is on by default on a free port, and off with observe.http=false", async () => {
     const on = startObserve({ workspace: tempWorkspace(), settings: Settings.from([], {}), sessionId: "s", getDoc: () => undefined });
     expect(on.http).toBeDefined();

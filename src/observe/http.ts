@@ -82,6 +82,8 @@ export interface ObserveHttpOptions {
   live?: boolean;
   /** 0 for a free port. */
   port: number;
+  /** Listen on a free port when `port` is taken (only for the default port, never one the user set). */
+  fallbackToFreePort?: boolean;
   version?: string;
   viewerDir?: string;
   /** Events kept for `since` replays. */
@@ -193,10 +195,22 @@ export class ObserveHttp {
       });
     });
     this.server = server;
-    await new Promise<void>((ok, fail) => {
-      server.once("error", fail);
-      server.listen(this.opts.port, "127.0.0.1", () => ok());
-    });
+    const listen = (port: number) =>
+      new Promise<void>((ok, fail) => {
+        const onError = (e: Error) => fail(e);
+        server.once("error", onError);
+        server.listen(port, "127.0.0.1", () => {
+          server.off("error", onError);
+          ok();
+        });
+      });
+    try {
+      await listen(this.opts.port);
+    } catch (e) {
+      if (!this.opts.fallbackToFreePort || this.opts.port === 0 || (e as NodeJS.ErrnoException).code !== "EADDRINUSE") throw e;
+      this.opts.log?.(`observe: port ${this.opts.port} is taken; using a free port (Claude Code's token telemetry won't reach this session)`);
+      await listen(0);
+    }
     const port = (server.address() as AddressInfo).port;
     this.port = port;
     this.url = `http://127.0.0.1:${port}/`;
@@ -409,7 +423,7 @@ export class ObserveHttp {
       ...(this.opts.standalone ? { standalone: true } : {}),
       // B3 (13): how many Claude Code log records have arrived, and the setup that sends them here.
       // A free port changes with every launch, so the endpoint only stays valid with a pinned `observe.http`.
-      ...(this.opts.publish && this.opts.live !== false ? { otel: { records: this.otelRecords, portPinned: this.opts.port !== 0, setup: otelSetup(this.port) } } : {}),
+      ...(this.opts.publish && this.opts.live !== false ? { otel: { records: this.otelRecords, portPinned: this.opts.port !== 0 && this.port === this.opts.port, setup: otelSetup(this.port) } } : {}),
     });
   }
 

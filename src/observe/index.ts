@@ -114,6 +114,7 @@ export function startObserve(opts: ObserveOptions): Observer {
       dirFor,
       docFor,
       port: port as number,
+      fallbackToFreePort: opts.settings.resolve(OBSERVE_HTTP).source.kind === "default",
       settings: opts.settings,
       ...(opts.instance ? { instance: opts.instance } : {}),
       ...(opts.library ? { library: opts.library } : {}),

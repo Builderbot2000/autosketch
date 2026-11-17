@@ -17,8 +17,15 @@ export const parseHttp = (raw: string): number | false | undefined => {
   const b = parseBool(s);
   return b === undefined ? undefined : b ? 0 : false;
 };
-/** On by default (a free port), so the viewer boots with every MCP session. */
-export const OBSERVE_HTTP = setting<number | false>("observe.http", 0, "a port 1..65535, true (a free port) or false", parseHttp, { group: "Observe", summary: "Port of this page: a number to pin one (needed for Claude Code's token telemetry), true for a free port, false to turn the page off." });
+/**
+ * The default port (settled with the user 2026-11-16, `12` *Live viewer*): fixed, so Claude Code's
+ * telemetry URL in settings.json stays valid across launches (`13`, B3). When it is taken (another
+ * session, another program) the viewer falls back to a free port, but only for this default: a port
+ * the user set is used as given.
+ */
+export const DEFAULT_HTTP_PORT = 47100;
+/** On by default, so the viewer boots with every MCP session. */
+export const OBSERVE_HTTP = setting<number | false>("observe.http", DEFAULT_HTTP_PORT, "a port 1..65535, true (a free port) or false", parseHttp, { group: "Observe", summary: `Port of this page. Default ${DEFAULT_HTTP_PORT}, or a free port when that one is taken; a number pins a port, true always takes a free one, false turns the page off.` });
 
 /** `observe.open`: open the live viewer in the default browser on the first tool call (MCP server only). */
 export const OBSERVE_OPEN = setting("observe.open", true, "true or false", parseBool, { group: "Observe", summary: "Open this page in the browser on the first tool call." });

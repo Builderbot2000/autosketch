@@ -3,6 +3,8 @@ package dev.autosketch.mod.volume;
 import dev.autosketch.mod.api.CommandExtension;
 import dev.autosketch.mod.api.WandMode;
 import dev.autosketch.mod.feedback.Feedback;
+import dev.autosketch.mod.link.Link;
+import dev.autosketch.mod.link.LinkStatus;
 import dev.autosketch.mod.platform.Platform;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -81,6 +83,7 @@ public final class AirMode {
         if (!wielding(p) || !on(p)) return false;
         if (!mainHand) return true;
         if (looksAtBlock(p)) return true;
+        if (!Link.requireConnected(p)) return true;
         setCorner(p, p.isShiftKeyDown() ? 1 : 2, reach(p));
         return true;
     }
@@ -90,7 +93,7 @@ public final class AirMode {
      * only. The distance is the client's, clamped.
      */
     public void clientClick(ServerPlayer p, int corner, int reach) {
-        if (!p.hasPermissions(CommandExtension.OP_LEVEL)) return;
+        if (!p.hasPermissions(CommandExtension.OP_LEVEL) || !Link.requireConnected(p)) return;
         players.get(p.getUUID()).airReach = Math.max(1, Math.min(MAX_REACH, reach));
         if (corner == 0) {
             feedback.actionBar(p, Component.literal("Autosketch: air distance " + reach(p)));
@@ -108,7 +111,7 @@ public final class AirMode {
      * air point as a particle outline (the client half draws its own).
      */
     public void tick(net.minecraft.server.MinecraftServer server) {
-        if (server.getTickCount() % Feedback.OUTLINE_PERIOD != 0) return;
+        if (server.getTickCount() % Feedback.OUTLINE_PERIOD != 0 || Link.status() == LinkStatus.OFFLINE) return;
         for (ServerPlayer p : server.getPlayerList().getPlayers()) {
             if (!on(p) || !wielding(p) || Platform.get().hasClientHalf(p)) continue;
             BlockPos at = point(p, reach(p));

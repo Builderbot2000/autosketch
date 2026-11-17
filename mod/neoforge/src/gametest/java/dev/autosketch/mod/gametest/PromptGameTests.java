@@ -224,11 +224,12 @@ public final class PromptGameTests {
             }
         });
         helper.assertTrue(out.barOf(player).getLast().contains("not on the agent's allowed players"), "the reason on the action bar: " + out.barOf(player));
-        // With no MCP connected at all, the mod says no_link itself and sends nothing.
+        // With no MCP connected at all, the offline lock (16) answers before the request is built: nothing sent.
         RecordingBridge down = new RecordingBridge(false);
+        int shown = out.barOf(player).size();
         with(down, fixed(null), out, () -> run(player, "autosketch ask hello"));
         helper.assertTrue(down.sent.isEmpty(), "nothing sent while disconnected");
-        helper.assertTrue(out.barOf(player).getLast().contains("no linked world"), "no_link on the action bar: " + out.barOf(player));
+        helper.assertTrue(out.barOf(player).size() == shown, "the lock's line, not the request's: " + out.barOf(player));
         leave(player);
         helper.succeed();
     }
@@ -347,8 +348,9 @@ public final class PromptGameTests {
         helper.assertTrue(out.barOf(player).getLast().equals(InGamePrompts.DONE_UNSUPPORTED), "the MCP needs updating, on the action bar: " + out.barOf(player));
 
         RecordingBridge down = new RecordingBridge(false);
+        int shown = out.barOf(player).size();
         with(down, fixed(null), out, () -> run(player, "autosketch done"));
-        helper.assertTrue(down.sent.isEmpty() && out.barOf(player).getLast().contains("no linked world"), "no_link while disconnected: " + out.barOf(player));
+        helper.assertTrue(down.sent.isEmpty() && out.barOf(player).size() == shown, "locked while disconnected (16), nothing sent: " + out.barOf(player));
         leave(player);
         helper.succeed();
     }

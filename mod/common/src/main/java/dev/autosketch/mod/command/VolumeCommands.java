@@ -11,6 +11,7 @@ import dev.autosketch.mod.api.LinkVolumes;
 import dev.autosketch.mod.api.PatchStatus;
 import dev.autosketch.mod.api.WandMode;
 import dev.autosketch.mod.feedback.Feedback;
+import dev.autosketch.mod.link.Link;
 import dev.autosketch.mod.protocol.Box;
 import dev.autosketch.mod.volume.PlayerStates;
 import dev.autosketch.mod.volume.VolumeManager;
@@ -196,6 +197,7 @@ public final class VolumeCommands implements CommandExtension {
         LinkVolumes v = volumes.current();
         String mcp = bridge.connected() ? "MCP connected (" + bridge.session().clientName() + " " + bridge.session().clientVersion() + ")" : "MCP not connected";
         c.getSource().sendSuccess(() -> Component.literal("Autosketch: " + mcp).withStyle(bridge.connected() ? ChatFormatting.GREEN : ChatFormatting.YELLOW), false);
+        c.getSource().sendSuccess(() -> Component.literal("  " + Link.statusLine()), false);
         if (v == null) c.getSource().sendSuccess(() -> Component.literal("  no work volume (unlinked)"), false);
         else {
             c.getSource().sendSuccess(() -> Component.literal("  link " + v.link() + " in " + v.dimension().location() + ": work " + v.work() + " (" + VolumeModes.size(v.work()) + ")"

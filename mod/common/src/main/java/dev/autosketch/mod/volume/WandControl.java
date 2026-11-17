@@ -3,6 +3,7 @@ package dev.autosketch.mod.volume;
 import dev.autosketch.mod.api.CommandExtension;
 import dev.autosketch.mod.api.WandMode;
 import dev.autosketch.mod.feedback.Feedback;
+import dev.autosketch.mod.link.Link;
 import java.util.List;
 import java.util.function.Supplier;
 import net.minecraft.core.BlockPos;
@@ -14,7 +15,8 @@ import net.minecraft.server.level.ServerPlayer;
  * sets corner 1 with a left click on a block and corner 2 with a right click, for the current mode,
  * and the swap-hands key cycles the mode. Each loader's events call these; a {@code true} result
  * means the loader cancels the click, so the wand never breaks, uses or places anything. Players
- * below op level 2 get the plain item's behaviour.
+ * below op level 2 get the plain item's behaviour. While no MCP is connected the clicks are still
+ * cancelled but only show {@link Link}'s line (16, *Mod side*).
  */
 public final class WandControl {
     private final PlayerStates players;
@@ -51,20 +53,21 @@ public final class WandControl {
     /** A left click on a block; {@code start} is the click itself (not the held-down follow-ups). True: cancel it. */
     public boolean leftClick(ServerPlayer p, BlockPos pos, boolean start) {
         if (!wielding(p)) return false;
-        if (start) mode(p).setCorner(p, 1, pos);
+        if (start && Link.requireConnected(p)) mode(p).setCorner(p, 1, pos);
         return true;
     }
 
     /** A right click on a block, with the main hand or not. True: cancel it. */
     public boolean rightClick(ServerPlayer p, BlockPos pos, boolean mainHand) {
         if (!wielding(p)) return false;
-        if (mainHand) mode(p).setCorner(p, 2, pos);
+        if (mainHand && Link.requireConnected(p)) mode(p).setCorner(p, 2, pos);
         return true;
     }
 
     /** The swap-hands key: cycles the mode. True: cancel the swap. */
     public boolean swapHands(ServerPlayer p) {
         if (!wielding(p)) return false;
+        if (!Link.requireConnected(p)) return true;
         PlayerStates.State st = players.get(p.getUUID());
         st.mode = Math.floorMod(st.mode + 1, modes.get().size());
         feedback.actionBar(p, Component.literal("Autosketch wand: " + mode(p).name() + " mode"));

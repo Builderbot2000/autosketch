@@ -3,6 +3,8 @@ package dev.autosketch.mod.feedback;
 import dev.autosketch.mod.api.CommandExtension;
 import dev.autosketch.mod.api.PatchStatus;
 import dev.autosketch.mod.api.WandMode;
+import dev.autosketch.mod.link.Link;
+import dev.autosketch.mod.link.LinkStatus;
 import dev.autosketch.mod.protocol.Box;
 import dev.autosketch.mod.volume.PlayerStates;
 import dev.autosketch.mod.volume.Wand;
@@ -84,6 +86,7 @@ public final class Feedback {
         long tick = server.getTickCount();
         boolean outlines = tick % OUTLINE_PERIOD == 0, modeLine = tick % MODE_LINE_PERIOD == 0;
         if (!outlines && !modeLine) return;
+        if (Link.status() == LinkStatus.OFFLINE) return; // 16: nothing drawn while no MCP is connected; volumes show again on connect
         List<WandMode> all = modes.get();
         for (ServerPlayer p : server.getPlayerList().getPlayers()) {
             if (!p.hasPermissions(CommandExtension.OP_LEVEL)) continue;

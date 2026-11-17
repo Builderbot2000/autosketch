@@ -3,6 +3,7 @@ package dev.autosketch.mod.command;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import dev.autosketch.mod.api.CommandExtension;
+import dev.autosketch.mod.link.Link;
 import java.util.List;
 import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
@@ -22,6 +23,7 @@ public final class AutosketchCommand {
         LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal(ROOT).requires(src -> src.hasPermission(CommandExtension.OP_LEVEL));
         CommandExtension.Registration reg = new CommandExtension.Registration(root, dispatcher, context);
         for (CommandExtension e : extensions) e.register(reg);
-        dispatcher.register(root);
+        // 16, *Mod side*: every subcommand but status is locked while no MCP is connected.
+        dispatcher.register(Link.lock(root));
     }
 }

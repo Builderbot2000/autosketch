@@ -43,6 +43,9 @@ public interface Platform {
     /** Sends the air-mode state to the player's client half, when it has one; nothing otherwise. */
     default void sendAirState(ServerPlayer player, boolean on, int reach, String wandItem) {}
 
+    /** Sends the link status to the player's client half (16, *Mod side*), when it has one; nothing otherwise. */
+    default void sendLinkStatus(ServerPlayer player, dev.autosketch.mod.link.LinkStatus status) {}
+
     /** The installed platform. */
     static Platform get() {
         Platform p = Holder.platform;

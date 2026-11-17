@@ -227,7 +227,7 @@ async function surface(r: Rcon, m: Mcp): Promise<void> {
     await r.command("autosketch clear");
     await sleep(60_000);
     const before = await mspt(r);
-    await setVolumes(r, work, { min: [big.min[0], -64, big.min[1]], max: [big.max[0], -64, big.max[1]] });
+    await setVolumes(r, work, { min: [big.min[0], -64, big.min[1]], max: [big.max[0], -64, big.max[1]] }, m.link);
     const t = performance.now();
     const s = await m.link.bridge.request({ type: "snapshot", kind: "surface", dimension: dim, columns: big });
     log(`surface_r12_cold_${i}`, { ms: Math.round(performance.now() - t), missing: s.missing.length, mspt_before: before, mspt_last100_after: await mspt(r) });

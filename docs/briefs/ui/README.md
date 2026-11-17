@@ -81,6 +81,6 @@ The owner lands the contract in its first merge, and the users code against it.
 
 ## Setup the user has done
 
-- JDK 21 is the default `java` (`/usr/lib/jvm/java-21-openjdk-amd64`); Xvfb, `xvfb-run` and Mesa (software and `d3d12`) are installed; WSLg provides a display (`DISPLAY=:0`) for watching a run. Checked 2026-11-17.
+- JDK 21 is the default `java` (`/usr/lib/jvm/java-21-openjdk-amd64`), but the login shell may still export `JAVA_HOME` as JDK 11, which Gradle refuses: run Gradle as `JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 ./gradlew …` unless `echo $JAVA_HOME` already shows 21; Xvfb, `xvfb-run` and Mesa (software and `d3d12`) are installed; WSLg provides a display (`DISPLAY=:0`) for watching a run. Checked 2026-11-17.
 - `xdotool` is installed (2026-11-17), for `16`'s one test with true OS input; H still skips that test with a message when `xdotool` is missing (CI, other machines).
 - The Craftoria server pack is at `~/servers/craftoria` (`world/test-setup.md`), for the occasional Craftoria-sized client run.

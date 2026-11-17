@@ -206,6 +206,8 @@ public final class AutosketchCore {
     List<String> features() {
         List<String> out = new java.util.ArrayList<>(FEATURES);
         for (String f : HANDLER_FEATURES) if (dispatcher.handles(f)) out.add(f);
+        // 16's in-game UI: listed when the relay registered its handlers (ui.relay.UiRelay).
+        if (dispatcher.handles("ui.state")) out.add(dev.autosketch.mod.protocol.UiMessages.FEATURE_UI);
         return List.copyOf(out);
     }
 }

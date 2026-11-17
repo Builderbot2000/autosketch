@@ -52,3 +52,13 @@ All are recorded in `16`'s *Decisions* or in `13`.
 - An intermittent `npm test` failure was seen twice, once by silo-c and once at R's merge. It didn't recur in later reruns, and the failing test wasn't identified.
 - `JAVA_HOME` in the user's `~/.bash_profile` points at JDK 11; Gradle needs 17 or later. Prefix Gradle as above, or change that line.
 - The Craftoria-sized client run (`mod/clienttest-craftoria.sh`) waits for a newer NeoForge on the dev profile, or a curated list of mods to leave out.
+
+## Paused 2026-11-17
+
+The user paused the follow-up work. State at the pause:
+
+- **Done and pushed:** the `src/ui/` dependency rule in ARCHITECTURE.md; the dead library editor writes removed; the old "management UI" comments updated.
+- **Replay follow-ups** (switch replay's boxes to O's `DrawList`, have S's log list call R's opener directly, check that the `OPEN_REPLAY` key matches): partly done. An untested WIP commit sits on the local branch `fix/replay-followups`, in worktree `.claude/worktrees/silo-r-fu`. It is not pushed.
+- **Ghost meshing off the render thread, and a distance cap:** not started in any lasting form. The agent was stopped before it committed, so its work was lost.
+- **Intermittent `npm test` failure:** not investigated yet.
+

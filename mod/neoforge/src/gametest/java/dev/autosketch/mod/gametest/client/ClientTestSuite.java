@@ -215,9 +215,25 @@ public final class ClientTestSuite {
         }
     }
 
-    /** The suite's fake MCP (16, *Testing*): what it received, and whether it is C's CLI or the placeholder. */
+    /** The suite's fake MCP (16, *Testing*): what it received since it last started. */
     public FakeMcp mcp() {
         return mcp;
+    }
+
+    /**
+     * Stops the suite's fake MCP (if running) and starts a new one with {@code scriptJson} (the format
+     * of {@code clienttest/<suite>.json}), e.g. one whose hello lacks {@code ui}. Its record starts
+     * empty. The driver starts the suite's own script before the first step.
+     */
+    public void startMcp(String scriptJson) throws IOException {
+        stopMcp();
+        mcp = FakeMcp.start(name, scriptJson, ClientTestDriver.pairingFile(), ClientTestDriver.gameDir().resolve("logs"), ClientTestDriver.repo());
+        ClientTestDriver.info(name + ": fake MCP started: " + scriptJson);
+    }
+
+    /** Stops the suite's fake MCP; the mod sees the connection close (wait on the link state). */
+    public void stopMcp() {
+        if (mcp != null) mcp.close();
     }
 
     /** The open screen's widget whose label is {@code label}, or a failed check. */

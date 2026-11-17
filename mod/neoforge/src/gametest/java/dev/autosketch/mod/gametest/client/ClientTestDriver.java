@@ -2,6 +2,7 @@ package dev.autosketch.mod.gametest.client;
 
 import dev.autosketch.mod.api.Autosketch;
 import dev.autosketch.mod.bridge.PairingFile;
+import dev.autosketch.mod.client.ui.LinkState;
 import java.io.IOException;
 import java.lang.annotation.ElementType;
 import java.lang.management.ManagementFactory;
@@ -115,6 +116,21 @@ public final class ClientTestDriver {
         return FMLPaths.GAMEDIR.get();
     }
 
+    /** The bridge's pairing file, written when the integrated server starts. */
+    static Path pairingFile() {
+        return FMLPaths.CONFIGDIR.get().resolve(PairingFile.NAME);
+    }
+
+    /** The repository root (for test/support/fake-mcp.ts and node_modules). */
+    static Path repo() {
+        return instance.repo;
+    }
+
+    /** An INFO line in the report. */
+    static void info(String message) {
+        if (instance != null) instance.line("INFO " + message);
+    }
+
     static void warn(ClientTestSuite s, String message) {
         if (instance != null) instance.line("WARN " + s.name() + ": " + message);
     }
@@ -193,17 +209,14 @@ public final class ClientTestDriver {
                 }
                 case WORLD -> world(mc);
                 case MCP_START -> {
-                    Path pairing = FMLPaths.CONFIGDIR.get().resolve(PairingFile.NAME);
-                    if (!Files.isRegularFile(pairing)) return;
-                    suite.mcp = FakeMcp.start(suite.name(), ClientTestSuite.script(suite.name()), pairing, gameDir().resolve("logs"), repo);
-                    line("INFO " + suite.name() + ": fake MCP " + (suite.mcp.usingCli() ? "test/support/fake-mcp.ts" : "in-process placeholder"));
+                    if (!Files.isRegularFile(pairingFile())) return;
+                    suite.startMcp(ClientTestSuite.script(suite.name()));
                     phase = Phase.MCP_WAIT;
                     phaseStartTick = tick;
                 }
                 case MCP_WAIT -> {
-                    // Connected on the bridge, and the client half has heard so (L's link state; when
-                    // C's channel lands this is client.ui.LinkState).
-                    if (Autosketch.bridge().connected() && dev.autosketch.mod.link.LinkPayloads.clientStatus != dev.autosketch.mod.link.LinkStatus.OFFLINE) {
+                    // Connected on the bridge, and the client half has heard so (L's link state).
+                    if (Autosketch.bridge().connected() && LinkState.get() != LinkState.State.OFFLINE) {
                         if (suiteIndex == 0) timing("fake MCP connected");
                         phase = Phase.STEPS;
                         stepIndex = 0;
@@ -216,7 +229,7 @@ public final class ClientTestDriver {
                 }
                 case STEPS -> step();
                 case MCP_STOP -> {
-                    if ((!Autosketch.bridge().connected() && dev.autosketch.mod.link.LinkPayloads.clientStatus == dev.autosketch.mod.link.LinkStatus.OFFLINE)
+                    if ((!Autosketch.bridge().connected() && LinkState.get() == LinkState.State.OFFLINE)
                             || tick - phaseStartTick > 20 * 10) nextSuite();
                 }
                 case DONE -> {

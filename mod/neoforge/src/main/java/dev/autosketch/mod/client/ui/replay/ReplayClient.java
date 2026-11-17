@@ -155,6 +155,8 @@ public final class ReplayClient {
             UiClient.onAction("replay.list", a -> list());
             UiClient.onAction("replay.open", a -> open(a.isBlank() ? null : a.strip()));
             UiClient.onAction("replay.close", a -> close());
+            // The replay ended on the MCP's side (a resync, the MCP gone); the server half resends the chunks next.
+            UiClient.onAction("replay.ended", a -> teardown());
             AutosketchKeys.setReplayOpen(ReplayClient::isOpen);
             AutosketchKeys.on(AutosketchKeys.REPLAY_BACK, () -> seekBy(-1));
             AutosketchKeys.on(AutosketchKeys.REPLAY_FORWARD, () -> seekBy(1));

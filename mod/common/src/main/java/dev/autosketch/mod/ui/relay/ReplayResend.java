@@ -33,8 +33,9 @@ import org.slf4j.Logger;
  * <p>It learns each player's open replay from the {@code replay.open} results going back through
  * the relay ({@link UiRelay#addResultListener}), and resends on that player's {@code replay.close}
  * (whatever the MCP answered: the client has closed either way), on a {@code resync} (which closes
- * the replay, 13), and for every open replay when the bridge disconnects (the client closes its
- * replay when the link goes offline, and the relay can't forward a close then). Server thread.
+ * the replay, 13), and for every open replay when the bridge disconnects (the relay can't forward a
+ * close then). In the last two cases it first tells the client the replay ended ({@link #ENDED}),
+ * so the client stops overriding before the chunks arrive. Server thread.
  */
 public final class ReplayResend {
     private static final Logger LOG = LogUtils.getLogger();
@@ -63,11 +64,21 @@ public final class ReplayResend {
         }
     };
 
+    /**
+     * The client action that ends a replay locally without a request: sent before the chunks when
+     * the replay ended on the MCP's side (a {@code resync}, or the MCP going away). The client may
+     * not have seen the link go offline at all (a new MCP replaced the old one at once), and its
+     * replay belonged to the old session.
+     */
+    public static final String ENDED = "replay.ended";
+
     private final Map<UUID, Open> open = new ConcurrentHashMap<>();
+    private final UiRelay relay;
     private volatile Sender sender = VANILLA;
 
     /** Hooks onto the relay's results and the bridge's disconnect. */
     public ReplayResend(UiRelay relay, Bridge bridge) {
+        this.relay = relay;
         relay.addResultListener(this::result);
         bridge.addListener(new Bridge.Listener() {
             @Override
@@ -80,7 +91,9 @@ public final class ReplayResend {
                 server.execute(() -> {
                     for (Map.Entry<UUID, Open> e : List.copyOf(open.entrySet())) {
                         ServerPlayer p = server.getPlayerList().getPlayer(e.getKey());
-                        if (p != null) resend(p, e.getValue());
+                        if (p == null) continue;
+                        relay.sendAction(p, ENDED);
+                        resend(p, e.getValue());
                     }
                     open.clear();
                 });
@@ -121,7 +134,9 @@ public final class ReplayResend {
             }
             case "replay.close", "resync" -> {
                 Open o = open.remove(p.getUUID());
-                if (o != null) resend(p, o);
+                if (o == null) return;
+                if (kind.equals("resync")) relay.sendAction(p, ENDED);
+                resend(p, o);
             }
             default -> {}
         }

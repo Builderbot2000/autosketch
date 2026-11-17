@@ -153,8 +153,8 @@ public final class ReplayGameTests {
     }
 
     /**
-     * When the MCP goes away with a replay open, the client closes its replay (the link is offline)
-     * and the relay can't forward a close, so the server half resends the volume's chunks itself.
+     * When the MCP goes away with a replay open, the relay can't forward a close, so the server half
+     * tells the client the replay ended and resends the volume's chunks itself.
      */
     @GameTest(template = "empty", batch = "autosketch_replay_disconnect", timeoutTicks = 400)
     public static void disconnectResendsAnOpenReplaysChunks(GameTestHelper h) {
@@ -178,6 +178,8 @@ public final class ReplayGameTests {
                 .thenWaitUntil(() -> check(chunks.of(a).equals(want), "a gets the volume's chunks: " + chunks.of(a) + ", want " + want))
                 .thenExecute(() -> {
                     check(ReplayEvents.resend().open(a.getUUID()) == null, "and the replay is forgotten");
+                    check(rec.of(a).stream().anyMatch(u -> u.op() == UiPayload.CLIENT_ACTION && u.text().equals(ReplayResend.ENDED)),
+                            "a's client is told the replay ended, so it stops overriding before the chunks arrive");
                     ReplayEvents.resend().setSender(oldSender);
                     relay.setTransport(old);
                     h.getLevel().getServer().getPlayerList().remove(a);

@@ -84,6 +84,16 @@ The agent has to understand (a) **what it can build with**: blocks, materials, p
 - `ui/` (the in-game UI's MCP side, `16`) reads `observe/`, `world/` (bridge, protocol), `document/`, `scope/`, `library/`, `formats/` and `core/`, and sends only display data to the game; it never mutates the world or a document, and no tool or op imports it. `server/index.ts` wires it in, like `observe/` and `world/`.
 - `server/` is a thin adapter: tool schemas plus calls into the layers above. All logic lives below it, so the same API powers the MCP tools, scripts and tests.
 
+## Own engine, other build tools as reference
+
+Autosketch keeps its own world-manipulation engine: selections, patterns, ops, brushes and scripts (`05`). It never runs another tool's command suite beside it, and it takes no build mod (WorldEdit, FAWE, Axiom, …) as a runtime dependency for ops. Established FOSS build mods (WorldEdit, FAWE, VoxelSniper, Litematica, Building Gadgets) serve as **reference** for command design, syntax and algorithms. Their syntax may be accepted as input and their algorithms ported, as long as the result stays one suite. Ported GPL-3.0 code keeps its notices (Autosketch is AGPL-3.0). Closed tools such as Axiom are reference for behaviour only, never for code. (Decided 2026-11-17.)
+
+Reasons:
+
+- **The ecosystem shares formats, not engines.** Every build mod implements its own geometry, selections and brushes. Tools interoperate through Minecraft's own block states and structure files and through schematic formats (`.schem`, `.litematic`, `.bp`, `.nbt`), which `08` already covers. The WorldEdit API is shared only among Bukkit/Paper plugins, not on NeoForge.
+- **WorldEdit's model suits a player, not an agent.** Its commands act on one session selection, clipboard and history per player, and many take direction from where the player stands or looks. Autosketch's tools take explicit arguments and keep no hidden session state.
+- **Its edits bypass the guarantees here.** Writing straight to the world loses the before-states that the patch precondition, the journal and the sync barrier need (`13`). Using WorldEdit as a library behind a capturing `Extent` would keep them, but it would split the op engine between the JVM and Node and force sandboxes (`11`) to be mirrored into the mod.
+
 ## Tech stack
 
 - TypeScript, ESM, Node ≥ 22.

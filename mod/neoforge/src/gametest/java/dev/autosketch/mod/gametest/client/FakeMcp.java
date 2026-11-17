@@ -80,6 +80,11 @@ public final class FakeMcp implements AutoCloseable {
 
     @Override
     public void close() {
+        // tsx runs the script in a child node process that can outlive tsx itself; an orphan keeps
+        // reconnecting (the CLI reconnects by design) and fights the next test's fake MCP. So stop
+        // the whole tree: children first, then tsx, and force whatever is left.
+        var children = process.descendants().toList();
+        children.forEach(ProcessHandle::destroy);
         process.destroy();
         try {
             if (!process.waitFor(5, TimeUnit.SECONDS)) process.destroyForcibly();
@@ -87,5 +92,6 @@ public final class FakeMcp implements AutoCloseable {
             process.destroyForcibly();
             Thread.currentThread().interrupt();
         }
+        children.forEach(ProcessHandle::destroyForcibly);
     }
 }

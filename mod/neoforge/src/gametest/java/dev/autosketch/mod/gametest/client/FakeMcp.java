@@ -24,6 +24,9 @@ public final class FakeMcp implements AutoCloseable {
     private final Process process;
     private final Path record;
 
+    /** {@code setsid} where the system has it (Linux, where the harness runs); null elsewhere. */
+    private static final Path SETSID = java.util.stream.Stream.of("/usr/bin/setsid", "/bin/setsid").map(Path::of).filter(Files::isExecutable).findFirst().orElse(null);
+
     private FakeMcp(Process process, Path record) {
         this.process = process;
         this.record = record;
@@ -41,7 +44,12 @@ public final class FakeMcp implements AutoCloseable {
         Path log = workDir.resolve("fake-mcp-" + suite + ".log");
         Files.writeString(scriptFile, script);
         Files.deleteIfExists(record);
-        Process p = new ProcessBuilder(tsx.toString(), cli.toString(), "--pairing", pairing.toString(), "--script", scriptFile.toString(), "--record", record.toString())
+        List<String> command = new ArrayList<>();
+        // Its own process group (setsid execs in place: the group id is the pid), so close() can
+        // stop every process tsx started, even one already orphaned.
+        if (SETSID != null) command.add(SETSID.toString());
+        command.addAll(List.of(tsx.toString(), cli.toString(), "--pairing", pairing.toString(), "--script", scriptFile.toString(), "--record", record.toString()));
+        Process p = new ProcessBuilder(command)
                 .directory(repo.toFile())
                 .redirectErrorStream(true)
                 .redirectOutput(ProcessBuilder.Redirect.appendTo(log.toFile()))
@@ -81,17 +89,43 @@ public final class FakeMcp implements AutoCloseable {
     @Override
     public void close() {
         // tsx runs the script in a child node process that can outlive tsx itself; an orphan keeps
-        // reconnecting (the CLI reconnects by design) and fights the next test's fake MCP. So stop
-        // the whole tree: children first, then tsx, and force whatever is left.
-        var children = process.descendants().toList();
-        children.forEach(ProcessHandle::destroy);
+        // reconnecting (the CLI reconnects by design) and fights the next test's fake MCP, each
+        // replacing the other every half second (seen in CI: a fake MCP closed right after it
+        // started, while tsx was spawning its child). So stop the whole process group when the CLI
+        // runs in its own (setsid), and in any case keep collecting tsx's children until it has
+        // exited, then force whatever is left.
+        java.util.Set<ProcessHandle> seen = new java.util.HashSet<>(process.descendants().toList());
+        signalGroup("-TERM");
+        seen.forEach(ProcessHandle::destroy);
         process.destroy();
+        long end = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         try {
-            if (!process.waitFor(5, TimeUnit.SECONDS)) process.destroyForcibly();
+            while (process.isAlive() && System.nanoTime() < end) {
+                process.descendants().forEach(h -> {
+                    if (seen.add(h)) h.destroy();
+                });
+                process.waitFor(10, TimeUnit.MILLISECONDS);
+            }
         } catch (InterruptedException e) {
-            process.destroyForcibly();
             Thread.currentThread().interrupt();
         }
-        children.forEach(ProcessHandle::destroyForcibly);
+        if (process.isAlive()) {
+            process.descendants().forEach(seen::add);
+            process.destroyForcibly();
+        }
+        seen.forEach(ProcessHandle::destroyForcibly);
+        signalGroup("-KILL");
+    }
+
+    /** Sends a signal to the CLI's process group (only when it was started with setsid). */
+    private void signalGroup(String signal) {
+        if (SETSID == null) return;
+        try {
+            new ProcessBuilder("kill", signal, "--", "-" + process.pid()).redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.DISCARD).start().waitFor(2, TimeUnit.SECONDS);
+        } catch (IOException e) {
+            // no kill(1): the descendant handling above still runs
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 }

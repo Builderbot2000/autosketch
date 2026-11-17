@@ -240,13 +240,27 @@ public final class ReplayClientTests {
     }
 
     /** The player at a known spot near the volume, the volume's server blocks reset to air, and the fake MCP on this test's script. */
+    /**
+     * The player at a known spot near the volume, the volume air on server and client, no replay
+     * open, and this test's fake MCP the one connected. The switch waits for the old MCP to be gone
+     * (the client sees offline) before starting the new one, then for the new one to receive the
+     * mod's hello: a link state still showing the old MCP as connected must not count.
+     */
     static void setUp(ClientTestSuite s, boolean withDelta) {
+        s.waitUntil("the previous fake MCP has paired (or exited), so stopping it stops its whole process tree",
+                () -> s.mcp() == null || !s.mcp().alive() || !s.mcp().received("hello").isEmpty(), 600);
+        s.step("stop the previous fake MCP", s::stopMcp);
+        s.waitUntil("offline, no replay open", () -> !LinkState.connected() && !ReplayClient.isOpen(), 400);
         s.step("fake MCP with the replay script", () -> s.startMcp(script(s, withDelta)));
-        s.waitUntil("connected", () -> LinkState.connected(), 400);
+        s.waitUntil("this test's MCP is paired and the client sees it", () -> !s.mcp().received("hello").isEmpty() && LinkState.connected(), 600);
         s.step("player near the volume; the volume is air on the server", () -> {
             s.command("tp @s 0.5 -60 0.5 -45 20");
             s.onServer(server -> {
                 var level = server.overworld();
+                // Stone then air in one tick: every position is marked changed, so the client gets
+                // air even where the server already had air (isolation from an earlier failed test).
+                for (BlockPos p : volume()) level.setBlockAndUpdate(p, Blocks.STONE.defaultBlockState());
+                level.setBlockAndUpdate(OUTSIDE, Blocks.STONE.defaultBlockState());
                 for (BlockPos p : volume()) level.setBlockAndUpdate(p, Blocks.AIR.defaultBlockState());
                 level.setBlockAndUpdate(OUTSIDE, Blocks.AIR.defaultBlockState());
                 return null;

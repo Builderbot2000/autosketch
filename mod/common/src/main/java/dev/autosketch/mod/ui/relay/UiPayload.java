@@ -19,10 +19,14 @@ import net.minecraft.resources.ResourceLocation;
  *       JSON, with the client's own number in {@code request} and no {@code player}.
  *   <li>{@link #LINK} (server to client): {@code data} is the link state's wire name
  *       ({@code offline}, {@code too_old}, {@code connected}; 16, *Mod side*).
+ *   <li>{@link #CLIENT_ACTION} (server to client): {@code data} is {@code <action> <args…>} in UTF-8,
+ *       something a server command hands to the client half ({@code replay.list},
+ *       {@code replay.open <log>}, {@code replay.close}, ...). Actions are mod-internal: both halves
+ *       ship in one jar, so they are not versioned.
  * </ul>
  */
 public record UiPayload(byte op, long id, int part, int parts, byte[] data) implements CustomPacketPayload {
-    public static final byte FRAME = 0, REQUEST = 1, LINK = 2;
+    public static final byte FRAME = 0, REQUEST = 1, LINK = 2, CLIENT_ACTION = 3;
 
     /** Requests from the client stay small; vanilla limits serverbound custom payloads to 32 KiB. */
     public static final int MAX_REQUEST_BYTES = 30_000;
@@ -40,6 +44,11 @@ public record UiPayload(byte op, long id, int part, int parts, byte[] data) impl
     /** The link state for the client half. */
     public static UiPayload link(String wire) {
         return new UiPayload(LINK, 0, 0, 0, wire.getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** A client action: {@code <action> <args…>}, for the client half's action registry. */
+    public static UiPayload action(String text) {
+        return new UiPayload(CLIENT_ACTION, 0, 0, 0, text.getBytes(StandardCharsets.UTF_8));
     }
 
     /** A client's request: its header JSON. */

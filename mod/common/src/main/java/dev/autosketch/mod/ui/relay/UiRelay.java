@@ -162,6 +162,14 @@ public final class UiRelay {
         if (t.hasChannel(p)) t.send(p, UiPayload.link(wire));
     }
 
+    /** A client action to one client ({@link UiPayload#CLIENT_ACTION}); false when the client lacks the channel. */
+    public boolean sendAction(ServerPlayer p, String text) {
+        Transport t = transport;
+        if (!t.hasChannel(p)) return false;
+        t.send(p, UiPayload.action(text));
+        return true;
+    }
+
     /** A player joined (or registered the channel): resend the last full state naming them. */
     public void playerJoined(ServerPlayer p) {
         Frame f = lastFull.get(p.getUUID());

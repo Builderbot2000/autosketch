@@ -1,0 +1,24 @@
+{
+  "description": "A prefab's blocks for the 3D preview: a 2×2×1 region, prefab-local, as the body",
+  "sender": "mcp",
+  "header": {
+    "type": "ui.result",
+    "request": 7,
+    "player": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    "ok": true,
+    "result": {
+      "size": [2, 2, 1]
+    }
+  },
+  "body": {
+    "bytes": "AxZtaW5lY3JhZnQ6c3RvbmVfYnJpY2tzMm1pbmVjcmFmdDpsYW50ZXJuW2hhbmdpbmc9ZmFsc2Usd2F0ZXJsb2dnZWQ9ZmFsc2VdDW1pbmVjcmFmdDphaXIAAAECAA==",
+    "preview": {
+      "palette": [
+        "minecraft:stone_bricks",
+        "minecraft:lantern[hanging=false,waterlogged=false]",
+        "minecraft:air"
+      ],
+      "states": [0, 0, 1, 2]
+    }
+  }
+}

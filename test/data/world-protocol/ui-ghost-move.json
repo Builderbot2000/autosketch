@@ -1,0 +1,20 @@
+{
+  "description": "An anchored document's ghost moved to a new origin: no sections, so no blocks resent (the body is an empty palette and an empty NBT list)",
+  "sender": "mcp",
+  "header": {
+    "type": "ui.ghost",
+    "players": [
+      "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+    ],
+    "ghost": "anchor-1",
+    "dimension": "minecraft:overworld",
+    "origin": [40, 70, 12],
+    "tint": "#b0b0b0",
+    "full": false,
+    "sections": []
+  },
+  "body": {
+    "palette": [],
+    "sections": []
+  }
+}

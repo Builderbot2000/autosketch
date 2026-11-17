@@ -519,3 +519,37 @@ export function decodeUpgradeBody(body: Uint8Array, kind: UpgradeData["kind"]): 
   done(r, "upgrade");
   return { kind, states, blockEntities, entities };
 }
+
+// ── in-game UI (feature `ui`) ──────────────────────────────────────────────────────────────────
+
+/** The box of a 16³ section (section coordinates, in whatever grid they belong to). */
+export function sectionBox(s: Vec3): WireBox {
+  return { min: [s[0] * 16, s[1] * 16, s[2] * 16], max: [s[0] * 16 + 15, s[1] * 16 + 15, s[2] * 16 + 15] };
+}
+
+/**
+ * States-only regions (`ui.ghost` sections, `replay.frame` keyframes, `library.preview`):
+ * `snapshot.result`'s layout with an always-empty NBT list. The palette comes back in first-use order.
+ */
+export function encodeStatesBody(palette: readonly string[], regions: readonly { box: WireBox; states: Uint32Array }[]): Uint8Array {
+  return encodeSnapshotBody(
+    palette,
+    regions.map((r) => ({ box: r.box, states: r.states, blockEntities: [] })),
+  );
+}
+
+export function decodeStatesBody(body: Uint8Array, boxes: readonly WireBox[], what: string): { palette: string[]; regions: { box: WireBox; states: Uint32Array }[] } {
+  const { palette, regions } = decodeSnapshotBody(body, boxes);
+  if (regions.some((r) => r.blockEntities.length)) throw new Error(`${what}: carries no NBT`);
+  return { palette, regions: regions.map((r) => ({ box: r.box, states: r.states })) };
+}
+
+/** A `library.preview` result body: one region, the prefab's local box from [0, 0, 0] to `size − 1`. */
+export function encodePreviewBody(palette: readonly string[], size: Vec3, states: Uint32Array): Uint8Array {
+  return encodeStatesBody(palette, [{ box: { min: [0, 0, 0], max: [size[0] - 1, size[1] - 1, size[2] - 1] }, states }]);
+}
+
+export function decodePreviewBody(body: Uint8Array, size: Vec3): { palette: string[]; states: Uint32Array } {
+  const { palette, regions } = decodeStatesBody(body, [{ min: [0, 0, 0], max: [size[0] - 1, size[1] - 1, size[2] - 1] }], "library.preview");
+  return { palette, states: regions[0]!.states };
+}

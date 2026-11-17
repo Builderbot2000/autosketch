@@ -1,0 +1,55 @@
+{
+  "description": "The whole overlay state, as sent to every player when the connection opens: two jobs, an open ask request, token totals with a cost, no refusal",
+  "sender": "mcp",
+  "header": {
+    "type": "ui.state",
+    "players": [
+      "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+      "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+    ],
+    "seq": 1,
+    "full": true,
+    "jobs": [
+      {
+        "id": "j1",
+        "colour": "#3fa7d6",
+        "brief": "east tower: four storeys, conical roof",
+        "dimension": "minecraft:overworld",
+        "work": {
+          "min": [120, 64, -190],
+          "max": [131, 87, -179]
+        },
+        "context": [
+          {
+            "min": [119, 63, -191],
+            "max": [132, 88, -178]
+          }
+        ]
+      },
+      {
+        "id": "j2",
+        "colour": "#f26419",
+        "brief": "courtyard paving",
+        "dimension": "minecraft:overworld",
+        "work": {
+          "min": [100, 64, -200],
+          "max": [119, 64, -181]
+        },
+        "context": []
+      }
+    ],
+    "request": {
+      "id": 7,
+      "mode": "ask",
+      "text": "how tall should the east tower be?"
+    },
+    "tokens": {
+      "input": 18234,
+      "output": 2210,
+      "cacheRead": 120400,
+      "cacheCreation": 5320,
+      "cost": 0.4825
+    },
+    "refusal": null
+  }
+}

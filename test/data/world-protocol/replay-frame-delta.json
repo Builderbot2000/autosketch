@@ -1,0 +1,43 @@
+{
+  "description": "A forward delta from step 12 to 13: two positions changed, and the strip carries a gap note for the steps after it",
+  "sender": "mcp",
+  "header": {
+    "type": "replay.frame",
+    "players": [
+      "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+    ],
+    "replay": "r1",
+    "step": 13,
+    "steps": 40,
+    "keyframe": false,
+    "from": 12,
+    "dimension": "minecraft:overworld",
+    "origin": [100, 65, -200],
+    "size": [4, 1, 2],
+    "count": 2,
+    "time": "2026-11-17T10:15:31.000Z",
+    "hud": {
+      "call": "set_blocks: 2 blocks",
+      "brief": null,
+      "note": "no deltas recorded for steps 14 to 16; the nearest time-lapse snapshot is at step 17"
+    },
+    "jobs": [],
+    "flashes": []
+  },
+  "body": {
+    "palette": [
+      "minecraft:oak_planks",
+      "minecraft:air"
+    ],
+    "blocks": [
+      {
+        "pos": [100, 65, -200],
+        "state": "minecraft:oak_planks"
+      },
+      {
+        "pos": [103, 65, -199],
+        "state": "minecraft:air"
+      }
+    ]
+  }
+}

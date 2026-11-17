@@ -1,7 +1,8 @@
 import { gunzipSync } from "node:zlib";
 import type { Compound } from "prismarine-nbt";
-import type { Message, PatchAck, PatchBlock, Sender, SnapshotResult, SurfaceLayer, SurfaceResult, WireArea, WorldBlock } from "../../../src/world/protocol/messages.js";
+import type { Message, PatchAck, PatchBlock, Sender, SnapshotResult, SurfaceLayer, SurfaceResult, WireArea, WireBox, WorldBlock } from "../../../src/world/protocol/messages.js";
 import { splitFrame } from "../../../src/world/protocol/codec.js";
+import { decodePreviewBody } from "../../../src/world/protocol/body.js";
 import { parseSnbt, toSnbt } from "../../../src/world/protocol/snbt.js";
 
 /**
@@ -60,6 +61,18 @@ export function sidecarOf(description: string, sender: Sender, m: Message, frame
     case "upgrade":
     case "upgrade.result":
       out.body = m.kind === "structure" ? { structure: toSnbt(m.structure) } : { states: m.states, blockEntities: m.blockEntities.map(toSnbt), entities: m.entities.map(toSnbt) };
+      break;
+    case "ui.ghost":
+      out.body = { palette: m.palette, sections: m.sections.map((s) => ({ section: s.section, states: Array.from(s.states) })) };
+      break;
+    case "replay.frame":
+      out.body = m.keyframe ? { palette: m.palette, regions: m.regions.map((r) => ({ states: Array.from(r.states) })) } : { palette: palette(m.blocks.map((b) => b.state)), blocks: m.blocks };
+      break;
+    case "ui.result":
+      if (m.ok && m.body) {
+        const size = m.result.size as [number, number, number] | undefined;
+        out.body = { bytes: Buffer.from(m.body).toString("base64"), ...(size ? { preview: (({ palette, states }) => ({ palette, states: Array.from(states) }))(decodePreviewBody(m.body, size)) } : {}) };
+      }
       break;
     case "snapshot.result":
       if ("kind" in m) {
@@ -134,6 +147,20 @@ export function messageOf(s: Sidecar): Message {
       if (h.type === "upgrade") return { type: "upgrade", id: h.id as number, from: h.from as number, ...data };
       return { type: "upgrade.result", id: h.id as number, to: h.to as number, ...(h.failed ? { failed: h.failed as number } : {}), ...data };
     }
+    case "ui.ghost": {
+      const { palette: _p, sections: _s, ...rest } = h;
+      return { ...(rest as object), palette: b.palette, sections: (b.sections as { section: Pos; states: number[] }[]).map((x) => ({ section: x.section, states: Uint32Array.from(x.states) })) } as Message;
+    }
+    case "replay.frame":
+      if (h.keyframe) {
+        const { regions, ...rest } = h;
+        return { ...(rest as object), palette: b.palette, regions: (regions as WireBox[]).map((box, i) => ({ box, states: Uint32Array.from(b.regions[i].states as number[]) })) } as unknown as Message;
+      } else {
+        const { origin: _o, size: _s, count: _c, ...rest } = h;
+        return { ...(rest as object), blocks: b.blocks } as Message;
+      }
+    case "ui.result":
+      return { ...(h as object), ...(s.body ? { body: new Uint8Array(Buffer.from(b.bytes as string, "base64")) } : {}) } as Message;
     case "hashes.result":
       return { type: "hashes.result", id: h.id as number, sections: (h.sections as [number, number, number, string][]).map(([x, y, z, hash]) => ({ section: [x, y, z], hash })) };
     default:

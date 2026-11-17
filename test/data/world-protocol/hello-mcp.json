@@ -91,7 +91,8 @@
       "build"
     ],
     "features": [
-      "prompt.close"
+      "prompt.close",
+      "ui"
     ]
   }
 }

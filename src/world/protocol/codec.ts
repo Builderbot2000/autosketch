@@ -12,6 +12,9 @@ import {
   encodeSnapshotBody,
   encodeSurfaceBody,
   encodeUpgradeBody,
+  decodeStatesBody,
+  encodeStatesBody,
+  sectionBox,
   type Grid,
 } from "./body.js";
 import {
@@ -19,7 +22,13 @@ import {
   MAX_FRAME,
   MAX_HEADER,
   PROMPT_REFUSALS,
+  REPLAY_MARKERS,
   REQUEST_MODES,
+  UI_ERRORS,
+  UI_MCP_TYPES,
+  type UiFlash,
+  type UiJob,
+  type UiState,
   type GameContext,
   type Message,
   type McpMessage,
@@ -149,7 +158,64 @@ function split(m: Message): { header: Record<string, unknown>; body: Uint8Array 
       return { header: { type: m.type, text: m.text, player: m.player }, body: none };
     case "chat":
       return { header: { type: m.type, request: m.request, player: m.player, kind: m.kind, lines: [...m.lines] }, body: none };
+    case "ui.state": {
+      const changed = <T>(k: string, v: T | null | undefined) => (m.full || v !== undefined ? { [k]: v ?? null } : {});
+      if (m.full && m.removed?.length) throw new ProtocolError("ui.state: a full state removes nothing");
+      if (m.full && m.jobs === undefined) throw new ProtocolError("ui.state: a full state lists its jobs");
+      return {
+        header: {
+          type: m.type,
+          players: [...m.players],
+          seq: m.seq,
+          full: m.full,
+          ...(m.full || m.jobs?.length ? { jobs: (m.jobs ?? []).map(uiJob) } : {}),
+          ...(!m.full && m.removed?.length ? { removed: [...m.removed] } : {}),
+          ...changed("request", m.request && { id: m.request.id, mode: m.request.mode, text: m.request.text }),
+          ...changed("tokens", m.tokens && { input: m.tokens.input, output: m.tokens.output, cacheRead: m.tokens.cacheRead, cacheCreation: m.tokens.cacheCreation, ...(m.tokens.cost !== undefined ? { cost: m.tokens.cost } : {}) }),
+          ...changed("refusal", m.refusal && { code: m.refusal.code, text: m.refusal.text }),
+        },
+        body: none,
+      };
+    }
+    case "ui.flash":
+      if (!m.flashes.length) throw new ProtocolError("ui.flash: no flashes");
+      return { header: { type: m.type, players: [...m.players], flashes: m.flashes.map(uiFlash) }, body: none };
+    case "ui.ghost":
+      return {
+        header: { type: m.type, players: [...m.players], ghost: m.ghost, dimension: m.dimension, origin: [...m.origin], tint: m.tint, full: m.full, sections: m.sections.map((s) => [s.section[0], s.section[1], s.section[2]]) },
+        body: encodeStatesBody(
+          m.palette,
+          m.sections.map((s) => ({ box: sectionBox(s.section), states: s.states })),
+        ),
+      };
+    case "ui.ghost.clear":
+      return { header: { type: m.type, players: [...m.players], ghost: m.ghost }, body: none };
+    case "replay.frame": {
+      const head = { type: m.type, players: [...m.players], replay: m.replay, step: m.step, steps: m.steps, keyframe: m.keyframe };
+      const tail = { time: m.time, hud: { call: m.hud.call, brief: m.hud.brief, ...(m.hud.note !== undefined ? { note: m.hud.note } : {}) }, jobs: m.jobs.map(uiJob), flashes: m.flashes.map(uiFlash) };
+      if (m.keyframe)
+        return {
+          header: { ...head, dimension: m.dimension, regions: m.regions.map((r) => box(r.box)), ...tail, markers: m.markers.map((k) => ({ step: k.step, kind: k.kind, label: k.label })) },
+          body: encodeStatesBody(m.palette, m.regions),
+        };
+      const e = encodeDirtyBody(m.blocks);
+      return { header: { ...head, from: m.from, dimension: m.dimension, ...grid(e.grid), count: m.blocks.length, ...tail }, body: e.body };
+    }
+    case "ui.request":
+      return { header: { type: m.type, request: m.request, player: player(m.player), kind: m.kind, args: m.args }, body: none };
+    case "ui.result":
+      if (m.ok) return { header: { type: m.type, request: m.request, player: m.player, ok: true, result: m.result }, body: m.body ?? none };
+      return { header: { type: m.type, request: m.request, player: m.player, ok: false, error: m.error, message: m.message }, body: none };
   }
+}
+
+function uiJob(j: UiJob): UiJob {
+  return { id: j.id, colour: j.colour, brief: j.brief, dimension: j.dimension, work: box(j.work), context: j.context.map(box) };
+}
+
+function uiFlash(f: UiFlash): UiFlash {
+  if (!f.boxes.length) throw new ProtocolError(`ui flash for ${f.job}: no boxes`);
+  return { job: f.job, colour: f.colour, dimension: f.dimension, boxes: f.boxes.map(box) };
 }
 
 function player(p: PlayerRef): PlayerRef {
@@ -229,9 +295,9 @@ export function decodeFrame(frame: Uint8Array, sender: Sender): Message {
   return decodeMessage(frame.subarray(4), sender);
 }
 
-const MCP_TYPES = new Set(["hello", "error", "volumes.extend", "volumes.set", "hashes", "snapshot", "patch", "registry", "upgrade", "prompt.result", "notice", "chat"]);
-const MOD_TYPES = new Set(["hello", "error", "volumes", "hashes.result", "snapshot.result", "patch.ack", "dirty", "prompt", "prompt.close", "registry.result", "upgrade.result"]);
-const BODY_TYPES = new Set(["snapshot.result", "patch", "patch.ack", "dirty", "registry.result", "upgrade", "upgrade.result"]);
+const MCP_TYPES = new Set(["hello", "error", "volumes.extend", "volumes.set", "hashes", "snapshot", "patch", "registry", "upgrade", "prompt.result", "notice", "chat", ...UI_MCP_TYPES]);
+const MOD_TYPES = new Set(["hello", "error", "volumes", "hashes.result", "snapshot.result", "patch.ack", "dirty", "prompt", "prompt.close", "registry.result", "upgrade.result", "ui.request"]);
+const BODY_TYPES = new Set(["snapshot.result", "patch", "patch.ack", "dirty", "registry.result", "upgrade", "upgrade.result", "ui.ghost", "replay.frame", "ui.result"]);
 
 function decode(type: string, v: Fields, body: Uint8Array, sender: Sender): Message {
   if (!(sender === "mcp" ? MCP_TYPES : MOD_TYPES).has(type)) throw new ProtocolError(`unknown message type "${type}" from the ${sender === "mcp" ? "MCP" : "mod"}`);
@@ -388,8 +454,99 @@ function decode(type: string, v: Fields, body: Uint8Array, sender: Sender): Mess
           return l;
         }),
       };
+    case "ui.state": {
+      const players = v.players(), seq = v.id("seq"), full = v.bool("full");
+      const out: UiState = { type, players, seq, full };
+      if (full || v.has("jobs")) out.jobs = v.arr("jobs").map((_, i) => uiJobOf(v.objAt("jobs", i)));
+      if (v.has("removed")) {
+        if (full) throw new ProtocolError("ui.state: a full state removes nothing");
+        out.removed = v.strings("removed");
+      }
+      if (full || v.has("request")) {
+        if (v.nullable("request")) {
+          const r = v.obj("request");
+          out.request = { id: r.id("id"), mode: r.oneOf("mode", REQUEST_MODES), text: r.str("text") };
+        } else out.request = null;
+      }
+      if (full || v.has("tokens")) {
+        if (v.nullable("tokens")) {
+          const t = v.obj("tokens");
+          out.tokens = { input: t.int("input"), output: t.int("output"), cacheRead: t.int("cacheRead"), cacheCreation: t.int("cacheCreation"), ...(t.has("cost") ? { cost: t.num("cost") } : {}) };
+        } else out.tokens = null;
+      }
+      if (full || v.has("refusal")) {
+        if (v.nullable("refusal")) {
+          const r = v.obj("refusal");
+          out.refusal = { code: r.str("code"), text: r.str("text") };
+        } else out.refusal = null;
+      }
+      return out;
+    }
+    case "ui.flash": {
+      const flashes = v.arr("flashes").map((_, i) => uiFlashOf(v.objAt("flashes", i)));
+      if (!flashes.length) throw new ProtocolError("ui.flash: flashes must not be empty");
+      return { type, players: v.players(), flashes };
+    }
+    case "ui.ghost": {
+      const players = v.players(), ghost = v.str("ghost"), dimension = v.str("dimension"), origin = v.vec3("origin"), tint = v.colour("tint"), full = v.bool("full");
+      const sections = v.arr("sections").map((_, i) => v.vec3At("sections", i));
+      for (let i = 1; i < sections.length; i++) {
+        const a = sections[i - 1]!, b = sections[i]!;
+        const cmp = a[1] - b[1] || a[2] - b[2] || a[0] - b[0];
+        if (cmp >= 0) throw new ProtocolError("ui.ghost: sections must be unique and ascending by sy, then sz, then sx");
+      }
+      const { palette, regions } = decodeStatesBody(body, sections.map(sectionBox), "ui.ghost");
+      return { type, players, ghost, dimension, origin, tint, full, palette, sections: sections.map((s, i) => ({ section: s, states: regions[i]!.states })) };
+    }
+    case "ui.ghost.clear":
+      return { type, players: v.players(), ghost: v.str("ghost") };
+    case "replay.frame": {
+      const players = v.players(), replay = v.str("replay"), step = v.int("step"), steps = v.int("steps"), keyframe = v.bool("keyframe");
+      const dimension = v.str("dimension");
+      const h = v.obj("hud");
+      const hud = { call: h.str("call"), brief: h.nullable("brief") ? h.str("brief") : null, ...(h.has("note") ? { note: h.str("note") } : {}) };
+      const tail = { time: v.str("time"), hud, jobs: v.arr("jobs").map((_, i) => uiJobOf(v.objAt("jobs", i))), flashes: v.arr("flashes").map((_, i) => uiFlashOf(v.objAt("flashes", i))) };
+      if (keyframe) {
+        if (v.has("from") || v.has("origin")) throw new ProtocolError("replay.frame: a keyframe has regions, not from, origin or size");
+        const { palette, regions } = decodeStatesBody(body, v.boxes("regions"), "replay.frame");
+        const markers = v.arr("markers").map((_, i) => {
+          const k = v.objAt("markers", i);
+          return { step: k.int("step"), kind: k.oneOf("kind", REPLAY_MARKERS), label: k.str("label") };
+        });
+        return { type, players, replay, step, steps, keyframe, dimension, palette, regions, ...tail, markers };
+      }
+      if (v.has("regions") || v.has("markers")) throw new ProtocolError("replay.frame: regions and markers belong to a keyframe");
+      const from = v.int("from");
+      const blocks = decodeDirtyBody(body, v.grid(), v.int("count"));
+      if (blocks.some((b) => b.nbt)) throw new ProtocolError("replay.frame: carries no NBT");
+      return { type, players, replay, step, steps, keyframe, from, dimension, blocks: blocks.map((b) => ({ pos: b.pos, state: b.state })), ...tail };
+    }
+    case "ui.request": {
+      const args = v.raw("args");
+      if (typeof args !== "object" || args === null || Array.isArray(args)) throw new ProtocolError("args must be an object");
+      return { type, request: v.id("request"), player: playerRef(v.obj("player")), kind: v.str("kind"), args: args as Record<string, unknown> };
+    }
+    case "ui.result": {
+      const request = v.id("request"), player = uuid(v.str("player"));
+      if (v.bool("ok")) {
+        const result = v.raw("result");
+        if (typeof result !== "object" || result === null || Array.isArray(result)) throw new ProtocolError("result must be an object");
+        return { type, request, player, ok: true, result: result as Record<string, unknown>, ...(body.length ? { body } : {}) };
+      }
+      if (body.length) throw new ProtocolError("a failed ui.result carries no body");
+      return { type, request, player, ok: false, error: v.oneOf("error", UI_ERRORS), message: v.str("message") };
+    }
   }
   throw new ProtocolError(`unknown message type "${type}"`);
+}
+
+function uiJobOf(f: Fields): UiJob {
+  return { id: f.str("id"), colour: f.colour("colour"), brief: f.str("brief"), dimension: f.str("dimension"), work: f.box("work"), context: f.arr("context").map((_, i) => f.boxAt("context", i)) };
+}
+
+function uiFlashOf(f: Fields): UiFlash {
+  const boxes = f.boxes("boxes");
+  return { job: f.str("job"), colour: f.colour("colour"), dimension: f.str("dimension"), boxes };
 }
 
 function uuid(s: string): string {
@@ -510,6 +667,25 @@ class Fields {
     const { min, max } = o as WireArea;
     if (min[0] > max[0] || min[1] > max[1]) throw new ProtocolError(`${this.name(k)}: min must not exceed max on either axis`);
     return { min: [min[0], min[1]], max: [max[0], max[1]] };
+  }
+
+  /** A `players` list: non-empty, lowercase hyphenated UUIDs (*In-game UI*). */
+  players(): string[] {
+    const list = this.strings("players");
+    if (!list.length) this.fail("players", "a non-empty list of UUIDs");
+    return list.map(uuid);
+  }
+
+  colour(k: string): string {
+    const v = this.o[k];
+    if (typeof v !== "string" || !/^#[0-9a-f]{6}$/.test(v)) this.fail(k, '"#rrggbb", lowercase');
+    return v;
+  }
+
+  objAt(k: string, i: number): Fields {
+    const v = this.arr(k)[i];
+    if (typeof v !== "object" || v === null || Array.isArray(v)) throw new ProtocolError(`${this.name(k)}[${i}] must be an object`);
+    return new Fields(v as Record<string, unknown>, `${this.name(k)}[${i}]`);
   }
 
   obj(k: string): Fields {

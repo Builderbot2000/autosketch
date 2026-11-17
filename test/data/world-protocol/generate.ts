@@ -7,12 +7,13 @@
  */
 import { createHash } from "node:crypto";
 import { writeFileSync, mkdirSync } from "node:fs";
-import { gzipSync } from "node:zlib";
+import { deflateSync, gzipSync } from "node:zlib";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { decodeFrame, encodeMessage } from "../../../src/world/protocol/codec.js";
+import { decodeFrame, encodeMessage, splitFrame } from "../../../src/world/protocol/codec.js";
+import { encodePreviewBody } from "../../../src/world/protocol/body.js";
 import { canonicalNbt, DEFAULT_VOLATILE, nbtHash, sectionHash } from "../../../src/world/protocol/hash.js";
-import { MCP_FEATURES, MOD_FEATURES, REQUEST_MODES, type Message, type PatchBlock, type Sender, type VolatileList, type WireBox } from "../../../src/world/protocol/messages.js";
+import { MCP_FEATURES, MOD_FEATURES, REQUEST_MODES, UI_PART_BYTES, type Message, type PatchBlock, type Sender, type UiGhost, type UiJob, type VolatileList, type WireBox } from "../../../src/world/protocol/messages.js";
 import { bytesToHex } from "../../../src/world/protocol/bytes.js";
 import { parseSnbt, toSnbt as snbtOf } from "../../../src/world/protocol/snbt.js";
 import { sidecarOf } from "./sidecar.js";
@@ -427,6 +428,266 @@ vector("upgrade-result-failed", "mod", "An upgrade where the fixer threw on one 
     kind: "structure",
     structure: S('{DataVersion:3955,size:[1,1,1],palette:[{Name:"minecraft:dirt_path"}],blocks:[{pos:[0,0,0],state:0}],entities:[]}'),
   });
+}
+
+// ── in-game UI (feature ui, added within protocol 3) ───────────────────────────────────────────
+{
+  const players = [UUID_KEV, UUID_ALEX];
+  const jobA: UiJob = { id: "j1", colour: "#3fa7d6", brief: "east tower: four storeys, conical roof", dimension: OW, work: { min: [120, 64, -190], max: [131, 87, -179] }, context: [{ min: [119, 63, -191], max: [132, 88, -178] }] };
+  const jobB: UiJob = { id: "j2", colour: "#f26419", brief: "courtyard paving", dimension: OW, work: { min: [100, 64, -200], max: [119, 64, -181] }, context: [] };
+  vector("ui-state-full", "mcp", "The whole overlay state, as sent to every player when the connection opens: two jobs, an open ask request, token totals with a cost, no refusal", {
+    type: "ui.state",
+    players,
+    seq: 1,
+    full: true,
+    jobs: [jobA, jobB],
+    request: { id: 7, mode: "ask", text: "how tall should the east tower be?" },
+    tokens: { input: 18234, output: 2210, cacheRead: 120400, cacheCreation: 5320, cost: 0.4825 },
+    refusal: null,
+  });
+  vector("ui-state-changes", "mcp", "Changes since seq 1: job j1 changed (its brief) and is sent whole, j2 ended, the request closed, a refusal happened; tokens unchanged (absent)", {
+    type: "ui.state",
+    players,
+    seq: 2,
+    full: false,
+    jobs: [{ ...jobA, brief: "east tower: five storeys, conical roof" }],
+    removed: ["j2"],
+    request: null,
+    refusal: { code: "outside_work_volume", text: "set_blocks in j1 reached outside its work volume" },
+  });
+  vector("ui-state-resync", "mcp", "A full state answering one player's resync: only that player, the current seq without taking a new one, no jobs, no token figures yet", {
+    type: "ui.state",
+    players: [UUID_ALEX],
+    seq: 2,
+    full: true,
+    jobs: [],
+    request: null,
+    tokens: null,
+    refusal: { code: "outside_work_volume", text: "set_blocks in j1 reached outside its work volume" },
+  });
+  vector("ui-flash", "mcp", "Boxes changed in one 250 ms window: two boxes by job j1, one by the root", {
+    type: "ui.flash",
+    players,
+    flashes: [
+      { job: "j1", colour: "#3fa7d6", dimension: OW, boxes: [{ min: [120, 64, -190], max: [131, 64, -179] }, { min: [125, 65, -185], max: [125, 70, -185] }] },
+      { job: "base", colour: "#9b9b9b", dimension: OW, boxes: [{ min: [100, 63, -200], max: [100, 63, -200] }] },
+    ],
+  });
+  const section = (f: (i: number) => number) => Uint32Array.from({ length: 4096 }, (_, i) => f(i));
+  const STONE = "minecraft:stone_bricks";
+  vector("ui-ghost-full", "mcp", "A sandbox's whole ghost: two sections of its local grid (a floor in the first, the corner posts in the second), job j1's tint", {
+    type: "ui.ghost",
+    players,
+    ghost: "j1",
+    dimension: OW,
+    origin: [120, 64, -190],
+    tint: "#3fa7d6",
+    full: true,
+    palette: [AIR, STONE, STAIRS],
+    sections: [
+      { section: [0, 0, 0], states: section((i) => (i < 256 ? 1 : i < 512 && i % 16 === 0 ? 2 : 0)) },
+      { section: [0, 1, 0], states: section((i) => ((i & 15) === 0 && ((i >> 4) & 15) === 0 ? 1 : 0)) },
+    ],
+  });
+  vector("ui-ghost-update", "mcp", "A partial update: one section replaced (all air now, so the client frees it); the ghost's other sections stay", {
+    type: "ui.ghost",
+    players,
+    ghost: "j1",
+    dimension: OW,
+    origin: [120, 64, -190],
+    tint: "#3fa7d6",
+    full: false,
+    palette: [AIR],
+    sections: [{ section: [0, 1, 0], states: section(() => 0) }],
+  });
+  vector("ui-ghost-move", "mcp", "An anchored document's ghost moved to a new origin: no sections, so no blocks resent (the body is an empty palette and an empty NBT list)", {
+    type: "ui.ghost",
+    players: [UUID_KEV],
+    ghost: "anchor-1",
+    dimension: OW,
+    origin: [40, 70, 12],
+    tint: "#b0b0b0",
+    full: false,
+    palette: [],
+    sections: [],
+  });
+  vector("ui-ghost-clear", "mcp", "Job j1 merged: its ghost goes", { type: "ui.ghost.clear", players, ghost: "j1" });
+  const replayBox: WireBox = { min: [100, 64, -200], max: [103, 65, -199] };
+  vector("replay-frame-keyframe", "mcp", "The first frame of a replay: every position of the replayed volume at step 12, with the strip's markers, one open job and the step's flash", {
+    type: "replay.frame",
+    players: [UUID_KEV],
+    replay: "r1",
+    step: 12,
+    steps: 40,
+    keyframe: true,
+    dimension: OW,
+    palette: [AIR, STONE, "minecraft:oak_planks"],
+    regions: [{ box: replayBox, states: Uint32Array.from([1, 1, 1, 1, 1, 2, 2, 1, 0, 0, 0, 0, 0, 2, 0, 0]) }],
+    time: "2026-11-17T10:15:30.250Z",
+    hud: { call: "fill: 6 blocks", brief: "courtyard paving" },
+    jobs: [jobB],
+    flashes: [{ job: "j2", colour: "#f26419", dimension: OW, boxes: [{ min: [100, 64, -200], max: [103, 64, -199] }] }],
+    markers: [
+      { step: 3, kind: "checkpoint", label: "before paving" },
+      { step: 5, kind: "fork", label: "j2: courtyard paving" },
+      { step: 18, kind: "refusal", label: "outside_work_volume" },
+      { step: 30, kind: "merge", label: "j2" },
+    ],
+  });
+  vector("replay-frame-delta", "mcp", "A forward delta from step 12 to 13: two positions changed, and the strip carries a gap note for the steps after it", {
+    type: "replay.frame",
+    players: [UUID_KEV],
+    replay: "r1",
+    step: 13,
+    steps: 40,
+    keyframe: false,
+    from: 12,
+    dimension: OW,
+    blocks: [
+      { pos: [100, 65, -200], state: "minecraft:oak_planks" },
+      { pos: [103, 65, -199], state: AIR },
+    ],
+    time: "2026-11-17T10:15:31.000Z",
+    hud: { call: "set_blocks: 2 blocks", brief: null, note: "no deltas recorded for steps 14 to 16; the nearest time-lapse snapshot is at step 17" },
+    jobs: [],
+    flashes: [],
+  });
+  vector("ui-request-resync", "mod", "A client fell behind (a gap in seq) and asks for the whole state again", { type: "ui.request", request: 1, player: { name: "Alex", uuid: UUID_ALEX }, kind: "resync", args: {} });
+  vector("ui-request-settings-set", "mod", "Save one setting, with the config.toml hash the screen read", {
+    type: "ui.request",
+    request: 2,
+    player: { name: "Kev", uuid: UUID_KEV },
+    kind: "settings.set",
+    args: { key: "scope.maxDepth", value: "2", hash: "5d41402abc4b2a76" },
+  });
+  vector("ui-request-ghost-anchor", "mod", "Anchor the open unlinked document's ghost at the player's position (/autosketch ghost here)", {
+    type: "ui.request",
+    request: 3,
+    player: { name: "Kev", uuid: UUID_KEV },
+    kind: "ghost.anchor",
+    args: { dimension: OW, pos: [40, 70, 12] },
+  });
+  vector("ui-result-settings-list", "mcp", "Settings rows for the settings screen: one toggle and one number field, with sources, an overridden launch value and a restart-needed mark", {
+    type: "ui.result",
+    request: 4,
+    player: UUID_KEV,
+    ok: true,
+    result: {
+      path: "/home/kev/.autosketch/config.toml",
+      hash: "5d41402abc4b2a76",
+      warnings: [],
+      unknown: [],
+      settings: [
+        { key: "library.starter", group: "Library", summary: "Include the starter library", applies: "restart", accepts: "true or false", control: { type: "toggle" }, default: true, value: true, text: "true", source: { kind: "default", label: "default" }, restartNeeded: false },
+        {
+          key: "scope.maxDepth",
+          group: "Scopes",
+          summary: "How deep scoped jobs may nest",
+          applies: "restart",
+          accepts: "an integer from 0 to 3",
+          control: { type: "number", min: 0, max: 3 },
+          default: 1,
+          value: 2,
+          text: "2",
+          source: { kind: "file", label: "config.toml" },
+          overrides: { label: "command line", raw: "1", same: false, note: "launch command sets scope.maxDepth=1; ignored, config.toml says 2" },
+          restartNeeded: true,
+          running: 1,
+        },
+      ],
+    },
+  });
+  vector("ui-result-conflict", "mcp", "A settings write refused: config.toml changed since the screen read it", {
+    type: "ui.result",
+    request: 2,
+    player: UUID_KEV,
+    ok: false,
+    error: "conflict",
+    message: "config.toml changed since the settings screen read it; reloading",
+  });
+  vector("ui-result-not-allowed", "mcp", "A request from a player who isn't on the allowlist", {
+    type: "ui.result",
+    request: 5,
+    player: UUID_ALEX,
+    ok: false,
+    error: "not_allowed",
+    message: "Alex isn't on world.promptPlayers, so can't use the Autosketch screens",
+  });
+  vector("ui-result-thumbnail", "mcp", "A prefab thumbnail: a synthetic 2×2 PNG as the body", {
+    type: "ui.result",
+    request: 6,
+    player: UUID_KEV,
+    ok: true,
+    result: { format: "png", width: 2, height: 2 },
+    body: tinyPng(),
+  });
+  vector("ui-result-preview", "mcp", "A prefab's blocks for the 3D preview: a 2×2×1 region, prefab-local, as the body", {
+    type: "ui.result",
+    request: 7,
+    player: UUID_KEV,
+    ok: true,
+    result: { size: [2, 2, 1] },
+    body: encodePreviewBody([STONE, AIR, "minecraft:lantern[hanging=false,waterlogged=false]"], [2, 2, 1], Uint32Array.from([0, 0, 2, 1])),
+  });
+
+  // relay-parts: no .bin (it would be over a megabyte); both sides rebuild the frame from the rule.
+  const sections: UiGhost["sections"] = [];
+  let k = 0;
+  for (let sy = 0; sy < 2; sy++)
+    for (let sz = 0; sz < 10; sz++)
+      for (let sx = 0; sx < 13; sx++) {
+        const kk = k++;
+        sections.push({ section: [sx, sy, sz], states: section((i) => (i + kk) % 3) });
+      }
+  const big: UiGhost = { type: "ui.ghost", players: [UUID_KEV], ghost: "j9", dimension: OW, origin: [0, 64, 0], tint: "#3fa7d6", full: true, palette: [AIR, "minecraft:stone", "minecraft:glass"], sections };
+  const frame = encodeMessage(big);
+  const parts: { bytes: number; sha256: string }[] = [];
+  for (let p = 0; p < frame.length; p += UI_PART_BYTES) {
+    const part = frame.subarray(p, Math.min(frame.length, p + UI_PART_BYTES));
+    parts.push({ bytes: part.length, sha256: createHash("sha256").update(part).digest("hex") });
+  }
+  const { header } = splitFrame(frame.subarray(4));
+  writeFileSync(
+    join(dir, "relay-parts.json"),
+    pretty({
+      description: "A ghost frame over 1,000,000 bytes and the parts the relay splits it into (13, *Relay to the client*). No .bin: rebuild the frame from the rule, check its length and hash, then split it",
+      sender: "mcp",
+      header,
+      generated:
+        'Sections in header order: for sy in 0..1, sz in 0..9, sx in 0..12 (sy outermost, sx innermost), the k-th section (k from 0) holding at local index i (0..4095, x fastest, then z, then y) the state ["minecraft:air", "minecraft:stone", "minecraft:glass"][(i + k) % 3]. No NBT.',
+      frame: { bytes: frame.length, sha256: createHash("sha256").update(frame).digest("hex") },
+      partBytes: UI_PART_BYTES,
+      parts,
+    }),
+  );
+}
+
+/** A synthetic 2×2 RGB PNG (two colours), built here so nothing comes from the game's assets. */
+function tinyPng(): Uint8Array {
+  const crcTable = Array.from({ length: 256 }, (_, n) => {
+    let c = n;
+    for (let j = 0; j < 8; j++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    return c >>> 0;
+  });
+  const crc = (b: Buffer) => {
+    let c = 0xffffffff;
+    for (const x of b) c = crcTable[(c ^ x) & 0xff]! ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const chunk = (type: string, data: Buffer) => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const td = Buffer.concat([Buffer.from(type, "ascii"), data]);
+    const c = Buffer.alloc(4);
+    c.writeUInt32BE(crc(td));
+    return Buffer.concat([len, td, c]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(2, 0);
+  ihdr.writeUInt32BE(2, 4);
+  ihdr.set([8, 2, 0, 0, 0], 8);
+  const raw = Buffer.from([0, 0x3f, 0xa7, 0xd6, 0xf2, 0x64, 0x19, 0, 0xf2, 0x64, 0x19, 0x3f, 0xa7, 0xd6]);
+  return new Uint8Array(Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]));
 }
 
 // ── hashing ────────────────────────────────────────────────────────────────────────────────────

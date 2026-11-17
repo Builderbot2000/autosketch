@@ -28,7 +28,8 @@ public final class FrameCodec {
     public static final int MAX_HEADER = 1024 * 1024;
 
     /** The only messages that carry a body ({@code dirty} only when not {@code everything}). */
-    public static final Set<String> BODY_TYPES = Set.of("patch", "snapshot.result", "patch.ack", "dirty", "registry.result", "upgrade", "upgrade.result");
+    public static final Set<String> BODY_TYPES = Set.of("patch", "snapshot.result", "patch.ack", "dirty", "registry.result", "upgrade", "upgrade.result",
+            "ui.ghost", "replay.frame", "ui.result");
 
     /** The complete frame, length prefix included. */
     public static byte[] encode(Frame frame) {

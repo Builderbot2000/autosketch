@@ -148,6 +148,11 @@ world (the save)
 | mod → MCP | `registry.result` | the registry report (`14`), or `unchanged` |
 | MCP → mod | `upgrade` | a schematic's data and its DataVersion: palette states, block-entity and entity NBT, or a whole structure (protocol 3) |
 | mod → MCP | `upgrade.result` | the same data through the game's data fixer, at the running DataVersion |
+| MCP → mod | `ui.state`, `ui.flash` | players; overlay state (jobs, request, tokens, refusal), full or changes; boxes that just changed (`16`; feature `ui`) |
+| MCP → mod | `ui.ghost`, `ui.ghost.clear` | players; ghost block regions by ghost id, as whole 16³ sections (`16`; feature `ui`) |
+| MCP → mod | `replay.frame` | players; a replay step: keyframe or forward delta, job volumes, HUD text, markers (`16`; feature `ui`) |
+| mod → MCP | `ui.request` | request (the mod's UI counter), player, kind and arguments, from a player's client (`16`; feature `ui`) |
+| MCP → mod | `ui.result` | request, player, the result or an error code; a body for thumbnails and previews (`16`; feature `ui`) |
 
 Field names, types and encodings are in *Wire format*, *Message schemas*.
 
@@ -162,7 +167,7 @@ Protocol version **3** (*Versions and features*: the MCP also speaks version 2; 
 - **varint** is an unsigned LEB128 integer: 7 bits per byte, low group first, high bit set on every byte but the last (the same encoding as Minecraft's `FriendlyByteBuf.writeVarInt`, but unsigned and wider). Values are 0 to 2^53 − 1, so a varint is at most 8 bytes. Encodings are minimal: a last byte of `0x00` after a continuation byte is an error. In Java, read and write them as `long`.
 - **string** (in binary bodies) is a varint byte length, then the bytes in standard UTF-8 (`StandardCharsets.UTF_8`).
 - **table** is a varint count, then that many strings.
-- **JSON** is RFC 8259, UTF-8. All integers in headers fit in ±2^53. Non-integer numbers appear only in `prompt` (position, eye, yaw, pitch).
+- **JSON** is RFC 8259, UTF-8. All integers in headers fit in ±2^53. Non-integer numbers appear only in `prompt` (position, eye, yaw, pitch) and in `ui.state`'s token cost.
 - **Box** in JSON is `{"min":[x,y,z],"max":[x,y,z]}`: an inclusive box in world coordinates (`01`), with `min ≤ max` on every axis. Senders normalise; a receiver rejects an unnormalised box.
 - **Section** is a 16×16×16 chunk section, named by section coordinates `[sx,sy,sz]` = `[x >> 4, y >> 4, z >> 4]` (arithmetic shift, so −1 is in section −1). Its box is `16·s … 16·s + 15` on each axis.
 - **Hash** is a 64-bit value: the first 8 bytes of a SHA-256 digest. In JSON it is 16 lowercase hex digits; in a binary body it is the 8 bytes, in digest order.
@@ -182,10 +187,10 @@ bytes    body            frameLength − 4 − headerLength bytes; empty unless 
 
 - **Maximum frame size:** `frameLength` ≤ 268,435,456 (256 MiB). A sender never writes a larger frame.
 - **Undecodable messages.** If the framing or the header can't be decoded (a `frameLength` below 4 or above the maximum, a `headerLength` that doesn't fit, a header that isn't UTF-8 JSON or isn't an object), the receiver sends `error` `bad_request` with id `null` and closes the connection: it can no longer tell where the next frame starts, or whom to answer. If the frame and header decode and the header has an `id`, but a field or the body is invalid (a missing or mistyped field, a body on a message that has none, a count that disagrees with the body, a bad NBT compound), it replies `error` `bad_request` with that `id` and the connection stays open. An invalid message without an `id` is answered with `bad_request` id `null`, and the connection stays open too.
-- **Messages with a body:** `patch`, `snapshot.result`, `patch.ack` and `dirty` (unless `everything`); protocol 3 adds `registry.result` (unless `unchanged`), `upgrade` and `upgrade.result`. Every other message has an empty body.
+- **Messages with a body:** `patch`, `snapshot.result`, `patch.ack` and `dirty` (unless `everything`); protocol 3 adds `registry.result` (unless `unchanged`), `upgrade` and `upgrade.result`; feature `ui` adds `ui.ghost`, `replay.frame` and `ui.result` (only for the request kinds that say so). Every other message has an empty body.
 - **Headers** are written compact (no whitespace), keys in the order the tables below list them, optional fields omitted when absent. Receivers accept any key order and ignore keys they don't know (so an addition stays readable by the previous version, *Versions and features*). Compare headers as JSON values, not as bytes: number formatting differs between JSON libraries.
-- **Ordering:** TCP keeps frames in order. Each side sends messages in the order the events happen. The mod handles **requests** (MCP messages with an `id`: `volumes.extend`, `volumes.set`, `hashes`, `snapshot`, `patch`, and in protocol 3 `registry` and `upgrade`) strictly in arrival order, each finishing before the next starts: a `snapshot` or `hashes` request that arrives while a patch is still applying across ticks is answered after that patch's ack, so it sees the patch. Messages without an `id` (`notice`, `chat`, `prompt.result`, `error`) don't wait behind a multi-tick patch; the mod may handle them as they arrive. From the mod, `dirty`, `volumes`, `prompt` and `prompt.close` may interleave with responses.
-- **Request ids:** `volumes.extend`, `volumes.set`, `hashes`, `snapshot` and `patch` carry an `id` the MCP assigns from one counter per connection, starting at 1 and increasing by at least 1 per request (so patch ids increase, and patches apply in id order). Their responses (`hashes.result`, `snapshot.result`, `patch.ack`, `registry.result`, `upgrade.result`, or `error`) carry the same `id`. A `volumes.extend` that succeeds is answered by a `volumes` message (which has no id), and one that fails by an `error` with its id. A `volumes.set` that succeeds is answered by a `volumes` message carrying its `id` (protocol 2), and one that fails by an `error` with its id. `prompt` ids come from the mod's own counter; a `prompt.result` carries the prompt's id in its `id` field, and a `chat` carries it in its `request` field.
+- **Ordering:** TCP keeps frames in order. Each side sends messages in the order the events happen. The mod handles **requests** (MCP messages with an `id`: `volumes.extend`, `volumes.set`, `hashes`, `snapshot`, `patch`, and in protocol 3 `registry` and `upgrade`) strictly in arrival order, each finishing before the next starts: a `snapshot` or `hashes` request that arrives while a patch is still applying across ticks is answered after that patch's ack, so it sees the patch. Messages without an `id` (`notice`, `chat`, `prompt.result`, `error`, and every `ui.*` and `replay.*` message) don't wait behind a multi-tick patch; the mod may handle them as they arrive. From the mod, `dirty`, `volumes`, `prompt`, `prompt.close` and `ui.request` may interleave with responses.
+- **Request ids:** `volumes.extend`, `volumes.set`, `hashes`, `snapshot` and `patch` carry an `id` the MCP assigns from one counter per connection, starting at 1 and increasing by at least 1 per request (so patch ids increase, and patches apply in id order). Their responses (`hashes.result`, `snapshot.result`, `patch.ack`, `registry.result`, `upgrade.result`, or `error`) carry the same `id`. A `volumes.extend` that succeeds is answered by a `volumes` message (which has no id), and one that fails by an `error` with its id. A `volumes.set` that succeeds is answered by a `volumes` message carrying its `id` (protocol 2), and one that fails by an `error` with its id. `prompt` ids come from the mod's own counter; a `prompt.result` carries the prompt's id in its `id` field, and a `chat` carries it in its `request` field. `ui.request` and `ui.result` carry no `id` at all: they are matched by their `request` field, from a third counter (*In-game UI*), so they never mix with either.
 
 ### Connection and handshake
 
@@ -216,18 +221,21 @@ Settled in `14` (*Version skew between mod and MCP*): the mod and the MCP releas
   | `volumes.set` | accepts `volumes.set` |
   | `registry` | protocol 3: serves `registry` with the registry report (`14`, *Version-specific data lives in the mod*) |
   | `upgrade` | protocol 3: serves `upgrade` through the game's data fixer (`14`, *Schematics from other versions*) |
+  | `ui` | added within protocol 3: relays `ui.*` and `replay.*` to the named players' clients and sends their `ui.request`s (`16`; *In-game UI*) |
 
 - **MCP features** (in the MCP's `hello`, within protocol 3; the mod ignores names it doesn't know):
 
   | Feature | The MCP |
   |---|---|
   | `prompt.close` | handles `prompt.close` (`/autosketch done`, B6): ends the open read-only request and answers with a `notice` to that player |
+  | `ui` | sends `ui.state`, `ui.flash`, `ui.ghost`, `ui.ghost.clear` and `replay.frame`, and answers every `ui.request` with a `ui.result` (`16`; *In-game UI*) |
 
-- **Without an MCP feature**, the mod: without `prompt.close` it refuses `/autosketch done` itself, telling the player on the action bar that the Autosketch MCP server is too old for it (a new request still ends the open one), and sends nothing.
-- **Without a feature**, the MCP: treats a `prompt` without `mode` as `build` (what `/autosketch ask` meant in version 1); refuses tools that need `scan` or `volumes.set` with `world_mod_outdated`, saying the mod is older and to update it, without sending anything; without `registry` it keeps the report file read at startup (or none); without `upgrade`, imports fall back to the rename table with a partial-upgrade warning (`08`, *Import*).
+- **Without an MCP feature**, the mod: without `prompt.close` it refuses `/autosketch done` itself, telling the player on the action bar that the Autosketch MCP server is too old for it (a new request still ends the open one), and sends nothing. Without `ui` (or without its own `ui`) it sends no `ui.request` and locks `16`'s in-game UI with an action-bar line saying the MCP is too old (`16`, *Mod side*).
+- **Without a feature**, the MCP: treats a `prompt` without `mode` as `build` (what `/autosketch ask` meant in version 1); refuses tools that need `scan` or `volumes.set` with `world_mod_outdated`, saying the mod is older and to update it, without sending anything; without `registry` it keeps the report file read at startup (or none); without `upgrade`, imports fall back to the rename table with a partial-upgrade warning (`08`, *Import*); without `ui` it sends no `ui.*` or `replay.*` message.
 - **What changed from version 1 to 2:** `hello` (MCP) gained `modes`, `hello` (mod) gained `features`; `prompt` gained `mode` and `scan`; `prompt.result` gained the reason `unsupported_mode`; `snapshot` and `snapshot.result` gained the kind `surface`; `volumes` gained `id`; the message `volumes.set` and the error `bad_volumes` are new. Nothing was removed or changed in meaning.
 - **What changed from version 2 to 3:** the features `registry` and `upgrade` and their four messages are new. Nothing else changed: the protocol-2 vectors that differ are the hellos (their `protocol`, and the new features in the mod's list) and the mismatch example.
 - **Added within version 3** (feature-gated, no bump; settled with the user 2026-11-16, B6): `hello` (MCP) gained `features`, and the message `prompt.close` is new. An MCP from before sends no `features`, so the mod never sends it `prompt.close`; a mod from before never sends one and ignores the key. The current vectors that changed are `hello-mcp` (it lists the feature); `prompt-close` and `notice-prompt-closed` are new.
+- **Added within version 3** (feature-gated, no bump; `16`, 2026-11-17): the feature `ui` on both hellos, and the messages `ui.state`, `ui.flash`, `ui.ghost`, `ui.ghost.clear`, `replay.frame`, `ui.request` and `ui.result` (*In-game UI*). Both hellos must list it: a side from before lists nothing, so the other never sends it a `ui` message, and ignores the name in the other's list. The current vectors that changed are `hello-mcp` and `hello-mod-singleplayer` (they list `ui`); the `ui-*`, `replay-*` and `relay-*` vectors are new.
 
 ### Pairing file
 
@@ -320,6 +328,9 @@ blockList     table palette, varint N, positions(N), indices(N) states, nbtList
 | `snapshot.result` | table palette · for each region, in header order, every position of its box in index order: varint palette index · nbtList (ordinals run over all regions' positions concatenated, in header order) |
 | `registry.result` (protocol 3) | the registry report file exactly as the mod writes it: gzip of the report's UTF-8 JSON (`14`); empty with `unchanged` |
 | `upgrade`, `upgrade.result` (protocol 3) | kind `elements`: table states (in the sender's order, duplicates allowed, not necessarily canonical) · varint B · B × (varint byteLength, NBT) block entities · varint E · E × (varint byteLength, NBT) entities. Kind `structure`: varint 1 · varint byteLength · NBT, the whole structure file's root compound. A result has the request's layout, order and counts |
+| `ui.ghost` (feature `ui`) | `snapshot.result`'s layout over the header's `sections`, in header order, each the full 16³ box of that section of the ghost's local grid: table palette · per section, 4,096 varint palette indices · nbtList, always empty (count 0) |
+| `replay.frame` (feature `ui`) | keyframe: `snapshot.result`'s layout over the header's `regions` (nbtList empty). Delta: a blockList like `dirty`'s over the header's `origin` and `size` (nbtList empty) |
+| `ui.result` (feature `ui`) | only for `library.thumbnail` (the PNG file's bytes) and `library.preview` (`snapshot.result`'s layout over one region, the prefab's local box `[0,0,0]` to `size − 1`, nbtList empty); empty otherwise |
 | `snapshot.result`, kind `surface` | table palette · for each column of the area in index order (`dx + sx · dz`, x fastest): varint **h**, then varint palette index when h > 0; with `ceiling`, the column's ceiling value (h and index the same way) follows its surface value. h = 0 means none (all air, or a missing chunk); otherwise the block is at y = `minY` + h − 1. The palette is in first-use order over that sequence |
 
 For a `patch.ack` the grid covers the skipped, rejected and normalized positions together, and the reason table is in first-use order over the rejected list. A snapshot region's positions are its box's own grid (origin = box min); a snapshot carries no `origin` or `size`.
@@ -340,7 +351,7 @@ Every header has `type` first. "MCP → mod" and "mod → MCP" say who sends it.
 | `client` | `{name, version}` | `{"name":"autosketch","version":"1.0.0"}` |
 | `volatile` | object | The volatile-key list (*Hashing*). May be `{}` |
 | `modes` | string[] | Protocol 2. The request modes the MCP enforces, from `ask`, `scan`, `plan`, `build` (B6). The mod sends no other mode. Absent means `["build"]`. This MCP lists all four by default. Sent to a version-1 mod too, which ignores it |
-| `features` | string[] | Added within protocol 3 (*Versions and features*). The optional capabilities the MCP has: `prompt.close`. The mod uses no other MCP addition. Absent means none. Sent to a version-2 mod too, which ignores it |
+| `features` | string[] | Added within protocol 3 (*Versions and features*). The optional capabilities the MCP has: `prompt.close`, `ui`. The mod uses no other MCP addition. Absent means none. Sent to a version-2 mod too, which ignores it |
 
 **`hello`**, mod → MCP
 
@@ -352,7 +363,7 @@ Every header has `type` first. "MCP → mod" and "mod → MCP" say who sends it.
 | `game` | `{version, dataVersion, loader, loaderVersion}` | e.g. `"1.21.1"`, `3955`, `"neoforge"`, `"21.1.249"` |
 | `singleplayer` | boolean | True on the integrated server of a singleplayer world |
 | `host` | `{name, uuid}` or `null` | The singleplayer host (the allowlist default, *Allowed players*); `null` on a dedicated server |
-| `features` | string[] | Protocol 2. The optional capabilities the mod has (*Versions and features*): `modes`, `scan`, `volumes.set`, and in protocol 3 `registry`, `upgrade`. Absent means none |
+| `features` | string[] | Protocol 2. The optional capabilities the mod has (*Versions and features*): `modes`, `scan`, `volumes.set`, and in protocol 3 `registry`, `upgrade`, `ui`. Absent means none |
 
 **`error`**, either direction
 
@@ -635,6 +646,183 @@ The mod runs the game's data fixer from `from` to the running version: block sta
 
 The mod shows a `chat` to the named player (a `reply` always; an `activity` unless their log setting is `off`), and to every other player whose log setting is `all`.
 
+#### In-game UI (feature `ui`)
+
+The messages behind `16`'s in-game UI, added within protocol 3 (*Versions and features*). Shared rules:
+
+- **Gated on both hellos.** The MCP sends none of them unless the mod's hello lists `ui`, and the mod sends no `ui.request` unless the MCP's hello lists `ui` (and it relays only what it implements: a mod without the feature never lists it).
+- **No `id`.** None of them carries an `id`, so the mod handles them as they arrive, never behind a multi-tick patch, and neither side's request matching sees them. `ui.request` and `ui.result` pair up by `request`, a number from the mod's own UI counter (one per server run, starting at 1); the MCP only echoes it.
+- **Players.** Every MCP → mod message names the players it is for: `players`, a non-empty list of UUIDs, or for `ui.result` the one `player` whose request it answers. The mod's **relay** forwards each to those of them who are online and whose client registered the UI channel, and to nobody else; players it can't reach are skipped without an answer. The MCP decides who may see what (the allowlist, *Allowed players*, which it also enforces on every `ui.request`).
+- **One player set for the overlays.** Every `ui.state` and `ui.flash` goes to the same players: those the MCP shows the UI to (the allowlist, *Allowed players*: the singleplayer host and the listed players it knows UUIDs for). The only exception is a full `ui.state` that answers one player's `resync`. The MCP never sends different overlay states to different players: the `seq` counter assumes one stream. Ghosts follow the same set; `replay.frame` and `ui.result` go to the one player who asked.
+- **Other dimensions.** A client keeps a `ui.state` job, `ui.flash` box, `ui.ghost` or `replay.frame` whose `dimension` isn't the player's current one, but doesn't draw it until the player is in that dimension (flashes have usually expired by then). Changing dimension drops nothing.
+- **The relay checks only the header's `type` and players** (a missing or invalid `players` or `player` is `bad_request` with id `null`) and forwards the frame unchanged; the client half decodes the rest with the same codec, so a frame the relay forwards is exactly a frame these tables describe.
+- **Colours** are `"#rrggbb"`, lowercase. **Job ids** are the scope ids of `11` (`"base"` for the root, `"j3"`…), stable for a job's life, so a client can key anything on them.
+- **Never slows the build** (`16`, *Principles*). The MCP builds these messages off the tool-call path and **coalesces `ui.state`, `ui.flash` and ghost updates over 250 ms**: at most one `ui.state` and one `ui.flash` per 250 ms window, and per ghost one `ui.ghost` carrying every section touched in the window. Reason: four updates a second reads as live to a player, and it bounds the relay's traffic whatever an agent does (a script making thousands of edits costs four small messages a second). Replay frames and results are sent when asked for.
+
+**Job**, the record `ui.state` and `replay.frame` share:
+
+| Key | Type | Meaning |
+|---|---|---|
+| `id` | string | The job's scope id |
+| `colour` | string | Its colour, stable for the job's life |
+| `brief` | string | The job's brief (the handoff's one-line summary), for the label and the HUD |
+| `dimension` | string | |
+| `work` | Box | The work volume, world coordinates |
+| `context` | Box[] | The context boxes, world coordinates; may be empty |
+
+**Flash**, the record `ui.flash` and `replay.frame` share:
+
+| Key | Type | Meaning |
+|---|---|---|
+| `job` | string | The job whose edit it was (`"base"` for the root) |
+| `colour` | string | That job's colour |
+| `dimension` | string | |
+| `boxes` | Box[] | Non-empty. The boxes that changed, world coordinates; at most 64 per job and message (beyond that the MCP merges them into fewer, larger boxes) |
+
+**`ui.state`**, MCP → mod. The overlay and HUD state (`16`, *Overlays in the world*, *HUD*).
+
+| Key | Type | Meaning |
+|---|---|---|
+| `type` | `"ui.state"` | |
+| `players` | UUID[] | |
+| `seq` | integer ≥ 1 | The state's sequence number (below) |
+| `full` | boolean | True: the whole state, replacing whatever the client holds. False: changes since `seq − 1` |
+| `jobs` | Job[] | Full: every open job, oldest first (may be empty). Changes: the jobs added or changed, each as a whole record that replaces the client's record with the same `id`; omitted when none changed |
+| `removed` | string[], optional | Changes only: ids of jobs that ended (merged or abandoned); omitted when none |
+| `request` | object or `null` | The open in-game request, `{id, mode, text}`: the prompt's `id`, its `mode` (B6) and its text (possibly shortened); `null` when none is open. Full: always present. Changes: present only when it changed |
+| `tokens` | object or `null` | Token totals of the current prompt (`13`, B3), `{input, output, cacheRead, cacheCreation, cost}`: integers, and `cost` a number in US dollars (omitted when Claude Code reported none); `null` when no figures arrived. Present as `request` is |
+| `refusal` | object or `null` | The last refusal, `{code, text}` (the refusal code, `12`, and one line saying what was refused); `null` for none. Present as `request` is |
+
+**Sequence and resync.** The MCP numbers `ui.state` messages from one counter per connection: each message sent to all the players it shows the UI to takes the next `seq`; a full state sent to fewer players (the answer to a `resync`) carries the current `seq` without taking a new one. A client keeps the `seq` of what it holds: it adopts a full state's `seq`, and applies a change only when the change's `seq` is its own plus 1. Any other change (a gap, or no full state yet) it drops, and it asks for the whole state again with a `ui.request` of kind `resync`. The MCP answers that request by sending that player a full `ui.state` and every open ghost as a full `ui.ghost`, then the `ui.result`. The MCP sends a full state to every player when the connection opens, and changes after that.
+
+- **Why replace-by-key per job:** a job is a few hundred bytes and changes rarely (fork, a brief or context change, merge), so sending it whole costs nothing. The client then holds a map from id to record and does a put or a remove, with no field-level merge in Java (the thin client, `16`), and a lost or reordered change can never leave a half-merged job behind: at worst the client sees a gap and resyncs.
+- **Why the client asks for resync** rather than the MCP resending on player joins: the MCP can't see joins (nothing on the wire reports them), the client is the side that knows it fell behind (a gap in `seq`, a reconnect, a reset UI), and it already has a request path. The relay also resends the last full `ui.state` naming a player when that player joins (*Relay to the client*), so something shows at once; if it is stale, the next change shows a gap and the client resyncs.
+
+**`ui.flash`**, MCP → mod. Boxes that just changed, to pulse in their job's colour (`16`, *Change flashes*).
+
+| Key | Type | Meaning |
+|---|---|---|
+| `type` | `"ui.flash"` | |
+| `players` | UUID[] | |
+| `flashes` | Flash[] | Non-empty. Every change in the coalescing window, one record per job |
+
+Flashes are fire-and-forget: a client that missed one doesn't resync for it.
+
+**`ui.ghost`**, MCP → mod, with a body. Blocks to draw translucent where they would land: a sandbox before merge, or an unlinked document at an anchor (`16`, *Ghost blocks*).
+
+| Key | Type | Meaning |
+|---|---|---|
+| `type` | `"ui.ghost"` | |
+| `players` | UUID[] | |
+| `ghost` | string | The ghost's id: a sandbox's job id, or the id `ghost.anchor` answered |
+| `dimension` | string | |
+| `origin` | `[x,y,z]` | World position of the ghost's local `[0,0,0]` |
+| `tint` | string | Colour to tint the blocks with (the job's colour) |
+| `full` | boolean | True: the listed sections are the whole ghost; drop every other section of it. False: the listed sections replace those sections; keep the rest |
+| `sections` | `[sx,sy,sz][]` | Sections of the ghost's local grid (local position `>> 4`), ascending by `sy`, then `sz`, then `sx`, unique; may be empty |
+
+The body holds each listed section whole, every position air included (*Binary bodies*); `minecraft:air` means "no ghost block here", so a section that is all air removes that section. The NBT list is always empty: ghosts draw block models only (`16`, *Decisions*). A `ui.ghost` with no sections and `full` false moves the ghost to a new `origin` or tint without resending blocks; with `full` true it empties the ghost.
+
+- **Why whole sections, not whole regions or single blocks:** the client meshes per 16³ section and re-meshes only touched sections (`16`), so a section is the natural unit to replace: an op that touches a few blocks resends only the sections it touched (a few kilobytes each), not the whole region, and the client never merges single blocks into a mesh's data. **Why a local grid with an origin:** an anchored document moves by sending a new origin alone.
+
+**`ui.ghost.clear`**, MCP → mod. Removes a ghost (sandbox merged or abandoned, `ghost.clear`).
+
+| Key | Type | Meaning |
+|---|---|---|
+| `type` | `"ui.ghost.clear"` | |
+| `players` | UUID[] | |
+| `ghost` | string | The ghost's id |
+
+**`replay.frame`**, MCP → mod, with a body. One step of a replay the player opened (`16`, *Replay in the world*), sent after `replay.open` and after each `replay.seek`.
+
+| Key | Type | Meaning |
+|---|---|---|
+| `type` | `"replay.frame"` | |
+| `players` | UUID[] | The player who opened the replay |
+| `replay` | string | The replay's id, from `replay.open`'s result |
+| `step` | integer | The step the client shows once it has applied this frame (0 is the state before the first step) |
+| `steps` | integer | The log's number of steps |
+| `keyframe` | boolean | True: the body holds every position of `regions`. False: the body holds the positions that differ between step `from` and `step` |
+| `from` | integer, optional | Deltas only: the step the client must be showing to apply it |
+| `dimension` | string | |
+| `regions` | Box[], optional | Keyframes only: the replayed volume, world coordinates |
+| `origin`, `size`, `count` | | Deltas only: the body's grid and number of positions, as for `dirty` |
+| `time` | string | The step's time, ISO-8601 UTC |
+| `hud` | object | The strip's text at the step: `call` (one line for the step's tool call), `brief` (the job's brief, or `null`), and `note` (optional: a gap message, `16`, *Gaps*) |
+| `jobs` | Job[] | Jobs open at the step |
+| `flashes` | Flash[] | The step's edits, one record per job; may be empty |
+| `markers` | object[], optional | Keyframes only: every marker of the log for the strip, ascending by step, `{step, kind, label}`, `kind` one of `fork`, `merge`, `refusal`, `checkpoint` |
+
+States only: the NBT list is always empty, since the client overrides states in its own copy of the world. A client that isn't showing a delta's `from` drops it and sends `replay.seek` for the step it wants; the MCP sends a keyframe whenever it doesn't know the client is showing `from` (the first frame, a backward seek, after a dropped delta). Play, pause and speed are the client's: it seeks step by step.
+
+**`ui.request`**, mod → MCP. A request from a player's client (`16`, *MCP side*, *Requests*).
+
+| Key | Type | Meaning |
+|---|---|---|
+| `type` | `"ui.request"` | |
+| `request` | integer ≥ 1 | From the mod's UI counter |
+| `player` | `{name, uuid}` | The player whose client sent it, set by the server half from the connection, never by the client |
+| `kind` | string | One of the kinds below |
+| `args` | object | The kind's arguments; `{}` when it takes none |
+
+**`ui.result`**, MCP → mod, with a body for the kinds that say so. Every `ui.request` gets exactly one.
+
+| Key | Type | Meaning |
+|---|---|---|
+| `type` | `"ui.result"` | |
+| `request` | integer | The request's `request` |
+| `player` | UUID | The request's player |
+| `ok` | boolean | |
+| `result` | object | Only when `ok`: the kind's result |
+| `error` | string | Only when not `ok`: one of the codes below |
+| `message` | string | Only when not `ok`: one line for the player |
+
+| Error | Meaning |
+|---|---|
+| `not_allowed` | The player isn't on the allowlist (*Allowed players*) |
+| `conflict` | The file changed since the client read it (a stale `hash`, `15`): reload and retry |
+| `not_found` | No such setting, entry, trash item, log, replay or ghost |
+| `bad_request` | An unknown kind, missing or mistyped arguments, or a value the setting or name rules refuse (the message says what is accepted) |
+| `busy` | The MCP is still serving this player's previous request of the same kind; try again |
+| `internal` | The request was valid, but the MCP failed serving it. `bad_request` blames the client; this blames the MCP |
+
+**Request kinds.** Names, arguments and results; the MCP's behaviour is `16`'s (*MCP side*) and, for settings and the library, `15`'s, through the same core code. Results carry what the screens show, and the client neither sorts nor rewords them (`16`, *Thin client*).
+
+| Kind | Arguments | Result |
+|---|---|---|
+| `resync` | none | `{}`, after a full `ui.state` and every open ghost were sent to the player (*Sequence and resync*). Also closes the player's open replay, which the client lost |
+| `settings.list` | none | `{path, hash, warnings, unknown, settings}`: `config.toml`'s path and hash, its read warnings, keys no setting declares, and one row per setting: `{key, group, summary?, applies, accepts, control, default, value, text, source, overrides?, invalid?, error?, restartNeeded, running?}`, with `applies` `live` or `restart`, `control` one of `{type:"toggle"}`, `{type:"select", options}`, `{type:"number", min, max}`, `{type:"list"}`, `{type:"text"}`, `source` `{kind, label}`, `overrides` `{label, raw, same, note}`, `invalid` `{raw, note}` (`15`, *Settings tab*) |
+| `settings.set` | `{key, value, hash}`: `value` as text (a list comma-separated), `hash` from `settings.list` | `{hash}`, the file's new hash. `conflict` on a stale hash |
+| `settings.unset` | `{key, hash}` | `{hash}`. `conflict` on a stale hash |
+| `library.list` | none | `{roots, entries, hidden}`: roots in search order `{label, path, kind, writable, counts, trash}` (`counts` per kind, `trash` the number of trashed entries); `entries` per kind (`prefabs`, `palettes`, `procedures`, `knowledge`), each `{kind, name, root, writable, title, tags, summary, hidden, shadowedBy?, overrides?}`; `hidden` the `library.hidden` list (`15`, *Library tab*) |
+| `library.entry` | `{root, kind, name}` | The entry's fields as in `library.list`, plus `hash` (the editable file's), `editable`, and `meta` (prefabs: `prefab.json`), `text` (other kinds), `palette` (palettes, parsed) |
+| `library.thumbnail` | `{root, name}` (a prefab) | `{format:"png", width, height}`, with the PNG as the body. `not_found` when it has none |
+| `library.preview` | `{root, name}` (a prefab) | `{size}`, `[sx,sy,sz]`, with the prefab's blocks as the body (*Binary bodies*; positions are prefab-local, no NBT) |
+| `library.rename` | `{root, kind, name, to}` | `{name}` |
+| `library.duplicate` | `{root, kind, name, to}` | `{name}` |
+| `library.delete` | `{root, kind, name}` | `{trashed}`, a trash item `{id, kind, name, deletedAt}` |
+| `library.trash` | `{root}` | `{trash}`, the root's trash items, newest first |
+| `library.restore` | `{root, id}` | `{restored}`, the trash item |
+| `library.hide` | `{root, kind, name, hidden, hash}`: `hidden` false unhides; `hash` is `config.toml`'s, from `settings.list` | `{hidden, hash}` (`conflict` on a stale hash) |
+| `library.copy` | `{root, kind, name}` | `{root, name}`: where the copy went |
+| `library.empty_trash` | `{root}` | `{emptied}`, how many entries were removed |
+| `logs.list` | none | `{logs}`, the workspace's session logs, newest first: `{id, doc, session, modified, live}`, `modified` ISO-8601 UTC, `live` for the running session |
+| `replay.open` | `{log}`: a log's `id`, or `null` for the live session | `{replay, steps, step, dimension, volume}`: the replay's id, its steps, the step shown first, and the replayed volume (Box). The first keyframe follows the result |
+| `replay.seek` | `{replay, step}` | `{step}`; the frame follows the result |
+| `replay.close` | `{replay}` | `{}`. The mod's server half resends the volume's chunks to the player (`16`) |
+| `ghost.anchor` | `{dimension, pos}`: `pos` `[x,y,z]`, the anchor in world coordinates | `{ghost}`, the anchored document's ghost id; the ghost follows the result as a full `ui.ghost` |
+| `ghost.clear` | `{ghost}` | `{}`; a `ui.ghost.clear` follows |
+
+A result goes to its player before anything it says follows (the frame, the ghost), on the same connection, so the client sees them in that order.
+
+#### Relay to the client
+
+Not part of the bridge: the custom packets between the mod's server half and its client half, which ship in one jar and so never differ in version. Written down here because the golden vectors check the split.
+
+- **One channel**, the payload `autosketch:ui`, registered optional (version `"1"`), so vanilla clients and servers still connect (M2). Each packet is `op` (byte), `id` (varlong), `part` and `parts` (varints), `data` (a byte array: varint length, bytes). Ops: `0` a part of a bridge frame (server to client); `1` a `ui.request` (client to server: `data` is its JSON header with the client's own number in `request`, and no `player`; the server half sets `player` from the connection and replaces `request` with its UI counter, and maps the result back); `2` the link state (server to client: `data` is `offline`, `too_old` or `connected` in UTF-8, `16`, *Mod side*).
+- **Splitting.** The relay forwards each frame whole, length prefix included, as its `data`, split into consecutive parts of at most **1,000,000 bytes** (custom packets to a client are limited to about 1 MiB, 1,048,576 bytes, and the packet's own fields need a few bytes). All parts of one frame share `id` (one counter per player), number `part` from 0 to `parts − 1`, and are sent consecutively, in order. The client joins them, checks the length prefix, and decodes the frame with the codec.
+- **What it keeps:** for each player, the last full `ui.state` naming them, resent when that player joins or registers the channel, and dropped when the bridge disconnects. Nothing else. When no MCP with `ui` is connected, it answers a client's request itself with a `ui.result` of error `internal` ("the Autosketch MCP isn't connected").
+
 ### Applying a patch
 
 For each position, in index order, under the tick budget:
@@ -701,7 +889,7 @@ Both sides compute it the same way: the mod over the world, the MCP over its cac
 - `generated`, instead of `body`, for `patch-large`: the rule that produces its blocks.
 - Protocol 3: `registry.result` bodies are given as `bytes` (base64 of the body) and `report` (the decoded JSON, for reading); upgrades list `states`, `blockEntities` and `entities` (SNBT), or `structure`.
 
-There is a vector per message kind: `hello` both ways, `error` (including a refused extension and `internal`), `volumes` (with and without a work volume, and with an extension in force), `volumes.extend`, `hashes` and its result, `snapshot` by boxes and by sections, `snapshot.result` (empty, one block, mixed palette with block entities and overlapping regions), `patch` (empty, one block, mixed palette given out of order, block entities with expected NBT hashes, forced, large), `patch.ack` (all applied, mixed, forced, stale), `dirty` (positions, everything), `prompt` (full and minimal), `prompt.result` (delivered, refused), `notice` and `chat` (activity, reply). Protocol 2 adds: `hello` with `modes` (all, and build only) and with `features` (all, and some), `prompt` with modes `build`, `ask` and `scan` (with a clipped grant), `prompt.result` `unsupported_mode`, `volumes.set` (with context, and default), the `volumes` confirming one (with `id`), `error` `bad_volumes`, `snapshot` kind `surface` (with and without `ceiling`) and its results (a missing chunk; ceilings). Protocol 3 adds: `registry` (with and without `have`), `registry.result` (a synthetic report, and `unchanged`), `upgrade` of elements and of a structure without a DataVersion, and their results (one with `failed`). Hash vectors: `hash-nbt.json` (compounds with their volatile lists, canonical bytes in hex and hash: empty, unordered keys, nested, every tag type, modified UTF-8, furnace with and without volatile keys, a nested path and `*`, state only) and `hash-sections.json` (sections with their boxes and blocks and expected hash: full, a single position, negative coordinates with partial overlapping boxes, block entities with volatile and state-only types).
+There is a vector per message kind: `hello` both ways, `error` (including a refused extension and `internal`), `volumes` (with and without a work volume, and with an extension in force), `volumes.extend`, `hashes` and its result, `snapshot` by boxes and by sections, `snapshot.result` (empty, one block, mixed palette with block entities and overlapping regions), `patch` (empty, one block, mixed palette given out of order, block entities with expected NBT hashes, forced, large), `patch.ack` (all applied, mixed, forced, stale), `dirty` (positions, everything), `prompt` (full and minimal), `prompt.result` (delivered, refused), `notice` and `chat` (activity, reply). Protocol 2 adds: `hello` with `modes` (all, and build only) and with `features` (all, and some), `prompt` with modes `build`, `ask` and `scan` (with a clipped grant), `prompt.result` `unsupported_mode`, `volumes.set` (with context, and default), the `volumes` confirming one (with `id`), `error` `bad_volumes`, `snapshot` kind `surface` (with and without `ceiling`) and its results (a missing chunk; ceilings). Protocol 3 adds: `registry` (with and without `have`), `registry.result` (a synthetic report, and `unchanged`), `upgrade` of elements and of a structure without a DataVersion, and their results (one with `failed`). Feature `ui` adds: `ui.state` (full, changes with a removed job and cleared fields), `ui.flash`, `ui.ghost` (full, a partial update, a move without blocks), `ui.ghost.clear`, `replay.frame` (keyframe with markers, delta with a gap note), `ui.request` (`resync`, `settings.set`, `ghost.anchor`), `ui.result` (settings rows, a `conflict`, a thumbnail PNG body, a preview body, `not_allowed`), and `relay-parts`: a ghost frame over 1,000,000 bytes, described by a rule (`generated`), with the length and SHA-256 of each part the relay splits it into (`parts`). Hash vectors: `hash-nbt.json` (compounds with their volatile lists, canonical bytes in hex and hash: empty, unordered keys, nested, every tag type, modified UTF-8, furnace with and without volatile keys, a nested path and `*`, state only) and `hash-sections.json` (sections with their boxes and blocks and expected hash: full, a single position, negative coordinates with partial overlapping boxes, block entities with volatile and state-only types).
 
 An implementation passes when it decodes every vector to its sidecar, re-encodes the sidecar to the same bytes (headers compared as JSON), and reproduces every hash. The vectors are synthetic, and they are frozen: a change to them is a protocol change.
 

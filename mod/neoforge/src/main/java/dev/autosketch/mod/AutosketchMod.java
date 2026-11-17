@@ -3,7 +3,8 @@ package dev.autosketch.mod;
 import dev.autosketch.mod.api.Autosketch;
 import dev.autosketch.mod.api.AutosketchSetupEvent;
 import dev.autosketch.mod.link.Link;
-import dev.autosketch.mod.link.LinkPayloads;
+import dev.autosketch.mod.ui.UiNetwork;
+import dev.autosketch.mod.ui.relay.UiPayload;
 import dev.autosketch.mod.link.LinkStatus;
 import dev.autosketch.mod.platform.Platform;
 import dev.autosketch.mod.volume.AirPayloads;
@@ -71,7 +72,7 @@ public final class AutosketchMod {
             if (e.getEntity() instanceof ServerPlayer p) Link.sendTo(p);
         });
         modBus.addListener((RegisterPayloadHandlersEvent e) -> AirPayloads.register(e, core.air()));
-        modBus.addListener(LinkPayloads::register);
+        modBus.addListener(UiNetwork::register);
     }
 
     private void commonSetup(FMLCommonSetupEvent event) {
@@ -116,7 +117,7 @@ public final class AutosketchMod {
 
         @Override
         public void sendLinkStatus(ServerPlayer player, LinkStatus status) {
-            LinkPayloads.sendStatus(player, status);
+            UiNetwork.send(player, UiPayload.link(status.wire()));
         }
     }
 }

@@ -16,7 +16,7 @@ public enum LinkStatus {
     CONNECTED("connected");
 
     /** The MCP feature {@code 16}'s in-game UI needs (13, *Versions and features*). */
-    public static final String FEATURE_UI = "ui";
+    public static final String FEATURE_UI = dev.autosketch.mod.protocol.UiMessages.FEATURE_UI;
 
     private final String wire;
 

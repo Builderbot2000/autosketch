@@ -23,7 +23,8 @@
       "scan",
       "volumes.set",
       "registry",
-      "upgrade"
+      "upgrade",
+      "ui"
     ]
   }
 }

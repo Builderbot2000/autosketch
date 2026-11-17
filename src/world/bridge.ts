@@ -32,6 +32,8 @@ import {
   type VolumesExtend,
   type VolumesMessage,
   type VolumesSet,
+  type UiMcpMessage,
+  UI_MCP_TYPES,
 } from "./protocol/messages.js";
 import { pairingPath, readPairing, type Pairing } from "./protocol/pairing.js";
 
@@ -92,8 +94,13 @@ export interface BridgeConnection {
   request(m: Req<RegistryRequest>): Promise<RegistryResult>;
   /** The game's data fixer over a schematic's data (`14`). Needs the `upgrade` feature. */
   request(m: Req<UpgradeRequest>): Promise<UpgradeResult>;
-  /** Fire-and-forget messages; dropped while disconnected. */
-  send(m: NoticeMessage | ChatMessage | PromptResult): void;
+  /**
+   * Fire-and-forget messages; dropped while disconnected. `ui.*` and `replay.*` messages are also
+   * dropped unless both hellos list `ui` (`13`, *In-game UI*).
+   */
+  send(m: NoticeMessage | ChatMessage | PromptResult | UiMcpMessage): void;
+  /** Whether both hellos list `ui`, so `ui` messages are sent. False while disconnected. */
+  readonly ui: boolean;
   /** Listens to one message type from the mod. Returns the unsubscribe function. */
   on<T extends ModType>(type: T, fn: (m: ModOf<T>) => void): () => void;
   /** Listens to connection changes: `up` after each completed handshake, `down` on each loss. */
@@ -112,7 +119,8 @@ export interface BridgeOptions {
   modes?: RequestMode[];
   /**
    * Optional capabilities the hello lists in `features` (*Versions and features*): the mod uses an
-   * addition only when this MCP lists it. Default all of `MCP_FEATURES` (`prompt.close`).
+   * addition only when this MCP lists it. Default `prompt.close` only: `ui` is listed by the code
+   * that answers `ui.request`s (`16`, silo M), since a mod relays player requests to any MCP listing it.
    */
   features?: McpFeature[];
   /** Reconnect after a lost connection (default true), with backoff from `minMs` to `maxMs`. */
@@ -243,8 +251,19 @@ export class Bridge implements BridgeConnection {
     });
   }
 
-  send(m: NoticeMessage | ChatMessage | PromptResult): void {
-    if (this.connected) this.write(m);
+  send(m: NoticeMessage | ChatMessage | PromptResult | UiMcpMessage): void {
+    if (!this.connected) return;
+    if ((UI_MCP_TYPES as readonly string[]).includes(m.type) && !this.ui) return;
+    this.write(m);
+  }
+
+  get ui(): boolean {
+    return this.connected && this.features.includes("ui") && this.supports("ui");
+  }
+
+  /** The features this MCP's hello lists. */
+  private get features(): readonly McpFeature[] {
+    return this.opts.features ?? DEFAULT_FEATURES;
   }
 
   on<T extends ModType>(type: T, fn: (m: ModOf<T>) => void): () => void {
@@ -331,7 +350,7 @@ export class Bridge implements BridgeConnection {
         if (!done) return fail(new BridgeError(DOWN, "The mod closed the connection during the handshake."));
         if (this.socket === s) this.lost("connection closed");
       });
-      this.writeTo(s, { type: "hello", protocol: version, token: p.token, client: this.opts.client ?? { name: "autosketch", version: "1.0.0" }, volatile: this.opts.volatile, modes: [...this.modes], features: [...(this.opts.features ?? MCP_FEATURES)] });
+      this.writeTo(s, { type: "hello", protocol: version, token: p.token, client: this.opts.client ?? { name: "autosketch", version: "1.0.0" }, volatile: this.opts.volatile, modes: [...this.modes], features: [...this.features] });
     });
   }
 
@@ -433,12 +452,16 @@ function mismatch(mod: number | undefined, sent: number): BridgeError {
   return new BridgeError("protocol_mismatch", `The mod speaks bridge protocol ${mod} and this Autosketch speaks ${SPOKEN}: the ${older} is older; update the ${older}.`);
 }
 
+/** The hello's features unless the options say otherwise: all of `MCP_FEATURES` except `ui` (see `BridgeOptions.features`). */
+const DEFAULT_FEATURES: readonly McpFeature[] = MCP_FEATURES.filter((f) => f !== "ui");
+
 const FEATURE_NAMES: Record<ModFeature, string> = {
   modes: "request modes",
   scan: "scanning (surface snapshots)",
   "volumes.set": "setting the volumes",
   registry: "the registry report",
   upgrade: "upgrading schematics through the game's data fixer",
+  ui: "the in-game UI",
 };
 
 function outdated(hello: ModHello, f: ModFeature): string {

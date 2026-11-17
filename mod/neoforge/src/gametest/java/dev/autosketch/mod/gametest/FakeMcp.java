@@ -85,6 +85,22 @@ public final class FakeMcp {
         return closed;
     }
 
+    /** Sends one frame to the mod, as the MCP would (silo C: the relay's GameTests send {@code ui} messages). */
+    public void send(Frame frame) {
+        try {
+            synchronized (socket) {
+                socket.getOutputStream().write(FrameCodec.encode(frame));
+            }
+        } catch (IOException e) {
+            throw new GameTestAssertException("fake MCP couldn't send " + frame.type() + ": " + e);
+        }
+    }
+
+    /** The frames of one type received so far. */
+    public List<Frame> received(String type) {
+        return frames.stream().filter(f -> f.type().equals(type)).toList();
+    }
+
     public void close() {
         try {
             socket.close();

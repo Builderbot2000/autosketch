@@ -1,0 +1,39 @@
+{
+  "description": "Changes since seq 1: job j1 changed (its brief) and is sent whole, j2 ended, the request closed, a refusal happened; tokens unchanged (absent)",
+  "sender": "mcp",
+  "header": {
+    "type": "ui.state",
+    "players": [
+      "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+      "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+    ],
+    "seq": 2,
+    "full": false,
+    "jobs": [
+      {
+        "id": "j1",
+        "colour": "#3fa7d6",
+        "brief": "east tower: five storeys, conical roof",
+        "dimension": "minecraft:overworld",
+        "work": {
+          "min": [120, 64, -190],
+          "max": [131, 87, -179]
+        },
+        "context": [
+          {
+            "min": [119, 63, -191],
+            "max": [132, 88, -178]
+          }
+        ]
+      }
+    ],
+    "removed": [
+      "j2"
+    ],
+    "request": null,
+    "refusal": {
+      "code": "outside_work_volume",
+      "text": "set_blocks in j1 reached outside its work volume"
+    }
+  }
+}

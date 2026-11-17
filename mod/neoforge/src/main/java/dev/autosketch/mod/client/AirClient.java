@@ -1,8 +1,7 @@
 package dev.autosketch.mod.client;
 
 import com.mojang.blaze3d.vertex.PoseStack;
-import dev.autosketch.mod.link.LinkPayloads;
-import dev.autosketch.mod.link.LinkStatus;
+import dev.autosketch.mod.client.ui.LinkState;
 import dev.autosketch.mod.volume.AirMode;
 import dev.autosketch.mod.volume.AirPayloads;
 import net.minecraft.client.Minecraft;
@@ -36,15 +35,13 @@ public final class AirClient {
         NeoForge.EVENT_BUS.addListener(AirClient::leftClickEmpty);
         NeoForge.EVENT_BUS.addListener(AirClient::scroll);
         NeoForge.EVENT_BUS.addListener(AirClient::render);
-        // The link status belongs to the server the client is on: forget it on leaving.
-        NeoForge.EVENT_BUS.addListener((net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent.LoggingOut e) -> LinkPayloads.clientStatus = LinkStatus.OFFLINE);
     }
 
     /** The air state when it applies now: on, and the local player holds the wand in the main hand. */
     private static AirPayloads.State active(LocalPlayer p) {
         AirPayloads.State s = AirPayloads.clientState;
         // 16, *Mod side*: nothing drawn or sent while the server says no MCP is connected.
-        if (s == null || p == null || LinkPayloads.clientStatus == LinkStatus.OFFLINE || p.getMainHandItem().isEmpty()) return null;
+        if (s == null || p == null || LinkState.get() == LinkState.State.OFFLINE || p.getMainHandItem().isEmpty()) return null;
         return BuiltInRegistries.ITEM.getKey(p.getMainHandItem().getItem()).toString().equals(s.wandItem()) ? s : null;
     }
 

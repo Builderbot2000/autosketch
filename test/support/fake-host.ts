@@ -39,6 +39,9 @@ import {
   type WireArea,
   type WireBox,
   type WorldBlock,
+  type UiMcpMessage,
+  type UiResult,
+  UI_MCP_TYPES,
 } from "../../src/world/protocol/messages.js";
 import { removePairing, writePairing } from "../../src/world/protocol/pairing.js";
 import { isCanonicalForm } from "../../src/world/protocol/state.js";
@@ -57,6 +60,11 @@ import { isCanonicalForm } from "../../src/world/protocol/state.js";
  * none and sends no `mode`, a version-2 host lacks `registry` and `upgrade`, and each answers later
  * requests as that version's mod would. Its registry report is `registryReport`; its data fixer is
  * the MCP's own rename table over states (NBT passes through), or `upgrade`.
+ *
+ * In-game UI (`ui`, `13`, *In-game UI*): the host stands for the mod's relay and every player's
+ * client at once. It records each `ui.*` and `replay.*` message in `ui` (`uiFor` filters by player),
+ * and `playerUiRequest` sends a player's `ui.request` and resolves with its `ui.result`. Like the mod,
+ * it does neither unless both hellos list `ui`, and keeps what arrives regardless in `uiUngated`.
  */
 
 export interface Volumes {
@@ -143,6 +151,10 @@ export class FakeHost {
   /** Every message sent to the MCP. */
   readonly sent: ModMessage[] = [];
   readonly chats: ChatMessage[] = [];
+  /** Every `ui.*` and `replay.*` message received (`13`, *In-game UI*), in order. */
+  readonly ui: UiMcpMessage[] = [];
+  /** `ui` messages that arrived although the two hellos don't both list `ui` (an MCP breaking the gate). */
+  readonly uiUngated: UiMcpMessage[] = [];
   readonly notices: NoticeMessage[] = [];
   /** The modes the MCP's last hello listed. */
   mcpModes: readonly RequestMode[] = [];
@@ -166,6 +178,8 @@ export class FakeHost {
   private promptId = 0;
   private readonly noticeWaiters: { player: string; resolve: (n: NoticeMessage) => void }[] = [];
   private readonly prompts = new Map<number, (r: PromptResult) => void>();
+  private uiRequestId = 0;
+  private readonly uiRequests = new Map<number, (r: UiResult) => void>();
   private ownsDir = false;
 
   private constructor(
@@ -310,6 +324,31 @@ export class FakeHost {
       this.noticeWaiters.push({ player: player.uuid, resolve });
       this.send({ type: "prompt.close", player });
     });
+  }
+
+  /** Whether both hellos list `ui` (*Versions and features*): only then does a mod relay `ui` messages or send `ui.request`. */
+  get uiEnabled(): boolean {
+    return this.connected && this.has("ui") && this.mcpFeatures.includes("ui");
+  }
+
+  /**
+   * A player's client sends a `ui.request` (`13`, *In-game UI*); resolves with the MCP's `ui.result`.
+   * As in the mod, nothing is sent without a connection (`no_link`) or unless both hellos list `ui`
+   * (`mcp_outdated`; the client half locks the UI with the too-old line).
+   */
+  playerUiRequest(player: PlayerRef, request: { kind: string; args?: Record<string, unknown> }): Promise<UiResult | { local: "no_link" | "mcp_outdated" }> {
+    if (!this.connected) return Promise.resolve({ local: "no_link" });
+    if (!this.uiEnabled) return Promise.resolve({ local: "mcp_outdated" });
+    const id = ++this.uiRequestId;
+    return new Promise((resolve) => {
+      this.uiRequests.set(id, resolve);
+      this.send({ type: "ui.request", request: id, player, kind: request.kind, args: request.args ?? {} });
+    });
+  }
+
+  /** The `ui` messages received since index `from` that are for `player` (by `players`, or `player` on a result). */
+  uiFor(player: string, from = 0): UiMcpMessage[] {
+    return this.ui.slice(from).filter((m) => ("players" in m ? m.players.includes(player) : m.player === player));
   }
 
   // ── connection control ─────────────────────────────────────────────────────────────────────
@@ -561,6 +600,25 @@ export class FakeHost {
         return;
       case "hello":
         return this.send({ type: "error", id: null, code: "bad_request", message: "hello after the handshake" }, s);
+      case "ui.state":
+      case "ui.flash":
+      case "ui.ghost":
+      case "ui.ghost.clear":
+      case "replay.frame":
+      case "ui.result": {
+        if (!this.uiEnabled) {
+          // A mod without the feature doesn't know these id-less types and ignores them.
+          this.uiUngated.push(m);
+          return;
+        }
+        this.ui.push(m);
+        if (m.type === "ui.result") {
+          const resolve = this.uiRequests.get(m.request);
+          this.uiRequests.delete(m.request);
+          resolve?.(m);
+        }
+        return;
+      }
       case "error":
         return;
     }
@@ -729,7 +787,7 @@ function containsBox(outer: WireBox, inner: WireBox): boolean {
 }
 
 const DIMENSIONS = new Set(["minecraft:overworld", "minecraft:the_nether", "minecraft:the_end"]);
-const KNOWN = new Set(["hello", "error", "volumes.extend", "volumes.set", "hashes", "snapshot", "patch", "registry", "upgrade", "prompt.result", "notice", "chat"]);
+const KNOWN = new Set(["hello", "error", "volumes.extend", "volumes.set", "hashes", "snapshot", "patch", "registry", "upgrade", "prompt.result", "notice", "chat", ...UI_MCP_TYPES]);
 
 /** The features each protocol version's mod lists (*Versions and features*). */
 const FEATURES_BY_VERSION: Record<number, string[] | undefined> = { 1: undefined, 2: ["modes", "scan", "volumes.set"], 3: [...MOD_FEATURES] };

@@ -73,15 +73,16 @@ export type RequestMode = (typeof REQUEST_MODES)[number];
  * Optional capabilities a mod's `hello` lists in `features` (*Versions and features*). The MCP uses
  * an addition only when the mod lists it, never because of the protocol number.
  */
-export const MOD_FEATURES = ["modes", "scan", "volumes.set", "registry", "upgrade"] as const;
+export const MOD_FEATURES = ["modes", "scan", "volumes.set", "registry", "upgrade", "ui"] as const;
 export type ModFeature = (typeof MOD_FEATURES)[number];
 
 /**
  * Optional capabilities the MCP's `hello` lists in `features` (*Versions and features*), mirroring
  * the mod's list: the mod uses an addition only when the MCP lists it. `prompt.close`: the MCP
- * handles the mod's `prompt.close` (`/autosketch done`, B6).
+ * handles the mod's `prompt.close` (`/autosketch done`, B6). `ui`: the MCP sends `16`'s in-game UI
+ * messages and answers `ui.request` (*In-game UI*); used only when the mod lists `ui` too.
  */
-export const MCP_FEATURES = ["prompt.close"] as const;
+export const MCP_FEATURES = ["prompt.close", "ui"] as const;
 export type McpFeature = (typeof MCP_FEATURES)[number];
 
 /** A world block as the mod reports it: canonical state, block-entity NBT when it has one. */
@@ -368,10 +369,210 @@ export interface ChatMessage {
   lines: string[];
 }
 
+// ── In-game UI (feature `ui`, added within protocol 3; `13`, *In-game UI*; `16`) ───────────────
+
+/** The coalescing window for `ui.state`, `ui.flash` and ghost updates (*In-game UI*, "Never slows the build"). */
+export const UI_COALESCE_MS = 250;
+/** Most boxes one flash record lists; beyond that the MCP merges them into fewer, larger boxes. */
+export const UI_FLASH_BOXES = 64;
+/** Largest piece of a frame in one relay packet to a client (*Relay to the client*). */
+export const UI_PART_BYTES = 1_000_000;
+
+/** A job as the overlays draw it: its scope id, colour (`#rrggbb`), brief and volumes in world coordinates. */
+export interface UiJob {
+  id: string;
+  colour: string;
+  brief: string;
+  dimension: string;
+  work: WireBox;
+  context: WireBox[];
+}
+
+/** Boxes one job just changed. */
+export interface UiFlash {
+  job: string;
+  colour: string;
+  dimension: string;
+  boxes: WireBox[];
+}
+
+/** The open in-game request: the prompt's id, its mode and its text. */
+export interface UiRequestInfo {
+  id: number;
+  mode: RequestMode;
+  text: string;
+}
+
+/** Token totals of the current prompt (`13`, B3); `cost` in US dollars, absent when none was reported. */
+export interface UiTokens {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheCreation: number;
+  cost?: number;
+}
+
+export interface UiRefusal {
+  code: string;
+  text: string;
+}
+
+/**
+ * Overlay and HUD state. Full: `jobs`, `request`, `tokens` and `refusal` are all given and replace
+ * the client's state. Changes: `jobs` lists added or changed jobs whole (replace by id), `removed`
+ * the ended ones, and `request`, `tokens`, `refusal` appear only when they changed (`null`: cleared).
+ */
+export interface UiState {
+  type: "ui.state";
+  players: string[];
+  seq: number;
+  full: boolean;
+  jobs?: UiJob[];
+  removed?: string[];
+  request?: UiRequestInfo | null;
+  tokens?: UiTokens | null;
+  refusal?: UiRefusal | null;
+}
+
+export interface UiFlashMessage {
+  type: "ui.flash";
+  players: string[];
+  flashes: UiFlash[];
+}
+
+/** One whole 16³ section of a ghost's local grid: a palette index per position, x fastest, then z, then y. */
+export interface UiGhostSection {
+  /** Section coordinates in the ghost's local grid (local position >> 4). */
+  section: Vec3;
+  states: Uint32Array;
+}
+
+export interface UiGhost {
+  type: "ui.ghost";
+  players: string[];
+  ghost: string;
+  dimension: string;
+  /** World position of the ghost's local [0, 0, 0]. */
+  origin: Vec3;
+  tint: string;
+  /** True: these sections are the whole ghost. False: they replace those sections only. */
+  full: boolean;
+  palette: string[];
+  /** Ascending by sy, then sz, then sx. */
+  sections: UiGhostSection[];
+}
+
+export interface UiGhostClear {
+  type: "ui.ghost.clear";
+  players: string[];
+  ghost: string;
+}
+
+export const REPLAY_MARKERS = ["fork", "merge", "refusal", "checkpoint"] as const;
+export type ReplayMarkerKind = (typeof REPLAY_MARKERS)[number];
+
+export interface ReplayMarker {
+  step: number;
+  kind: ReplayMarkerKind;
+  label: string;
+}
+
+export interface ReplayHud {
+  call: string;
+  brief: string | null;
+  note?: string;
+}
+
+interface ReplayFrameBase {
+  type: "replay.frame";
+  players: string[];
+  replay: string;
+  step: number;
+  steps: number;
+  dimension: string;
+  /** ISO-8601 UTC. */
+  time: string;
+  hud: ReplayHud;
+  jobs: UiJob[];
+  flashes: UiFlash[];
+}
+
+/** A keyframe: every position of the replayed volume's boxes at `step`, states only. */
+export interface ReplayKeyframe extends ReplayFrameBase {
+  keyframe: true;
+  palette: string[];
+  regions: { box: WireBox; states: Uint32Array }[];
+  markers: ReplayMarker[];
+}
+
+/** A forward delta: the positions that differ between `from` and `step`, with their state at `step`. */
+export interface ReplayDelta extends ReplayFrameBase {
+  keyframe: false;
+  from: number;
+  blocks: { pos: Vec3; state: string }[];
+}
+
+export type ReplayFrame = ReplayKeyframe | ReplayDelta;
+
+/** `ui.request` kinds (*In-game UI*, *Request kinds*). The MCP answers any other kind with `bad_request`. */
+export const UI_REQUEST_KINDS = [
+  "resync",
+  "settings.list",
+  "settings.set",
+  "settings.unset",
+  "library.list",
+  "library.entry",
+  "library.thumbnail",
+  "library.preview",
+  "library.rename",
+  "library.duplicate",
+  "library.delete",
+  "library.trash",
+  "library.restore",
+  "library.hide",
+  "library.copy",
+  "library.empty_trash",
+  "logs.list",
+  "replay.open",
+  "replay.seek",
+  "replay.close",
+  "ghost.anchor",
+  "ghost.clear",
+] as const;
+export type UiRequestKind = (typeof UI_REQUEST_KINDS)[number];
+
+/** A request from a player's client, numbered from the mod's UI counter (`request`), never by `id`. */
+export interface UiRequest {
+  type: "ui.request";
+  request: number;
+  player: PlayerRef;
+  /** Kept as sent, so an unknown kind can be answered with `bad_request`. */
+  kind: string;
+  args: Record<string, unknown>;
+}
+
+export const UI_ERRORS = ["not_allowed", "conflict", "not_found", "bad_request", "busy", "internal"] as const;
+export type UiError = (typeof UI_ERRORS)[number];
+
+/** The answer to a `ui.request`. `body` only for `library.thumbnail` (PNG) and `library.preview` (a region body). */
+export type UiResult =
+  | { type: "ui.result"; request: number; player: string; ok: true; result: Record<string, unknown>; body?: Uint8Array }
+  | { type: "ui.result"; request: number; player: string; ok: false; error: UiError; message: string };
+
+/** Every message the MCP sends only when both hellos list `ui`. */
+export type UiMcpMessage = UiState | UiFlashMessage | UiGhost | UiGhostClear | ReplayFrame | UiResult;
+export const UI_MCP_TYPES: readonly UiMcpMessage["type"][] = ["ui.state", "ui.flash", "ui.ghost", "ui.ghost.clear", "replay.frame", "ui.result"];
+
+/** Whether both hellos list `ui`: the only case in which either side sends a `ui` message. */
+export function uiEnabled(mcp: Pick<ClientHello, "features"> | undefined, mod: ModHello | undefined): boolean {
+  return mcpHas(mcp, "ui") && modHas(mod, "ui");
+}
+
 /** Messages the MCP sends. */
-export type McpMessage = ClientHello | ErrorMessage | VolumesExtend | VolumesSet | HashesRequest | SnapshotRequest | SurfaceRequest | PatchMessage | RegistryRequest | UpgradeRequest | PromptResult | NoticeMessage | ChatMessage;
+export type McpMessage = ClientHello | ErrorMessage | VolumesExtend | VolumesSet | HashesRequest | SnapshotRequest | SurfaceRequest | PatchMessage | RegistryRequest | UpgradeRequest | PromptResult | NoticeMessage | ChatMessage | UiMcpMessage;
 /** Messages the mod sends. */
-export type ModMessage = ModHello | ErrorMessage | VolumesMessage | HashesResult | SnapshotResult | SurfaceResult | PatchAck | DirtyMessage | PromptMessage | PromptClose | RegistryResult | UpgradeResult;
+export type ModMessage = ModHello | ErrorMessage | VolumesMessage | HashesResult | SnapshotResult | SurfaceResult | PatchAck | DirtyMessage | PromptMessage | PromptClose | RegistryResult | UpgradeResult | UiRequest;
+
 export type Message = McpMessage | ModMessage;
 export type Sender = "mcp" | "mod";
 

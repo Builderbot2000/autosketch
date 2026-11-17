@@ -57,7 +57,7 @@ class GoldenVectorsTest {
     @Test
     void everyMessageKindHasAVector() {
         List<String> names = Golden.frameNames();
-        assertTrue(names.size() >= 59, "found " + names.size() + " vectors in " + Golden.dir());
+        assertTrue(names.size() >= 77, "found " + names.size() + " vectors in " + Golden.dir());
         assertTrue(Golden.frameNames("v2/").size() >= 48, "the frozen version-2 vectors");
         assertTrue(Golden.frameNames("v1/").size() >= 36, "the frozen version-1 vectors");
     }
@@ -124,6 +124,7 @@ class GoldenVectorsTest {
             case "registry.result" -> RegistryResult.decode(f);
             case "upgrade" -> UpgradeRequest.decode(f);
             case "upgrade.result" -> UpgradeResult.decode(f);
+            case "ui.state", "ui.flash", "ui.ghost", "ui.ghost.clear", "replay.frame", "ui.request", "ui.result" -> UiMessages.decode(f);
             default -> null;
         };
     }
@@ -153,6 +154,13 @@ class GoldenVectorsTest {
             case RegistryResult x -> x.encode();
             case UpgradeRequest x -> x.encode();
             case UpgradeResult x -> x.encode();
+            case UiMessages.UiState x -> x.encode();
+            case UiMessages.UiFlash x -> x.encode();
+            case UiMessages.UiGhost x -> x.encode();
+            case UiMessages.UiGhostClear x -> x.encode();
+            case UiMessages.ReplayFrame x -> x.encode();
+            case UiMessages.UiRequest x -> x.encode();
+            case UiMessages.UiResult x -> x.encode();
             default -> throw new IllegalArgumentException(m.toString());
         };
     }
@@ -172,9 +180,67 @@ class GoldenVectorsTest {
                     body == null ? null : java.util.Base64.getDecoder().decode(body.get("bytes").getAsString()));
             case "upgrade" -> new UpgradeRequest(h.get("id").getAsLong(), h.get("from").getAsInt(), upgradeData(h, body));
             case "upgrade.result" -> new UpgradeResult(h.get("id").getAsLong(), h.get("to").getAsInt(), h.has("failed") ? h.get("failed").getAsInt() : 0, upgradeData(h, body));
+            case "ui.ghost" -> uiGhost(h, body);
+            case "replay.frame" -> replayFrame(h, body);
+            case "ui.result" -> {
+                UiMessages.UiResult r = UiMessages.UiResult.decode(new Frame(h));
+                yield body == null ? r : new UiMessages.UiResult(r.request(), r.player(), r.ok(), r.result(), r.error(), r.message(), java.util.Base64.getDecoder().decode(body.get("bytes").getAsString()));
+            }
             // Header-only messages: the typed decoder applied to the sidecar's header.
             default -> decodeTyped(new Frame(h), sender);
         };
+    }
+
+    private static int[] ints(JsonElement a) {
+        var arr = a.getAsJsonArray();
+        int[] out = new int[arr.size()];
+        for (int i = 0; i < out.length; i++) out[i] = arr.get(i).getAsInt();
+        return out;
+    }
+
+    private static List<String> strings(JsonElement a) {
+        List<String> out = new ArrayList<>();
+        for (JsonElement e : a.getAsJsonArray()) out.add(e.getAsString());
+        return out;
+    }
+
+    /** A ghost from its sidecar: the header's fields with the body's palette and sections. */
+    private static UiMessages.UiGhost uiGhost(JsonObject h, JsonObject body) throws ProtocolException {
+        UiMessages.UiGhost head = UiMessages.UiGhost.decode(new Frame(withoutSections(h), new byte[] {0, 0}));
+        List<UiMessages.GhostSection> sections = new ArrayList<>();
+        for (JsonElement e : body.getAsJsonArray("sections")) {
+            int[] s = ints(e.getAsJsonObject().get("section"));
+            sections.add(new UiMessages.GhostSection(s[0], s[1], s[2], ints(e.getAsJsonObject().get("states"))));
+        }
+        return new UiMessages.UiGhost(head.players(), head.ghost(), head.dimension(), head.originX(), head.originY(), head.originZ(), head.tint(), head.full(),
+                strings(body.get("palette")), sections);
+    }
+
+    private static JsonObject withoutSections(JsonObject h) {
+        JsonObject c = h.deepCopy();
+        c.add("sections", new com.google.gson.JsonArray());
+        return c;
+    }
+
+    /** A replay frame from its sidecar: the header, then the body's keyframe regions or delta blocks. */
+    private static UiMessages.ReplayFrame replayFrame(JsonObject h, JsonObject body) throws ProtocolException {
+        JsonObject c = h.deepCopy();
+        boolean keyframe = h.get("keyframe").getAsBoolean();
+        List<SnapshotRegion> regions = new ArrayList<>();
+        List<WorldBlock> blocks = new ArrayList<>();
+        if (keyframe) {
+            List<Box> boxes = Json.reqBoxes(h, "regions", null);
+            for (int i = 0; i < boxes.size(); i++) regions.add(new SnapshotRegion(boxes.get(i), ints(body.getAsJsonArray("regions").get(i).getAsJsonObject().get("states")), List.of()));
+            c.add("regions", new com.google.gson.JsonArray());
+        } else {
+            blocks.addAll(worldBlocks(body.getAsJsonArray("blocks")));
+            c.add("origin", Json.vec(0, 0, 0));
+            c.add("size", Json.vec(0, 0, 0));
+            c.addProperty("count", 0);
+        }
+        UiMessages.ReplayFrame head = UiMessages.ReplayFrame.decode(new Frame(c, keyframe ? new byte[] {0, 0} : new byte[] {0, 0, 0}));
+        return new UiMessages.ReplayFrame(head.players(), head.replay(), head.step(), head.steps(), keyframe, head.from(), head.dimension(),
+                keyframe ? strings(body.get("palette")) : List.of(), regions, blocks, head.time(), head.hud(), head.jobs(), head.flashes(), head.markers());
     }
 
     private static UpgradeData upgradeData(JsonObject h, JsonObject body) {
@@ -273,6 +339,12 @@ class GoldenVectorsTest {
     }
 
     private static void assertSameContent(Object expected, Object actual) {
+        // ui messages holding arrays (ghost sections, replay regions, result bodies): compare what they encode to.
+        if (expected instanceof UiMessages.UiGhost || expected instanceof UiMessages.ReplayFrame || expected instanceof UiMessages.UiResult) {
+            assertEquals(expected.getClass(), actual.getClass());
+            assertArrayEquals(FrameCodec.encode(encodeTyped(expected)), FrameCodec.encode(encodeTyped(actual)), "decoded content matches the sidecar");
+            return;
+        }
         if (expected instanceof RegistryResult e && actual instanceof RegistryResult a) {
             assertEquals(e.id(), a.id());
             assertEquals(e.hash(), a.hash());

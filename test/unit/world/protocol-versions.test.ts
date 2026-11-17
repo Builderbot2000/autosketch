@@ -70,7 +70,7 @@ describe("protocol 2 golden vectors (N−1)", () => {
 
   roundTrips(V2);
 
-  it("carry none of protocol 3's additions, and protocol 3 changed only the hellos and the mismatch example (and gained prompt.close, a feature-gated addition)", () => {
+  it("carry none of protocol 3's additions, and protocol 3 changed only the hellos and the mismatch example (and gained prompt.close and ui, feature-gated additions)", () => {
     const v2 = (n: string) => splitFrame(new Uint8Array(readFileSync(join(V2, `${n}.bin`))).subarray(4)).header;
     expect(v2("hello-mcp")).toMatchObject({ protocol: 2 });
     expect(v2("hello-mod-singleplayer").features).toEqual(["modes", "scan", "volumes.set"]);
@@ -82,6 +82,24 @@ describe("protocol 2 golden vectors (N−1)", () => {
       "registry-have",
       "registry-result",
       "registry-result-unchanged",
+      "replay-frame-delta",
+      "replay-frame-keyframe",
+      "ui-flash",
+      "ui-ghost-clear",
+      "ui-ghost-full",
+      "ui-ghost-move",
+      "ui-ghost-update",
+      "ui-request-ghost-anchor",
+      "ui-request-resync",
+      "ui-request-settings-set",
+      "ui-result-conflict",
+      "ui-result-not-allowed",
+      "ui-result-preview",
+      "ui-result-settings-list",
+      "ui-result-thumbnail",
+      "ui-state-changes",
+      "ui-state-full",
+      "ui-state-resync",
       "upgrade-elements",
       "upgrade-result-elements",
       "upgrade-result-failed",
@@ -282,7 +300,7 @@ describe("bridge and fake host, protocol 2 (N−1)", () => {
 describe("bridge and fake host, protocol 3", () => {
   it("pairs in protocol 3 and sees every feature the hello lists", async () => {
     const { host, bridge, hello } = await pair({ volumes: { work: WORK } });
-    expect(hello).toMatchObject({ protocol: PROTOCOL_VERSION, features: ["modes", "scan", "volumes.set", "registry", "upgrade"] });
+    expect(hello).toMatchObject({ protocol: PROTOCOL_VERSION, features: ["modes", "scan", "volumes.set", "registry", "upgrade", "ui"] });
     expect(host.received[0]).toMatchObject({ type: "hello", protocol: 3, modes: ["ask", "scan", "plan", "build"] });
     expect(host.mcpModes).toEqual(["ask", "scan", "plan", "build"]);
     for (const f of MOD_FEATURES) expect(bridge.supports(f)).toBe(true);

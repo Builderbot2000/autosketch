@@ -1,0 +1,14 @@
+{
+  "description": "A client fell behind (a gap in seq) and asks for the whole state again",
+  "sender": "mod",
+  "header": {
+    "type": "ui.request",
+    "request": 1,
+    "player": {
+      "name": "Alex",
+      "uuid": "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+    },
+    "kind": "resync",
+    "args": {}
+  }
+}

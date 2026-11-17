@@ -16,7 +16,7 @@ import { tapJournal, type JournalStep, type JournalTap } from "./journal-tap.js"
 import type { DirtyState, LinkOpenOptions, LinkState, LinkVolumes, SyncFn, SyncReason, WorldLink } from "./link.js";
 import { patchBlocks } from "./patch.js";
 import { DEFAULT_VOLATILE, mergeVolatile } from "./protocol/hash.js";
-import { PAIRING_FILE, type PatchAck, type PatchBlock, type SnapshotResult, type VolatileList, type VolumesMessage, type WireBox, type WorldBlock } from "./protocol/messages.js";
+import { PAIRING_FILE, type McpFeature, type PatchAck, type PatchBlock, type SnapshotResult, type VolatileList, type VolumesMessage, type WireBox, type WorldBlock } from "./protocol/messages.js";
 import { applyWorldState } from "./sync.js";
 
 /**
@@ -74,6 +74,8 @@ export interface LiveLinkOptions {
   backoff?: { minMs: number; maxMs: number };
   /** How often automatic linking retries the first connection (default 2 s; tests shorten it). */
   autoRetryMs?: number;
+  /** The features the bridge's hello lists (`BridgeOptions.features`); the entry point adds `ui` once `src/ui/` answers requests (`16`). */
+  features?: McpFeature[];
   log?: (msg: string) => void;
 }
 
@@ -128,7 +130,7 @@ export class LiveLink implements WorldLink {
     private readonly opts: LiveLinkOptions = {},
   ) {
     this.apply = opts.apply ?? applyWorldState;
-    this.bridge = new Bridge({ instanceDir: opts.gameDir ?? "", volatile: this.volatile, ...(opts.backoff ? { backoff: opts.backoff } : {}), ...(opts.log ? { log: opts.log } : {}) });
+    this.bridge = new Bridge({ instanceDir: opts.gameDir ?? "", volatile: this.volatile, ...(opts.backoff ? { backoff: opts.backoff } : {}), ...(opts.features ? { features: opts.features } : {}), ...(opts.log ? { log: opts.log } : {}) });
     this.bridge.on("volumes", (m) => this.onVolumes(m));
     this.bridge.on("dirty", (m) => {
       if (!this.frame) return;

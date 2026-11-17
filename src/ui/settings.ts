@@ -12,22 +12,19 @@ import {
   type Settings,
   type SourcedText,
 } from "../core/settings.js";
+import { UiRequestError } from "./errors.js";
 
 /**
- * The Settings tab's endpoints (docs/design/15-management-ui.md, *Settings tab*, *Endpoints*):
+ * Settings rows for the in-game settings screen (docs/design/16-in-game-ui.md, *Settings screen*;
+ * `13`, `settings.list`, `settings.set`, `settings.unset`), rewritten from the browser's
+ * `/api/settings` (`15`, *Settings tab*) over the same `core/settings.ts` and `core/config.ts`.
  *
- *   GET    /api/settings          every registered setting, resolved (value, source, overridden
- *                                 launch value, invalid file value, restart needed), plus the
- *                                 file's path and hash
- *   PUT    /api/settings/<key>    {value, hash?} → config.toml [settings]
- *   DELETE /api/settings/<key>    {hash?}        → removes the key, so the launch value or default applies
- *
- * Writes go through `writeConfig`'s compare-and-set: the UI sends the hash it last read, and a
- * file changed since (by `autosketch config`, a hand edit or the agent's own process) answers 409,
- * so the UI reloads instead of overwriting. A file with read problems (bad TOML, wrongly typed
+ * Writes go through `writeConfig`'s compare-and-set: the client sends the hash it last read, and a
+ * file changed since (by `autosketch config`, a hand edit or the agent's own process) is `conflict`,
+ * so the screen reloads instead of overwriting. A file with read problems (bad TOML, wrongly typed
  * values) is never rewritten, since a whole-file write would drop the parts that didn't parse.
  *
- * The file is watched, and re-read before every GET, so the running `Settings` follows it
+ * The file is watched, and re-read before every list, so the running `Settings` follows it
  * (`Settings.reload`): settings marked `live` take a change at once, `restart` ones show
  * *restart needed* while the saved value differs from the one read at startup.
  */
@@ -57,9 +54,8 @@ export interface SettingRow {
   running?: unknown;
 }
 
-export interface SettingsView {
+export interface SettingsList {
   path: string;
-  exists: boolean;
   hash: string;
   warnings: string[];
   /** config.toml keys no registered setting declares. */
@@ -67,39 +63,24 @@ export interface SettingsView {
   settings: SettingRow[];
 }
 
-export interface ApiReply {
-  status: number;
-  body: unknown;
-}
-
-export class SettingsApi {
+export class SettingsRows {
   /** JSON of each value as read at startup (what `restart` settings are running with). */
   private readonly running = new Map<string, string>();
   private watching = false;
-  private readonly reloadListeners = new Set<() => void>();
 
   constructor(
     private readonly settings: Settings,
     readonly path: string,
-    private readonly opts: { log?: (msg: string) => void; /** No server runs here (`autosketch ui`): nothing is "restart needed". */ standalone?: boolean } = {},
+    private readonly log?: (msg: string) => void,
   ) {
-    if (!opts.standalone) for (const r of settings.resolveAll()) this.running.set(r.setting.key, json(r.value));
+    for (const r of settings.resolveAll()) this.running.set(r.setting.key, json(r.value));
   }
 
   /** Re-reads config.toml and swaps it into `Settings` when its hash changed. */
   refresh(): ConfigSnapshot {
     const snap = readConfig(this.path);
-    if (snap.hash !== this.settings.config?.hash) {
-      this.settings.reload(snap);
-      for (const fn of this.reloadListeners) fn();
-    }
+    if (snap.hash !== this.settings.config?.hash) this.settings.reload(snap);
     return snap;
-  }
-
-  /** Calls `fn` after each reload of a changed config.toml (by the watch or a request). Returns an unsubscribe. */
-  onReload(fn: () => void): () => void {
-    this.reloadListeners.add(fn);
-    return () => this.reloadListeners.delete(fn);
   }
 
   /** Watches config.toml (polling: it is replaced by rename, and may not exist yet). */
@@ -121,17 +102,16 @@ export class SettingsApi {
     try {
       this.refresh();
     } catch (e) {
-      this.opts.log?.(`observe: re-reading ${this.path} failed: ${(e as Error).message}`);
+      this.log?.(`ui: re-reading ${this.path} failed: ${(e as Error).message}`);
     }
   };
 
-  view(): SettingsView {
+  list(): SettingsList {
     const snap = this.refresh();
     const all = registeredSettings();
     const known = new Set(all.map((s) => s.key));
     return {
       path: this.path,
-      exists: snap.exists,
       hash: snap.hash,
       warnings: snap.warnings,
       unknown: Object.keys(snap.config.settings).filter((k) => !known.has(k)),
@@ -139,41 +119,41 @@ export class SettingsApi {
     };
   }
 
-  put(key: string, body: unknown): ApiReply {
+  /** Saves a value (text, as a launch value carries it). Returns the file's new hash. */
+  set(key: string, value: unknown, hash: unknown): string {
     const s = find(key);
-    if (!s) return { status: 404, body: { error: `no setting "${key}"` } };
-    const b = (body ?? {}) as { value?: unknown; hash?: unknown };
-    const text = valueText(b.value);
-    if (text === undefined) return { status: 400, body: { error: "value must be text, a number, true/false or a list of text" } };
-    if (s.parse(text) === undefined) return { status: 400, body: { error: `${key} must be ${s.accepts} (got "${text}")` } };
-    return this.write(s, typeof b.hash === "string" ? b.hash : undefined, (settings) => ({ ...settings, [key]: text }));
+    const text = valueText(value);
+    if (text === undefined) throw new UiRequestError("bad_request", "value must be text (a list comma-separated)");
+    if (s.parse(text) === undefined) throw new UiRequestError("bad_request", `${key} must be ${s.accepts} (got "${text}")`);
+    return this.write(hash, (settings) => ({ ...settings, [key]: text }));
   }
 
-  remove(key: string, body: unknown): ApiReply {
-    const s = find(key);
-    if (!s) return { status: 404, body: { error: `no setting "${key}"` } };
-    const hash = (body as { hash?: unknown } | undefined)?.hash;
-    return this.write(s, typeof hash === "string" ? hash : undefined, (settings) => {
+  /** Removes a key from config.toml, so the launch value or default applies. Returns the new hash. */
+  unset(key: string, hash: unknown): string {
+    find(key);
+    return this.write(hash, (settings) => {
       const { [key]: _gone, ...rest } = settings;
       return rest;
     });
   }
 
-  private write(s: Setting<unknown>, expected: string | undefined, edit: (settings: Record<string, string>) => Record<string, string>): ApiReply {
+  /** A compare-and-set edit of `[settings]`; `conflict` on a stale hash. Returns the file's hash after. */
+  write(expected: unknown, edit: (settings: Record<string, string>) => Record<string, string>): string {
+    if (typeof expected !== "string") throw new UiRequestError("bad_request", "hash must be the one settings.list gave");
     const snap = readConfig(this.path);
-    if (expected !== undefined && expected !== snap.hash) return conflict(this.path);
-    if (snap.warnings.length) return { status: 409, body: { error: `${this.path} has problems; fix them by hand first (a save would drop what didn't parse)`, warnings: snap.warnings } };
+    if (expected !== snap.hash) throw new UiRequestError("conflict", `${this.path} changed since it was read; reload and try again`);
+    if (snap.warnings.length) throw new UiRequestError("conflict", `${this.path} has problems (${snap.warnings.join("; ")}); fix them by hand first, since a save would drop what didn't parse`);
     const settings = edit(snap.config.settings);
-    if (json(settings) === json(snap.config.settings)) return { status: 200, body: this.row(this.settings.resolve(s)) };
+    if (json(settings) === json(snap.config.settings)) return snap.hash;
     let written: ConfigSnapshot;
     try {
       written = writeConfig({ ...snap.config, settings }, snap.hash, this.path);
     } catch (e) {
-      if (e instanceof ConfigConflictError) return conflict(this.path);
+      if (e instanceof ConfigConflictError) throw new UiRequestError("conflict", `${this.path} changed since it was read; reload and try again`);
       throw e;
     }
     this.settings.reload(written);
-    return { status: 200, body: { ...this.row(this.settings.resolve(s)), hash: written.hash } };
+    return written.hash;
   }
 
   private row(r: Resolved<unknown>): SettingRow {
@@ -211,14 +191,16 @@ export class SettingsApi {
   }
 }
 
-const find = (key: string): Setting<unknown> | undefined => registeredSettings().find((s) => s.key === key);
-
-const conflict = (path: string): ApiReply => ({ status: 409, body: { error: `${path} changed since it was read; reload and try again`, conflict: true } });
+function find(key: unknown): Setting<unknown> {
+  const s = typeof key === "string" ? registeredSettings().find((x) => x.key === key) : undefined;
+  if (!s) throw new UiRequestError("not_found", `no setting "${String(key)}"`);
+  return s;
+}
 
 /** Stable JSON for comparing values (`undefined` as null). */
 const json = (v: unknown): string => JSON.stringify(v ?? null);
 
-/** A PUT value as the text a launch value would carry (a list joined with ", "). */
+/** A value as the text a launch value would carry (a list joined with ", "). */
 function valueText(v: unknown): string | undefined {
   if (typeof v === "string") return v;
   if (typeof v === "number" && Number.isFinite(v)) return String(v);

@@ -27,16 +27,20 @@ import { configFromEnv, launchOptions, loadInstanceContext, startupArgNotes } fr
 import { createServer, SERVER_VERSION } from "./server.js";
 import { SERVER_HIDE_TOOLS } from "./settings.js";
 import { defaultWorkspace, Session } from "./session.js";
-import { makeLibraryHost } from "./library-host.js";
 import { makeInstanceSetup } from "./setup.js";
 import { CLI_COMMANDS, runCli } from "../cli/index.js";
 import { bakerFor } from "./tools/shared.js";
 import { LiveLink } from "../world/live-link.js";
 import { watchGameReport } from "../assets/report.js";
 import { bridgeUpgrader } from "../world/upgrade.js";
-import { promptSettings, worldSettings } from "../world/settings.js";
+import { promptSettings, WORLD_PROMPT_PLAYERS, worldSettings } from "../world/settings.js";
 import { CHANNEL_INSTRUCTIONS, CHANNEL_METHOD, InGameRequests } from "../world/prompt.js";
 import { autoSyncHook, syncLink } from "../world/sync.js";
+import { MCP_FEATURES } from "../world/protocol/messages.js";
+import { startUi } from "../ui/index.js";
+import type { LibraryHost as UiLibraryHost } from "../ui/library.js";
+import type { InstanceContext } from "./context.js";
+import { libraryFor, rootsFor } from "./tools/library-context.js";
 
 const log = (msg: string) => process.stderr.write(`[autosketch] ${msg}\n`);
 
@@ -75,7 +79,7 @@ async function main(): Promise<void> {
     hideTools = settings.get(SERVER_HIDE_TOOLS);
     // Snapshots need the baker, which exists once an instance is loaded (12).
     const getBaker = () => session.instance?.then(bakerFor) ?? Promise.reject(new Error("no instance loaded"));
-    observer = startObserve({ workspace, settings, version: SERVER_VERSION, getDoc: () => session.doc, getScopeDoc: (id) => session.scopes.scopes.get(id)?.doc, getBaker, log, library: makeLibraryHost(session) });
+    observer = startObserve({ workspace, settings, version: SERVER_VERSION, getDoc: () => session.doc, getScopeDoc: (id) => session.scopes.scopes.get(id)?.doc, getBaker, log });
   } catch (e) {
     log((e as Error).message);
     process.exit(2);
@@ -101,7 +105,8 @@ async function main(): Promise<void> {
   try {
     const ws = worldSettings(settings);
     autoLink = ws.autoLink;
-    link = new LiveLink(session, { ...ws, log });
+    // `ui` in the hello: src/ui/ answers the in-game UI's requests (16).
+    link = new LiveLink(session, { ...ws, features: [...MCP_FEATURES], log });
   } catch (e) {
     log((e as Error).message);
     process.exit(2);
@@ -135,6 +140,23 @@ async function main(): Promise<void> {
     process.exit(2);
   }
   session.inGame = inGame;
+  // The in-game UI (16): overlays, ghosts, replay and the player's requests, over the bridge.
+  const ui = startUi({
+    bridge: link.bridge,
+    subscribe: (fn) => session.subscribe(fn),
+    bus: observer.bus,
+    workspace,
+    sessionId: observer.sessionId,
+    settings,
+    configPath: file.path,
+    promptPlayers: () => settings.get(WORLD_PROMPT_PLAYERS),
+    library: uiLibraryHost(session),
+    baseDoc: () => session.doc,
+    scopes: session.scopes,
+    linkFrame: () => (link.volumes ? { dimension: link.volumes.dimension, origin: link.volumes.origin } : undefined),
+    inGame: () => inGame,
+    log,
+  });
   // Request modes (13, B6): while an ask, plan or scan request is open, edits on the linked document are refused.
   session.callHooks.push(inGame.modeRule);
   // Once an instance loads (at startup, or later in place).
@@ -148,6 +170,7 @@ async function main(): Promise<void> {
   const shutdown = async (code: number) => {
     if (closing) return;
     closing = true;
+    ui.close();
     inGame.close();
     link.close();
     await session.close();
@@ -160,6 +183,26 @@ async function main(): Promise<void> {
   process.on("SIGTERM", () => void shutdown(143));
   await server.connect(transport);
   log(`listening on stdio; workspace ${workspace}`);
+}
+
+/**
+ * The in-game library screen's view of the library (16, *Library screen*): the same roots the tools
+ * use (`rootsFor`: `library.*` settings read now, the loaded instance's Axiom folder), and
+ * thumbnails through the same `Library` (cached, embedded, or rendered with the instance).
+ */
+function uiLibraryHost(session: Session): UiLibraryHost {
+  let loaded: InstanceContext | undefined;
+  void session.whenInstance().then((c) => (loaded = c));
+  return {
+    roots: () => rootsFor(session, loaded),
+    async thumbnail(p) {
+      if (loaded) return libraryFor(loaded, session).thumbnail(p);
+      const { prefabThumbnail } = await import("../library/prefabs.js");
+      const { defaultCacheDir } = await import("../assets/cache.js");
+      return prefabThumbnail(p, { cacheDir: defaultCacheDir() });
+    },
+    registry: () => loaded?.registry,
+  };
 }
 
 const command = process.argv[2];

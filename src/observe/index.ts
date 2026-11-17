@@ -5,8 +5,6 @@ import type { BlockBaker } from "../perception/render/bake.js";
 import { EventBus } from "./bus.js";
 import { DeltaWriter } from "./deltas.js";
 import { ObserveHttp } from "./http.js";
-import type { InstanceHost } from "./instance-api.js";
-import type { LibraryHost } from "./library-api.js";
 import { EventLog, newSessionId, sessionDir } from "./log.js";
 import { OBSERVE_DELTAS, OBSERVE_HTTP, OBSERVE_LOG, OBSERVE_MAX_DELTA_BYTES, OBSERVE_RETAIN_SESSIONS, OBSERVE_SNAPSHOTS } from "./settings.js";
 import { SnapshotScheduler } from "./snapshots.js";
@@ -14,8 +12,8 @@ import { LogTables } from "./states.js";
 
 /**
  * Observability for one server process (docs/design/12-observability.md): the bus, the
- * `events.ndjson` log, `deltas.bin`, time-lapse snapshots and the live viewer, configured from
- * settings. The entry point hands `sink()` to the session; `document/` and `server/` see only
+ * `events.ndjson` log, `deltas.bin` (which in-game replay reads, `16`), time-lapse snapshots and
+ * the receiver for Claude Code's telemetry (`http.ts`), configured from settings. The entry point hands `sink()` to the session; `document/` and `server/` see only
  * that `EventSink`.
  */
 
@@ -24,24 +22,19 @@ export interface ObserveOptions {
   settings: Settings;
   version?: string;
   sessionId?: string;
-  /** The current base document, for snapshots, deltas and the viewer. */
+  /** The current base document, for snapshots and deltas. */
   getDoc?: () => Document | undefined;
   /**
-   * A sandbox document by scope id (11), for sandbox deltas and the viewer's drill-in. Scoped
-   * sessions supply it; without it, sandbox ops are logged without deltas.
+   * A sandbox document by scope id (11), for sandbox deltas. Scoped sessions supply it; without it,
+   * sandbox ops are logged without deltas.
    */
   getScopeDoc?: (scope: string) => Document | undefined;
-  /** The block baker, for snapshots and the viewer's models (awaited off the tool-call path). */
+  /** The block baker, for snapshots (awaited off the tool-call path). */
   getBaker?: () => Promise<BlockBaker>;
   log?: (msg: string) => void;
-  /** The session's instance, discovery and live link, for the management UI's Instance tab (15). */
-  instance?: InstanceHost;
-  /** Library roots, thumbnails and the baker for previews, for the management UI's Library tab (15). */
-  library?: LibraryHost;
   /** Overrides for tests. */
   flushMs?: number;
   debounceMs?: number;
-  viewerDir?: string;
 }
 
 export interface Observer {
@@ -51,14 +44,11 @@ export interface Observer {
   readonly snapshots?: SnapshotScheduler;
   readonly deltas?: DeltaWriter;
   readonly http?: ObserveHttp;
-  /**
-   * Resolves once the viewer is listening, to the URL to open (with the write token in its fragment,
-   * `…/#t=<token>`, docs/design/15-management-ui.md *Security*), or undefined when it is off or failed.
-   */
+  /** Resolves once the telemetry receiver is listening, to its base URL, or undefined when it is off or failed. */
   readonly ready: Promise<string | undefined>;
   /** A sink tagged with `doc`; `NO_EVENTS` when everything is off. */
   sink(doc?: string): EventSink;
-  /** Stops the viewer, waits for pending snapshots, then flushes the log and deltas. */
+  /** Stops the telemetry receiver, waits for pending snapshots, then flushes the log and deltas. */
   close(): Promise<void>;
 }
 
@@ -80,8 +70,9 @@ export function startObserve(opts: ObserveOptions): Observer {
   if (log) bus.subscribe(log.onEvent);
 
   const httpOn = port !== false && !!opts.getDoc;
+  // `auto` keeps its old rule (on with observe.http), so defaults are unchanged: deltas on.
   const deltasOn = !!opts.getDoc && (deltaMode === "on" || (deltaMode === "auto" && httpOn));
-  const tables = httpOn || deltasOn ? new LogTables((e) => bus.publish("base", e)) : undefined;
+  const tables = deltasOn ? new LogTables((e) => bus.publish("base", e)) : undefined;
   if (tables) bus.annotate(tables.annotate);
   const deltas = tables && deltasOn
     ? new DeltaWriter({ tables, dirFor, docFor, maxBytes: maxDeltaBytes, ...(opts.flushMs !== undefined ? { flushMs: opts.flushMs } : {}), ...(opts.log ? { log: opts.log } : {}) })
@@ -106,29 +97,16 @@ export function startObserve(opts: ObserveOptions): Observer {
 
   let http: ObserveHttp | undefined;
   let ready: Promise<string | undefined> = Promise.resolve(undefined);
-  if (tables && httpOn) {
+  if (httpOn) {
     const h = new ObserveHttp({
-      bus,
-      tables,
-      sessionId,
-      dirFor,
-      docFor,
       port: port as number,
       fallbackToFreePort: opts.settings.resolve(OBSERVE_HTTP).source.kind === "default",
-      settings: opts.settings,
-      ...(opts.instance ? { instance: opts.instance } : {}),
-      ...(opts.library ? { library: opts.library } : {}),
       publish: (e) => void bus.publish("base", e),
-      ...(opts.getBaker ? { getBaker: opts.getBaker } : {}),
-      ...(deltas ? { deltas } : {}),
-      ...(opts.version ? { version: opts.version } : {}),
-      ...(opts.viewerDir ? { viewerDir: opts.viewerDir } : {}),
       ...(opts.log ? { log: opts.log } : {}),
     });
     http = h;
-    bus.subscribe(h.onEvent);
     ready = h.start().catch((e: Error) => {
-      opts.log?.(`observe: viewer failed to start on port ${port}: ${e.message}`);
+      opts.log?.(`observe: the telemetry receiver failed to start on port ${port}: ${e.message}`);
       return undefined;
     });
   }

@@ -1,9 +1,9 @@
 /**
  * The OTLP/HTTP JSON log receiver (docs/design/13-live-world.md, *Backlog* B3). Claude Code's
- * OpenTelemetry exporter posts `ExportLogsServiceRequest` batches to `/v1/logs` on the viewer's
- * port; each log record is appended to the event log unchanged as an `otel` event, so the live
- * viewer and replay read the same thing. The token totals and per-action labels are worked out by
- * the viewer from those events (src/observe/session-model.ts, `Spend`), with Claude Code's own event names
+ * OpenTelemetry exporter posts `ExportLogsServiceRequest` batches to `/v1/logs` on `observe.http`'s
+ * port (`http.ts`); each log record is appended to the event log unchanged as an `otel` event, so the
+ * in-game HUD and replay read the same thing. The token totals and per-action labels are worked out
+ * from those events (src/observe/session-model.ts, `Spend`), with Claude Code's own event names
  * and attributes and no schema of ours on top.
  *
  * Only the envelope is checked here (`resourceLogs[].scopeLogs[].logRecords[]`); records are not
@@ -30,16 +30,4 @@ export function otlpRecords(body: unknown): Record<string, unknown>[] | undefine
     }
   }
   return out;
-}
-
-/** The environment Claude Code needs to send its log events here (13, B3, *Setup*). */
-export function otelSetup(port: number | string): Record<string, string> {
-  return {
-    CLAUDE_CODE_ENABLE_TELEMETRY: "1",
-    OTEL_LOGS_EXPORTER: "otlp",
-    OTEL_EXPORTER_OTLP_LOGS_PROTOCOL: "http/json",
-    OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: `http://localhost:${port}/v1/logs`,
-    OTEL_LOG_TOOL_DETAILS: "1",
-    OTEL_LOGS_EXPORT_INTERVAL: "1000",
-  };
 }

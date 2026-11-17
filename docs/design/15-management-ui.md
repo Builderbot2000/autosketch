@@ -160,7 +160,7 @@ U4 depends on `14`'s `config.toml` and discovery, so it lands with or after them
 
 ## Implementation status
 
-Since `16` (2026-11-17): the rows for U1, U3, U4 and U5 describe code that has been removed (the page and its tabs, `instance-host.ts`, `ui-command.ts`, the wizard signal) or is being rewritten as bridge request handlers (`http.ts`, `guard.ts`, `settings-api.ts`, `library-api.ts`, `library-host.ts`). The settings layer (U2's first two rows) and `src/library/manage.ts` and `roots.ts` (U3a) are unchanged.
+Since `16` (2026-11-17): the rows for U1, U3, U4 and U5 describe code that has been removed (the page and its tabs, `instance-host.ts`, `ui-command.ts`, the wizard signal) or was rewritten as bridge request handlers in `src/ui/` (`settings-api.ts`, `library-api.ts`, `library-host.ts`; `http.ts` and `guard.ts` reduced to the OTLP receiver). The settings layer (U2's first two rows) and `src/library/manage.ts` and `roots.ts` (U3a) are unchanged.
 
 | Piece | Status |
 |---|---|

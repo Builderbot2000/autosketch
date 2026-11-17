@@ -1,28 +1,20 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { createGunzip } from "node:zlib";
 
 /**
- * Write guard for the management UI (docs/design/15-management-ui.md, *Security*). Loopback
- * binding and the Host check (http.ts) stop DNS rebinding, but not a cross-origin request from
- * another page open in the user's browser. So every request that changes something must:
- *
- *   - use POST, PUT or DELETE (GET stays side-effect free),
- *   - carry the per-launch token as `X-Autosketch-Token` (a custom header can't be sent
- *     cross-origin without a preflight, which this server never approves),
- *   - carry an `Origin` that is this server's own.
- *
- * The token is made at start and handed to the page in the URL fragment (`…/#t=<token>`), which
- * browsers never send to a server.
+ * Request checks for the OTLP receiver (`http.ts`; `16`, *What goes, what stays, what moves*).
+ * Loopback binding and the Host check stop DNS rebinding; the Origin check stops another page open
+ * in the user's browser (which can send requests to `127.0.0.1`) from posting into the log. Nothing
+ * writes over HTTP but that log, so there is no token.
  */
 
-export const TOKEN_HEADER = "x-autosketch-token";
-
-export const WRITE_METHODS: ReadonlySet<string> = new Set(["POST", "PUT", "DELETE"]);
-
-export const newToken = (): string => randomBytes(24).toString("base64url");
-
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
+
+/** Whether a request's `Host` names this machine's loopback (any port). */
+export function allowedHost(host: string | undefined): boolean {
+  if (!host) return false;
+  return LOOPBACK.has(host.replace(/:\d+$/, ""));
+}
 
 /** Whether `origin` is this server's own (a loopback name on `port`). */
 export function ownOrigin(origin: string | undefined, port: number): boolean {
@@ -36,23 +28,10 @@ export function ownOrigin(origin: string | undefined, port: number): boolean {
   return u.protocol === "http:" && LOOPBACK.has(u.hostname) && Number(u.port || 80) === port && origin.replace(/\/$/, "") === u.origin;
 }
 
-/** Why a changing request is refused, or undefined when it may go ahead. */
-export function refuseWrite(req: IncomingMessage, token: string, port: number): string | undefined {
-  if (!WRITE_METHODS.has(req.method ?? "")) return "changes need POST, PUT or DELETE";
-  if (!ownOrigin(header(req, "origin"), port)) return "foreign or missing Origin";
-  const given = header(req, TOKEN_HEADER);
-  if (!given || !sameText(given, token)) return "missing or wrong token: open the link the server printed (it ends in #t=…)";
-  return undefined;
-}
-
-function header(req: IncomingMessage, name: string): string | undefined {
-  const v = req.headers[name];
-  return Array.isArray(v) ? v[0] : v;
-}
-
-function sameText(a: string, b: string): boolean {
-  const x = Buffer.from(a), y = Buffer.from(b);
-  return x.length === y.length && timingSafeEqual(x, y);
+/** True for a request that carries an `Origin` other than this server's own (none at all is fine: Claude Code's exporter sends none). */
+export function foreignOrigin(origin: string | string[] | undefined, port: number): boolean {
+  const o = Array.isArray(origin) ? origin[0] : origin;
+  return o !== undefined && !ownOrigin(o, port);
 }
 
 /** A request body too large to accept (answered 413). */

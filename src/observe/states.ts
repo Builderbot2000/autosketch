@@ -2,10 +2,9 @@ import type { ObserveEvent } from "../core/events.js";
 
 /**
  * The log-wide block-state table (docs/design/12-observability.md, *Block deltas*). Document
- * palette ids are local to one document and can change, so `deltas.bin`, the viewer's voxel
- * endpoints and `/assets/models.json` all use these ids instead. The first time a state is seen it
- * gets the next id and a `state.add` event, so a reader of the log can rebuild the table. Id 0 is
- * always air.
+ * palette ids are local to one document and can change, so `deltas.bin` uses these ids instead.
+ * The first time a state is seen it gets the next id and a `state.add` event, so a reader of the log
+ * can rebuild the table. Id 0 is always air.
  *
  * One table per log folder (`<workspace>/<doc>/observe/<session>/`): each folder's log is
  * self-contained. The base document and every sandbox writing into a folder share its table.

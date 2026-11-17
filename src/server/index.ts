@@ -27,7 +27,6 @@ import { configFromEnv, launchOptions, loadInstanceContext, startupArgNotes } fr
 import { createServer, SERVER_VERSION } from "./server.js";
 import { SERVER_HIDE_TOOLS } from "./settings.js";
 import { defaultWorkspace, Session } from "./session.js";
-import { makeLibraryHost } from "./library-host.js";
 import { makeInstanceSetup } from "./setup.js";
 import { CLI_COMMANDS, runCli } from "../cli/index.js";
 import { bakerFor } from "./tools/shared.js";
@@ -80,7 +79,7 @@ async function main(): Promise<void> {
     hideTools = settings.get(SERVER_HIDE_TOOLS);
     // Snapshots need the baker, which exists once an instance is loaded (12).
     const getBaker = () => session.instance?.then(bakerFor) ?? Promise.reject(new Error("no instance loaded"));
-    observer = startObserve({ workspace, settings, version: SERVER_VERSION, getDoc: () => session.doc, getScopeDoc: (id) => session.scopes.scopes.get(id)?.doc, getBaker, log, library: makeLibraryHost(session) });
+    observer = startObserve({ workspace, settings, version: SERVER_VERSION, getDoc: () => session.doc, getScopeDoc: (id) => session.scopes.scopes.get(id)?.doc, getBaker, log });
   } catch (e) {
     log((e as Error).message);
     process.exit(2);

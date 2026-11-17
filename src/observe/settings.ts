@@ -18,19 +18,19 @@ export const parseHttp = (raw: string): number | false | undefined => {
   return b === undefined ? undefined : b ? 0 : false;
 };
 /**
- * The default port (settled with the user 2026-11-16, `12` *Live viewer*): fixed, so Claude Code's
- * telemetry URL in settings.json stays valid across launches (`13`, B3). When it is taken (another
- * session, another program) the viewer falls back to a free port, but only for this default: a port
+ * The default port of the telemetry receiver (settled with the user 2026-11-16): fixed, so Claude
+ * Code's telemetry URL in settings.json stays valid across launches (`13`, B3). When it is taken
+ * (another session, another program) the receiver falls back to a free port, but only for this default: a port
  * the user set is used as given.
  */
 export const DEFAULT_HTTP_PORT = 47100;
-/** On by default, so the viewer boots with every MCP session. */
-export const OBSERVE_HTTP = setting<number | false>("observe.http", DEFAULT_HTTP_PORT, "a port 1..65535, true (a free port) or false", parseHttp, { group: "Observe", summary: `Port of this page. Default ${DEFAULT_HTTP_PORT}, or a free port when that one is taken; a number pins a port, true always takes a free one, false turns the page off.` });
+/** On by default, so Claude Code's token figures reach every MCP session (the HUD's totals, `16`). */
+export const OBSERVE_HTTP = setting<number | false>("observe.http", DEFAULT_HTTP_PORT, "a port 1..65535, true (a free port) or false", parseHttp, { group: "Observe", summary: `Port that receives Claude Code's telemetry (/v1/logs). Default ${DEFAULT_HTTP_PORT}, or a free port when that one is taken; a number pins a port, true always takes a free one, false turns it off.` });
 
 export const DELTA_MODES = ["auto", "on", "off"] as const;
 export type DeltaMode = (typeof DELTA_MODES)[number];
-/** `"auto"` turns deltas on when the viewer is enabled (12, *Block deltas*). */
-export const OBSERVE_DELTAS = setting<DeltaMode>("observe.deltas", "auto", DELTA_MODES.join(", "), parseOneOf(DELTA_MODES), { group: "Observe", summary: "Record block changes for the live 3D view and replay: auto (on with this page), on or off." });
+/** `"auto"` turns deltas on while `observe.http` is on (12, *Block deltas*); in-game replay reads them (`16`). */
+export const OBSERVE_DELTAS = setting<DeltaMode>("observe.deltas", "auto", DELTA_MODES.join(", "), parseOneOf(DELTA_MODES), { group: "Observe", summary: "Record block changes for replay in the game: auto (on while observe.http is on), on or off." });
 
 /** Bytes: a plain integer or one with a K/M/G suffix (`512M`). */
 export const parseBytes = (raw: string): number | undefined => {

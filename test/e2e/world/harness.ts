@@ -10,6 +10,7 @@ import { createServer } from "../../../src/server/server.js";
 import { Session } from "../../../src/server/session.js";
 import { LiveLink } from "../../../src/world/live-link.js";
 import { autoSyncHook, syncLink } from "../../../src/world/sync.js";
+import { DEFAULT_VOLATILE, mergeVolatile } from "../../../src/world/protocol/hash.js";
 import type { Compound } from "../../../src/world/protocol/index.js";
 import { watchGameReport } from "../../../src/assets/report.js";
 import { bridgeUpgrader } from "../../../src/world/upgrade.js";
@@ -80,7 +81,11 @@ export interface Mcp {
   close(): Promise<void>;
 }
 
-/** The MCP side, as `server/index.ts` builds it (without observe/ and in-game requests). */
+/**
+ * The MCP side, as `server/index.ts` builds it (without observe/ and in-game requests), connected
+ * to the game before it returns: the mod is locked while no MCP is connected (`16`, *Mod side*), so
+ * volumes can be marked only once it is. The hello carries the volatile list `doc_open` would send.
+ */
 export async function startMcp(opts: { ackWaitMs?: number } = {}): Promise<Mcp> {
   const workspace = mkdtempSync(join(tmpdir(), "autosketch-e2e-world-"));
   const session = new Session(workspace);
@@ -94,6 +99,9 @@ export async function startMcp(opts: { ackWaitMs?: number } = {}): Promise<Mcp> 
   const [a, b] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "e2e", version: "0" });
   await Promise.all([server.connect(a), client.connect(b)]);
+  link.bridge.setVolatile(mergeVolatile(DEFAULT_VOLATILE, ...(await instanceContext()).plugins.map((p) => p.volatileKeys ?? {})));
+  link.bridge.setInstanceDir(SERVER_DIR);
+  await link.bridge.connect();
   const tryCall = async (name: string, args: Record<string, unknown> = {}) => {
     const r = await client.callTool({ name, arguments: args });
     const text = (r.content as { type: string; text?: string }[]).filter((c) => c.type === "text").map((c) => c.text).join("\n");
@@ -137,8 +145,12 @@ export async function worldBlock(link: LiveLink, p: Vec3): Promise<string> {
   return (await worldBlocks(link, p, p)).states.get(p.join(","))!;
 }
 
-/** Sets the work volume (and optionally a reference context box) through the mod's console commands. */
-export async function setVolumes(r: Rcon, work: { min: Vec3; max: Vec3 }, reference?: { min: Vec3; max: Vec3 }, link?: LiveLink): Promise<void> {
+/**
+ * Sets the work volume (and optionally a reference context box) through the mod's console commands.
+ * The MCP must be connected first: the mod refuses volume commands while it is offline (`16`).
+ */
+export async function setVolumes(r: Rcon, work: { min: Vec3; max: Vec3 }, reference: { min: Vec3; max: Vec3 } | undefined, link: LiveLink): Promise<void> {
+  if (!link.bridge.connected) throw new Error("connect the MCP before marking volumes: the mod is locked while it is offline");
   await r.command("autosketch context clear");
   await r.command("autosketch mode work");
   await r.command(`autosketch pos1 ${work.min.join(" ")}`);
@@ -153,7 +165,7 @@ export async function setVolumes(r: Rcon, work: { min: Vec3; max: Vec3 }, refere
     await r.command("autosketch mode work");
   }
   // RCON answers before the mod's `volumes` message reaches the MCP; a player can't be that fast.
-  if (link?.bridge.connected) {
+  {
     const same = (b: { min: number[]; max: number[] } | null | undefined, c: { min: Vec3; max: Vec3 }) => !!b && b.min.join() === c.min.join() && b.max.join() === c.max.join();
     await until(() => same(link.bridge.volumes?.work, work) && (!reference || !!link.bridge.volumes?.context.some((b) => same(b, reference))), 10_000, "volumes from the mod");
     await sleep(200);

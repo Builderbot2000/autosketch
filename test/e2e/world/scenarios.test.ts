@@ -31,8 +31,9 @@ describe.skipIf(!ENABLED)("e2e world: scenarios", () => {
   }, 300_000);
 
   afterAll(async () => {
-    await mcp?.close();
+    // Clear while the MCP is still connected: the mod refuses volume commands while it is offline (16).
     await r?.command("autosketch clear").catch(() => {});
+    await mcp?.close();
     r?.close();
   });
 

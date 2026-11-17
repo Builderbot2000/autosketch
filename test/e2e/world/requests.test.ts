@@ -59,7 +59,6 @@ describe.skipIf(!ENABLED)("e2e world: in-game requests (B4, B6)", () => {
   beforeAll(async () => {
     const ctx = await instanceContext();
     r = await rcon();
-    await r.command("autosketch clear");
     await r.command(`forceload add ${X0 - 16} ${Z0 - 16} ${X0 + 160} ${Z0 + 64}`);
     // Clear the area above the ground so reruns start from the same world (fill takes at most 32,768 blocks).
     for (let x = X0 - 4; x <= X0 + 140; x += 8) {
@@ -67,6 +66,8 @@ describe.skipIf(!ENABLED)("e2e world: in-game requests (B4, B6)", () => {
       if (/maximum|not loaded/i.test(out)) throw new Error(`clearing failed: ${out}`);
     }
     mcp = await startMcp();
+    // Connected now (the mod refuses volume commands while no MCP is, 16): clear before automatic linking starts.
+    await r.command("autosketch clear");
     inGame = new InGameRequests(mcp.link, {
       promptPlayers: [P.name],
       idleMs: 600_000,
@@ -86,8 +87,8 @@ describe.skipIf(!ENABLED)("e2e world: in-game requests (B4, B6)", () => {
 
   afterAll(async () => {
     inGame?.close();
-    await mcp?.close();
     await r?.command("autosketch clear").catch(() => {});
+    await mcp?.close();
     r?.close();
   }, 60_000);
 

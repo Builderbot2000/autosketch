@@ -18,11 +18,8 @@ import "../../../src/assets/settings.js";
 import "../../../src/server/settings.js";
 import "../../../src/world/settings.js";
 import { observeCall } from "../../../src/server/observe-call.js";
-// The viewer bundle is plain ESM JavaScript (no build step); its pure modules run in Node.
-// @ts-expect-error untyped JS module
-import { SessionModel } from "../../../viewer/js/model.js";
-// @ts-expect-error untyped JS module
-import { modelAt } from "../../../viewer/js/replay.js";
+import { modelAt } from "../../../src/observe/replay.js";
+import { SessionModel } from "../../../src/observe/session-model.js";
 
 /** The management UI (docs/design/15-management-ui.md, U1 and U2) and token spend (13, *Backlog* B3). */
 

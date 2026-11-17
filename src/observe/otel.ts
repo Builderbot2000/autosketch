@@ -3,7 +3,7 @@
  * OpenTelemetry exporter posts `ExportLogsServiceRequest` batches to `/v1/logs` on the viewer's
  * port; each log record is appended to the event log unchanged as an `otel` event, so the live
  * viewer and replay read the same thing. The token totals and per-action labels are worked out by
- * the viewer from those events (viewer/js/model.js, `Spend`), with Claude Code's own event names
+ * the viewer from those events (src/observe/session-model.ts, `Spend`), with Claude Code's own event names
  * and attributes and no schema of ours on top.
  *
  * Only the envelope is checked here (`resourceLogs[].scopeLogs[].logRecords[]`); records are not

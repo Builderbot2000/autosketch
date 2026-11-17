@@ -4,14 +4,15 @@
 #          so the protocol's golden-vector test (GoldenVectorsTest) never blocks a target's smoke.
 #   full:  the Craftoria profile only (1.21.1, NeoForge): JUnit tests, including GoldenVectorsTest
 #          against test/data/world-protocol, and the whole GameTest suite.
+#   client: a real client on the dev profile (1.21.1, NeoForge), headless (Xvfb, Mesa): every client test suite (16, *Testing*).
 name: mod
 
 on:
   push:
     branches: [main]
-    paths: ["mod/**", "test/data/world-protocol/**", ".github/workflows/mod.yml"]
+    paths: ["mod/**", "test/data/world-protocol/**", "test/support/fake-mcp.ts", ".github/workflows/mod.yml"]
   pull_request:
-    paths: ["mod/**", "test/data/world-protocol/**", ".github/workflows/mod.yml"]
+    paths: ["mod/**", "test/data/world-protocol/**", "test/support/fake-mcp.ts", ".github/workflows/mod.yml"]
   workflow_dispatch:
 
 permissions:
@@ -71,4 +72,51 @@ jobs:
           path: |
             mod/common/versions/*/build/reports/tests/
             mod/run/gametest/logs/
+          if-no-files-found: ignore
+
+  # The client test harness (docs/design/16-in-game-ui.md, *Testing*, client half): a real client on
+  # the dev profile, headless under Xvfb with Mesa software rendering, running every client test
+  # suite against the mod and the fake MCP (test/support/fake-mcp.ts, run with tsx, hence Node).
+  # The report (with the boot timings) is uploaded every time; logs and screenshots on failure.
+  client:
+    name: client tests (headless, dev profile)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: mod
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.13"
+      - name: Install Node dependencies (for the fake MCP)
+        working-directory: .
+        run: npm ci
+      - name: Install Xvfb, Mesa, xdotool and GLFW's X11 libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb xauth xdotool libgl1 libgl1-mesa-dri libglx-mesa0 \
+            libx11-6 libxrandr2 libxcursor1 libxi6 libxinerama1 libxxf86vm1 libxext6 libxrender1
+      - name: Client tests
+        run: ./clienttest.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mod-client-report
+          path: mod/run/clienttest/report.txt
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: mod-client-failure
+          path: |
+            mod/run/clienttest/logs/
+            mod/run/clienttest/crash-reports/
+            mod/run/clienttest/clienttest-screenshots/
           if-no-files-found: ignore

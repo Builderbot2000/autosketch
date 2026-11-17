@@ -1,0 +1,6 @@
+{
+  "hello": { "features": ["prompt.close", "ui"], "modes": ["build", "ask", "plan", "scan"] },
+  "replies": [
+    { "on": "prompt.close", "send": { "type": "notice", "text": "Autosketch: no ask, plan or scan request is open.", "player": null } }
+  ]
+}

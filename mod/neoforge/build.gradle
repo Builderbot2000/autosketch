@@ -89,6 +89,26 @@ neoForge {
             gameDirectory = rootProject.file('run/smoke')
             systemProperty 'neoforge.enabledGameTestNamespaces', "${project.mod_id}_smoke"
         }
+        // The client test harness (16, *Testing*, client half): a real client with the gametest
+        // source set, quick-playing a flat creative test world that the driver creates when missing
+        // (never committed), running the selected client test suites, writing a report and exiting.
+        // Run it through mod/clienttest.sh (Xvfb, software rendering, exit code from the report).
+        clientTest {
+            client()
+            sourceSet = sourceSets.gametest
+            // The report is report.txt in the game directory. clienttest-craftoria.sh points this at a
+            // directory whose mods/ holds the Craftoria pack's jars.
+            gameDirectory = rootProject.layout.projectDirectory.dir(providers.gradleProperty('clientTestGameDir').orElse('run/clienttest'))
+            jvmArguments.add providers.gradleProperty('clientTestXmx').orElse('3G').map { "-Xmx${it}".toString() }
+            programArguments.addAll '--quickPlaySingleplayer', 'autosketch-clienttest'
+            systemProperty 'autosketch.clienttest.world', 'autosketch-clienttest'
+            // Comma-separated suite names, or "all" (./gradlew runClientTest -PclientTestSuites=basics).
+            systemProperties.put 'autosketch.clienttest.suites', providers.gradleProperty('clientTestSuites').orElse('all')
+            // Seconds before the driver's watchdog writes a failed report and halts the game.
+            systemProperties.put 'autosketch.clienttest.timeout', providers.gradleProperty('clientTestTimeout').orElse('900')
+            // The repository root, for the fake MCP CLI (test/support/fake-mcp.ts) and node_modules.
+            systemProperty 'autosketch.clienttest.repo', rootProject.projectDir.parentFile.absolutePath
+        }
         configureEach {
             logLevel = org.slf4j.event.Level.INFO
             // Dev runs keep their pointer files out of the real home folder (PointerFile).

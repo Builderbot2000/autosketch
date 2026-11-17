@@ -4,6 +4,7 @@
   "display_name": "Autosketch",
   "version": "0.1.0",
   "description": "Build Minecraft schematics with an agent, using blocks and textures from your own modded instance.",
+  "icon": "icon.png",
   "long_description": "Autosketch reads blocks, shapes and textures from your own Minecraft instance (vanilla or modded; no game assets are shipped) and gives the agent high-level build actions, renders, slices and palette sheets. Results export to Axiom blueprints, Sponge `.schem` and Create `.nbt`.\n\nChoose your instance below, or leave it empty: the server then opens a setup page in your browser listing the instances it found in your launchers' folders.\n\nIn-game requests through the companion mod need Claude Code channels, which Claude Desktop doesn't have; building and the live world link work.",
   "author": {
     "name": "Builderbot2000",
@@ -36,7 +37,7 @@
     "instance": {
       "type": "directory",
       "title": "Minecraft instance",
-      "description": "The instance folder to read blocks from (for CurseForge: …/curseforge/minecraft/Instances/<pack>). Leave empty to choose in the setup page instead.",
+      "description": "The instance folder to read blocks from (for CurseForge: \u2026/curseforge/minecraft/Instances/<pack>). Leave empty to choose in the setup page instead.",
       "required": false
     },
     "workspace": {

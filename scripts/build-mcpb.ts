@@ -34,6 +34,8 @@ const server = join(STAGE, "server");
 execFileSync(process.platform === "win32" ? "cmd" : "mv", process.platform === "win32" ? ["/c", "move", join(STAGE, "package"), server] : [join(STAGE, "package"), server]);
 run(npm, ["install", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund", "--package-lock=false"], server);
 writeFileSync(join(STAGE, "manifest.json"), readFileSync(join(ROOT, "packaging", "mcpb", "manifest.json")));
+// The same icon as the Claude Code plugin (scripts/make-icon.py draws it).
+writeFileSync(join(STAGE, "icon.png"), readFileSync(join(ROOT, "packaging", "claude-plugin", ".claude-plugin", "icon.png")));
 for (const extra of ["LICENSE", "README.md"]) writeFileSync(join(STAGE, extra), readFileSync(join(ROOT, extra)));
 
 const files: Zippable = {};

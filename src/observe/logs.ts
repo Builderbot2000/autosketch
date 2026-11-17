@@ -3,8 +3,8 @@ import { join } from "node:path";
 
 /**
  * Finished session logs in a workspace (`<workspace>/<doc>/observe/<session>/events.ndjson`, docs/design/12-observability.md,
- * *Event stream*), newest first: what `autosketch ui`'s Observe tab offers to replay
- * (docs/design/15-management-ui.md, *App shell*: "without a live session it lists recent session logs").
+ * *Event stream*), newest first: the logs a player can replay in the game (docs/design/16-in-game-ui.md, `logs.list`;
+ * formerly `autosketch ui`'s Observe tab, `15`).
  */
 
 export interface SessionLogInfo {

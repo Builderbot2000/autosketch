@@ -57,7 +57,7 @@ The owner lands the contract in its first merge, and the users code against it.
 
 ## Release gate
 
-The first public release (`14`: Craftoria's profile, NeoForge 1.21.1) needs J's packaging, X's publishing and smoke test, Z's `N`/`N−1` support, and K's U4 (the setup wizard), since that is how players choose an instance. V and the backlog are not gates.
+The first public release (`14`: Craftoria's profile, NeoForge 1.21.1) needs J's packaging, X's publishing and smoke test, Z's `N`/`N−1` support, and automatic instance choice (`16`, *Command line*; silo X of the in-game UI set), since that is how players without a `setup` get an instance: the one found is used, or the first tool result lists the candidates with the `setup` command. K's U4 setup wizard, which this gate named until 2026-11-17, was removed with the browser UI. V and the backlog are not gates.
 
 ## Checks during the work
 

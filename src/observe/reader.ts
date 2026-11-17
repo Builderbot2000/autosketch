@@ -5,7 +5,7 @@ import type { LoggedEvent } from "../core/events.js";
 /**
  * Reads finished session logs (docs/design/12-observability.md, *Event stream*): the
  * `events.ndjson` files the log writer (`log.ts`) leaves in `<workspace>/<doc>/observe/<session>/`.
- * Used by `autosketch observe <path>` (`offline.ts`) and by the eval harness's log join
+ * Used by in-game replay of finished logs (docs/design/16-in-game-ui.md, *Replay in the world*) and by the eval harness's log join
  * (`test/eval/join.ts`, 12 *Metrics and evals*). Read-only; nothing here is reachable from a tool.
  */
 

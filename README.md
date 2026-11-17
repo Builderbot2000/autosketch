@@ -24,9 +24,9 @@ npx -y autosketch instances                       # what was found in your launc
 npx -y autosketch setup --instance <id> --client claude
 ```
 
-Without a `setup`, the server opens a setup page in your browser on first start, listing the instances it found. The choice is saved in `~/.autosketch/config.toml` (`npx -y autosketch config unset instance` forgets it).
+Without a `setup`, the server uses the instance it finds when there is exactly one (preferring games that have run with the companion mod) and says so; with several, the agent's first tool call lists them with the `setup` command to run. A `setup` choice is saved in `~/.autosketch/config.toml` (`npx -y autosketch config unset instance` forgets it), and `npx -y autosketch config set <key> <value>` changes any setting. There is no browser page: with the companion mod, settings, the library, job volumes and replay are in the game (`docs/design/16-in-game-ui.md`).
 
-**Claude Desktop**: open `autosketch-<version>.mcpb` from the GitHub release and choose your instance folder (or leave it empty to use the setup page).
+**Claude Desktop**: open `autosketch-<version>.mcpb` from the GitHub release and choose your instance folder (or leave it empty to let the server choose, as above).
 
 **From a checkout:**
 

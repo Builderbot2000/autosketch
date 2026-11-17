@@ -38,6 +38,7 @@ The browser parts can be deleted at any time: nothing else depends on them. Only
 
 - **Instance choice is command-line only.** `autosketch instances` lists candidates; `autosketch setup --instance <id|path>` saves one; `autosketch config set|unset` edits any setting. These exist today ([src/server/index.ts](../../src/server/index.ts)).
 - **No setup wizard.** With no instance saved, the server picks one automatically when exactly one candidate is found, preferring games that wrote a pointer file (`14`, *Instance discovery*), and says so on stderr and in the first tool result. Otherwise the first tool result lists the candidates and the `autosketch setup` command, for the agent to pass on to the user.
+  - *Built* (silo X): only candidates that can be loaded count, and "preferring" means that when one or more of them have a pointer file, only those are considered (so one modded game with the mod beats any number of plain installs; two with the mod are listed). A launcher's candidate counts as having a pointer when the mod's pointer file names its game folder (`Candidate.pointer`). The automatic choice is loaded in place but **not saved** to `config.toml`: the note gives the `setup` command to keep it, so a second instance appearing later is listed rather than silently passed over for the first. Reason: `config.toml` holds only what the user chose. A tool call that arrives while discovery is still running gets the note as its `not_configured` answer ("loading now: call the tool again") instead of a list.
 - **`autosketch observe <path>` is removed.** Finished logs are replayed in game through the running MCP (*Replay in the world*). With no MCP running, every in-game UI feature is locked (*Mod side*).
 
 ## Architecture
@@ -177,6 +178,8 @@ Every entry point the harness needs is public; no mixin, reflection or access tr
 
 Measured and estimated 2026-11-17. About 3,500 lines of JavaScript and TypeScript go (*What goes, what stays, what moves*); the client half (103 lines today) grows by an estimated 3,000 to 5,000 lines of Java. The MCP side and the security surface get simpler. The cost that remains is the client half's rendering and GUI code: it changes more between Minecraft versions than anything else the mod uses (1.21.x alone reworked both), so it is ported with each target and loader. The thin client keeps that code to drawing only.
 
+**Measured after the removal** (silo X, 2026-11-17; the first step, before M reduces `http.ts`): 3,940 lines deleted and 46 added: `viewer/` 2,915 (its `model.js` and `replay.js` already ported to TypeScript by M), `src/` 499 (`offline.ts`, `ui-command.ts`, `instance-host.ts`, the `observe` and `ui` subcommands, the wizard and browser opening, `observe.open`), tests 524 (of removed code only). One runtime dependency removed (`three`, about 23 MB installed, which was most of the MCPB bundle's 15 MB). `npm pack`: 503.3 kB packed, 1.79 MB unpacked, 230 files before; 457.3 kB, 1.64 MB, 215 files after. Still to go once M has rewritten them: `atlas.ts`, `open.ts`, `instance-api.ts` (imported by `http.ts` and `library-api.ts`), `voxels.ts`'s viewer endpoints, and `http.ts`'s routes beyond `/v1/logs`.
+
 ## Work plan
 
 Workstreams run in parallel. Only the contracts come first, and they are small: everything else codes against them.
@@ -220,7 +223,7 @@ X removal (once M has moved model.js and replay.js)
 | Ghosts | G | Not built |
 | Replay in the world | R | Not built |
 | Screens, menu, key bindings | S | Not built (mappings declared by C) |
-| Removal and CLI | X | Not built |
+| Removal and CLI | X | Partly built (waits on M for the rest). Removed: `viewer/`, `three` and `/vendor/three/`'s package, `autosketch ui` (`src/server/ui-command.ts`), `autosketch observe` (`src/observe/offline.ts`), `src/server/instance-host.ts`, the setup wizard and browser opening in `server/index.ts`, `observe.open` (a value in `config.toml` is now reported as unknown), the UI URL in `not_configured`, and the tests of removed code. Automatic instance choice: `chooseAutomatically`, `autoChoiceText` and `ServerInstanceSetup.autoChoose` in `src/server/setup.ts`, `Candidate.pointer` in `src/assets/discover/`, `instance_info` reports `automatic choice`; tests in `test/unit/server/not-configured.test.ts` (one picked and reported once; pointer preferred and unloadable ignored; several listed with the setup command; none says how; a call during discovery). Docs: `12`, `13`, `14`, `15`, `README.md`, `world/test-setup.md`, the release *Release gate*. Left until M's rewrite lands: deleting `src/observe/atlas.ts`, `open.ts`, `instance-api.ts` (still imported by `http.ts` and `library-api.ts`), the `instance` option of `startObserve` and its type, the viewer-only comments in `src/observe/index.ts`, `settings.ts`, `otel.ts`, `states.ts`, `voxels.ts`, and `ui.test.ts`'s browser-API cases. |
 
 ## Open questions
 

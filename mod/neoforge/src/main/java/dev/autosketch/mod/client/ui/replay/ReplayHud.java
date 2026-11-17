@@ -1,45 +1,36 @@
 package dev.autosketch.mod.client.ui.replay;
 
-import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.blaze3d.vertex.VertexConsumer;
 import dev.autosketch.mod.api.Autosketch;
+import dev.autosketch.mod.client.ui.LinkState;
 import dev.autosketch.mod.client.ui.UiToggles;
-import dev.autosketch.mod.protocol.Box;
+import dev.autosketch.mod.client.ui.overlay.DrawList;
+import dev.autosketch.mod.client.ui.overlay.OverlayState;
 import dev.autosketch.mod.protocol.UiMessages.Flash;
-import dev.autosketch.mod.protocol.UiMessages.Job;
 import dev.autosketch.mod.protocol.UiMessages.Marker;
 import java.util.ArrayList;
 import java.util.List;
+import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.renderer.LevelRenderer;
-import net.minecraft.client.renderer.MultiBufferSource;
-import net.minecraft.client.renderer.RenderType;
-import net.minecraft.world.phys.Vec3;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.RenderGuiEvent;
-import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * What a replay draws besides the blocks (16, *Replay in the world*, *Controls* and *The scope tree
  * in space*): a strip at the top of the screen with the step's time, the step and play state, the
  * tool call, the job's brief and any gap note, over a bar with a tick per marker; and in the world,
- * the open jobs' work volumes (context dimmer) and the step's edits pulsing in their job's colour.
- * Everything is the frame's text and boxes, nothing computed. Minimal line boxes until silo O's
- * overlay drawing can be reused; they follow the job-volume and flash toggles.
+ * the step's open jobs and edits, drawn by silo O's overlay ({@link #drawList}) in place of the live
+ * ones. Everything is the frame's text and boxes, nothing computed.
  *
- * <p>1.21.x: {@code RenderGuiEvent}, {@code RenderLevelStageEvent} and {@code LevelRenderer.renderLineBox}
- * changed shape across 1.21; a port looks here.
+ * <p>1.21.x: {@code RenderGuiEvent} changed shape across 1.21; a port looks here.
  */
 @EventBusSubscriber(modid = Autosketch.MOD_ID, value = Dist.CLIENT)
 public final class ReplayHud {
     private ReplayHud() {}
-
-    /** How long a step's flash pulses, in milliseconds. */
-    static final long FLASH_MS = 1200;
 
     /** The strip's lines as drawn (for tests): status, call, then brief and note when present. */
     public static List<String> lines() {
@@ -94,39 +85,18 @@ public final class ReplayHud {
         };
     }
 
-    @SubscribeEvent
-    static void world(RenderLevelStageEvent e) {
-        if (e.getStage() != RenderLevelStageEvent.Stage.AFTER_TRANSLUCENT_BLOCKS) return;
+    /**
+     * The step's job volumes and flashes as silo O's overlay draws them (solid work boxes, dashed
+     * context, brief labels, pulses; the toggles; the player's dimension only), in place of the live
+     * ones while a replay is open ({@code OverlayClient.setReplacement}); null with no replay.
+     */
+    public static @Nullable DrawList drawList() {
         ReplayView v = ReplayClient.view();
         Minecraft mc = Minecraft.getInstance();
-        if (v == null || mc.level == null) return;
-        String dim = mc.level.dimension().location().toString();
-        Vec3 cam = e.getCamera().getPosition();
-        PoseStack pose = e.getPoseStack();
-        pose.pushPose();
-        pose.translate(-cam.x, -cam.y, -cam.z);
-        MultiBufferSource.BufferSource buffers = mc.renderBuffers().bufferSource();
-        VertexConsumer lines = buffers.getBuffer(RenderType.lines());
-        if (UiToggles.volumes)
-            for (Job j : v.jobs) {
-                if (!j.dimension().equals(dim)) continue;
-                box(pose, lines, j.work(), j.colour(), 0.9f, 0.01);
-                for (Box c : j.context()) box(pose, lines, c, j.colour(), 0.35f, 0.02);
-            }
-        long age = System.currentTimeMillis() - v.frameAt;
-        if (UiToggles.flashes && age < FLASH_MS) {
-            float a = 1f - (float) age / FLASH_MS;
-            for (Flash f : v.flashes) {
-                if (!f.dimension().equals(dim)) continue;
-                for (Box b : f.boxes()) box(pose, lines, b, f.colour(), a, 0.03);
-            }
-        }
-        buffers.endBatch(RenderType.lines());
-        pose.popPose();
+        if (v == null || mc.level == null) return ReplayClient.isOpen() ? DrawList.EMPTY : null;
+        List<OverlayState.ActiveFlash> active = new ArrayList<>();
+        for (Flash f : v.flashes) active.add(new OverlayState.ActiveFlash(f, v.frameAt));
+        return DrawList.build(v.jobs, active, Util.getMillis(), mc.level.dimension().location().toString(), LinkState.connected(), UiToggles.volumes, UiToggles.flashes);
     }
 
-    private static void box(PoseStack pose, VertexConsumer lines, Box b, int rgb, float alpha, double grow) {
-        float r = ((rgb >> 16) & 0xFF) / 255f, g = ((rgb >> 8) & 0xFF) / 255f, bl = (rgb & 0xFF) / 255f;
-        LevelRenderer.renderLineBox(pose, lines, b.minX() - grow, b.minY() - grow, b.minZ() - grow, b.maxX() + 1 + grow, b.maxY() + 1 + grow, b.maxZ() + 1 + grow, r, g, bl, alpha);
-    }
 }

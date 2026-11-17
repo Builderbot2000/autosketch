@@ -10,6 +10,7 @@ import dev.autosketch.mod.client.ui.UiToggles;
 import dev.autosketch.mod.client.ui.hud.HudOverlay;
 import dev.autosketch.mod.protocol.UiMessages.UiFlash;
 import dev.autosketch.mod.protocol.UiMessages.UiState;
+import java.util.function.Supplier;
 import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
@@ -18,6 +19,7 @@ import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
 import net.neoforged.neoforge.common.NeoForge;
+import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 
 /**
@@ -38,6 +40,7 @@ public final class OverlayClient {
     private static final OverlayState STATE = new OverlayState();
     private static boolean resyncPending;
     private static int resyncs;
+    private static volatile @Nullable Supplier<@Nullable DrawList> replacement;
 
     public OverlayClient(IEventBus modBus) {
         UiClient.register("ui.state", (f, m) -> onState((UiState) m));
@@ -72,10 +75,21 @@ public final class OverlayClient {
         return resyncs;
     }
 
-    /** What the overlays draw now, for the player's current dimension. */
+    /**
+     * Lets replay (silo R) show the open jobs and flashes of the step it replays in place of the live
+     * ones: while {@code r} returns a draw list, the overlay draws that one; null goes back to live.
+     */
+    public static void setReplacement(@Nullable Supplier<@Nullable DrawList> r) {
+        replacement = r;
+    }
+
+    /** What the overlays draw now, for the player's current dimension (a replay's step while one is open). */
     public static DrawList drawList() {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level == null) return DrawList.EMPTY;
+        Supplier<@Nullable DrawList> r = replacement;
+        DrawList replay = r == null ? null : r.get();
+        if (replay != null) return replay;
         return DrawList.build(STATE, Util.getMillis(), mc.level.dimension().location().toString(), LinkState.connected(), UiToggles.volumes, UiToggles.flashes);
     }
 

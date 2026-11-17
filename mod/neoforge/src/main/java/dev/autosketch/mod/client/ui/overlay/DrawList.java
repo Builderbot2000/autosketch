@@ -31,11 +31,21 @@ public record DrawList(List<Outline> outlines, List<Label> labels, List<Pulse> p
      */
     public static DrawList build(OverlayState state, long now, String dimension, boolean connected, boolean volumes, boolean flashes) {
         if (!connected) return EMPTY;
+        return build(state.jobs(), state.flashes(now), now, dimension, true, volumes, flashes);
+    }
+
+    /**
+     * The same rules over jobs and flashes given directly: replay (silo R) draws the jobs and
+     * flashes of the step it shows ({@code replay.frame}) through this, so a step looks exactly
+     * like the live overlay. {@code active} are flashes with their start; expired ones draw nothing.
+     */
+    public static DrawList build(List<Job> jobs, List<OverlayState.ActiveFlash> active, long now, String dimension, boolean connected, boolean volumes, boolean flashes) {
+        if (!connected) return EMPTY;
         List<Outline> outlines = new ArrayList<>();
         List<Label> labels = new ArrayList<>();
         List<Pulse> pulses = new ArrayList<>();
         if (volumes) {
-            for (Job j : state.jobs()) {
+            for (Job j : jobs) {
                 if (!j.dimension().equals(dimension)) continue;
                 outlines.add(new Outline(j.id(), j.work(), j.colour(), false));
                 for (Box c : j.context()) outlines.add(new Outline(j.id(), c, j.colour(), true));
@@ -43,10 +53,9 @@ public record DrawList(List<Outline> outlines, List<Label> labels, List<Pulse> p
                 labels.add(new Label(j.id(), j.brief(), (w.minX() + w.maxX() + 1) / 2.0, w.maxY() + 1.5, (w.minZ() + w.maxZ() + 1) / 2.0, j.colour()));
             }
         }
-        List<OverlayState.ActiveFlash> active = state.flashes(now);
         if (flashes) {
             for (OverlayState.ActiveFlash a : active) {
-                if (!a.flash().dimension().equals(dimension)) continue;
+                if (!a.flash().dimension().equals(dimension) || now - a.start() >= OverlayState.FLASH_MS) continue;
                 float strength = Math.max(0f, 1f - (now - a.start()) / (float) OverlayState.FLASH_MS);
                 for (Box b : a.flash().boxes()) pulses.add(new Pulse(a.flash().job(), b, a.flash().colour(), strength));
             }

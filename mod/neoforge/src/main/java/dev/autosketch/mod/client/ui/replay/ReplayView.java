@@ -46,7 +46,7 @@ final class ReplayView {
     List<Job> jobs = List.of();
     List<Flash> flashes = List.of();
     List<Marker> markers = List.of();
-    /** {@code System.currentTimeMillis()} when the last frame arrived, for the flash pulse. */
+    /** {@code Util.getMillis()} when the last frame arrived: the step's flashes pulse from then (the overlay's clock). */
     long frameAt;
 
     ReplayView(String replay) {
@@ -90,7 +90,7 @@ final class ReplayView {
         hud = f.hud();
         jobs = f.jobs();
         flashes = f.flashes();
-        frameAt = System.currentTimeMillis();
+        frameAt = net.minecraft.Util.getMillis();
     }
 
     private int intern(String state) {

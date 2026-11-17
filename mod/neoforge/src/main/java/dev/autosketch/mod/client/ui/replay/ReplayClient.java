@@ -9,6 +9,8 @@ import dev.autosketch.mod.api.Autosketch;
 import dev.autosketch.mod.client.ui.AutosketchKeys;
 import dev.autosketch.mod.client.ui.LinkState;
 import dev.autosketch.mod.client.ui.UiClient;
+import dev.autosketch.mod.client.ui.overlay.OverlayClient;
+import dev.autosketch.mod.client.ui.screen.LogListScreen;
 import dev.autosketch.mod.protocol.BodyTypes.WorldBlock;
 import dev.autosketch.mod.protocol.Box;
 import dev.autosketch.mod.protocol.Frame;
@@ -158,6 +160,10 @@ public final class ReplayClient {
             // The replay ended on the MCP's side (a resync, the MCP gone); the server half resends the chunks next.
             UiClient.onAction("replay.ended", a -> teardown());
             AutosketchKeys.setReplayOpen(ReplayClient::isOpen);
+            // The step's jobs and flashes replace the live overlay while a replay is open (silo O's drawing).
+            OverlayClient.setReplacement(ReplayHud::drawList);
+            // The menu's log list (silo S) opens a replay here directly; "live" is the running session.
+            LogListScreen.setOpener(id -> open("live".equals(id) ? null : id));
             AutosketchKeys.on(AutosketchKeys.REPLAY_BACK, () -> seekBy(-1));
             AutosketchKeys.on(AutosketchKeys.REPLAY_FORWARD, () -> seekBy(1));
             AutosketchKeys.on(AutosketchKeys.REPLAY_PLAY, ReplayClient::togglePlay);

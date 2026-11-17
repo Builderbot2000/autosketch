@@ -1,6 +1,7 @@
 /**
  * Instance discovery types (docs/design/14-distribution.md, *Instance discovery*). The `Candidate`
- * shape is the contract the management UI's Instance tab and `autosketch instances` use.
+ * shape is the contract `autosketch instances` and the automatic instance choice
+ * (docs/design/16-in-game-ui.md, *Command line*) use.
  */
 
 /** Which reader found a candidate. `pointer` is the companion mod's pointer file. */

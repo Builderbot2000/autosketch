@@ -12,7 +12,8 @@ import "../world/settings.js";
 
 /**
  * Command-line setup (docs/design/14-distribution.md, *Setup*). Each command edits
- * `~/.autosketch/config.toml`, the same file and with the same validation as the management UI:
+ * `~/.autosketch/config.toml`, the same file and with the same validation as the in-game
+ * settings screen (docs/design/16-in-game-ui.md):
  *
  *   autosketch instances [--json]
  *   autosketch setup --instance <id | path> [--workspace <path>] [--version <v>] [--base-jar <jar>] [--client claude]

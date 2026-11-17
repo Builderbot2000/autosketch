@@ -11,8 +11,8 @@ import { parseBool, parseList, setting, Settings } from "../core/settings.js";
  * Which roots, and which entries are hidden, are settings (docs/design/15-management-ui.md,
  * *Library settings*): `library.roots`, `library.starter`, `library.axiom`, `library.hidden`.
  * `AUTOSKETCH_LIBRARY` keeps working as an alias for `library.roots`. Folders and files whose name
- * starts with a dot are never entries, so a root's `.trash/` (the management UI's recoverable
- * delete) never shows in a listing.
+ * starts with a dot are never entries, so a root's `.trash/` (the library screen's recoverable
+ * delete, docs/design/16-in-game-ui.md) never shows in a listing.
  */
 
 export type RootKind = "library" | "axiom";

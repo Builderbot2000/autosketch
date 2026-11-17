@@ -2,8 +2,9 @@
  * Server settings: named keys with defaults, read from the user's config file, server args and the
  * environment. Each area declares its own keys next to the code that uses them (e.g.
  * `observe/settings.ts`), so adding a setting never edits this module. Declaring a setting also
- * registers it (`registeredSettings()`), which is what the management UI's Settings tab and the
- * startup conflict report are built from (docs/design/15-management-ui.md, *Settings tab*).
+ * registers it (`registeredSettings()`), which is what the in-game settings screen's rows and the
+ * startup conflict report are built from (docs/design/16-in-game-ui.md, *Settings screen*;
+ * the rows are described in docs/design/15-management-ui.md, *Settings tab*).
  *
  * Sources, highest priority first (`15`, *Settings tab*; `12`, *Settings*):
  *   config.toml [settings]       the user's saved choice (core/config.ts), written by the UI and

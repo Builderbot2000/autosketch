@@ -1,6 +1,6 @@
 /**
  * The user's saved choices: `~/.autosketch/config.toml` (docs/design/14-distribution.md, *Setup*;
- * docs/design/15-management-ui.md, *Settings tab*). One file, edited by the management UI, the
+ * docs/design/15-management-ui.md, *Settings tab*). One file, edited by the in-game settings screen (docs/design/16-in-game-ui.md), the
  * `autosketch setup` / `autosketch config` commands and by hand, and it beats the launch command:
  *
  *   instance = "C:/Users/me/curseforge/minecraft/Instances/Craftoria"

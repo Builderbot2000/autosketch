@@ -4,6 +4,12 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.logging.LogUtils;
+import dev.autosketch.mod.client.ui.blocks.BlockDrawer;
+import dev.autosketch.mod.client.ui.blocks.BlockMesh;
+import dev.autosketch.mod.client.ui.blocks.BlockMesher;
+import dev.autosketch.mod.client.ui.blocks.PaletteRegion;
+import dev.autosketch.mod.protocol.Bodies;
+import dev.autosketch.mod.protocol.Box;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -35,6 +41,11 @@ import org.slf4j.Logger;
  * <p>Thumbnails are the MCP's PNGs ({@code library.thumbnail}), asked for one at a time as cards come
  * into view, loaded as dynamic textures, and freed when the screen closes. Lists keep the MCP's
  * order; only the filter and the hidden switch leave entries out.
+ *
+ * <p>A selected prefab gets a <b>3D preview</b> in the detail pane: its {@code library.preview}
+ * voxels meshed once with the ghosts' block drawing ({@code client.ui.blocks}, models only) and drawn
+ * with an orbit camera the player turns by dragging; meshes are freed when the selection changes or
+ * the screen closes.
  */
 public final class LibraryScreen extends PaneScreen {
     private static final Logger LOG = LogUtils.getLogger();
@@ -151,6 +162,8 @@ public final class LibraryScreen extends PaneScreen {
         forget("act:");
         resetScroll("detail");
         String root = LogListScreen.str(e, "root"), kind = LogListScreen.str(e, "kind"), name = LogListScreen.str(e, "name");
+        closePreview();
+        if (kind.equals("prefabs")) preview(e);
         Requests.send("library.entry", Requests.args("root", root, "kind", kind, "name", name), r -> {
             if (!isSelected(e)) return;
             if (r.ok()) entry = r.result();
@@ -422,6 +435,7 @@ public final class LibraryScreen extends PaneScreen {
         y += LINE;
         y += wrap(p, 0, y, tr("library.kinds_one." + s(e, "kind")), DIM);
         y += wrap(p, 0, y, flags(e), TEXT);
+        if (s(e, "kind").equals("prefabs")) y = detailPreview(p, y + 2);
         y += 2;
         int w = Math.min(120, p.w - 70);
         if (bool(e, "writable")) {
@@ -493,6 +507,146 @@ public final class LibraryScreen extends PaneScreen {
         return y;
     }
 
+    // ── 3D preview ──────────────────────────────────────────────────────────────────────────────
+
+    private final List<BlockMesh> meshes = new ArrayList<>();
+    private int[] previewSize = {0, 0, 0};
+    private @Nullable Component previewNote;
+    private int previewNoteColour = DIM;
+    private boolean previewLoaded;
+    private float yaw = 35, pitch = 25;
+    private int previewDraws;
+    /** The preview's square in content coordinates of the detail pane, from the last layout; size 0 when none. */
+    private int previewY, previewSide;
+    private boolean dragging;
+
+    /** Quads of the preview's meshes (0 before it arrived, for tests). */
+    public int previewQuads() {
+        return meshes.stream().mapToInt(BlockMesh::quads).sum();
+    }
+
+    /** Frames that drew the preview so far (for tests). */
+    public int previewDraws() {
+        return previewDraws;
+    }
+
+    /** The preview square's centre in screen coordinates, or null when none is laid out (for tests). */
+    public int @Nullable [] previewCentre() {
+        if (previewSide == 0) return null;
+        for (Pane p : panes) if (p.key.equals("detail")) return new int[] {p.x + previewSide / 2, p.y + previewY - p.scroll + previewSide / 2};
+        return null;
+    }
+
+    public float[] previewAngles() {
+        return new float[] {yaw, pitch};
+    }
+
+    private void preview(JsonObject e) {
+        previewLoaded = false;
+        previewNote = null;
+        Requests.send("library.preview", Requests.args("root", s(e, "root"), "name", s(e, "name")), r -> {
+            if (closed || !isSelected(e)) return;
+            previewLoaded = true;
+            if (!r.ok()) {
+                previewNote = Component.literal(r.message());
+                previewNoteColour = BAD;
+                refresh();
+                return;
+            }
+            try {
+                var size = r.result().getAsJsonArray("size");
+                int sx = size.get(0).getAsInt(), sy = size.get(1).getAsInt(), sz = size.get(2).getAsInt();
+                Bodies.SnapshotBody body = Bodies.decodeSnapshot(r.body(), List.of(new Box(0, 0, 0, sx - 1, sy - 1, sz - 1)));
+                PaletteRegion region = PaletteRegion.of(body.palette(), sx, sy, sz, body.regions().get(0).states());
+                meshes.addAll(BlockMesher.all(region));
+                previewSize = new int[] {sx, sy, sz};
+                if (!region.unknown().isEmpty()) {
+                    previewNote = tr("library.preview_unknown", String.join(", ", region.unknown()));
+                    previewNoteColour = WARN;
+                }
+            } catch (Exception ex) {
+                LOG.warn("Autosketch: preview of {} didn't load: {}", s(e, "name"), ex.toString());
+                previewNote = tr("library.preview_failed", ex.getMessage() == null ? ex.toString() : ex.getMessage());
+                previewNoteColour = BAD;
+            }
+            refresh();
+        });
+    }
+
+    private void closePreview() {
+        meshes.forEach(BlockMesh::close);
+        meshes.clear();
+        previewSize = new int[] {0, 0, 0};
+        previewLoaded = false;
+        previewNote = null;
+    }
+
+    /** Lays out the preview square under the actions; returns the y below it. */
+    private int detailPreview(Pane p, int y) {
+        previewSide = 0;
+        if (!previewLoaded) {
+            text(p, 0, y, tr("library.preview_loading"), DIM);
+            return y + LINE + 2;
+        }
+        if (!meshes.isEmpty()) {
+            previewY = y;
+            // Square, as wide as the pane allows, leaving room below for the actions in a short window.
+            previewSide = Math.max(40, Math.min(Math.min(p.w - 6, 140), p.h - y - 72));
+            p.content = Math.max(p.content, y + previewSide);
+            y += previewSide + 2;
+            text(p, 0, y, tr("library.preview_hint"), DIM);
+            y += LINE;
+        }
+        if (previewNote != null) y += wrap(p, 0, y, previewNote, previewNoteColour);
+        return y + 2;
+    }
+
+    @Override
+    protected void renderPane(GuiGraphics g, Pane p, int mouseX, int mouseY, float partialTick) {
+        if (!p.key.equals("detail") || previewSide == 0 || meshes.isEmpty()) return;
+        int x0 = p.x, y0 = p.y + previewY - p.scroll;
+        g.fill(x0, y0, x0 + previewSide, y0 + previewSide, 0xFF202020);
+        int sx = previewSize[0], sy = previewSize[1], sz = previewSize[2];
+        // Fit the region's bounding sphere in the square.
+        float extent = (float) Math.sqrt(sx * sx + sy * sy + sz * sz);
+        float scale = previewSide * 0.9f / Math.max(1f, extent);
+        BlockDrawer.drawInScreen(g, meshes, sx, sy, sz, x0 + previewSide / 2f, y0 + previewSide / 2f, scale, yaw, pitch);
+        previewDraws++;
+    }
+
+    private boolean overPreview(double mx, double my) {
+        if (previewSide == 0) return false;
+        for (Pane p : panes) {
+            if (!p.key.equals("detail")) continue;
+            int y0 = p.y + previewY - p.scroll;
+            return p.contains(mx, my) && mx >= p.x && mx < p.x + previewSide && my >= y0 && my < y0 + previewSide;
+        }
+        return false;
+    }
+
+    @Override
+    public boolean mouseClicked(double mx, double my, int button) {
+        dragging = button == 0 && overPreview(mx, my);
+        return super.mouseClicked(mx, my, button) || dragging;
+    }
+
+    @Override
+    public boolean mouseReleased(double mx, double my, int button) {
+        dragging = false;
+        return super.mouseReleased(mx, my, button);
+    }
+
+    /** The orbit camera: dragging across the preview turns it (x) and tilts it (y, kept between -89 and 89 degrees). */
+    @Override
+    public boolean mouseDragged(double mx, double my, int button, double dx, double dy) {
+        if (dragging) {
+            yaw = (yaw + (float) dx * 1.5f) % 360f;
+            pitch = Math.max(-89f, Math.min(89f, pitch + (float) dy * 1.5f));
+            return true;
+        }
+        return super.mouseDragged(mx, my, button, dx, dy);
+    }
+
     private static List<String> keys(JsonObject o, String key) {
         return o.has(key) && o.get(key).isJsonObject() ? new ArrayList<>(o.getAsJsonObject(key).keySet()) : List.of();
     }
@@ -540,8 +694,9 @@ public final class LibraryScreen extends PaneScreen {
 
     @Override
     public void removed() {
-        if (childOpen) return; // a confirmation on top; coming back keeps the textures
+        if (childOpen) return; // a confirmation on top; coming back keeps the textures and the preview
         closed = true;
+        closePreview();
         for (Thumb t : thumbs.values()) if (t.texture != null) minecraft.getTextureManager().release(t.texture);
         thumbs.clear();
         asked.clear();

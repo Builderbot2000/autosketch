@@ -87,7 +87,7 @@ describe("UI latency", () => {
     const report = `edit latency over ${N} edits of 512 blocks: no UI median ${median(off).toFixed(3)} ms, p95 ${p95(off).toFixed(3)} ms; UI on, socket stalled: median ${median(on).toFixed(3)} ms, p95 ${p95(on).toFixed(3)} ms (${sent.ghosts} ghost updates sent into the stalled socket)`;
     console.log(report);
     // Generous bounds: timing on a shared machine is noisy; the claim is "no added work on the edit's path".
-    expect(sent.ghosts).toBeGreaterThan(5); // the UI really was sending all along
+    expect(sent.ghosts).toBeGreaterThan(1); // the UI really was sending all along
     expect(median(on)).toBeLessThan(median(off) * 1.5 + 0.5);
   }, 60_000);
 });

@@ -38,7 +38,7 @@ All are recorded in `16`'s *Decisions* or in `13`.
 **Checks run after the merges** (2026-11-17)
 - **Dedicated server:** passed. The fresh jar booted on the Craftoria server pack (`test/e2e/world/server.sh start ~/servers/craftoria`, 537 mods) with the bridge listening and no Autosketch errors. The dev `runServer` still needs the user to accept the EULA in `mod/run`.
 - **e2e world tier:** 12 of 12 pass, with `AUTOSKETCH_E2E_SERVER=~/servers/craftoria` and `AUTOSKETCH_E2E_INSTANCE` set to the Craftoria CurseForge instance.
-- **CI `client` job:** it runs on every push to `main`, and the game boots on the runner in about 17 s. R's replay client tests fail there, though they pass locally every run, so a race is suspected. silo-r is fixing it on `fix/replay-client-tests-ci`.
+- **CI `client` job:** passes (run 44201769605: 467 steps; the game boots on the runner in about 17 s). The earlier replay failures came from a fake MCP leaked when it was closed while tsx was still starting its child. The fix: the fake MCP runs in its own process group, which `close()` kills whole, and replay tests switch MCPs deterministically. It also closed a product gap: the client ends its replay (`replay.ended`) when the MCP side drops or resyncs.
 - **In-game check by the user** on the real Craftoria client: still to do. `docs/briefs/world/test-setup.md` marks what the harness now automates.
 - The `src/ui/` dependency rule was added to `docs/ARCHITECTURE.md` with the user's OK.
 

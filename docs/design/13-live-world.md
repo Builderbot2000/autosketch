@@ -2,6 +2,8 @@
 
 Lets the agent build directly in the world the player has loaded, while the player keeps placing and tweaking blocks by hand. The agent's edits appear in the world op by op, and the player's hand edits reach the agent automatically. Nobody carries schematic files back and forth or types commands per action.
 
+> **Changes coming from `16`** (2026-11-17): the whole mod locks while the MCP is offline (the wand and volume commands included), and the mod's client half gains the in-game UI over this protocol (feature `ui`). The sections below describe the mod as built until those land.
+
 Two pieces make it work: a **companion mod** in the game, and a **world link** in the MCP server that connects a document to part of the loaded world. The player marks that part in-game as a **work volume** and a **context volume**, the same two volumes a sandbox has (`11`): the linked document is the root scope of the session, and the player sets its volumes the way a parent agent sets a subagent's. The player then asks the agent for work from inside the game, pointing at what they mean (*Prompting from the game*), which starts the root agent on that work volume.
 
 ## Principles

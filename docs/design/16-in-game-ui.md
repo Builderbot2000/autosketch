@@ -1,0 +1,229 @@
+# 16 — In-Game UI
+
+Every operation the player does moves into the game, and the browser UI (`12`'s live viewer, `15`'s management UI) is removed. The command line keeps startup and anything outside the game: installing, choosing the instance, configuration with no game running. Inside the game, the companion mod's client half shows what the agents are doing in the world itself (work volumes, edits, sandboxes before merge, replay), and gives the player screens for settings and the library.
+
+Status: designed with the user 2026-11-17 (*Decisions*); nothing built. Supersedes `15` entirely and `12`'s *Live viewer* section. The event log, deltas, snapshots and replay data in `12` stay; only the browser that read them goes.
+
+## Principles
+
+1. **For the human, never the model** (from `12`). Nothing drawn in the game is returned to an agent, and no tool reads it.
+2. **Thin client.** The MCP computes everything: what to draw, replay state at a step, the scope tree, token totals, settings rows, library listings. The client half draws boxes, blocks and text, and turns input into requests. Logic stays in tested TypeScript, and the Java that has to be ported with each Minecraft version stays small.
+3. **One data path.** MCP ↔ the existing bridge ↔ the mod's server half ↔ the mod's own custom packets ↔ the client half. No second connection, no token handed to the client, no HTTP API for the client. In singleplayer the server half and client half run in the same game, so the last hop costs almost nothing.
+4. **Local only.** The MCP runs on the player's machine (`13`, *Connection*), for security. Nothing here is designed for remote servers.
+5. **Never slows the build** (from `12`). UI messages are built off the tool-call path, coalesced and rate-limited. A client that falls behind is dropped and resyncs from current state; ops never wait for it.
+6. **Never touches the world.** Overlays, ghosts and replay exist only on the client. The server's world changes only through patches, as now.
+7. **Files stay the source of truth** (from `15`). Settings and library screens edit `~/.autosketch/config.toml` and the library folders through the MCP, exactly as `autosketch config` and a file manager would.
+
+## What goes, what stays, what moves
+
+Measured 2026-11-17.
+
+| Code | Fate |
+|---|---|
+| `viewer/` page, 3D view, panels, tabs, CSS (about 2,100 of 2,915 lines) | **Removed** |
+| `viewer/js/model.js` (session model: scope tree, feed, spend; 492) | **Moved** to `src/observe/session-model.ts`, tests kept |
+| `viewer/js/replay.js` (replay planning; 149) | **Moved** to `src/observe/replay.ts`, tests kept |
+| `viewer/js/voxels.js` (WebGL meshing) | **Removed**; the game meshes blocks itself |
+| `src/observe/http.ts` (519) | **Reduced** to the OTLP receiver `/v1/logs` (`13`, B3): Claude Code's telemetry export can only post over HTTP. `observe.http` keeps its meaning (the port) |
+| `src/observe/guard.ts` | **Reduced** to refusing foreign `Origin`s and `Host`s on `/v1/logs`. The write token and the write checks go: nothing writes over HTTP any more |
+| `src/observe/atlas.ts`, `open.ts`, `instance-api.ts`, `src/server/instance-host.ts`, `src/server/ui-command.ts` (`autosketch ui`) | **Removed** |
+| `src/observe/settings-api.ts`, `library-api.ts`, `src/server/library-host.ts` | **Rewritten** as bridge request handlers (*MCP side*); `core/settings.ts`, `library/manage.ts` and `library/roots.ts` are reused unchanged |
+| `observe.open` | **Removed**; a value in `config.toml` is reported as unknown, as any unknown key is |
+| The `three` dependency and `/vendor/three/` | **Removed** |
+| Event bus, log, deltas, state table, reader, snapshots | **Unchanged** |
+
+The browser parts can be deleted at any time: nothing else depends on them. Only the two moved files must move first.
+
+## Command line (startup and outside actions)
+
+- **Instance choice is command-line only.** `autosketch instances` lists candidates; `autosketch setup --instance <id|path>` saves one; `autosketch config set|unset` edits any setting. These exist today ([src/server/index.ts](../../src/server/index.ts)).
+- **No setup wizard.** With no instance saved, the server picks one automatically when exactly one candidate is found, preferring games that wrote a pointer file (`14`, *Instance discovery*), and says so on stderr and in the first tool result. Otherwise the first tool result lists the candidates and the `autosketch setup` command, for the agent to pass on to the user.
+- **`autosketch observe <path>` is removed.** Finished logs are replayed in game through the running MCP (*Replay in the world*). With no MCP running, every in-game UI feature is locked (*Mod side*).
+
+## Architecture
+
+```
+MCP (TypeScript)                         mod, server half (Java)          mod, client half (Java)
+ event bus ─► session model ─► UI feed ──┐
+ replay planner ─► replay frames ────────┤  bridge (TCP, token)
+ settings / library handlers ◄──────────►├──────────────► relay ──custom packets──► draw lists, ghosts,
+                                         │               (per player,              replay overrides,
+ ◄── UI requests (seek, save, rename) ───┘                allowlisted)             HUD, screens
+```
+
+### MCP side
+
+A new module, `src/ui/`, owns everything sent to the game for display and everything the game asks for:
+
+- **Feed.** Subscribes to the event bus and keeps the session model. It produces coalesced state for the overlays: open jobs with their work and context volumes in world coordinates and their briefs; change boxes to flash; current request and mode; token totals; refusals. It sends a full state on connect and on resync, then changes, at most a few times a second.
+- **Ghosts.** For a sandbox before merge: its blocks in base-document coordinates, from the scope document. For an unlinked document: its blocks at an anchor the player chose. Sent as block-state regions, reusing the snapshot body encoding (`13`, *Binary bodies*), and updated from `doc.op` deltas.
+- **Replay.** The replay planner (moved from the viewer) plus a frame builder: the states of the replayed volume at step S as a keyframe, then forward deltas, and the job volumes and HUD text at that step. It reads any session log in the workspace, not just the live one.
+- **Requests.** Settings (list rows, set, unset, with the compare-and-set hash from `15`), library (list, entry detail, thumbnail PNG, preview voxels, rename, duplicate, delete, restore, hide, copy, empty trash), log list, replay open, seek and close, ghost anchor. Each request runs the same core code the HTTP endpoints called.
+
+### Wire additions
+
+Feature-gated within protocol 3, as `prompt.close` was (`13`, *Versions and features*): the MCP lists `ui` in its hello's `features`, the mod lists `ui` in its own. Without both, nothing below is sent, and the game behaves as today. The exact schemas go into `13`'s *Message schemas*, with golden vectors, in the contracts work (*Work plan*).
+
+| Direction | Message | Purpose |
+|---|---|---|
+| MCP → mod | `ui.state` | Overlay state, full or changed: jobs, volumes, briefs, request, mode, tokens. Id-less, coalesced |
+| MCP → mod | `ui.flash` | Boxes that just changed, with the job's colour |
+| MCP → mod | `ui.ghost` (body) / `ui.ghost.clear` | Ghost block regions, by ghost id |
+| MCP → mod | `replay.frame` (body) | Keyframe or deltas for the replayed volume, plus volumes and HUD text at the step |
+| mod → MCP | `ui.request` | A request from the player's client, with a request id: settings, library, logs, replay open, seek and close, ghost anchor |
+| MCP → mod | `ui.result` (body when binary, such as thumbnails and previews) | The answer to a `ui.request`, by id |
+
+The mod has only ever sent requests one way (MCP to mod) until now. `ui.request` and `ui.result` carry their own ids so they never mix with the MCP's request ids.
+
+### Mod side
+
+- **Server half: a relay.** The allowlist lives on the MCP (`world.promptPlayers`, `13`, *Allowed players*), so every `ui.*` and `replay.*` message names its players, and the server half forwards it to those players whose clients registered the channel. It forwards those clients' requests to the bridge with the player's UUID, and the MCP refuses requests from players not on the allowlist. Custom packets sent to the client are limited to about 1 MiB, so large bodies (ghost regions, keyframes) are split into numbered parts and joined on the client. It keeps no UI state of its own, except to resend the last full `ui.state` when a player joins.
+- **Client half: draws and asks.** It keeps the latest draw state, meshes ghost regions and draws them, applies replay overrides, draws the HUD and screens, and turns key bindings and screen actions into `ui.request`s. It holds no logic about scopes, steps or settings.
+- **The whole mod is locked while the MCP is offline.** Using the mod means running the MCP, so with no bridge connection the mod does nothing for the player: the client half draws nothing (no overlays, ghosts, HUD or volume outlines); the wand, air mode, the `/autosketch` volume, request, scan, replay and ghost commands, the key bindings and the menu all answer with one action-bar line saying the Autosketch MCP isn't connected. Volumes already marked are kept in the player's saved data, shown and editable again when the MCP connects. What keeps running is only what lets the MCP connect and the player check on it: the bridge listening, the pairing and pointer files, the mod's config screen and `/autosketch status`. The server half tells the client the link state when it changes and when the player joins.
+- **An MCP that is connected but older** (no `ui` feature in its hello) keeps today's features working (`13`), and only the in-game UI from this document is locked, with an action-bar line saying the MCP is too old.
+- **Clients without the client half** (a vanilla client) get none of this and lose nothing they have today.
+
+## Features
+
+All in the client half, each drawing what the MCP sent.
+
+### Autosketch menu and key bindings
+
+One key opens the **Autosketch menu**, a small hub screen with the toggles (HUD, job volumes, change flashes, ghosts), *Settings*, *Library*, *Replay* (the log list) and *Ghost here*. Every feature is reachable from it, so nothing else needs a default key.
+
+Bindings follow the usual practice for mods used in large packs: their own category (`key.categories.autosketch`), one default key, the rest unbound for players to bind, and keys that only matter in one mode active only in that mode (NeoForge `IKeyConflictContext`), so they never conflict with anything else. Checked against Craftoria's `options.txt` on 2026-11-17, where every letter key is already bound, most several times, and Left Alt carries 16 bindings.
+
+| Binding | Default | Active |
+|---|---|---|
+| Open Autosketch menu | `Home` (free in Craftoria; navigation keys don't move between keyboard layouts as letters and punctuation do) | in game |
+| Toggle HUD, toggle job volumes, toggle change flashes, toggle ghosts | unbound | in game |
+| Open settings, open library, open replay list | unbound | in game |
+| Replay: step back / forward | `←` / `→` (scroll also steps) | replay only |
+| Replay: play / pause | `Space` | replay only |
+| Replay: slower / faster | `↓` / `↑` | replay only |
+| Replay: previous / next marker (fork, merge, refusal, checkpoint) | `Page Up` / `Page Down` | replay only |
+| Replay: close | `Backspace` (`Esc` keeps opening the pause menu) | replay only |
+
+The player is frozen during replay, so its keys can reuse movement-adjacent keys without taking anything from normal play.
+
+### Overlays in the world
+
+- **Job volumes:** a line box per open job's work volume in its colour, with the brief as a label facing the camera; context volumes as dashed boxes. They appear at fork and leave at merge or abandon.
+- **Change flashes:** a short pulse on boxes the agent just changed, in the job's colour, so edits behind the player are noticed.
+- **The player's own volumes** keep today's outlines (`13`).
+- Drawn through blocks where useful, toggled with a key binding.
+
+### HUD
+
+A small corner panel, toggled with a key binding: the open request and its mode, open jobs (count and the newest briefs), the last refusal, and token totals for the current prompt (`13`, B3). One line when collapsed. It replaces nothing: the activity lines in chat (`13`, *Prompting from the game*) stay.
+
+### Ghost blocks
+
+Translucent blocks drawn with the game's own block renderer, so modded blocks look right (the browser's baked atlas never handled custom renderers):
+
+- **Sandbox preview:** a job's blocks where they will land, before merge, in the job's colour tint.
+- **Unlinked documents:** a document that isn't linked to the world, shown at an anchor the player sets (`/autosketch ghost here`, or the wand), to judge size and fit before exporting or linking.
+- Meshed per 16³ section and re-meshed only where deltas land. Blocks with block-entity renderers draw their block model only (*Decisions*).
+
+### Replay in the world
+
+The timeline plays in the world instead of on a chart:
+
+- **Open:** `/autosketch replay` lists the workspace's session logs, newest first; `/autosketch replay <log>` or the live session opens one. The replayed volume is the base document's footprint in the world (linked documents) or a ghost anchor (logs of unlinked documents).
+- **Showing step S:** the client overrides every block in that volume in its own copy of the world (a frame starts from a keyframe of the whole volume). The server's world is untouched. On close, the server half resends those chunks to the client, so it shows exactly the server's state again with nothing to keep track of.
+- **Live updates are ignored during replay.** The server's world keeps changing while the player watches (an agent still building, fluids, crops, redstone), and the server sends those changes to the client, into the same copy replay draws in. While replay is open, the client drops block updates from the server inside the replayed volume (a small client mixin on the block-update and section-update packets; the mod already uses mixins). Nothing is lost: the chunk resend on close brings the client up to date. Chunks that load inside the volume during replay get the frame reapplied.
+- **Camera:** the client detaches the camera and freezes the player, so collisions with blocks that exist only on the client can't push the player around. No game-mode change.
+- **Controls:** scroll or keys to step, play/pause, speed, jump to the next fork, merge, refusal or checkpoint. A HUD strip shows the time, the step's tool call and job brief, with ticks for forks, merges and refusals.
+- **The scope tree in space:** at each step, open jobs' volumes are drawn as in *Overlays*, and each step's edits flash in their job's colour. That replaces the timeline chart, the scope tree panel and the activity map.
+- **Gaps:** steps with no deltas (capped or off, `12`) fall back to the nearest time-lapse snapshot as a HUD message, since a snapshot image can't be shown as blocks.
+
+### Settings screen
+
+Generated from the MCP's settings rows (group, summary, control, bounds, options, value, source, what a launch value overrides, restart needed), as `15`'s tab was. Toggle, cycle, number field with bounds, list editor, text field. Save sends the hash and reloads on a conflict. The mod's own config screen (Cloth Config) stays separate and is linked from it.
+
+### Library screen
+
+Roots with counts, per-kind lists filtered by text and `tag:`, prefab thumbnails in a grid (PNGs from the MCP, loaded as textures), flags for origin, overrides, shadowed and hidden, and the actions in *MCP side*. The detail pane shows metadata or text and a **3D preview**: the prefab's blocks drawn with the game's block renderer in the screen, with an orbit camera. The preview shares its block drawing with ghosts.
+
+## Testing
+
+### MCP (TypeScript)
+
+- The session model and replay planner keep their tests after the move.
+- New unit tests for the feed (coalescing, resync, job colours), ghost regions from scope documents and deltas, replay frames (keyframe plus deltas equal the replayed grid at every step), and every `ui.request` handler.
+- Golden vectors for every new message, both codecs, as for the rest of the protocol. The fake host gains the `ui` feature.
+
+### Mod, server half (GameTests)
+
+Relay: forwarded only to the named players with the channel; large bodies split and joined in order; requests forwarded with their ids; chunks resent on replay close; nothing sent without the feature.
+
+### Mod, client half (real client, headless)
+
+No client test framework exists in NeoForge 21.1.249 (its GameTests run only on the server), but NeoForge runs a real client headless in its own CI (`SelfTestClient`: wait for the loading screen to go, write a report file, `Minecraft.stop()`). The harness copies that pattern:
+
+- **Run:** a `clientTest` run in [mod/neoforge/build.gradle](../../mod/neoforge/build.gradle) with `client()`, the existing `gametest` source set, `--quickPlaySingleplayer <test world>`, and a report path; launched under `xvfb-run` with Mesa software rendering (`LIBGL_ALWAYS_SOFTWARE=1`). The test code never ships in the released jar.
+- **Driver:** a client tick listener that runs steps and waits for conditions, never fixed tick counts. A suite shares one client boot.
+- **The MCP end:** the TypeScript fake host plays the MCP over the real bridge, sending UI state, ghosts and replay frames and answering requests.
+- **Input:** `KeyMapping.click` and `KeyMapping.set` go through the same path as real input (a left click into the air reaches `CommonHooks.onEmptyLeftClick`); scrolling goes through `ClientHooks.onMouseScroll`, which posts the same event the mouse handler does. One test may use `xdotool` on the virtual screen for true OS input.
+- **Assertions:** mostly on state: the draw list, the override map in replay mode, widgets after an action, the request sent over the bridge, and the server's state through the integrated server in the same process. Pixel checks only where state can't prove it (a ghost is visible, an outline draws through blocks), with `Screenshot.takeScreenshot` and a tolerance; reference images are tied to a Mesa version.
+- **Also covers the existing manual checklist** (`docs/briefs/world/test-setup.md`): air mode's left click, scroll distance and outline; `/autosketch done` and its notice; a vanilla client joining a local dedicated server running the mod.
+- **Environment:** the dev machine (WSL2) already has Xvfb, `xvfb-run` and Mesa's OpenGL drivers (software and `d3d12`), and WSLg provides a display for watching a run. Checked 2026-11-17.
+- **CI:** a job installing Xvfb and Mesa on the Ubuntu runner, on the dev profile. A Craftoria-sized client (532 mods) runs occasionally, not on every change.
+
+Every entry point the harness needs is public; no mixin, reflection or access transformer. Line numbers and some calls will change between versions, so the harness is ported with the client half.
+
+## Cost
+
+Measured and estimated 2026-11-17. About 3,500 lines of JavaScript and TypeScript go (*What goes, what stays, what moves*); the client half (103 lines today) grows by an estimated 3,000 to 5,000 lines of Java. The MCP side and the security surface get simpler. The cost that remains is the client half's rendering and GUI code: it changes more between Minecraft versions than anything else the mod uses (1.21.x alone reworked both), so it is ported with each target and loader. The thin client keeps that code to drawing only.
+
+## Work plan
+
+Workstreams run in parallel. Only the contracts come first, and they are small: everything else codes against them.
+
+| Stream | Scope | Side | Needs |
+|---|---|---|---|
+| **C. Contracts** | `ui` feature on both hellos; message schemas in `13`; golden vectors; both codecs; fake host; the relay's packet channel and splitting | both | — |
+| **H. Client test harness** | `clientTest` run, driver, fake host wiring, first test (air mode left click sets corner 1), CI job; time a boot with software rendering, here and on the CI runner, and record it | mod | — |
+| **M. MCP UI core** | `src/ui/`: move session model and replay planner, feed, ghost regions, replay frames, request handlers; `http.ts` and `guard.ts` reduced to OTLP | MCP | C |
+| **O. Overlays and HUD** | job volumes, flashes, HUD | mod | C |
+| **L. Offline lock** | gate the wand, air mode, commands and outlines on the bridge connection; `/autosketch status`; link state to the client; existing GameTests and e2e scenarios that mark volumes without a connected MCP connect a fake one first | mod | — |
+| **G. Ghosts** | block drawing shared with the preview; section meshing; sandbox and anchored-document ghosts; `/autosketch ghost` | mod | C |
+| **R. Replay** | client overrides, chunk resend on close, detached camera, controls, HUD strip, `/autosketch replay` | mod | C; G's block drawing is not needed |
+| **S. Screens** | Autosketch menu and key bindings, settings screen, library screen, thumbnails, 3D preview (uses G's block drawing) | mod | C; G for the preview only |
+| **X. Removal and CLI** | delete the browser code and `three`, `autosketch ui`, `autosketch observe`, `observe.open`; automatic instance choice and its messages; update `12`, `13`, `14`, `15`, `README.md` | MCP, docs | M has moved the two viewer files |
+
+Every stream lands with its tests: TypeScript units and vectors for C and M, GameTests for the relay, client tests for O, G, R and S.
+
+```
+C contracts ─┬─► M MCP UI core ──────────┐
+             ├─► O overlays, HUD ────────┤
+             ├─► G ghosts ──► S preview  ├─► done
+             ├─► R replay ───────────────┤
+             └─► S screens ──────────────┘
+L offline lock (from day one, independent)
+H harness (from day one, used by O, G, R, S)
+X removal (once M has moved model.js and replay.js)
+```
+
+## Open questions
+
+None at the moment.
+
+## Decisions
+
+All settled with the user on 2026-11-17.
+
+- **The browser UI is removed completely.** The command line handles startup and outside actions; the game handles every operation. Reason: the player is in the game, switching to a browser is friction, and the game draws modded blocks with their real renderers.
+- **Instance choice is command-line only**, with automatic choice when there is exactly one candidate. Reason: it's done once, before the game matters; the existing commands already cover it.
+- **Thin client.** Reason: logic stays in tested TypeScript, and the version-sensitive Java (rendering and GUI code changes across Minecraft versions) stays small.
+- **One data path through the bridge and the mod's packets**, not a client connection to an HTTP API. Reason: no second connection, no token to hand over, reuses both codecs and the golden vectors; the MCP is local only.
+- **Replay plays in the world, client-side.** Reason: the world is already the 3D view; replaying through the server would fight the journal and hand edits and could leave the world wrong after a crash.
+- **In-client tests run a real headless client**, following NeoForge's own client self-test. Reason: NeoForge has no client test framework, but everything the harness needs is public.
+- **Streams run in parallel** after the contracts, not one after another.
+- **Rejected: embedding the browser page in the game** with a Chromium mod (MCEF-style). Reason: a large native dependency per platform, extra risk on Linux and WSL, at odds with the one-command install and a mod that needs no other mods (`14`), and it would still be a web page, in a worse window.
+- **Rejected: a client connection to the MCP's HTTP API.** Reason: a second connection and a token to hand to the client, where the bridge already pairs, has both codecs and golden vectors. Going through the bridge also means nothing writes over HTTP any more, so browsers on the machine (which can send requests to `127.0.0.1`) have nothing to attack but the read-only OTLP receiver.
+- **Rejected: keeping a small web page** for offline replay or the timeline. Reason: the in-game intent is complete; replay and the timeline play in the world.
+- **Key bindings** (decided by Claude on the user's instruction to follow modding conventions, 2026-11-17): one default key (`Home`) opens the Autosketch menu; toggles and screens are unbound; replay keys are active only in replay (*Autosketch menu and key bindings*).
+- **Ghosts draw block models only**; blocks with block-entity renderers (chests, Create parts) show their model without the renderer. Revisit only if it looks wrong in use.
+- **The whole mod is locked while the MCP is offline**, the wand and volume commands included; only connecting and `/autosketch status` keep working. Reason: the mod exists to serve the MCP; with it off, the mod is effectively disabled, and no fallback commands or standalone server are needed.
+- **Replay ignores the server's live block updates inside the replayed volume** and catches up on close. Reason: replay is client-side only, and live updates arriving in the same client copy of the world would mix into the picture.

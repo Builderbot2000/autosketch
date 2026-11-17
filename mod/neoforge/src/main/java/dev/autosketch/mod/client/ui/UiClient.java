@@ -46,6 +46,7 @@ public final class UiClient {
 
     private static final Map<String, List<Handler>> handlers = new ConcurrentHashMap<>();
     private static final Map<String, Integer> counts = new ConcurrentHashMap<>();
+    private static final Map<String, Consumer<String>> actions = new ConcurrentHashMap<>();
     private static final Map<Long, Consumer<UiResult>> waiting = new ConcurrentHashMap<>();
     private static long nextRequest;
     private static long partsId = -1;
@@ -63,6 +64,15 @@ public final class UiClient {
     /** Adds a handler for one MCP → mod type ({@code ui.state}, {@code ui.ghost}, {@code replay.frame}, ...). */
     public static void register(String type, Handler handler) {
         handlers.computeIfAbsent(type, k -> new CopyOnWriteArrayList<>()).add(handler);
+    }
+
+    /**
+     * Adds the handler for a client action the server half sends ({@link UiPayload#CLIENT_ACTION}:
+     * {@code <action> <args…>}, from a server command). The handler gets the text after the name
+     * (empty when none), on the client thread. One handler per name; unknown actions are ignored.
+     */
+    public static void onAction(String name, Consumer<String> handler) {
+        actions.put(name, handler);
     }
 
     /** How many messages of a type arrived since the client started (for tests). */
@@ -90,8 +100,20 @@ public final class UiClient {
         switch (p.op()) {
             case UiPayload.LINK -> LinkState.set(LinkState.State.fromWire(p.text()));
             case UiPayload.FRAME -> part(p);
+            case UiPayload.CLIENT_ACTION -> action(p.text());
             default -> LOG.debug("Autosketch UI: ignoring packet op {}", p.op());
         }
+    }
+
+    static void action(String text) {
+        int space = text.indexOf(' ');
+        String name = space < 0 ? text : text.substring(0, space);
+        Consumer<String> h = actions.get(name);
+        if (h == null) {
+            LOG.debug("Autosketch UI: ignoring unknown client action {}", name);
+            return;
+        }
+        h.accept(space < 0 ? "" : text.substring(space + 1));
     }
 
     private static void part(UiPayload p) {

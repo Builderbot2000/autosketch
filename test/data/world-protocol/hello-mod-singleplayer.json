@@ -5,7 +5,7 @@
     "type": "hello",
     "protocol": 3,
     "mod": {
-      "version": "0.2.0"
+      "version": "0.1.0"
     },
     "game": {
       "version": "1.21.1",

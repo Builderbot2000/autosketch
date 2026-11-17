@@ -68,7 +68,7 @@ vector("hello-mcp-build-only", "mcp", "MCP hello listing only the build mode: th
 vector("hello-mod-singleplayer", "mod", "Mod hello from the integrated server of a singleplayer world, listing every feature up to version 3", {
   type: "hello",
   protocol: 3,
-  mod: { version: "0.2.0" },
+  mod: { version: "0.1.0" },
   game: { version: "1.21.1", dataVersion: 3955, loader: "neoforge", loaderVersion: "21.1.249" },
   singleplayer: true,
   host: { name: "Kev", uuid: UUID_KEV },
@@ -77,7 +77,7 @@ vector("hello-mod-singleplayer", "mod", "Mod hello from the integrated server of
 vector("hello-mod-dedicated", "mod", "Mod hello from a dedicated server (no host player), listing only some features", {
   type: "hello",
   protocol: 3,
-  mod: { version: "0.2.0" },
+  mod: { version: "0.1.0" },
   game: { version: "1.21.1", dataVersion: 3955, loader: "neoforge", loaderVersion: "21.1.249" },
   singleplayer: false,
   host: null,

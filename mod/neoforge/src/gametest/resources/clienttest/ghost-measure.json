@@ -1,0 +1,3 @@
+{
+  "hello": { "features": ["prompt.close", "ui"], "modes": ["build", "ask", "plan", "scan"] }
+}

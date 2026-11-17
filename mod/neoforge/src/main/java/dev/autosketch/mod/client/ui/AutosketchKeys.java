@@ -115,4 +115,10 @@ public final class AutosketchKeys {
         String line = LinkState.get() == LinkState.State.TOO_OLD ? Link.TOO_OLD_LINE : Link.OFFLINE_LINE;
         mc.player.displayClientMessage(Component.literal(line), true);
     }
+
+    // ── S: the menu and the screens (16, *Autosketch menu and key bindings*) ──────────────────
+    // Last in the class, so every mapping and the action map exist when it runs.
+    static {
+        dev.autosketch.mod.client.ui.screen.AutosketchScreens.attachKeys();
+    }
 }

@@ -36,12 +36,16 @@ import org.slf4j.Logger;
  */
 @Config(name = AutosketchConfig.NAME)
 public final class AutosketchConfig implements ConfigData {
+    @ConfigEntry.Gui.Excluded // not a setting: AutoConfig's screen would try to show it
     public static final String NAME = "autosketch";
     /** The file this build reads and writes, in the game's config folder. */
+    @ConfigEntry.Gui.Excluded // not a setting: AutoConfig's screen would try to show it
     public static final String FILE = NAME + ".toml";
     /** The {@code ModConfigSpec} file of builds before Cloth Config, migrated once. */
+    @ConfigEntry.Gui.Excluded // not a setting: AutoConfig's screen would try to show it
     public static final String LEGACY_FILE = "autosketch-common.toml";
 
+    @ConfigEntry.Gui.Excluded // not a setting: AutoConfig's screen would try to show it
     private static final Logger LOG = LogUtils.getLogger();
 
     @ConfigEntry.Category("bridge")
@@ -104,6 +108,7 @@ public final class AutosketchConfig implements ConfigData {
         public String wandItem = DEFAULT_WAND;
     }
 
+    @ConfigEntry.Gui.Excluded // not a setting: AutoConfig's screen would try to show it
     public static final String DEFAULT_WAND = "minecraft:blaze_rod";
 
     /** An item id with its namespace ({@code blaze_rod} → {@code minecraft:blaze_rod}), or null when it isn't a valid id. */
@@ -163,6 +168,7 @@ public final class AutosketchConfig implements ConfigData {
     }
 
     /** The settings in file order, with the comments and ranges the {@code ModConfigSpec} file had. */
+    @ConfigEntry.Gui.Excluded // not a setting: AutoConfig's screen would try to show it
     static final List<Key> KEYS = List.of(
             intKey("bridge", "port", 0, 65535, c -> c.bridge.port, (c, v) -> c.bridge.port = v,
                     "TCP port for the MCP connection on 127.0.0.1. 0 picks a free port on every start (written to config/autosketch-bridge.toml)."),
@@ -276,7 +282,9 @@ public final class AutosketchConfig implements ConfigData {
 
     // ── registration ──────────────────────────────────────────────────────────────────────────
 
+    @ConfigEntry.Gui.Excluded // not a setting: AutoConfig's screen would try to show it
     private static volatile @Nullable ConfigHolder<AutosketchConfig> holder;
+    @ConfigEntry.Gui.Excluded // not a setting: AutoConfig's screen would try to show it
     private static final AutosketchConfig DEFAULTS = new AutosketchConfig();
 
     /**
@@ -291,7 +299,9 @@ public final class AutosketchConfig implements ConfigData {
         lastModified = modified(file);
     }
 
+    @ConfigEntry.Gui.Excluded // not a setting: AutoConfig's screen would try to show it
     private static volatile @Nullable Path file;
+    @ConfigEntry.Gui.Excluded // not a setting: AutoConfig's screen would try to show it
     private static volatile @Nullable FileTime lastModified;
 
     private static @Nullable FileTime modified(@Nullable Path f) {

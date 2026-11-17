@@ -1,0 +1,418 @@
+{
+ "hello": {
+  "features": [
+   "prompt.close",
+   "ui"
+  ],
+  "modes": [
+   "build",
+   "ask",
+   "plan",
+   "scan"
+  ]
+ },
+ "results": {
+  "settings.list": {
+   "ok": true,
+   "result": {
+    "path": "/home/test/.autosketch/config.toml",
+    "hash": "hash-1",
+    "warnings": [],
+    "unknown": [
+     "old.key"
+    ],
+    "settings": [
+     {
+      "key": "observe.snapshots",
+      "group": "Observe",
+      "summary": "When time-lapse snapshots are taken",
+      "applies": "restart",
+      "accepts": "off, merge, every",
+      "control": {
+       "type": "select",
+       "options": [
+        "off",
+        "merge",
+        "every"
+       ]
+      },
+      "default": "merge",
+      "value": "merge",
+      "text": "merge",
+      "source": {
+       "kind": "default",
+       "label": "default"
+      },
+      "restartNeeded": false
+     },
+     {
+      "key": "observe.deltas",
+      "group": "Observe",
+      "applies": "live",
+      "accepts": "true or false",
+      "control": {
+       "type": "toggle"
+      },
+      "default": true,
+      "value": true,
+      "text": "true",
+      "source": {
+       "kind": "config",
+       "label": "config.toml"
+      },
+      "overrides": {
+       "label": "command line",
+       "raw": "false",
+       "same": false,
+       "note": "launch command sets observe.deltas=false; ignored, config.toml says true"
+      },
+      "restartNeeded": false
+     },
+     {
+      "key": "scope.maxDepth",
+      "group": "Scopes",
+      "summary": "How deep jobs may nest",
+      "applies": "restart",
+      "accepts": "an integer from 0 to 4",
+      "control": {
+       "type": "number",
+       "min": 0,
+       "max": 4
+      },
+      "default": 1,
+      "value": 2,
+      "text": "2",
+      "source": {
+       "kind": "config",
+       "label": "config.toml"
+      },
+      "restartNeeded": true,
+      "running": 1
+     },
+     {
+      "key": "library.roots",
+      "group": "Library",
+      "applies": "restart",
+      "accepts": "a list of folders",
+      "control": {
+       "type": "list"
+      },
+      "default": [
+       "<workspace>/library"
+      ],
+      "value": [
+       "~/autosketch/library",
+       "~/shared/kit"
+      ],
+      "text": "~/autosketch/library, ~/shared/kit",
+      "source": {
+       "kind": "config",
+       "label": "config.toml"
+      },
+      "restartNeeded": false
+     },
+     {
+      "key": "assets.instance",
+      "group": "Assets",
+      "applies": "restart",
+      "accepts": "a path",
+      "control": {
+       "type": "text"
+      },
+      "default": null,
+      "value": null,
+      "text": "",
+      "source": {
+       "kind": "default",
+       "label": "default"
+      },
+      "invalid": {
+       "raw": "42",
+       "note": "config.toml's value 42 isn't a path; skipped"
+      },
+      "restartNeeded": false
+     }
+    ]
+   }
+  },
+  "settings.set": {
+   "ok": true,
+   "result": {
+    "hash": "hash-2"
+   }
+  },
+  "settings.unset": {
+   "ok": false,
+   "error": "conflict",
+   "message": "config.toml changed since it was read"
+  },
+  "library.list": {
+   "ok": true,
+   "result": {
+    "roots": [
+     {
+      "label": "user",
+      "path": "/home/test/autosketch/library",
+      "kind": "user",
+      "writable": true,
+      "counts": {
+       "prefabs": 2,
+       "palettes": 1,
+       "procedures": 1,
+       "knowledge": 0
+      },
+      "trash": 1
+     },
+     {
+      "label": "starter",
+      "path": "(built in)",
+      "kind": "starter",
+      "writable": false,
+      "counts": {
+       "prefabs": 2,
+       "palettes": 0,
+       "procedures": 0,
+       "knowledge": 0
+      },
+      "trash": 0
+     }
+    ],
+    "entries": {
+     "prefabs": [
+      {
+       "kind": "prefabs",
+       "name": "tower",
+       "root": "user",
+       "writable": true,
+       "title": "Stone tower",
+       "tags": [
+        "medieval",
+        "tall"
+       ],
+       "summary": "A round tower",
+       "hidden": false,
+       "overrides": [
+        "starter"
+       ]
+      },
+      {
+       "kind": "prefabs",
+       "name": "hut",
+       "root": "user",
+       "writable": true,
+       "title": "Hut",
+       "tags": [
+        "medieval"
+       ],
+       "summary": "A small hut",
+       "hidden": false
+      },
+      {
+       "kind": "prefabs",
+       "name": "park_bench",
+       "root": "starter",
+       "writable": false,
+       "title": "Park bench",
+       "tags": [
+        "park"
+       ],
+       "summary": "A bench",
+       "hidden": false
+      },
+      {
+       "kind": "prefabs",
+       "name": "old_well",
+       "root": "starter",
+       "writable": false,
+       "title": "Old well",
+       "tags": [
+        "park"
+       ],
+       "summary": "A well",
+       "hidden": true
+      }
+     ],
+     "palettes": [
+      {
+       "kind": "palettes",
+       "name": "castle",
+       "root": "user",
+       "writable": true,
+       "title": "Castle",
+       "tags": [
+        "stone"
+       ],
+       "summary": "Grey stone",
+       "hidden": false
+      }
+     ],
+     "procedures": [
+      {
+       "kind": "procedures",
+       "name": "stairs",
+       "root": "user",
+       "writable": true,
+       "title": "Stairs",
+       "tags": [],
+       "summary": "Builds a stair run",
+       "hidden": false
+      }
+     ],
+     "knowledge": []
+    },
+    "hidden": [
+     "prefabs/old_well"
+    ]
+   }
+  },
+  "library.entry": {
+   "ok": true,
+   "result": {
+    "kind": "prefabs",
+    "name": "tower",
+    "root": "user",
+    "writable": true,
+    "title": "Stone tower",
+    "tags": [
+     "medieval",
+     "tall"
+    ],
+    "summary": "A round tower",
+    "hidden": false,
+    "overrides": [
+     "starter"
+    ],
+    "hash": "e-1",
+    "editable": true,
+    "meta": {
+     "name": "tower",
+     "tags": [
+      "medieval",
+      "tall"
+     ],
+     "front": "south",
+     "footprint": [
+      5,
+      5
+     ],
+     "height": 9,
+     "notes": "Synthetic test prefab"
+    }
+   }
+  },
+  "library.thumbnail": {
+   "ok": true,
+   "result": {
+    "format": "png",
+    "width": 32,
+    "height": 32
+   },
+   "bodyBase64": "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAATElEQVR4nO3OMREAIAxD0YpgRhiakIgIHBQH7cDlsvwh47+8mOtktbtHud8+AAAAYAeoD7oeAAAAfoD6oOsBAADgB6gPuh4AAAB2wAMTQsSIm20JmAAAAABJRU5ErkJggg=="
+  },
+  "library.rename": {
+   "ok": true,
+   "result": {
+    "name": "tower2"
+   }
+  },
+  "library.duplicate": {
+   "ok": true,
+   "result": {
+    "name": "tower_copy"
+   }
+  },
+  "library.delete": {
+   "ok": true,
+   "result": {
+    "trashed": {
+     "id": "t1",
+     "kind": "prefabs",
+     "name": "tower",
+     "deletedAt": "2026-11-17T10:00:00Z"
+    }
+   }
+  },
+  "library.trash": {
+   "ok": true,
+   "result": {
+    "trash": [
+     {
+      "id": "t0",
+      "kind": "prefabs",
+      "name": "shed",
+      "deletedAt": "2026-11-16T09:00:00Z"
+     }
+    ]
+   }
+  },
+  "library.restore": {
+   "ok": true,
+   "result": {
+    "restored": {
+     "id": "t0",
+     "kind": "prefabs",
+     "name": "shed",
+     "deletedAt": "2026-11-16T09:00:00Z"
+    }
+   }
+  },
+  "library.hide": {
+   "ok": true,
+   "result": {
+    "hidden": true,
+    "hash": "hash-3"
+   }
+  },
+  "library.copy": {
+   "ok": true,
+   "result": {
+    "root": "user",
+    "name": "park_bench"
+   }
+  },
+  "library.empty_trash": {
+   "ok": true,
+   "result": {
+    "emptied": 1
+   }
+  },
+  "logs.list": {
+   "ok": true,
+   "result": {
+    "logs": [
+     {
+      "id": "log-2",
+      "doc": "castle",
+      "session": "s2",
+      "modified": "2026-11-17T09:00:00Z",
+      "live": true
+     },
+     {
+      "id": "log-1",
+      "doc": "hut",
+      "session": "s1",
+      "modified": "2026-11-16T09:00:00Z",
+      "live": false
+     }
+    ]
+   }
+  },
+  "ghost.anchor": {
+   "ok": true,
+   "result": {
+    "ghost": "anchor-1"
+   }
+  },
+  "library.preview": {
+   "ok": true,
+   "result": {
+    "size": [
+     4,
+     3,
+     4
+    ]
+   },
+   "bodyBase64": "BBRtaW5lY3JhZnQ6Z29sZF9ibG9jaw9taW5lY3JhZnQ6c3RvbmUNbWluZWNyYWZ0OmFpchdtaW5lY3JhZnQ6ZW1lcmFsZF9ibG9jawAAAAAAAAAAAAAAAAAAAAABAQEBAQICAQECAgEBAQEBAgICAgIDAgICAgICAgICAgA="
+  }
+ }
+}

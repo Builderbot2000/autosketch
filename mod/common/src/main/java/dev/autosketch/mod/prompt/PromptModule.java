@@ -24,7 +24,8 @@ import org.slf4j.Logger;
 /**
  * Registers in-game requests (13, *Prompting from the game*, M13) through the skeleton's hooks:
  * {@code /autosketch ask|plan|build <text>} (B6: the subcommand names the request's mode; the
- * configured alias is a short root for them), {@code /autosketch focus clear},
+ * configured alias is a short root for them), {@code /autosketch done} (B6: the player ends the open
+ * read-only request), {@code /autosketch focus clear},
  * {@code /autosketch log off|mine|all}, the wand's {@code focus} mode, and the handlers for
  * {@code prompt.result} and {@code chat}. Each loader's setup event calls {@link #setup} (on
  * NeoForge, {@code PromptEvents}).
@@ -101,9 +102,10 @@ public final class PromptModule {
     /**
      * Adds the request subcommands under {@code root} ({@code /autosketch}, or the alias), including
      * {@code scan [radius] [text]} (B4: radius in chunks; a number first is the radius, anything else
-     * the text).
+     * the text) and {@code done} (B6: ends the open read-only request).
      */
     static void requests(LiteralArgumentBuilder<CommandSourceStack> root) {
+        root.then(Commands.literal("done").executes(ctx -> InGamePrompts.done(ctx.getSource().getPlayerOrException(), Autosketch.bridge())));
         for (String mode : TEXT_MODES)
             root.then(Commands.literal(mode).then(Commands.argument("text", StringArgumentType.greedyString())
                     .executes(ctx -> InGamePrompts.request(ctx.getSource().getPlayerOrException(), mode, StringArgumentType.getString(ctx, "text"), Autosketch.bridge()))));

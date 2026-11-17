@@ -191,6 +191,37 @@ public final class InGamePrompts {
         return sent;
     }
 
+    /**
+     * {@code /autosketch done} (13, B6): ends the open read-only request ({@code ask}, {@code plan},
+     * {@code scan}). Only the player lifts a read-only mode, so this is the in-game way to end one
+     * without sending a new request. Sends {@code prompt.close}, which the MCP answers with a notice on
+     * the player's action bar (it owns the request state, so it says whether one was open). Without a
+     * connection the player hears {@code no_link}; an MCP whose hello doesn't list
+     * {@code prompt.close} is too old for it, and the player is told to update it, with nothing sent.
+     * Returns the command result (1 sent, 0 not).
+     */
+    public static int done(ServerPlayer player, Bridge bridge) {
+        if (!bridge.connected()) {
+            out.actionBar(player, refusal("no_link"));
+            return 0;
+        }
+        BridgeSession session = bridge.session();
+        if (session == null || !session.features().contains(Messages.MCP_FEATURE_PROMPT_CLOSE)) {
+            out.actionBar(player, Component.literal(DONE_UNSUPPORTED).withStyle(ChatFormatting.RED));
+            return 0;
+        }
+        Messages.Player who = new Messages.Player(player.getGameProfile().getName(), player.getUUID());
+        if (!bridge.send(new Messages.PromptClose(who).encode())) {
+            out.actionBar(player, refusal("no_link"));
+            return 0;
+        }
+        out.actionBar(player, Component.literal("Autosketch: ending the open request…").withStyle(ChatFormatting.GRAY));
+        return 1;
+    }
+
+    /** The action-bar text for {@code /autosketch done} to an MCP that doesn't list {@code prompt.close}. */
+    public static final String DONE_UNSUPPORTED = "Autosketch: not sent: the Autosketch MCP server is too old for /autosketch done (update it; a new request also ends the open one)";
+
     /** The action-bar text for a request mode the MCP doesn't accept (its hello doesn't list it). */
     public static String unsupportedText(String mode) {
         return "Autosketch: not sent: the Autosketch MCP server doesn't accept " + mode + " requests (update it; /autosketch build still works)";

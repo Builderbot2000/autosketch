@@ -45,6 +45,7 @@ public final class PromptGameTests {
         final List<Frame> sent = new ArrayList<>();
         final boolean connected;
         final List<String> modes;
+        final List<String> features;
 
         RecordingBridge(boolean connected) {
             this(connected, List.of("ask", "plan", "build"));
@@ -52,8 +53,14 @@ public final class PromptGameTests {
 
         /** Connected, to an MCP whose hello lists these request modes. */
         RecordingBridge(boolean connected, List<String> modes) {
+            this(connected, modes, List.of());
+        }
+
+        /** Connected, to an MCP whose hello lists these request modes and features. */
+        RecordingBridge(boolean connected, List<String> modes, List<String> features) {
             this.connected = connected;
             this.modes = modes;
+            this.features = features;
         }
 
         @Override
@@ -63,7 +70,7 @@ public final class PromptGameTests {
 
         @Override
         public @Nullable BridgeSession session() {
-            return connected ? new BridgeSession(1, "test", "0", new JsonObject(), modes) : null;
+            return connected ? new BridgeSession(1, "test", "0", new JsonObject(), modes, features) : null;
         }
 
         @Override
@@ -303,6 +310,45 @@ public final class PromptGameTests {
         }
         helper.assertTrue(out.barOf(player).getLast().contains("scanChunksMax"), "the clipped radius is warned about: " + out.barOf(player));
         dev.autosketch.mod.world.ScanGrants.clear();
+        leave(player);
+        helper.succeed();
+    }
+
+    /**
+     * B6: {@code /autosketch done} (and {@code /<alias> done}) sends {@code prompt.close} only to an MCP
+     * whose hello lists {@code prompt.close}; an older MCP is refused on the action bar with nothing
+     * sent, and with no connection the player hears no_link. The MCP's answer is a notice to that
+     * player, shown whatever their notices setting.
+     */
+    @GameTest(template = "empty")
+    public static void doneIsSentOnlyToAnMcpListingPromptClose(GameTestHelper helper) {
+        ServerPlayer player = helper.makeMockServerPlayerInLevel();
+        Recorder out = new Recorder();
+        RecordingBridge listed = new RecordingBridge(true, List.of("ask", "scan", "plan", "build"), List.of("prompt.close"));
+        with(listed, fixed(null), out, () -> run(player, "autosketch done"));
+        helper.assertTrue(listed.sent.size() == 1, "one prompt.close sent, got " + listed.sent.size());
+        Frame f = listed.sent.getFirst();
+        helper.assertTrue(f.type().equals("prompt.close") && f.id() == null, "type prompt.close, no id: " + f.header());
+        try {
+            var close = dev.autosketch.mod.protocol.Messages.PromptClose.decode(f);
+            helper.assertTrue(close.player().uuid().equals(player.getUUID()) && close.player().name().equals(player.getGameProfile().getName()), "the player: " + close.player());
+        } catch (dev.autosketch.mod.protocol.ProtocolException e) {
+            throw new RuntimeException(e);
+        }
+        helper.assertTrue(out.barOf(player).getLast().contains("ending the open request"), "the action bar says it went out: " + out.barOf(player));
+        // The alias root has it too.
+        var dispatcher = new com.mojang.brigadier.CommandDispatcher<net.minecraft.commands.CommandSourceStack>();
+        PromptModule.alias(dispatcher, "zz");
+        helper.assertTrue(dispatcher.getRoot().getChild("zz").getChild("done") != null, "/zz done");
+
+        RecordingBridge old = new RecordingBridge(true, List.of("ask", "scan", "plan", "build"));
+        with(old, fixed(null), out, () -> run(player, "autosketch done"));
+        helper.assertTrue(old.sent.isEmpty(), "nothing sent to an MCP whose hello lacks prompt.close");
+        helper.assertTrue(out.barOf(player).getLast().equals(InGamePrompts.DONE_UNSUPPORTED), "the MCP needs updating, on the action bar: " + out.barOf(player));
+
+        RecordingBridge down = new RecordingBridge(false);
+        with(down, fixed(null), out, () -> run(player, "autosketch done"));
+        helper.assertTrue(down.sent.isEmpty() && out.barOf(player).getLast().contains("no linked world"), "no_link while disconnected: " + out.barOf(player));
         leave(player);
         helper.succeed();
     }

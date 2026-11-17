@@ -18,6 +18,10 @@ displayTest="IGNORE_ALL_VERSION"
 [[mixins]]
     config="autosketch.mixins.json"
 
+# Silo R (16): replay ignores the server's block updates inside the replayed volume (client only).
+[[mixins]]
+    config="autosketch.client.mixins.json"
+
 [[dependencies.${mod_id}]]
     modId="neoforge"
     type="required"

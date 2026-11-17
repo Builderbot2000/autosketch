@@ -28,6 +28,7 @@ import dev.autosketch.mod.protocol.Messages.SnapshotRequest;
 import dev.autosketch.mod.protocol.Messages.SnapshotResult;
 import dev.autosketch.mod.protocol.Messages.ChunkXZ;
 import dev.autosketch.mod.protocol.Messages.Prompt;
+import dev.autosketch.mod.protocol.Messages.PromptClose;
 import dev.autosketch.mod.protocol.Messages.PromptResult;
 import dev.autosketch.mod.protocol.Messages.RegistryRequest;
 import dev.autosketch.mod.protocol.Messages.RegistryResult;
@@ -56,7 +57,7 @@ class GoldenVectorsTest {
     @Test
     void everyMessageKindHasAVector() {
         List<String> names = Golden.frameNames();
-        assertTrue(names.size() >= 57, "found " + names.size() + " vectors in " + Golden.dir());
+        assertTrue(names.size() >= 59, "found " + names.size() + " vectors in " + Golden.dir());
         assertTrue(Golden.frameNames("v2/").size() >= 48, "the frozen version-2 vectors");
         assertTrue(Golden.frameNames("v1/").size() >= 36, "the frozen version-1 vectors");
     }
@@ -114,6 +115,7 @@ class GoldenVectorsTest {
             case "snapshot.result" -> "surface".equals(Json.optString(f.header(), "kind", null)) ? SurfaceResult.decode(f) : SnapshotResult.decode(f);
             case "prompt" -> Prompt.decode(f);
             case "prompt.result" -> PromptResult.decode(f);
+            case "prompt.close" -> PromptClose.decode(f);
             case "patch" -> Patch.decode(f);
             case "patch.ack" -> PatchAck.decode(f);
             case "dirty" -> Dirty.decode(f);
@@ -142,6 +144,7 @@ class GoldenVectorsTest {
             case SurfaceResult x -> x.encode();
             case Prompt x -> x.encode();
             case PromptResult x -> x.encode();
+            case PromptClose x -> x.encode();
             case Patch x -> x.encode();
             case PatchAck x -> x.encode();
             case Dirty x -> x.encode();

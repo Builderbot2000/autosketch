@@ -2,6 +2,7 @@ import { connect as netConnect, type Socket } from "node:net";
 import { decodeMessage, encodeMessage } from "./protocol/codec.js";
 import { FrameReader } from "./protocol/frame.js";
 import {
+  MCP_FEATURES,
   modHas,
   PROTOCOL_VERSION,
   SUPPORTED_PROTOCOLS,
@@ -9,6 +10,7 @@ import {
   type ErrorMessage,
   type HashesRequest,
   type HashesResult,
+  type McpFeature,
   type McpMessage,
   type ModFeature,
   type ModHello,
@@ -108,6 +110,11 @@ export interface BridgeOptions {
    * the others itself. Default all four: `ask`, `scan`, `plan`, `build`.
    */
   modes?: RequestMode[];
+  /**
+   * Optional capabilities the hello lists in `features` (*Versions and features*): the mod uses an
+   * addition only when this MCP lists it. Default all of `MCP_FEATURES` (`prompt.close`).
+   */
+  features?: McpFeature[];
   /** Reconnect after a lost connection (default true), with backoff from `minMs` to `maxMs`. */
   reconnect?: boolean;
   backoff?: { minMs: number; maxMs: number };
@@ -324,7 +331,7 @@ export class Bridge implements BridgeConnection {
         if (!done) return fail(new BridgeError(DOWN, "The mod closed the connection during the handshake."));
         if (this.socket === s) this.lost("connection closed");
       });
-      this.writeTo(s, { type: "hello", protocol: version, token: p.token, client: this.opts.client ?? { name: "autosketch", version: "1.0.0" }, volatile: this.opts.volatile, modes: [...this.modes] });
+      this.writeTo(s, { type: "hello", protocol: version, token: p.token, client: this.opts.client ?? { name: "autosketch", version: "1.0.0" }, volatile: this.opts.volatile, modes: [...this.modes], features: [...(this.opts.features ?? MCP_FEATURES)] });
     });
   }
 

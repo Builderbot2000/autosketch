@@ -37,6 +37,12 @@ public final class Messages {
     public static final String FEATURE_MODES = "modes", FEATURE_SCAN = "scan", FEATURE_VOLUMES_SET = "volumes.set";
     /** Protocol 3 features (14, *Version-specific data lives in the mod*). */
     public static final String FEATURE_REGISTRY = "registry", FEATURE_UPGRADE = "upgrade";
+    /**
+     * Optional MCP capabilities an MCP hello lists in {@code features}, mirroring the mod's list: the
+     * mod uses an addition only when the MCP lists it. {@code prompt.close}: the MCP handles
+     * {@code prompt.close} ({@code /autosketch done}, 13, B6).
+     */
+    public static final String MCP_FEATURE_PROMPT_CLOSE = "prompt.close";
 
     private static final Pattern HASH = Pattern.compile("[0-9a-f]{16}");
 
@@ -89,16 +95,23 @@ public final class Messages {
     /**
      * {@code hello}, MCP → mod. {@code volatileKeys} is the volatile-key list (*Hashing*), possibly
      * empty. {@code modes} (protocol 2) the request modes the MCP enforces; null when absent, which
-     * means {@code ["build"]} ({@link #effectiveModes}).
+     * means {@code ["build"]} ({@link #effectiveModes}). {@code features} the MCP's optional
+     * capabilities ({@code prompt.close}); null when absent, which means none.
      */
-    public record McpHello(int protocol, String token, String clientName, String clientVersion, JsonObject volatileKeys, @Nullable List<String> modes) {
+    public record McpHello(int protocol, String token, String clientName, String clientVersion, JsonObject volatileKeys, @Nullable List<String> modes,
+            @Nullable List<String> features) {
         public McpHello(int protocol, String token, String clientName, String clientVersion, JsonObject volatileKeys) {
-            this(protocol, token, clientName, clientVersion, volatileKeys, null);
+            this(protocol, token, clientName, clientVersion, volatileKeys, null, null);
         }
 
         /** The modes the hello lists, or {@code ["build"]} when it lists none. */
         public List<String> effectiveModes() {
             return modes == null ? List.of("build") : modes;
+        }
+
+        /** The features the hello lists, or none. */
+        public List<String> effectiveFeatures() {
+            return features == null ? List.of() : features;
         }
 
         public Frame encode() {
@@ -111,6 +124,7 @@ public final class Messages {
             h.add("client", client);
             h.add("volatile", volatileKeys);
             if (modes != null) h.add("modes", Json.strings(modes));
+            if (features != null) h.add("features", Json.strings(features));
             return new Frame(h);
         }
 
@@ -125,7 +139,7 @@ public final class Messages {
             JsonObject client = Json.reqObject(h, "client", null);
             return new McpHello(Json.reqInt(h, "protocol", null), Json.reqString(h, "token", null),
                     Json.reqString(client, "name", null), Json.reqString(client, "version", null), Json.reqObject(h, "volatile", null),
-                    Json.optStrings(h, "modes", null));
+                    Json.optStrings(h, "modes", null), Json.optStrings(h, "features", null));
         }
 
         /** The {@code protocol} field alone, the part every protocol version keeps. */
@@ -602,6 +616,24 @@ public final class Messages {
             String mode = Json.optString(h, "mode", id);
             ScanGrant scan = h.has("scan") ? ScanGrant.fromJson(Json.reqObject(h, "scan", id), id) : null;
             return new Prompt(id, Player.fromJson(Json.reqObject(h, "player", id), id), Json.reqString(h, "text", id), Json.reqObject(h, "context", id), mode, scan);
+        }
+    }
+
+    /**
+     * {@code prompt.close}, mod to MCP: the player ran {@code /autosketch done} to end the open
+     * read-only request (13, B6). Sent only when the MCP's hello lists {@code prompt.close}; the MCP
+     * answers on the player's action bar with a {@code notice}.
+     */
+    public record PromptClose(Player player) {
+        public Frame encode() {
+            JsonObject h = Json.header("prompt.close");
+            h.add("player", player.toJson());
+            return new Frame(h);
+        }
+
+        public static PromptClose decode(Frame f) throws ProtocolException {
+            expectType(f, "prompt.close");
+            return new PromptClose(Player.fromJson(Json.reqObject(f.header(), "player", null), null));
         }
     }
 

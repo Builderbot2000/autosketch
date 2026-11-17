@@ -65,8 +65,9 @@ public final class Feedback {
     public void notice(MinecraftServer server, @Nullable UUID player, String text) {
         Component c = Component.literal(text);
         if (player != null) {
+            // A notice to one player answers something they did (/autosketch done), so it shows whatever their notices setting.
             ServerPlayer p = server.getPlayerList().getPlayer(player);
-            if (p != null && noticesOn(p)) actionBar(p, c);
+            if (p != null) actionBar(p, c);
             return;
         }
         for (ServerPlayer p : server.getPlayerList().getPlayers())

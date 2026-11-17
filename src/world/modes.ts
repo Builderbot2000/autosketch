@@ -21,9 +21,12 @@ import type { PlayerRef, RequestMode } from "./protocol/messages.js";
  * - **Volume changes** are the volume tools (`VOLUME_TOOLS`, B4's `world_volumes`): refused in `ask`
  *   and `plan`, allowed in `scan` and `build`.
  *
- * The rule holds while the request is open (`InGameRequests.current`): from delivery until the
- * agent's `world_reply` with `done`, the next delivered request, or the game disconnecting. A
- * read-only request does not close on idle time, so a slow turn can't outlast the permission.
+ * The rule holds while the read-only request is open (`InGameRequests.heldRequest`): from delivery
+ * until the player ends it in game (`/autosketch done`, the mod's `prompt.close`), the next
+ * delivered request, or the game disconnecting. The agent can't lift it: `world_reply` with `done`
+ * answers the request but leaves the mode in force, since the mode is the player's permission over
+ * their world, so only the player lifts it (settled with the user 2026-11-16). A read-only request
+ * does not close on idle time either, so a slow turn can't outlast the permission.
  */
 
 /** Modes that allow no edits on the linked document. */
@@ -63,7 +66,8 @@ export const modeOf = (r: { mode?: RequestMode } | undefined): RequestMode => r?
 
 /**
  * The `request_mode` refusal: names the mode, what it allows, the subcommand the player would use
- * instead, and how terminal work gets past an open request (only the user can ask for that).
+ * instead, and that only the player ends the request (`/autosketch done` or a new request), so the
+ * agent tells the user at the terminal rather than lifting it.
  */
 export function requestModeRefusal(r: ModeRequest, attempt: { edit: string } | { volumes: string } | { draft: string }): Error & { refusal: string } {
   const head = `The open in-game ${r.mode} request (request ${r.id} from ${r.player.name}) allows ${ALLOWS[r.mode]}`;
@@ -73,7 +77,7 @@ export function requestModeRefusal(r: ModeRequest, attempt: { edit: string } | {
       : "draft" in attempt
         ? `, in words only, so ${attempt.draft} can't draft in a sandbox or another document either. Nothing was changed. Describe the idea in world_reply; to have it built, the player sends /autosketch build <text>.`
         : `, so ${attempt.volumes} can't change the volumes. Nothing was sent. To have the agent set them, the player sends /autosketch scan [radius] [text].`;
-  const close = ` Answer with world_reply. Only if the user at the terminal asked for this, close the request first with world_reply({ request: ${r.id}, lines: […], done: true }).`;
+  const close = " Answer with world_reply. Only the player can end this request, in game with /autosketch done or by sending a new request; if the user at the terminal wants this edit, tell them so.";
   return refusal("request_mode", head + what + close);
 }
 

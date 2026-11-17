@@ -16,7 +16,8 @@ import type { Rcon } from "./rcon.js";
  *
  * A headless server has no player, and the mod sends `prompt` only for a player's command
  * (`/autosketch ask|plan|scan|build`), so these scenarios hand the MCP the `prompt` a player's
- * command would send (`InGameRequests.onPrompt`) and check everything after it against the real
+ * command would send (`InGameRequests.onPrompt`), and likewise the `prompt.close` of
+ * `/autosketch done` (`InGameRequests.onClose`), and check everything after it against the real
  * mod: refused edits leave the world as it was, the probe is read with the mod's snapshots and
  * surface reads, `volumes.set` sets volumes that link, and the mod's refusals come back. The
  * command side (subcommands, the grant, `unsupported_mode` on the action bar) is silo Y's
@@ -90,7 +91,7 @@ describe.skipIf(!ENABLED)("e2e world: in-game requests (B4, B6)", () => {
     r?.close();
   }, 60_000);
 
-  it("ask and plan requests refuse edits with request_mode and nothing reaches the world; world_reply done ends them", async () => {
+  it("ask and plan requests refuse edits with request_mode and nothing reaches the world; world_reply done keeps the mode, the player's done or a new request ends it", async () => {
     const w = { min: [X0, -61, Z0] as Vec3, max: [X0 + 15, -50, Z0 + 15] as Vec3 };
     await setVolumes(r, w, undefined, mcp.link);
     await until(() => mcp.link.state === "linked", 20_000, "the automatic link");
@@ -105,6 +106,12 @@ describe.skipIf(!ENABLED)("e2e world: in-game requests (B4, B6)", () => {
     // Looking still works.
     expect(await mcp.call("query_block", { pos: [0, 0, 0] })).toContain("grass_block");
     await mcp.call("world_reply", { lines: ["It's grass."], done: true });
+    // Answered, but only the player lifts the mode.
+    const still = await mcp.tryCall("fill", { box: { min: [2, 2, 2], max: [2, 2, 2] }, pattern: "minecraft:gold_block" });
+    expect(still.text).toContain(`The open in-game ask request (request ${ask.id} from E2E) allows reading and looking only`);
+    expect(still.text).toContain("Only the player can end this request, in game with /autosketch done or by sending a new request; if the user at the terminal wants this edit, tell them so.");
+    expect(await worldBlock(mcp.link, at)).toBe("minecraft:air");
+    inGame.onClose({ type: "prompt.close", player: P }); // the player's /autosketch done
     expect(await mcp.call("fill", { box: { min: [2, 2, 2], max: [2, 2, 2] }, pattern: "minecraft:gold_block" })).toMatch(/world: 1 placed/);
     expect(await worldBlock(mcp.link, at)).toBe("minecraft:gold_block");
 
@@ -125,7 +132,7 @@ describe.skipIf(!ENABLED)("e2e world: in-game requests (B4, B6)", () => {
     expect(vol.text).toContain("so world_volumes can't change the volumes");
     expect(mcp.link.bridge.volumes?.work).toEqual({ min: w.min, max: w.max });
     await mcp.call("world_reply", { lines: ["A gable roof."], done: true });
-    // A build request edits.
+    // A build request ends the plan request and edits.
     await prompt("build", "put stone next to it", [X0 + 8, -60, Z0 + 8]);
     expect(await mcp.call("set_blocks", { blocks: [{ pos: [3, 2, 2], block: "minecraft:stone" }] })).toMatch(/world: 1 placed/);
     expect(await worldBlock(mcp.link, [at[0] + 1, at[1], at[2]])).toBe("minecraft:stone");
@@ -165,6 +172,8 @@ describe.skipIf(!ENABLED)("e2e world: in-game requests (B4, B6)", () => {
     expect(refused.text).toContain(`The open in-game scan request (request ${scan.id} from E2E) allows looking and setting the volumes only`);
     expect(await worldBlock(mcp.link, [work.min[0], -60, work.min[2]])).toBe("minecraft:air");
     await mcp.call("world_reply", { lines: ["Set the volumes around the tower."], done: true });
+    inGame.onClose({ type: "prompt.close", player: P }); // the player's /autosketch done
+    expect(inGame.heldRequest).toBeUndefined();
   }, 180_000);
 
   it("the mod refuses volumes.set with bad volumes, and the volumes stay as they were", async () => {
@@ -189,6 +198,7 @@ describe.skipIf(!ENABLED)("e2e world: in-game requests (B4, B6)", () => {
     const hello = await bridge.connect();
     expect(hello.protocol).toBe(3);
     expect(hello.features).toEqual(expect.arrayContaining(["modes", "scan", "volumes.set", "registry", "upgrade"]));
+    expect(bridge.connected).toBe(true); // the mod accepted a hello listing the MCP's features (prompt.close)
     bridge.close();
     // The mod speaks only protocol 3 (N−1 support is the MCP's: it speaks 3 and 2, unit-tested against a protocol-2 fake host).
     const p = await readPairing(SERVER_DIR);

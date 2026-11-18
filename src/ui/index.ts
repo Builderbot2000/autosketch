@@ -1,7 +1,10 @@
 import type { EventListener } from "../core/fanout.js";
 import type { LoggedEvent } from "../core/events.js";
 import type { Settings } from "../core/settings.js";
+import type { StateOverride } from "../core/rotate.js";
 import type { Candidates } from "../library/candidates.js";
+import { Library } from "../library/index.js";
+import { loadPrefab, type LoadedPrefab, type Prefab } from "../library/prefabs.js";
 import type { Document } from "../document/document.js";
 import type { ScopeManager } from "../scope/scopes.js";
 import type { BridgeConnection } from "../world/bridge.js";
@@ -44,6 +47,8 @@ export interface UiOptions {
   library: LibraryHost;
   /** The session's candidates lists (`17`, piece 3), which `candidates.*` requests read. */
   candidates?: Pick<Candidates, "get">;
+  /** Plugin block-state overrides for turning blocks (`09`), so a rotated candidate ghost matches `stamp`. */
+  stateOverrides?(): readonly StateOverride[];
   baseDoc(): Document | undefined;
   scopes: Pick<ScopeManager, "scopes" | "baseOffset">;
   /** The link's frame while the base document is linked. */
@@ -108,7 +113,7 @@ export function startUi(o: UiOptions): UiCore {
     ghosts,
     settings,
     library: new LibraryRequests(o.library, settings),
-    ...(o.candidates ? { candidates: new CandidateRequests({ lists: o.candidates, openRequest }) } : {}),
+    ...(o.candidates ? { candidates: new CandidateRequests({ lists: o.candidates, openRequest, ghosts, load: (id) => loadCandidate(o.library, id), registry: () => o.library.registry?.(), ...(o.stateOverrides ? { stateOverrides: o.stateOverrides } : {}) }) } : {}),
     workspace: o.workspace,
     live: () => ({ session: o.sessionId, doc: o.baseDoc()?.meta.name }),
     linked: () => o.linkFrame() !== undefined,
@@ -144,4 +149,11 @@ export function startUi(o: UiOptions): UiCore {
       settings.close();
     },
   };
+}
+
+/** A library prefab by id, with its blocks, for the candidate ghost (`17`, piece 3). */
+async function loadCandidate(lib: LibraryHost, id: string): Promise<{ prefab: Prefab; loaded: LoadedPrefab }> {
+  const registry = lib.registry?.();
+  const prefab = await new Library({ roots: lib.roots(), ...(registry ? { registry } : {}) }).resolve(id);
+  return { prefab, loaded: await loadPrefab(prefab, registry) };
 }

@@ -40,10 +40,14 @@ public final class UiMessages {
     /** Request kinds (13, *Request kinds*); the MCP answers any other with {@code bad_request}. */
     public static final List<String> REQUEST_KINDS = List.of("resync", "settings.list", "settings.set", "settings.unset", "library.list", "library.entry",
             "library.thumbnail", "library.preview", "library.rename", "library.duplicate", "library.delete", "library.trash", "library.restore", "library.hide",
-            "library.copy", "library.empty_trash", "logs.list", "replay.open", "replay.seek", "replay.close", "ghost.anchor", "ghost.clear");
+            "library.copy", "library.empty_trash", "logs.list", "replay.open", "replay.seek", "replay.close", "ghost.anchor", "ghost.clear",
+            "candidates.open", "candidates.ghost", "candidates.ghost.clear", "candidates.submit");
 
-    /** {@code ui.result} error codes. */
-    public static final List<String> ERRORS = List.of("not_allowed", "conflict", "not_found", "bad_request", "busy", "internal");
+    /** {@code ui.result} error codes; {@code answered} (17, piece 3): the candidates were already answered. */
+    public static final List<String> ERRORS = List.of("not_allowed", "conflict", "not_found", "bad_request", "busy", "internal", "answered");
+
+    /** The id of the session's candidate ghost, the {@code ghost} a {@code candidates.ghost} answers (17, piece 3). */
+    public static final String CANDIDATE_GHOST = "candidate";
 
     public static final List<String> MARKERS = List.of("fork", "merge", "refusal", "checkpoint");
 

@@ -55,6 +55,36 @@ describe("fake MCP", () => {
     expect(mcp.uiRequests.map((r) => r.kind)).toEqual(["logs.list", "library.preview", "settings.list", "resync"]);
   });
 
+  it("candidates (17, piece 3): a reply's clickable line sends candidates.open, answered from the table", async () => {
+    const h = await host();
+    const entries = [{ cell: "B2", prefab: "gothic_tower_a", root: "user", size: [7, 24, 7], tags: ["tower"], notes: null }];
+    const mcp = await FakeMcp.connect({
+      pairing: pairingPath(h.instanceDir),
+      script: {
+        send: [{ type: "chat", request: 12, player: KEV.uuid, kind: "reply", lines: ["Here are towers.", "[Show candidates]"], action: { line: 1, kind: "candidates.open", args: { id: "c1" } } }],
+        results: {
+          "candidates.open": { ok: true, result: { id: "c1", request: 12, question: "show me a tower", entries } },
+          "candidates.ghost": { ok: true, result: { ghost: "candidate" } },
+          "candidates.ghost.clear": { ok: true, result: {} },
+          "candidates.submit": { ok: false, error: "answered", message: "already answered" },
+        },
+      },
+    });
+    cleanup.push(() => mcp.close());
+    await h.waitFor(() => h.chats.length === 1);
+    expect(await h.playerClick(KEV, h.chats[0]!)).toMatchObject({ ok: true, result: { id: "c1", request: 12, entries } });
+    expect(await h.playerUiRequest(KEV, { kind: "candidates.ghost", args: { id: "c1", prefab: "gothic_tower_a", dimension: "minecraft:overworld", at: [1, 64, 2], rotate: 90 } })).toMatchObject({ ok: true, result: { ghost: "candidate" } });
+    expect(await h.playerUiRequest(KEV, { kind: "candidates.ghost.clear" })).toMatchObject({ ok: true, result: {} });
+    expect(await h.playerUiRequest(KEV, { kind: "candidates.submit", args: { id: "c1", picks: [{ prefab: "gothic_tower_a", cell: "B2" }] } })).toMatchObject({ ok: false, error: "answered" });
+    expect(mcp.uiRequests.map((r) => [r.kind, r.args])).toEqual([
+      ["candidates.open", { id: "c1" }],
+      ["candidates.ghost", { id: "c1", prefab: "gothic_tower_a", dimension: "minecraft:overworld", at: [1, 64, 2], rotate: 90 }],
+      ["candidates.ghost.clear", {}],
+      ["candidates.submit", { id: "c1", picks: [{ prefab: "gothic_tower_a", cell: "B2" }] }],
+    ]);
+    expect(() => h.playerClick(KEV, { type: "chat", request: 12, player: KEV.uuid, kind: "reply", lines: ["plain"] })).toThrow();
+  });
+
   it("plays an MCP that's too old: no ui in its hello, so the mod sends no ui.request", async () => {
     const h = await host();
     const mcp = await FakeMcp.connect({ pairing: pairingPath(h.instanceDir), script: { hello: { features: ["prompt.close"] } } });

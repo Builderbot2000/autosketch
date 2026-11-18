@@ -1,0 +1,21 @@
+{
+  "description": "A reply offering candidates: its last line is clickable and makes the client send candidates.open (feature ui; a client without it shows plain text)",
+  "sender": "mcp",
+  "header": {
+    "type": "chat",
+    "request": 12,
+    "player": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    "kind": "reply",
+    "lines": [
+      "Three towers in your library match: a slim gothic one, a round keep tower and a gatehouse.",
+      "[Show candidates]"
+    ],
+    "action": {
+      "line": 1,
+      "kind": "candidates.open",
+      "args": {
+        "id": "c1"
+      }
+    }
+  }
+}

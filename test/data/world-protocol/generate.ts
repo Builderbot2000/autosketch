@@ -567,6 +567,81 @@ vector("upgrade-result-failed", "mod", "An upgrade where the fixer threw on one 
     kind: "ghost.anchor",
     args: { dimension: OW, pos: [40, 70, 12] },
   });
+  // `17` piece 3: candidates in a reply.
+  vector("chat-reply-action", "mcp", "A reply offering candidates: its last line is clickable and makes the client send candidates.open (feature ui; a client without it shows plain text)", {
+    type: "chat",
+    request: 12,
+    player: UUID_KEV,
+    kind: "reply",
+    lines: ["Three towers in your library match: a slim gothic one, a round keep tower and a gatehouse.", "[Show candidates]"],
+    action: { line: 1, kind: "candidates.open", args: { id: "c1" } },
+  });
+  vector("ui-request-candidates-open", "mod", "The player clicked [Show candidates]: open the list", {
+    type: "ui.request",
+    request: 8,
+    player: { name: "Kev", uuid: UUID_KEV },
+    kind: "candidates.open",
+    args: { id: "c1" },
+  });
+  vector("ui-result-candidates-open", "mcp", "The candidates list: cells as on the agent's last sheet, the open request and its question", {
+    type: "ui.result",
+    request: 8,
+    player: UUID_KEV,
+    ok: true,
+    result: {
+      id: "c1",
+      request: 12,
+      question: "show me a tower",
+      entries: [
+        { cell: "B2", prefab: "gothic_tower_a", root: "user", size: [7, 24, 7], tags: ["gothic", "tower"], notes: "corner piece, door on the south face" },
+        { cell: "C2", prefab: "round_keep_tower", root: "user", size: [9, 18, 9], tags: ["tower", "keep"], notes: null },
+        { cell: "A3", prefab: "gate_small", root: "starter", size: [11, 9, 5], tags: ["gate"], notes: null },
+      ],
+    },
+  });
+  vector("ui-request-candidates-ghost", "mod", "Preview here: one candidate as the candidate ghost at the block the player looks at, turned 90 degrees", {
+    type: "ui.request",
+    request: 9,
+    player: { name: "Kev", uuid: UUID_KEV },
+    kind: "candidates.ghost",
+    args: { id: "c1", prefab: "gothic_tower_a", dimension: OW, at: [120, 64, -180], rotate: 90 },
+  });
+  vector("ui-result-candidates-ghost", "mcp", "The candidate ghost's id; the ghost follows as a full ui.ghost", {
+    type: "ui.result",
+    request: 9,
+    player: UUID_KEV,
+    ok: true,
+    result: { ghost: "candidate" },
+  });
+  vector("ui-request-candidates-ghost-clear", "mod", "Clear candidate ghost, from the Autosketch menu", {
+    type: "ui.request",
+    request: 10,
+    player: { name: "Kev", uuid: UUID_KEV },
+    kind: "candidates.ghost.clear",
+    args: {},
+  });
+  vector("ui-request-candidates-submit", "mod", "Submit: two picks, one labelled, and a note", {
+    type: "ui.request",
+    request: 11,
+    player: { name: "Kev", uuid: UUID_KEV },
+    kind: "candidates.submit",
+    args: { id: "c1", picks: [{ prefab: "gothic_tower_a", cell: "B2", label: "corner tower" }, { prefab: "gate_small", cell: "A3" }], note: "smaller if possible" },
+  });
+  vector("ui-result-candidates-submit", "mcp", "The picks went to the agent as text on in-game request 12", {
+    type: "ui.result",
+    request: 11,
+    player: UUID_KEV,
+    ok: true,
+    result: { request: 12 },
+  });
+  vector("ui-result-answered", "mcp", "A second submit (or an open) after the list was answered", {
+    type: "ui.result",
+    request: 13,
+    player: UUID_KEV,
+    ok: false,
+    error: "answered",
+    message: "You already answered these candidates.",
+  });
   vector("ui-result-settings-list", "mcp", "Settings rows for the settings screen: one toggle and one number field, with sources, an overridden launch value and a restart-needed mark", {
     type: "ui.result",
     request: 4,

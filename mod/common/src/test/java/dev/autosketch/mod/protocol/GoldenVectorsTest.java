@@ -21,6 +21,7 @@ import dev.autosketch.mod.protocol.Messages.HashesRequest;
 import dev.autosketch.mod.protocol.Messages.HashesResult;
 import dev.autosketch.mod.protocol.Messages.McpHello;
 import dev.autosketch.mod.protocol.Messages.ModHello;
+import dev.autosketch.mod.protocol.Messages.Chat;
 import dev.autosketch.mod.protocol.Messages.Notice;
 import dev.autosketch.mod.protocol.Messages.Patch;
 import dev.autosketch.mod.protocol.Messages.PatchAck;
@@ -57,7 +58,7 @@ class GoldenVectorsTest {
     @Test
     void everyMessageKindHasAVector() {
         List<String> names = Golden.frameNames();
-        assertTrue(names.size() >= 77, "found " + names.size() + " vectors in " + Golden.dir());
+        assertTrue(names.size() >= 86, "found " + names.size() + " vectors in " + Golden.dir());
         assertTrue(Golden.frameNames("v2/").size() >= 48, "the frozen version-2 vectors");
         assertTrue(Golden.frameNames("v1/").size() >= 36, "the frozen version-1 vectors");
     }
@@ -90,7 +91,7 @@ class GoldenVectorsTest {
         Object decoded = decodeTyped(frame, sender);
         if (decoded == null) {
             assertFalse(frame.hasBody());
-            return; // chat: a header-only message the in-game requests package reads with Json
+            return; // a message with no typed decoder
         }
         // The mod speaks one version, its own, so its typed hello always says 3: an older mod
         // hello only has to decode.
@@ -120,6 +121,7 @@ class GoldenVectorsTest {
             case "patch.ack" -> PatchAck.decode(f);
             case "dirty" -> Dirty.decode(f);
             case "notice" -> Notice.decode(f);
+            case "chat" -> Chat.decode(f);
             case "registry" -> RegistryRequest.decode(f);
             case "registry.result" -> RegistryResult.decode(f);
             case "upgrade" -> UpgradeRequest.decode(f);
@@ -150,6 +152,7 @@ class GoldenVectorsTest {
             case PatchAck x -> x.encode();
             case Dirty x -> x.encode();
             case Notice x -> x.encode();
+            case Chat x -> x.encode();
             case RegistryRequest x -> x.encode();
             case RegistryResult x -> x.encode();
             case UpgradeRequest x -> x.encode();

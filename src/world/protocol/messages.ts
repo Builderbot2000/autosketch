@@ -367,6 +367,19 @@ export interface ChatMessage {
   player: string | null;
   kind: "activity" | "reply";
   lines: string[];
+  /** Replies only, feature `ui` (`17`, piece 3): makes one line clickable. Absent: plain lines. */
+  action?: ChatAction;
+}
+
+/**
+ * A clickable reply line (`13`, `chat`): clicking `lines[line]` makes the player's client send the
+ * `ui.request` `kind` with `args`, as replay's log lines do. The MCP sends it only when both hellos
+ * list `ui`; a mod or client without it shows the line as plain text.
+ */
+export interface ChatAction {
+  line: number;
+  kind: string;
+  args: Record<string, unknown>;
 }
 
 // ── In-game UI (feature `ui`, added within protocol 3; `13`, *In-game UI*; `16`) ───────────────
@@ -538,6 +551,10 @@ export const UI_REQUEST_KINDS = [
   "replay.close",
   "ghost.anchor",
   "ghost.clear",
+  "candidates.open",
+  "candidates.ghost",
+  "candidates.ghost.clear",
+  "candidates.submit",
 ] as const;
 export type UiRequestKind = (typeof UI_REQUEST_KINDS)[number];
 
@@ -551,8 +568,55 @@ export interface UiRequest {
   args: Record<string, unknown>;
 }
 
-export const UI_ERRORS = ["not_allowed", "conflict", "not_found", "bad_request", "busy", "internal"] as const;
+export const UI_ERRORS = ["not_allowed", "conflict", "not_found", "bad_request", "busy", "internal", "answered"] as const;
 export type UiError = (typeof UI_ERRORS)[number];
+
+// ── Candidates (`17`, piece 3; `13`, *Request kinds*) ──────────────────────────────────────────
+
+/** Most entries one `world_reply` offers as candidates (one sheet page, 6×4). */
+export const CANDIDATES_MAX = 24;
+/** The id of the session's one candidate ghost, the `ghost` a `candidates.ghost` answers. */
+export const CANDIDATE_GHOST = "candidate";
+
+/** One candidate in `candidates.open`'s result. `root` and `prefab` address it for `library.thumbnail` and `library.preview`. */
+export interface CandidateEntry {
+  cell: string;
+  prefab: string;
+  root: string;
+  size: Vec3;
+  tags: string[];
+  notes: string | null;
+}
+
+/** `candidates.open`'s result: the list, the in-game request it answers (`null` once closed) and its question. */
+export interface CandidatesOpenResult {
+  id: string;
+  request: number | null;
+  question: string;
+  entries: CandidateEntry[];
+}
+
+/** `candidates.ghost`'s arguments: `at` is the world position of the prefab's anchor (or its local origin). */
+export interface CandidatesGhostArgs {
+  id: string;
+  prefab: string;
+  dimension: string;
+  at: Vec3;
+  rotate?: 0 | 90 | 180 | 270;
+}
+
+/** One pick in `candidates.submit`. */
+export interface CandidatePick {
+  prefab: string;
+  cell: string;
+  label?: string;
+}
+
+export interface CandidatesSubmitArgs {
+  id: string;
+  picks: CandidatePick[];
+  note?: string;
+}
 
 /** The answer to a `ui.request`. `body` only for `library.thumbnail` (PNG) and `library.preview` (a region body). */
 export type UiResult =

@@ -141,6 +141,12 @@ export class UiRequests {
         if (!this.host.ghosts.anchor) throw new UiRequestError("not_found", "No anchored ghost to clear.");
         return { result: {}, after: () => void this.host.ghosts.clear(DOC_GHOST) };
       }
+      // `17` piece 3: names and shapes frozen in `13` (*Request kinds*); silo Q serves them.
+      case "candidates.open":
+      case "candidates.ghost":
+      case "candidates.ghost.clear":
+      case "candidates.submit":
+        throw new UiRequestError("bad_request", `This Autosketch doesn't serve ${kind} yet.`);
     }
   }
 

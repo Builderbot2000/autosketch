@@ -137,6 +137,8 @@ Editing a prefab's **blocks** stays out of scope (`15`). The round trip already 
 
 `prefab_save` takes `format`: `schem` (default), `litematic`, `nbt` or `bp`, and the setting `library.prefabFormat` changes the default. A prefab folder holds one schematic file (`prefab.<ext>`). Every format is already readable, so stamping and the library screen work the same with any of them.
 
+Built details (F1, 2026-11-18): `.litematic` joined the extensions a library scan accepts (it was readable but never listed). Saving over a prefab in another format removes the old `prefab.<ext>`, so a folder never holds two. A `.bp` save leaves out block entities and entities with the same warning `export` gives, and embeds the rendered thumbnail so Axiom's browser shows it. The setting is read on each save, like the other `library.*` settings (`applies: "live"`); an invalid launch value falls back to `schem`.
+
 ### 8. Flash on save
 
 When `prefab_save` runs on a linked document, the saved box is sent as a change flash (`ui.flash`) in a fixed colour, so the player sees what was saved without an approval step. If it's wrong, the player says so, and the agent saves again with `overwrite`.
@@ -173,3 +175,9 @@ All settled with the user on 2026-11-17.
 - **Web sourcing is deferred.**
 - **Rejected: ghosts of every candidate lined up in the world.** Reason: cluttered and slow with several large candidates, and the player had already dropped ghost-based approval.
 - **Rejected: a text-only candidate list in chat** as the main view. Reason: names and sizes don't show what a tower looks like. Typing picks in chat still works alongside the screen.
+
+## Implementation status
+
+| Piece | Silo | Status |
+|---|---|---|
+| 7. Save format | F (F1) | Built. `prefab_save({format})` with `schem`, `litematic`, `nbt`, `bp` in `src/library/prefabs.ts` (`savePrefab`, `PREFAB_FORMATS`), setting `library.prefabFormat` (group Library, live) beside it. Tests: `test/unit/library/prefab-formats.test.ts` (each format read back by stamp block for block, block entity kept except `.bp`, thumbnail, overwrite across formats, setting parse), `test/unit/server/library.test.ts` (format argument and setting default through the tools). |

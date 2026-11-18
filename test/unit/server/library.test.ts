@@ -14,6 +14,7 @@ beforeAll(async () => {
   // Never touch the real ~/autosketch or ~/.cache: library, cache and workspace all live in temp.
   vi.stubEnv("AUTOSKETCH_LIBRARY", join(base, "library"));
   vi.stubEnv("AUTOSKETCH_CACHE", join(base, "cache"));
+  vi.stubEnv("AUTOSKETCH_HOME", join(base, "home"));
 });
 afterAll(async () => {
   vi.unstubAllEnvs();
@@ -77,6 +78,28 @@ describe("library tools", () => {
     expect(rot.text).toMatch(/^ok · stamp · 3 blocks changed/);
     expect((await call("query_column", { x: 0, z: 0 })).text).toMatch(/y1 oak_planks, y2 oak_stairs\[facing=west/);
     expect((await call("query_column", { x: 0, z: 1 })).text).toMatch(/y1 oak_planks/);
+  });
+
+  it("saves in the format given, else library.prefabFormat, and stamps the result", async () => {
+    const { call } = await connect();
+    await call("doc_new", { name: "fmt" });
+    await call("set_blocks", { blocks: [{ pos: [0, 0, 0], block: "andesite" }, { pos: [0, 1, 0], block: "oak_stairs[facing=west]" }] });
+    const bp = await call("prefab_save", { name: "post_bp", box: { min: [0, 0, 0], max: [0, 1, 0] }, format: "bp" });
+    expect(bp.text).toMatch(/saved prefab "post_bp" in .*post_bp as prefab\.bp/);
+    vi.stubEnv("AUTOSKETCH_LIBRARY_PREFAB_FORMAT", "litematic");
+    try {
+      expect((await call("prefab_save", { name: "post_lm", box: { min: [0, 0, 0], max: [0, 1, 0] } })).text).toMatch(/as prefab\.litematic/);
+      expect((await call("prefab_save", { name: "post_nbt", box: { min: [0, 0, 0], max: [0, 1, 0] }, format: "nbt" })).text).toMatch(/as prefab\.nbt/);
+    } finally {
+      vi.stubEnv("AUTOSKETCH_LIBRARY_PREFAB_FORMAT", undefined);
+    }
+    expect((await call("prefab_save", { name: "post_schem", box: { min: [0, 0, 0], max: [0, 1, 0] } })).text).toMatch(/as prefab\.schem/);
+    await call("doc_new", { name: "fmt_dst" });
+    for (const [i, id] of ["post_bp", "post_lm", "post_nbt", "post_schem"].entries()) {
+      const st = await call("stamp", { prefab: id, at: [i * 2, 0, 0] });
+      expect(st.isError).toBeFalsy();
+      expect((await call("query_column", { x: i * 2, z: 0 })).text).toMatch(/y0 andesite, y1 oak_stairs\[facing=west/);
+    }
   });
 
   it("saves a palette from one document and loads it into another, reporting missing families", async () => {

@@ -2,6 +2,8 @@
 
 One brief per silo of `17`'s *New pieces*, as of commit `c231060` (2026-11-18). Each team reads the main [briefs README](../README.md) first (branching, file ownership, code style and *Done means* all apply), then the [world README](../world/README.md) and the [UI README](../ui/README.md)'s *Rules for this set* where it touches `src/world/`, `src/ui/` or `mod/`, then this README, then its own brief, then `17` and the sections of `07`, `13` and `16` the brief cites. `17` is the source of truth. A brief only scopes, sequences and assigns files.
 
+**Status: complete.** All steps, W1 to Z2, done 2026-11-18; `17` is marked built. [HANDOFF.md](HANDOFF.md) records the state at completion, the decisions taken during the work and the follow-ups; [PROGRESS.md](PROGRESS.md) is the step log.
+
 Letters are local to this set. Agents work one step at a time and are never resumed (*How to run this set*). Branches are named `silo/rc-<letter>-<slug>` so they never collide with earlier sets.
 
 | Silo | Brief | `17` pieces | Wave | Side | Depends on |

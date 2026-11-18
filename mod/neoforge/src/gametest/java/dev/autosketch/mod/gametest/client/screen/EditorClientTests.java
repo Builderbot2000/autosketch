@@ -3,8 +3,6 @@ package dev.autosketch.mod.gametest.client.screen;
 import static dev.autosketch.mod.gametest.client.ClientTestSuite.check;
 
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-import dev.autosketch.mod.client.ui.LinkState;
 import dev.autosketch.mod.client.ui.screen.EntryEditorScreen;
 import dev.autosketch.mod.client.ui.screen.KnowledgeEditorScreen;
 import dev.autosketch.mod.client.ui.screen.LibraryScreen;
@@ -13,9 +11,6 @@ import dev.autosketch.mod.client.ui.screen.PrefabEditorScreen;
 import dev.autosketch.mod.client.ui.screen.ProcedureEditorScreen;
 import dev.autosketch.mod.gametest.client.ClientTest;
 import dev.autosketch.mod.gametest.client.ClientTestSuite;
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.MultiLineEditBox;
@@ -24,9 +19,10 @@ import net.minecraft.client.gui.components.events.GuiEventListener;
 /**
  * The library editors (17, piece 6; briefs/components/E step E2), against the fake MCP's library
  * ({@code clienttest/editors.json}: a writable root {@code user} with one entry of each kind, the
- * read-only {@code starter} with one prefab). The script's {@code library.entry} answers one entry; a
- * test that needs another restarts the fake MCP with the script's {@code entries[name]} as the answer
- * (and, for the conflict, a {@code conflict} for the kind's write). Each editor opens, sends its
+ * read-only {@code starter} with one prefab). The script answers {@code library.entry} per entry
+ * (replies matched on root, kind and name), and refuses {@code library.write.procedure} with
+ * {@code conflict} only for the conflict test's typed text, so one fake MCP serves every test and a
+ * test counts requests from its own start. Each editor opens, sends its
  * {@code library.write.*} with the hash it started from and the form's changes, and takes the new
  * hash; a {@code conflict} reloads the entry; a read-only entry offers <i>Copy to my library</i> and
  * no editor.
@@ -34,35 +30,8 @@ import net.minecraft.client.gui.components.events.GuiEventListener;
 public final class EditorClientTests {
     private EditorClientTests() {}
 
-    private static JsonObject script() {
-        try (InputStream in = EditorClientTests.class.getResourceAsStream("/clienttest/editors.json")) {
-            return JsonParser.parseString(new String(in.readAllBytes(), StandardCharsets.UTF_8)).getAsJsonObject();
-        } catch (IOException e) {
-            throw new IllegalStateException(e);
-        }
-    }
-
-    /** Restarts the fake MCP so {@code library.entry} answers {@code entry}, and {@code conflictKind}'s write (if any) is refused. */
-    private static void serve(ClientTestSuite s, String entry, String conflictKind) {
-        s.step("the fake MCP goes away", s::stopMcp);
-        s.waitUntil("the client is offline", () -> !LinkState.connected(), 400);
-        s.step("a fake MCP whose library.entry is " + entry + (conflictKind == null ? "" : ", refusing " + conflictKind), () -> {
-            JsonObject sc = script();
-            JsonObject results = sc.getAsJsonObject("results");
-            JsonObject r = new JsonObject();
-            r.addProperty("ok", true);
-            r.add("result", sc.getAsJsonObject("entries").get(entry));
-            results.add("library.entry", r);
-            if (conflictKind != null) {
-                JsonObject c = new JsonObject();
-                c.addProperty("ok", false);
-                c.addProperty("error", "conflict");
-                c.addProperty("message", "the file changed since it was opened");
-                results.add(conflictKind, c);
-            }
-            s.startMcp(sc.toString());
-        });
-        s.waitUntil("connected again", Ui.connected(), 400);
+    private static void connected(ClientTestSuite s) {
+        s.waitUntil("connected", Ui.connected(), 400);
     }
 
     private static <T extends EntryEditorScreen> void openEditor(ClientTestSuite s, Class<T> type, String kind, String name) {
@@ -119,7 +88,7 @@ public final class EditorClientTests {
     public static void prefabEditorFromTheLibrarySendsTheChangedFields(ClientTestSuite s) {
         JsonObject[] args = new JsonObject[1];
         int[] lists = new int[1];
-        serve(s, "tower", null);
+        connected(s);
         s.step("open the library screen", () -> s.mc().setScreen(new LibraryScreen(null)));
         s.waitUntil("the list arrived", () -> !Ui.screen(LibraryScreen.class).shown().isEmpty(), 200);
         s.step("select tower", () -> s.clickWidget("tower"));
@@ -182,7 +151,7 @@ public final class EditorClientTests {
     @ClientTest("editors")
     public static void paletteEditorSendsItsOperations(ClientTestSuite s) {
         JsonObject[] args = new JsonObject[1];
-        serve(s, "castle", null);
+        connected(s);
         openEditor(s, PaletteEditorScreen.class, "palettes", "castle");
         s.step("roles, members and weights as percent", () -> {
             check(((EditBox) s.widget("w:wall\nminecraft:stone_bricks")).getValue().equals("50"), "weight");
@@ -228,13 +197,14 @@ public final class EditorClientTests {
     @ClientTest("editors")
     public static void procedureEditorSavesItsSourceAndKeepsEditing(ClientTestSuite s) {
         JsonObject[] args = new JsonObject[1];
-        serve(s, "stairs", null);
+        connected(s);
         openEditor(s, ProcedureEditorScreen.class, "procedures", "stairs");
         s.step("the source is in the box", () -> check(((MultiLineEditBox) s.widget("text")).getValue().startsWith("// Builds a stair run\n"), "text"));
         s.step("Save with nothing changed sends nothing", () -> {
+            int before = Ui.requests(s, "library.write.procedure").size();
             Ui.click(s.widget("Save"));
             check(editor().message().getString().equals("Nothing changed."), "message " + editor().message());
-            check(Ui.requests(s, "library.write.procedure").isEmpty(), "sent");
+            check(Ui.requests(s, "library.write.procedure").size() == before, "sent");
         });
         s.step("edit the source", () -> setArea(s, "text", "// v2\nexport default function stairs(ctx) {}\n"));
         save(s, "library.write.procedure", args);
@@ -256,7 +226,7 @@ public final class EditorClientTests {
     @ClientTest("editors")
     public static void knowledgeEditorSplitsFrontmatterAndText(ClientTestSuite s) {
         JsonObject[] args = new JsonObject[1];
-        serve(s, "kits/cathedral", null);
+        connected(s);
         s.step("open the knowledge editor on a kit", () -> s.mc().setScreen(EntryEditorScreen.open(null, "user", "knowledge", "kits/cathedral")));
         loaded(s, KnowledgeEditorScreen.class, 1);
         s.step("frontmatter and text in their boxes", () -> {
@@ -282,7 +252,7 @@ public final class EditorClientTests {
     public static void conflictReloadsTheEntry(ClientTestSuite s) {
         JsonObject[] args = new JsonObject[1];
         int[] entries = new int[1];
-        serve(s, "stairs", "library.write.procedure");
+        connected(s);
         openEditor(s, ProcedureEditorScreen.class, "procedures", "stairs");
         s.step("type over the source", () -> {
             entries[0] = Ui.requests(s, "library.entry").size();
@@ -304,7 +274,7 @@ public final class EditorClientTests {
 
     @ClientTest("editors")
     public static void readOnlyEntryOffersCopyFirst(ClientTestSuite s) {
-        serve(s, "park_bench", null);
+        connected(s);
         s.step("open the library screen", () -> s.mc().setScreen(new LibraryScreen(null)));
         s.waitUntil("the list arrived", () -> !Ui.screen(LibraryScreen.class).shown().isEmpty(), 200);
         s.step("select park_bench", () -> s.clickWidget("park_bench"));

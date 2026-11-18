@@ -1,0 +1,36 @@
+{
+  "description": "The prefab editor saves prefab.json fields: tags, front, notes, an anchor and a role; the fields not sent stay as they are",
+  "sender": "mod",
+  "header": {
+    "type": "ui.request",
+    "request": 14,
+    "player": {
+      "name": "Kev",
+      "uuid": "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+    },
+    "kind": "library.write.prefab",
+    "args": {
+      "root": "user",
+      "name": "gothic_tower_a",
+      "hash": "5d41402abc4b2a76b9719d911017c592ae2f1c0e8e1a4b7f3c6d2e9a0b1c2d3e",
+      "meta": {
+        "tags": [
+          "gothic",
+          "tower",
+          "corner"
+        ],
+        "front": "south",
+        "notes": "door on the south face",
+        "anchors": {
+          "base": [3, 0, 3]
+        },
+        "roles": {
+          "wall": [
+            "minecraft:stone_bricks",
+            "minecraft:cracked_stone_bricks"
+          ]
+        }
+      }
+    }
+  }
+}

@@ -152,6 +152,14 @@ The editors `15` built for the browser, removed with it (commit `0e7a40c`), come
 
 Each write sends the hash it started from. A changed file is refused with `conflict` and the screen reloads, so a file the agent just saved is never overwritten. Entries in read-only roots offer *Copy to my library* first, as now.
 
+**Wire shape** (silo W, step W2, 2026-11-18):
+
+- **One kind per entry kind: `library.write.prefab`, `library.write.palette`, `library.write.procedure`, `library.write.knowledge`**, each `{root, name, hash, …}` (`13`, *Request kinds*). Reason: the four writes take different arguments (`meta`, palette operations, `text`), so a fixed shape per kind lets both codecs and the forms check them, and the `library.write.` prefix keeps them beside the other `library.*` kinds. Procedures and knowledge share an argument shape but stay two kinds so a client never names a kind it can't edit.
+- **The arguments are the recovered editor's** (`b6e60bf`, `15` U3b): prefabs send `meta` (only the keys to change), palettes `tags`, `notes`, `edit` and `addBlocks`, text kinds the whole `text`. Palettes' `edit` takes only the `palette_edit` operations that need no sheet (`weights`, `remove`, `drop`, `rename`): there is no sheet in the game, so members are added by block id through `addBlocks`. Reason: E recovers that code with its tests, so the wire matches what it validates.
+- **`conflict` is reused, not added.** It already means "the file changed since the client read it" (`settings.set`, `library.hide`), which is exactly the stale-hash case. The result of every write is the new `hash`, so the form keeps editing without a reload; palettes also return `warnings`.
+- **A read-only root is `bad_request`**, as for `library.rename` and the other library writes there (the message says to copy the entry first), and so is a loose schematic file with no `prefab.json`. `library.entry` already says `editable: false` for both, so the forms never send them; `not_allowed` stays the allowlist's code.
+- **The hash of a prefab folder without `prefab.json` is `"absent"`**, the value the config code already uses, and a write with it creates the file.
+
 Editing a prefab's **blocks** stays out of scope (`15`). The round trip already works: stamp it in the world, edit it, `prefab_save` with `overwrite`.
 
 ### 7. Save format
@@ -164,6 +172,8 @@ Built details (F1, 2026-11-18): `.litematic` joined the extensions a library sca
 
 When `prefab_save` runs on a linked document, the saved box is sent as a change flash (`ui.flash`) in a fixed colour, so the player sees what was saved without an approval step. If it's wrong, the player says so, and the agent saves again with `overwrite`.
 
+**Wire shape** (silo W, step W2, 2026-11-18): the save flash is an ordinary Flash record in `ui.flash` with the reserved `job` `"save"` and the fixed colour `#ffffff` (`13`, *Save flash*). Reason: a Flash already carries its own colour and clients draw it without looking the job up, so a mod or client from before shows it too and no new message or optional key is needed; `"save"` can't collide with a scope id (`"base"`, `"j<n>"`), and white is never a job colour (those are saturated, `src/ui/colours.ts`). It shares the 250 ms window with job flashes, and replay frames never carry it.
+
 ## Implementation status
 
 | Piece | Silo | Status |
@@ -174,9 +184,11 @@ When `prefab_save` runs on a linked document, the saved box is sent as a change 
 | 3. Candidates in a reply, MCP | Q (Q1) | Sheet cells, `world_reply({candidates})` and `candidates.open` built (*MCP side* above): `src/library/candidates.ts` (`Candidates`, on `Session.candidates`), `prefab_sheet`'s record in `src/server/tools/library.ts`, `src/server/tools/world-prompt.ts`, the reply action through `InGameReplies.reply` and `clickable` (`src/world/prompt.ts`, `chat-stream.ts`; the request's text now kept on `OpenRequest`), `src/ui/candidates.ts` dispatched from `src/ui/requests.ts` and wired in `startUi`. Tests: `test/unit/ui/candidates.test.ts` (cells from the last sheet, explicit and `#n` cells, the clickable line and its click, plain text without `ui`, refusals that send nothing, `not_found`, `answered`, the id outliving its request), `test/unit/ui/ui-fake-host.test.ts`. `candidates.ghost`, `candidates.ghost.clear` (Q2) and `candidates.submit` (Q3) still answer `bad_request`. |
 | 4. Candidates screen | V (V1) | Shared parts extracted (V1), behaviour unchanged: `ThumbnailGrid` (cards in a pane, `library.thumbnail` textures asked as cards come into view and freed on close; an abstract `Card` whose subclass gives title, selection, click and corner mark) and `OrbitPreview` (`library.preview` voxels meshed, laid out as a square in a pane, drawn with the drag-to-turn orbit camera), both in `mod/neoforge/.../client/ui/screen/`, used by `LibraryScreen`. Covered by the existing `library` and `preview` client suites, unchanged. Reply-line click and the screen: V2. *Preview here* and the menu entry: V3. |
 | 5. Picks as text | Q | Not built |
-| 6. Library editors in game | W (wire, step W2), E | Not built |
+| 6. Library editors in game, wire | W (step W2) | Built. The four `library.write.*` kinds and their shapes in `13` (*Request kinds*, `conflict`), both codecs (`src/world/protocol/messages.ts`: `LIBRARY_WRITE_KINDS` and the argument types; `mod/common/.../protocol/UiMessages`), golden vectors, the fake MCP answering the kinds from its table. The MCP answers the kinds `bad_request` until E serves them (`13`, *Implementation status*) |
+| 6. Library editors in game, MCP and forms | E | Not built |
 | 7. Save format | F (F1) | Built. `prefab_save({format})` with `schem`, `litematic`, `nbt`, `bp` in `src/library/prefabs.ts` (`savePrefab`, `PREFAB_FORMATS`), setting `library.prefabFormat` (group Library, live) beside it. Tests: `test/unit/library/prefab-formats.test.ts` (each format read back by stamp block for block, block entity kept except `.bp`, thumbnail, overwrite across formats, setting parse), `test/unit/server/library.test.ts` (format argument and setting default through the tools). |
-| 8. Flash on save | W (wire, step W2), F | Not built |
+| 8. Flash on save, wire | W (step W2) | Built. A Flash record with `job` `SAVE_FLASH_JOB` (`"save"`) and colour `SAVE_FLASH_COLOUR` (`#ffffff`) in `13` (*Save flash*), constants in both codecs, golden vector `ui-flash-save`, the fake MCP sending one in a test |
+| 8. Flash on save | F | Not built |
 
 ## Deferred
 

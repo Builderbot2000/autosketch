@@ -85,6 +85,32 @@ describe("fake MCP", () => {
     expect(() => h.playerClick(KEV, { type: "chat", request: 12, player: KEV.uuid, kind: "reply", lines: ["plain"] })).toThrow();
   });
 
+  it("library editors and save flash (17, pieces 6 and 8): writes answered from the table, a save flash sent like any flash", async () => {
+    const h = await host();
+    const flash = { job: "save", colour: "#ffffff", dimension: "minecraft:overworld", boxes: [{ min: [1, 64, 2], max: [7, 80, 8] }] as { min: [number, number, number]; max: [number, number, number] }[] };
+    const mcp = await FakeMcp.connect({
+      pairing: pairingPath(h.instanceDir),
+      script: {
+        send: [{ type: "ui.flash", players: [KEV.uuid], flashes: [flash] }],
+        results: {
+          "library.write.prefab": { ok: false, error: "conflict", message: "changed since it was opened" },
+          "library.write.palette": { ok: true, result: { hash: "b".repeat(64), warnings: [] } },
+          "library.write.procedure": { ok: true, result: { hash: "c".repeat(64) } },
+          "library.write.knowledge": { ok: true, result: { hash: "d".repeat(64) } },
+        },
+      },
+    });
+    cleanup.push(() => mcp.close());
+    await h.waitFor(() => h.ui.some((m) => m.type === "ui.flash"));
+    expect(h.ui.find((m) => m.type === "ui.flash")).toMatchObject({ flashes: [flash] });
+    const at = { root: "user", name: "towers/round", hash: "a".repeat(64) };
+    expect(await h.playerUiRequest(KEV, { kind: "library.write.prefab", args: { ...at, name: "gothic_tower_a", meta: { tags: ["tower"] } } })).toMatchObject({ ok: false, error: "conflict" });
+    expect(await h.playerUiRequest(KEV, { kind: "library.write.palette", args: { ...at, name: "castle", tags: ["grey"] } })).toMatchObject({ ok: true, result: { hash: "b".repeat(64) } });
+    expect(await h.playerUiRequest(KEV, { kind: "library.write.procedure", args: { ...at, text: "x" } })).toMatchObject({ ok: true, result: { hash: "c".repeat(64) } });
+    expect(await h.playerUiRequest(KEV, { kind: "library.write.knowledge", args: { ...at, name: "kits/k", text: "---\nkind: kit\n---\n" } })).toMatchObject({ ok: true, result: { hash: "d".repeat(64) } });
+    expect(mcp.uiRequests.map((r) => r.kind)).toEqual(["library.write.prefab", "library.write.palette", "library.write.procedure", "library.write.knowledge"]);
+  });
+
   it("plays an MCP that's too old: no ui in its hello, so the mod sends no ui.request", async () => {
     const h = await host();
     const mcp = await FakeMcp.connect({ pairing: pairingPath(h.instanceDir), script: { hello: { features: ["prompt.close"] } } });

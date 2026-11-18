@@ -6,7 +6,7 @@ import { Bridge } from "../../../src/world/bridge.js";
 import { decodePreviewBody, encodePreviewBody } from "../../../src/world/protocol/body.js";
 import { decodeFrame, decodeMessage, encodeMessage, ProtocolError } from "../../../src/world/protocol/codec.js";
 import { DEFAULT_VOLATILE } from "../../../src/world/protocol/hash.js";
-import { UI_PART_BYTES, uiEnabled, type McpFeature, type Message, type UiGhost, type UiRequest } from "../../../src/world/protocol/messages.js";
+import { LIBRARY_WRITE_KINDS, SAVE_FLASH_COLOUR, SAVE_FLASH_JOB, UI_ERRORS, UI_PART_BYTES, UI_REQUEST_KINDS, uiEnabled, type McpFeature, type Message, type UiGhost, type UiRequest } from "../../../src/world/protocol/messages.js";
 import { FakeHost } from "../../support/fake-host.js";
 
 /** The in-game UI messages (docs/design/13-live-world.md, *In-game UI*; feature `ui`). */
@@ -104,6 +104,25 @@ describe("ui codec", () => {
   it("candidates: the new error code answered decodes; unknown codes still don't", () => {
     expect(decodeFrame(new Uint8Array(readFileSync(join(DIR, "ui-result-answered.bin"))), "mcp")).toMatchObject({ ok: false, error: "answered" });
     expect(() => tweak("ui-result-answered", "mcp", (h) => (h.error = "already_answered"))).toThrow(ProtocolError);
+  });
+
+  it("library editors (17, piece 6): one write kind per entry kind, each with the hash it started from; a stale one is conflict", () => {
+    for (const k of LIBRARY_WRITE_KINDS) expect(UI_REQUEST_KINDS).toContain(k);
+    const req = (n: string) => decodeFrame(new Uint8Array(readFileSync(join(DIR, `${n}.bin`))), "mod") as UiRequest;
+    expect(req("ui-request-library-write-prefab")).toMatchObject({ kind: "library.write.prefab", args: { root: "user", name: "gothic_tower_a", meta: { front: "south", anchors: { base: [3, 0, 3] } } } });
+    expect(req("ui-request-library-write-prefab-new").args).toEqual({ root: "user", name: "gate_small", hash: "absent", meta: { name: "Small gate", front: null } });
+    expect(req("ui-request-library-write-palette").args).toMatchObject({ notes: "", edit: { drop: ["glass"], rename: { roof: "roofing" } }, addBlocks: { accent: ["minecraft:mossy_stone_bricks"] } });
+    for (const n of ["prefab", "palette", "procedure", "knowledge"]) expect(typeof req(`ui-request-library-write-${n}`).args.hash).toBe("string");
+    expect(decodeFrame(new Uint8Array(readFileSync(join(DIR, "ui-result-library-write.bin"))), "mcp")).toMatchObject({ ok: true, result: { hash: expect.stringMatching(/^[0-9a-f]{64}$/) } });
+    expect(decodeFrame(new Uint8Array(readFileSync(join(DIR, "ui-result-library-write-conflict.bin"))), "mcp")).toMatchObject({ ok: false, error: "conflict" });
+    // `conflict` was already a code (settings): the editors add no new one.
+    expect(UI_ERRORS).toEqual(["not_allowed", "conflict", "not_found", "bad_request", "busy", "internal", "answered"]);
+  });
+
+  it("save flash (17, piece 8): a flash record with the reserved job save in the fixed colour, beside a job's", () => {
+    const m = decodeFrame(new Uint8Array(readFileSync(join(DIR, "ui-flash-save.bin"))), "mcp");
+    expect(m).toMatchObject({ type: "ui.flash", flashes: [{ job: SAVE_FLASH_JOB, colour: SAVE_FLASH_COLOUR }, { job: "base" }] });
+    expect(SAVE_FLASH_COLOUR).toMatch(/^#[0-9a-f]{6}$/);
   });
 
   it("a failed ui.result carries no body; an ok one may", () => {

@@ -41,13 +41,30 @@ public final class UiMessages {
     public static final List<String> REQUEST_KINDS = List.of("resync", "settings.list", "settings.set", "settings.unset", "library.list", "library.entry",
             "library.thumbnail", "library.preview", "library.rename", "library.duplicate", "library.delete", "library.trash", "library.restore", "library.hide",
             "library.copy", "library.empty_trash", "logs.list", "replay.open", "replay.seek", "replay.close", "ghost.anchor", "ghost.clear",
-            "candidates.open", "candidates.ghost", "candidates.ghost.clear", "candidates.submit");
+            "candidates.open", "candidates.ghost", "candidates.ghost.clear", "candidates.submit",
+            "library.write.prefab", "library.write.palette", "library.write.procedure", "library.write.knowledge");
+
+    /**
+     * The library editors' write kinds (17, piece 6), one per entry kind. Each carries the
+     * {@code hash} the editor started from ({@code library.entry}'s) and is answered with the new
+     * {@code hash}, or {@code conflict} when the file changed since.
+     */
+    public static final List<String> LIBRARY_WRITE_KINDS = List.of("library.write.prefab", "library.write.palette", "library.write.procedure", "library.write.knowledge");
 
     /** {@code ui.result} error codes; {@code answered} (17, piece 3): the candidates were already answered. */
     public static final List<String> ERRORS = List.of("not_allowed", "conflict", "not_found", "bad_request", "busy", "internal", "answered");
 
     /** The id of the session's candidate ghost, the {@code ghost} a {@code candidates.ghost} answers (17, piece 3). */
     public static final String CANDIDATE_GHOST = "candidate";
+
+    /**
+     * The {@code job} of a save flash (17, piece 8): a {@code prefab_save}'s box, not a job's edit.
+     * No scope id takes it; the record is drawn like any flash, in its own colour.
+     */
+    public static final String SAVE_FLASH_JOB = "save";
+
+    /** The save flash's fixed colour, white ({@code #ffffff}), which no job colour is. */
+    public static final int SAVE_FLASH_COLOUR = 0xffffff;
 
     public static final List<String> MARKERS = List.of("fork", "merge", "refusal", "checkpoint");
 

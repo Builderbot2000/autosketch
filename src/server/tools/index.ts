@@ -3,6 +3,7 @@ import { registerEditTools, registerSelectionTools } from "./edit.js";
 import { registerExportTools } from "./export.js";
 import { registerBlockInfoTool, registerInstanceTools } from "./instance.js";
 import { registerLibraryTools } from "./library.js";
+import { registerComponentTools } from "./components.js";
 import { registerPaletteTools } from "./palette.js";
 import { registerPerceptionTools } from "./perception.js";
 import { registerPluginTools } from "./plugins.js";
@@ -39,6 +40,7 @@ export const TOOL_GROUPS: readonly ((deps: ToolDeps) => void)[] = [
   registerPerceptionTools,
   registerCameraTools,
   registerLibraryTools,
+  registerComponentTools,
   registerPluginTools,
   registerQueryTools,
   registerScopeTools,

@@ -23,8 +23,11 @@ import net.minecraft.client.gui.screens.ConfirmScreen;
 public final class LibraryClientTests {
     private LibraryClientTests() {}
 
+    /** The library screen last seen open: a confirmation on top keeps it, and {@link #acts} counts its lists across one. */
+    private static LibraryScreen last;
+
     private static LibraryScreen screen() {
-        return Ui.screen(LibraryScreen.class);
+        return last = Ui.screen(LibraryScreen.class);
     }
 
     private static void open(ClientTestSuite s) {
@@ -104,6 +107,27 @@ public final class LibraryClientTests {
         }, 100);
     }
 
+    /**
+     * As {@link #sends}, then waits for the list the screen loads once the action's result is in. The
+     * result can clear the selection (a copy or rename selects the new entry on the next list, a delete
+     * selects nothing), so a test that selects the next entry before it lands would see that entry's
+     * {@code library.entry} answer dropped.
+     */
+    private static void acts(ClientTestSuite s, String what, ClientTestSuite.Action act, String kind, Predicate<JsonObject> ok) {
+        int[] loads = new int[1];
+        LibraryScreen[] lib = new LibraryScreen[1];
+        s.step("before " + what, () -> {
+            lib[0] = s.mc().screen instanceof ConfirmScreen ? last : screen();
+            loads[0] = lib[0].loads();
+        });
+        sends(s, what, act, kind, ok);
+        s.waitUntil("the list reloaded after " + kind, () -> {
+            check(s.mc().screen == lib[0], "screen " + s.mc().screen);
+            check(lib[0].loads() > loads[0], "loads " + lib[0].loads());
+            return true;
+        }, 100);
+    }
+
     private static boolean is(JsonObject a, String key, String value) {
         return a.has(key) && a.get(key).getAsString().equals(value);
     }
@@ -118,33 +142,33 @@ public final class LibraryClientTests {
         open(s);
         s.waitUntil("thumbnails loaded", () -> screen().texturesLoaded() == 3, 200);
         select(s, "tower");
-        sends(s, "Rename to tower2", () -> {
+        acts(s, "Rename to tower2", () -> {
             ((EditBox) s.widget("act:rename")).setValue("tower2");
             s.clickWidget("Rename");
         }, "library.rename", a -> is(a, "root", "user") && is(a, "kind", "prefabs") && is(a, "name", "tower") && is(a, "to", "tower2"));
         select(s, "tower");
-        sends(s, "Duplicate", () -> s.clickWidget("Duplicate"), "library.duplicate", a -> is(a, "name", "tower") && is(a, "to", "tower_copy"));
+        acts(s, "Duplicate", () -> s.clickWidget("Duplicate"), "library.duplicate", a -> is(a, "name", "tower") && is(a, "to", "tower_copy"));
         select(s, "tower");
         s.waitUntil("Delete is in view", () -> Ui.reveal(() -> s.widget("Delete"), s.mc().screen.width - 40, s.mc().screen.height / 2).test(), 100);
         s.step("Delete asks first", () -> Ui.click(s.widget("Delete")));
         s.waitUntil("a confirmation", () -> s.mc().screen instanceof ConfirmScreen, 20);
-        sends(s, "confirm the delete", () -> confirmYes(s), "library.delete", a -> is(a, "root", "user") && is(a, "kind", "prefabs") && is(a, "name", "tower"));
+        acts(s, "confirm the delete", () -> confirmYes(s), "library.delete", a -> is(a, "root", "user") && is(a, "kind", "prefabs") && is(a, "name", "tower"));
         s.step("back on the library, its textures kept", () -> check(screen().texturesLoaded() == 3, "textures " + screen().texturesLoaded()));
         select(s, "park_bench");
-        sends(s, "Copy to my library", () -> s.clickWidget("Copy to my library"), "library.copy", a -> is(a, "root", "starter") && is(a, "name", "park_bench"));
+        acts(s, "Copy to my library", () -> s.clickWidget("Copy to my library"), "library.copy", a -> is(a, "root", "starter") && is(a, "name", "park_bench"));
         select(s, "park_bench");
-        sends(s, "Hide (with config.toml's hash from settings.list)", () -> s.clickWidget("Hide"), "library.hide",
+        acts(s, "Hide (with config.toml's hash from settings.list)", () -> s.clickWidget("Hide"), "library.hide",
                 a -> is(a, "root", "starter") && is(a, "name", "park_bench") && a.get("hidden").getAsBoolean() && is(a, "hash", "hash-1"));
         sends(s, "Roots tab, user's trash", () -> {
             s.clickWidget("Roots");
             s.clickWidget("Trash (1)");
         }, "library.trash", a -> is(a, "root", "user"));
         s.waitUntil("the trash listed", () -> screen().trash() != null && screen().trash().size() == 1, 100);
-        sends(s, "Restore", () -> s.clickWidget("Restore"), "library.restore", a -> is(a, "root", "user") && is(a, "id", "t0"));
+        acts(s, "Restore", () -> s.clickWidget("Restore"), "library.restore", a -> is(a, "root", "user") && is(a, "id", "t0"));
         s.waitUntil("the trash listed again", () -> screen().trash() != null, 100);
         s.step("Empty trash asks first", () -> s.clickWidget("Empty trash"));
         s.waitUntil("a confirmation", () -> s.mc().screen instanceof ConfirmScreen, 20);
-        sends(s, "confirm emptying", () -> confirmYes(s), "library.empty_trash", a -> is(a, "root", "user"));
+        acts(s, "confirm emptying", () -> confirmYes(s), "library.empty_trash", a -> is(a, "root", "user"));
         s.waitUntil("the result is said", () -> {
             var m = screen().message();
             check(m != null && m.getString().equals("Emptied 1 from the trash."), "message " + m);

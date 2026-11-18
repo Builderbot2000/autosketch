@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { listSessionLogs } from "../observe/logs.js";
 import type { Vec3 } from "../core/region.js";
-import { UI_REQUEST_KINDS, type UiMcpMessage, type UiRequest, type UiRequestKind } from "../world/protocol/messages.js";
+import { UI_REQUEST_KINDS, type PlayerRef, type UiMcpMessage, type UiRequest, type UiRequestKind } from "../world/protocol/messages.js";
 import { UiRequestError, uiErrorOf } from "./errors.js";
 import type { UiFeed } from "./feed.js";
 import type { WorldFrame } from "./frame.js";
@@ -61,7 +61,7 @@ export class UiRequests {
     if (this.running.has(key)) return reply({ ok: false, error: "busy", message: `Still serving your previous ${m.kind}; try again.` });
     this.running.add(key);
     try {
-      const a = await this.serve(m.kind as UiRequestKind, m.args ?? {}, player);
+      const a = await this.serve(m.kind as UiRequestKind, m.args ?? {}, player, m.player);
       reply({ ok: true, result: a.result, ...(a.body ? { body: a.body } : {}) });
       a.after?.();
     } catch (e) {
@@ -78,7 +78,7 @@ export class UiRequests {
     this.replays.clear();
   }
 
-  private async serve(kind: UiRequestKind, a: Args, player: string): Promise<Answer> {
+  private async serve(kind: UiRequestKind, a: Args, player: string, ref: PlayerRef): Promise<Answer> {
     const lib = this.host.library;
     switch (kind) {
       case "resync":
@@ -152,7 +152,7 @@ export class UiRequests {
       case "candidates.ghost.clear":
         return this.candidates(kind).ghostClear();
       case "candidates.submit":
-        throw new UiRequestError("bad_request", `This Autosketch doesn't serve ${kind} yet.`);
+        return this.candidates(kind).submit(a, ref);
       // `17` piece 6: names and shapes frozen in `13` (*Request kinds*); handlers in `library.ts`.
       case "library.write.prefab":
         return { result: await lib.writePrefab(a) };

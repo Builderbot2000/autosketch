@@ -13,7 +13,7 @@ import type { OpenRequest } from "../world/chat-stream.js";
 import type { UiRequestInfo } from "../world/protocol/messages.js";
 import { UiFeed } from "./feed.js";
 import type { WorldFrame } from "./frame.js";
-import { CandidateRequests } from "./candidates.js";
+import { CandidateRequests, type CandidatesHost } from "./candidates.js";
 import { GhostRegions } from "./ghosts.js";
 import { LibraryRequests, type LibraryHost } from "./library.js";
 import { UiPlayers } from "./players.js";
@@ -54,7 +54,7 @@ export interface UiOptions {
   /** The link's frame while the base document is linked. */
   linkFrame(): WorldFrame | undefined;
   /** The open in-game request (the activity stream's), and the read-only one whose mode holds. */
-  inGame?(): { current: OpenRequest | undefined; heldRequest: ModeRequest | undefined } | undefined;
+  inGame?(): { current: OpenRequest | undefined; heldRequest: ModeRequest | undefined; candidatesAnswer?: CandidatesHost["answer"] } | undefined;
   log?(msg: string): void;
   /** Coalescing window override for tests. */
   intervalMs?: number;
@@ -92,6 +92,12 @@ export function startUi(o: UiOptions): UiCore {
     const g = o.inGame?.();
     return g?.current?.id === id || g?.heldRequest?.id === id;
   };
+  // `candidates.submit`'s text goes to the agent through the in-game requests (`17`, piece 5).
+  const answer: NonNullable<CandidatesHost["answer"]> = async (a) => {
+    const g = o.inGame?.();
+    if (!g?.candidatesAnswer) throw new Error("in-game requests aren't served here");
+    await g.candidatesAnswer(a);
+  };
   const intervalMs = o.intervalMs !== undefined ? { intervalMs: o.intervalMs } : {};
   const ghosts = new GhostRegions({
     bridge: o.bridge,
@@ -113,7 +119,7 @@ export function startUi(o: UiOptions): UiCore {
     ghosts,
     settings,
     library: new LibraryRequests(o.library, settings),
-    ...(o.candidates ? { candidates: new CandidateRequests({ lists: o.candidates, openRequest, ghosts, load: (id) => loadCandidate(o.library, id), registry: () => o.library.registry?.(), ...(o.stateOverrides ? { stateOverrides: o.stateOverrides } : {}) }) } : {}),
+    ...(o.candidates ? { candidates: new CandidateRequests({ lists: o.candidates, openRequest, ghosts, answer,  load: (id) => loadCandidate(o.library, id), registry: () => o.library.registry?.(), ...(o.stateOverrides ? { stateOverrides: o.stateOverrides } : {}) }) } : {}),
     workspace: o.workspace,
     live: () => ({ session: o.sessionId, doc: o.baseDoc()?.meta.name }),
     linked: () => o.linkFrame() !== undefined,

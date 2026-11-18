@@ -149,10 +149,9 @@ describe("against the fake host with ui", () => {
     const no = await ask(STRANGER, "settings.list");
     expect(no).toMatchObject({ ok: false, error: "not_allowed" });
     expect((await ask(HOST, "nope")).ok).toBe(false);
-    // `17`'s candidates kinds: open and ghost are served (Q1, Q2), so an unknown id is not_found, and clearing with no ghost is {}; submit isn't yet (Q3).
-    for (const kind of ["candidates.open", "candidates.ghost"]) expect(await ask(HOST, kind, { id: "c1" })).toMatchObject({ ok: false, error: "not_found" });
+    // `17`'s candidates kinds are all served (Q1–Q3), so an unknown id is not_found, and clearing with no ghost is {}.
+    for (const kind of ["candidates.open", "candidates.ghost", "candidates.submit"]) expect(await ask(HOST, kind, { id: "c1" })).toMatchObject({ ok: false, error: "not_found" });
     expect(await ask(HOST, "candidates.ghost.clear")).toMatchObject({ ok: true, result: {} });
-    expect(await ask(HOST, "candidates.submit", { id: "c1" })).toMatchObject({ ok: false, error: "bad_request" });
     // `17`'s editor writes are served (E1), so an unknown entry is not_found.
     for (const kind of ["library.write.prefab", "library.write.palette", "library.write.procedure", "library.write.knowledge"]) expect(await ask(HOST, kind, { root: "user", name: "x", hash: "absent" })).toMatchObject({ ok: false, error: "not_found" });
     const from = host.ui.length;

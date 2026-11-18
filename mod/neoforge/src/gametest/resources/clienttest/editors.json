@@ -1,0 +1,327 @@
+{
+ "hello": {
+  "features": [
+   "prompt.close",
+   "ui"
+  ],
+  "modes": [
+   "build",
+   "ask",
+   "plan",
+   "scan"
+  ]
+ },
+ "results": {
+  "library.list": {
+   "ok": true,
+   "result": {
+    "roots": [
+     {
+      "label": "user",
+      "path": "/home/test/autosketch/library",
+      "kind": "user",
+      "writable": true,
+      "counts": {
+       "prefabs": 1,
+       "palettes": 1,
+       "procedures": 1,
+       "knowledge": 1
+      },
+      "trash": 0
+     },
+     {
+      "label": "starter",
+      "path": "(built in)",
+      "kind": "starter",
+      "writable": false,
+      "counts": {
+       "prefabs": 1,
+       "palettes": 0,
+       "procedures": 0,
+       "knowledge": 0
+      },
+      "trash": 0
+     }
+    ],
+    "entries": {
+     "prefabs": [
+      {
+       "kind": "prefabs",
+       "name": "tower",
+       "root": "user",
+       "writable": true,
+       "title": "Stone tower",
+       "tags": [
+        "medieval"
+       ],
+       "summary": "A round tower",
+       "hidden": false
+      },
+      {
+       "kind": "prefabs",
+       "name": "park_bench",
+       "root": "starter",
+       "writable": false,
+       "title": "Park bench",
+       "tags": [
+        "park"
+       ],
+       "summary": "A bench",
+       "hidden": false
+      }
+     ],
+     "palettes": [
+      {
+       "kind": "palettes",
+       "name": "castle",
+       "root": "user",
+       "writable": true,
+       "title": "Castle",
+       "tags": [
+        "stone"
+       ],
+       "summary": "Grey stone",
+       "hidden": false
+      }
+     ],
+     "procedures": [
+      {
+       "kind": "procedures",
+       "name": "stairs",
+       "root": "user",
+       "writable": true,
+       "title": "Stairs",
+       "tags": [],
+       "summary": "Builds a stair run",
+       "hidden": false
+      }
+     ],
+     "knowledge": [
+      {
+       "kind": "knowledge",
+       "name": "kits/cathedral",
+       "root": "user",
+       "writable": true,
+       "title": "Cathedral kit",
+       "tags": [
+        "kit"
+       ],
+       "summary": "A kit",
+       "hidden": false
+      }
+     ]
+    },
+    "hidden": []
+   }
+  },
+  "library.entry": {
+   "ok": true,
+   "result": {
+    "kind": "prefabs",
+    "name": "tower",
+    "root": "user",
+    "writable": true,
+    "title": "Stone tower",
+    "tags": [
+     "medieval"
+    ],
+    "summary": "A round tower",
+    "hidden": false,
+    "hash": "e-1",
+    "editable": true,
+    "meta": {
+     "name": "tower",
+     "tags": [
+      "medieval"
+     ],
+     "front": "south",
+     "footprint": [
+      5,
+      5
+     ],
+     "height": 9,
+     "anchors": {
+      "base": [
+       2,
+       0,
+       2
+      ]
+     },
+     "roles": {},
+     "requires": [],
+     "notes": "Synthetic test prefab"
+    }
+   }
+  },
+  "library.write.prefab": {
+   "ok": true,
+   "result": {
+    "hash": "e-2"
+   }
+  },
+  "library.write.palette": {
+   "ok": true,
+   "result": {
+    "hash": "p-2",
+    "warnings": [
+     "glass: minecraft:tinted_glass is not a building block in this instance; not added"
+    ]
+   }
+  },
+  "library.write.procedure": {
+   "ok": true,
+   "result": {
+    "hash": "s-2"
+   }
+  },
+  "library.write.knowledge": {
+   "ok": true,
+   "result": {
+    "hash": "k-2"
+   }
+  }
+ },
+ "entries": {
+  "tower": {
+   "kind": "prefabs",
+   "name": "tower",
+   "root": "user",
+   "writable": true,
+   "title": "Stone tower",
+   "tags": [
+    "medieval"
+   ],
+   "summary": "A round tower",
+   "hidden": false,
+   "hash": "e-1",
+   "editable": true,
+   "meta": {
+    "name": "tower",
+    "tags": [
+     "medieval"
+    ],
+    "front": "south",
+    "footprint": [
+     5,
+     5
+    ],
+    "height": 9,
+    "anchors": {
+     "base": [
+      2,
+      0,
+      2
+     ]
+    },
+    "roles": {},
+    "requires": [],
+    "notes": "Synthetic test prefab"
+   }
+  },
+  "park_bench": {
+   "kind": "prefabs",
+   "name": "park_bench",
+   "root": "starter",
+   "writable": false,
+   "title": "Park bench",
+   "tags": [
+    "park"
+   ],
+   "summary": "A bench",
+   "hidden": false,
+   "hash": "e-9",
+   "editable": false,
+   "meta": {
+    "name": "park_bench",
+    "tags": [
+     "park"
+    ],
+    "anchors": {},
+    "roles": {},
+    "requires": []
+   }
+  },
+  "castle": {
+   "kind": "palettes",
+   "name": "castle",
+   "root": "user",
+   "writable": true,
+   "title": "Castle",
+   "tags": [
+    "stone"
+   ],
+   "summary": "Grey stone",
+   "hidden": false,
+   "hash": "p-1",
+   "editable": true,
+   "text": "{\n  \"name\": \"castle\",\n  \"tags\": [\n    \"stone\"\n  ],\n  \"source\": {\n    \"sheet\": \"overview\",\n    \"page\": 1\n  },\n  \"roles\": {\n    \"wall\": [\n      {\n        \"family\": \"minecraft:stone_bricks\",\n        \"block\": \"minecraft:stone_bricks\",\n        \"weight\": 0.5,\n        \"color\": \"#7a7a7a\"\n      },\n      {\n        \"family\": \"minecraft:andesite\",\n        \"block\": \"minecraft:andesite\",\n        \"weight\": 0.5\n      }\n    ],\n    \"roof\": [\n      {\n        \"family\": \"minecraft:dark_oak_planks\",\n        \"block\": \"minecraft:dark_oak_planks\",\n        \"weight\": 1\n      }\n    ],\n    \"trim\": [\n      {\n        \"family\": \"minecraft:polished_andesite\",\n        \"block\": \"minecraft:polished_andesite\",\n        \"weight\": 1\n      }\n    ]\n  }\n}\n",
+   "palette": {
+    "name": "castle",
+    "tags": [
+     "stone"
+    ],
+    "source": {
+     "sheet": "overview",
+     "page": 1
+    },
+    "roles": {
+     "wall": [
+      {
+       "family": "minecraft:stone_bricks",
+       "block": "minecraft:stone_bricks",
+       "weight": 0.5,
+       "color": "#7a7a7a"
+      },
+      {
+       "family": "minecraft:andesite",
+       "block": "minecraft:andesite",
+       "weight": 0.5
+      }
+     ],
+     "roof": [
+      {
+       "family": "minecraft:dark_oak_planks",
+       "block": "minecraft:dark_oak_planks",
+       "weight": 1
+      }
+     ],
+     "trim": [
+      {
+       "family": "minecraft:polished_andesite",
+       "block": "minecraft:polished_andesite",
+       "weight": 1
+      }
+     ]
+    }
+   }
+  },
+  "stairs": {
+   "kind": "procedures",
+   "name": "stairs",
+   "root": "user",
+   "writable": true,
+   "title": "Stairs",
+   "tags": [],
+   "summary": "Builds a stair run",
+   "hidden": false,
+   "hash": "s-1",
+   "editable": true,
+   "text": "// Builds a stair run\nexport default function stairs(ctx) {\n  return ctx;\n}\n"
+  },
+  "kits/cathedral": {
+   "kind": "knowledge",
+   "name": "kits/cathedral",
+   "root": "user",
+   "writable": true,
+   "title": "Cathedral kit",
+   "tags": [
+    "kit"
+   ],
+   "summary": "A kit",
+   "hidden": false,
+   "hash": "k-1",
+   "editable": true,
+   "text": "---\nname: Cathedral kit\nkind: kit\nentries:\n  - corner tower = tower\n---\n# Cathedral\nNotes.\n"
+  }
+ }
+}

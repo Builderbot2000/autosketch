@@ -346,6 +346,15 @@ export class FakeHost {
     });
   }
 
+  /**
+   * The player clicks a reply's clickable line (`13`, `chat`, `action`; `17` piece 3): their client
+   * sends the action's `ui.request`. Throws when the chat has no action, as a plain line does nothing.
+   */
+  playerClick(player: PlayerRef, chat: ChatMessage): ReturnType<FakeHost["playerUiRequest"]> {
+    if (!chat.action) throw new Error("fake host: this chat has no clickable line");
+    return this.playerUiRequest(player, { kind: chat.action.kind, args: chat.action.args });
+  }
+
   /** The `ui` messages received since index `from` that are for `player` (by `players`, or `player` on a result). */
   uiFor(player: string, from = 0): UiMcpMessage[] {
     return this.ui.slice(from).filter((m) => ("players" in m ? m.players.includes(player) : m.player === player));

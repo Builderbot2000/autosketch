@@ -76,6 +76,25 @@ class UiMessagesTest {
         assertThrows(ProtocolException.class, () -> UiMessages.UiResult.decode(edit("ui-result-conflict", h -> h.addProperty("error", "stale"))));
     }
 
+    /** 17, piece 3: a reply's clickable line, the candidates kinds and the {@code answered} code. */
+    @Test
+    void candidatesWire() throws Exception {
+        Messages.Chat chat = Messages.Chat.decode(FrameCodec.decode(Golden.bin("chat-reply-action")));
+        assertEquals(1, chat.action().line());
+        assertEquals("candidates.open", chat.action().kind());
+        assertEquals("c1", chat.action().args().get("id").getAsString());
+        assertEquals(null, Messages.Chat.decode(FrameCodec.decode(Golden.bin("chat-reply"))).action());
+        assertThrows(ProtocolException.class, () -> Messages.Chat.decode(edit("chat-reply-action", h -> h.addProperty("kind", "activity"))));
+        assertThrows(ProtocolException.class, () -> Messages.Chat.decode(edit("chat-reply-action", h -> h.getAsJsonObject("action").addProperty("line", 2))));
+        assertThrows(ProtocolException.class, () -> Messages.Chat.decode(edit("chat-reply-action", h -> h.getAsJsonObject("action").addProperty("line", -1))));
+        assertThrows(ProtocolException.class, () -> Messages.Chat.decode(edit("chat-reply-action", h -> h.getAsJsonObject("action").add("args", new com.google.gson.JsonArray()))));
+        for (String k : List.of("candidates.open", "candidates.ghost", "candidates.ghost.clear", "candidates.submit")) assertTrue(UiMessages.REQUEST_KINDS.contains(k), k);
+        UiMessages.UiResult answered = UiMessages.UiResult.decode(FrameCodec.decode(Golden.bin("ui-result-answered")));
+        assertEquals("answered", answered.error());
+        UiMessages.UiResult ghost = UiMessages.UiResult.decode(FrameCodec.decode(Golden.bin("ui-result-candidates-ghost")));
+        assertEquals(UiMessages.CANDIDATE_GHOST, ghost.result().get("ghost").getAsString());
+    }
+
     private interface Edit {
         void apply(JsonObject h);
     }

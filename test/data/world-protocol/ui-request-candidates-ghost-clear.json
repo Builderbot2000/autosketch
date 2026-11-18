@@ -1,0 +1,14 @@
+{
+  "description": "Clear candidate ghost, from the Autosketch menu",
+  "sender": "mod",
+  "header": {
+    "type": "ui.request",
+    "request": 10,
+    "player": {
+      "name": "Kev",
+      "uuid": "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+    },
+    "kind": "candidates.ghost.clear",
+    "args": {}
+  }
+}

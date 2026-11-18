@@ -21,8 +21,8 @@ import org.jetbrains.annotations.Nullable;
 /**
  * Typed messages (13, *Wire format*, *Message schemas*). Each record encodes to a {@link Frame} with
  * header keys in the order the schema tables list them, and decodes from one, turning a missing or
- * ill-typed field into {@code bad_request} for the request's id. {@code prompt}, {@code prompt.result}
- * and {@code chat} belong to the in-game requests package and use {@link Json} directly.
+ * ill-typed field into {@code bad_request} for the request's id. {@code prompt.result} belongs to the
+ * in-game requests package and uses {@link Json} directly.
  */
 public final class Messages {
     private Messages() {}
@@ -781,4 +781,66 @@ public final class Messages {
             return new Notice(Json.reqString(f.header(), "text", null), p == null ? null : parseUuid(p, null));
         }
     }
+
+    /**
+     * {@code chat}, MCP → mod: lines for the requesting player's chat. {@code action} (a reply only,
+     * feature {@code ui}; 17, piece 3) makes {@code lines[action.line]} clickable: the click makes the
+     * player's client send the {@code ui.request} {@code action.kind} with {@code action.args}. A mod
+     * or client that doesn't handle it shows the line as plain text.
+     */
+    public record Chat(@Nullable Long request, @Nullable UUID player, String kind, List<String> lines, @Nullable ChatAction action) {
+        public static final String ACTIVITY = "activity", REPLY = "reply";
+
+        public Chat {
+            lines = List.copyOf(lines);
+        }
+
+        public boolean reply() {
+            return kind.equals(REPLY);
+        }
+
+        public Frame encode() {
+            JsonObject h = Json.header("chat");
+            h.add("request", Json.nullable(request));
+            h.add("player", Json.nullable(player == null ? null : player.toString()));
+            h.addProperty("kind", kind);
+            h.add("lines", Json.strings(lines));
+            if (action != null) {
+                JsonObject a = new JsonObject();
+                a.addProperty("line", action.line());
+                a.addProperty("kind", action.kind());
+                a.add("args", action.args());
+                h.add("action", a);
+            }
+            return new Frame(h);
+        }
+
+        public static Chat decode(Frame f) throws ProtocolException {
+            expectType(f, "chat");
+            JsonObject h = f.header();
+            Long request = Json.reqNullableLong(h, "request", null);
+            String p = Json.optString(h, "player", null);
+            String kind = Json.reqString(h, "kind", null);
+            if (!kind.equals(ACTIVITY) && !kind.equals(REPLY)) throw ProtocolException.badRequest(null, "\"kind\" must be \"activity\" or \"reply\"");
+            List<String> lines = new ArrayList<>();
+            for (JsonElement e : Json.reqArray(h, "lines", null)) {
+                if (!e.isJsonPrimitive() || !e.getAsJsonPrimitive().isString()) throw ProtocolException.badRequest(null, "\"lines\" must be strings");
+                lines.add(e.getAsString());
+            }
+            ChatAction action = null;
+            if (h.has("action")) {
+                if (!kind.equals(REPLY)) throw ProtocolException.badRequest(null, "only a reply carries an action");
+                JsonObject a = Json.reqObject(h, "action", null);
+                int line = Json.reqInt(a, "line", null);
+                if (line < 0 || line >= lines.size()) throw ProtocolException.badRequest(null, "action.line " + line + " names no line");
+                String k = Json.reqString(a, "kind", null);
+                if (k.isEmpty()) throw ProtocolException.badRequest(null, "action.kind must be non-empty");
+                action = new ChatAction(line, k, Json.reqObject(a, "args", null));
+            }
+            return new Chat(request, p == null ? null : parseUuid(p, null), kind, lines, action);
+        }
+    }
+
+    /** A clickable reply line: the {@code ui.request} the client sends when {@code lines[line]} is clicked. */
+    public record ChatAction(int line, String kind, JsonObject args) {}
 }

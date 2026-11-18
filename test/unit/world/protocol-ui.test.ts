@@ -87,6 +87,25 @@ describe("ui codec", () => {
     bad("ui-result-settings-list", "mcp", (h) => (h.result = null));
   });
 
+  it("chat: a reply may make one line clickable; anything else about the action is refused", () => {
+    const m = decodeFrame(new Uint8Array(readFileSync(join(DIR, "chat-reply-action.bin"))), "mcp");
+    expect(m).toMatchObject({ type: "chat", kind: "reply", action: { line: 1, kind: "candidates.open", args: { id: "c1" } } });
+    expect("action" in decodeFrame(new Uint8Array(readFileSync(join(DIR, "chat-reply.bin"))), "mcp")).toBe(false);
+    const bad = (edit: (h: Record<string, any>) => void) => expect(() => tweak("chat-reply-action", "mcp", edit)).toThrow(ProtocolError);
+    bad((h) => (h.kind = "activity")); // only a reply carries one
+    bad((h) => (h.action.line = 2)); // past the last line
+    bad((h) => (h.action.line = -1));
+    bad((h) => (h.action.kind = ""));
+    bad((h) => (h.action.args = []));
+    bad((h) => delete h.action.args);
+    expect(() => encodeMessage({ type: "chat", request: 1, player: KEV, kind: "activity", lines: ["x"], action: { line: 0, kind: "candidates.open", args: {} } })).toThrow(ProtocolError);
+  });
+
+  it("candidates: the new error code answered decodes; unknown codes still don't", () => {
+    expect(decodeFrame(new Uint8Array(readFileSync(join(DIR, "ui-result-answered.bin"))), "mcp")).toMatchObject({ ok: false, error: "answered" });
+    expect(() => tweak("ui-result-answered", "mcp", (h) => (h.error = "already_answered"))).toThrow(ProtocolError);
+  });
+
   it("a failed ui.result carries no body; an ok one may", () => {
     expect(() => tweak("ui-result-conflict", "mcp", () => {}, new Uint8Array([1]))).toThrow(ProtocolError);
     const ok = tweak("ui-result-settings-list", "mcp", () => {}, new Uint8Array([1, 2]));

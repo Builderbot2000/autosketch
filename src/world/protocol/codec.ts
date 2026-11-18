@@ -26,6 +26,7 @@ import {
   REQUEST_MODES,
   UI_ERRORS,
   UI_MCP_TYPES,
+  type ChatMessage,
   type UiFlash,
   type UiJob,
   type UiState,
@@ -157,7 +158,11 @@ function split(m: Message): { header: Record<string, unknown>; body: Uint8Array 
     case "notice":
       return { header: { type: m.type, text: m.text, player: m.player }, body: none };
     case "chat":
-      return { header: { type: m.type, request: m.request, player: m.player, kind: m.kind, lines: [...m.lines] }, body: none };
+      if (m.action && (m.kind !== "reply" || !Number.isInteger(m.action.line) || m.action.line < 0 || m.action.line >= m.lines.length)) throw new ProtocolError("chat: an action names one line of a reply");
+      return {
+        header: { type: m.type, request: m.request, player: m.player, kind: m.kind, lines: [...m.lines], ...(m.action ? { action: { line: m.action.line, kind: m.action.kind, args: m.action.args } } : {}) },
+        body: none,
+      };
     case "ui.state": {
       const changed = <T>(k: string, v: T | null | undefined) => (m.full || v !== undefined ? { [k]: v ?? null } : {});
       if (m.full && m.removed?.length) throw new ProtocolError("ui.state: a full state removes nothing");
@@ -443,8 +448,8 @@ function decode(type: string, v: Fields, body: Uint8Array, sender: Sender): Mess
     }
     case "notice":
       return { type, text: v.str("text"), player: v.nullable("player") ? uuid(v.str("player")) : null };
-    case "chat":
-      return {
+    case "chat": {
+      const out: ChatMessage = {
         type,
         request: v.nullable("request") ? v.id("request") : null,
         player: v.nullable("player") ? uuid(v.str("player")) : null,
@@ -454,6 +459,17 @@ function decode(type: string, v: Fields, body: Uint8Array, sender: Sender): Mess
           return l;
         }),
       };
+      if (v.has("action")) {
+        const a = v.obj("action");
+        const line = a.int("line"), kind = a.str("kind"), args = a.raw("args");
+        if (out.kind !== "reply") throw new ProtocolError("chat: only a reply carries an action");
+        if (line < 0 || line >= out.lines.length) throw new ProtocolError(`chat: action.line ${line} names no line`);
+        if (!kind) throw new ProtocolError("chat: action.kind must be non-empty");
+        if (typeof args !== "object" || args === null || Array.isArray(args)) throw new ProtocolError("chat: action.args must be an object");
+        out.action = { line, kind, args: args as Record<string, unknown> };
+      }
+      return out;
+    }
     case "ui.state": {
       const players = v.players(), seq = v.id("seq"), full = v.bool("full");
       const out: UiState = { type, players, seq, full };

@@ -1,0 +1,13 @@
+{
+  "description": "The candidate ghost's id; the ghost follows as a full ui.ghost",
+  "sender": "mcp",
+  "header": {
+    "type": "ui.result",
+    "request": 9,
+    "player": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    "ok": true,
+    "result": {
+      "ghost": "candidate"
+    }
+  }
+}

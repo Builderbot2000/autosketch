@@ -94,11 +94,18 @@ New `ui.request` kinds (feature `ui`, `16`, *Wire additions*):
 | Kind | Answer |
 |---|---|
 | `candidates.open {id}` | The list: per entry, cell, prefab name, root, size, tags, notes; plus the open request id and question text |
-| `candidates.ghost {id, prefab, at, rotate?}` | Shows one prefab as the session's candidate ghost at `at` (world coordinates); replaces any earlier candidate ghost |
+| `candidates.ghost {id, prefab, dimension, at, rotate?}` | Shows one prefab as the session's candidate ghost (id `candidate`) at `at` (world coordinates); replaces any earlier candidate ghost |
 | `candidates.ghost.clear` | Removes it |
-| `candidates.submit {id, picks: [{prefab, cell, label?}], note?}` | Sends the picks to the agent as text (*Picks as text*) |
+| `candidates.submit {id, picks: [{prefab, cell, label?}], note?}` | Sends the picks to the agent as text (*Picks as text*); answers with the request the text went to |
 
-Thumbnails and the 3D preview reuse `library.thumbnail` and `library.preview`. The schemas and golden vectors go into `13`'s *Message schemas*, as for the other `ui` messages.
+Thumbnails and the 3D preview reuse `library.thumbnail` and `library.preview`. The exact schemas are in `13`'s *Request kinds*, with golden vectors, as for the other `ui` messages.
+
+**Wire shape** (silo W, step W1, 2026-11-18):
+
+- **The clickable line is an optional `action` on a `chat` reply**, `{line, kind, args}`: `lines[line]` is clickable and the click sends the `ui.request` `kind` with `args`. Reason: the line is generic (any `ui.request`, not only `candidates.open`), costs one optional key, and a mod or client without the `ui` feature ignores the key and shows the same line as plain text. One action per message is enough for piece 3; a second clickable line would be a second `chat`.
+- **`candidates.ghost` also takes `dimension`**, as `ghost.anchor` does. Reason: every ghost message names its dimension (`13`, `ui.ghost`), and the player may be in another dimension than the linked document.
+- **A new error code, `answered`**, for `candidates.open` and `candidates.submit` after the list was answered, instead of reusing one. Reason: none of the existing codes means it (`conflict` says reload and retry, `not_found` says the id is unknown), and the screen needs to tell "answered" apart to show the line as answered. Only the `candidates.*` kinds return it, so a mod from before them never receives it.
+- **`candidates.ghost.clear` with no ghost shown is `{}`**, not `not_found`, so the menu entry can clear without knowing whether one is shown.
 
 ### 4. Candidates screen (mod)
 
@@ -146,6 +153,20 @@ Built details (F1, 2026-11-18): `.litematic` joined the extensions a library sca
 ### 8. Flash on save
 
 When `prefab_save` runs on a linked document, the saved box is sent as a change flash (`ui.flash`) in a fixed colour, so the player sees what was saved without an approval step. If it's wrong, the player says so, and the agent saves again with `overwrite`.
+
+## Implementation status
+
+| Piece | Silo | Status |
+|---|---|---|
+| 1. Component set | K | Not built |
+| 2. Kits | K | Not built |
+| 3. Candidates in a reply, wire | W (step W1) | Built. The four `candidates.*` kinds, the error `answered` and the `chat` `action` in `13` (*Request kinds*, `chat`), both codecs (`src/world/protocol/`, `mod/common/.../protocol/`: `Messages.Chat`, `UiMessages`), golden vectors, the fake host's `playerClick`, the fake MCP answering the kinds from its table. The MCP answers the kinds `bad_request` until Q serves them (`13`, *Implementation status*) |
+| 3. Candidates in a reply, MCP | Q | Not built |
+| 4. Candidates screen | V | Not built |
+| 5. Picks as text | Q | Not built |
+| 6. Library editors in game | W (wire, step W2), E | Not built |
+| 7. Save format | F | Not built |
+| 8. Flash on save | W (wire, step W2), F | Not built |
 
 ## Deferred
 

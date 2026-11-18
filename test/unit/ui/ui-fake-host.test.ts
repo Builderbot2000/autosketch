@@ -125,6 +125,8 @@ describe("against the fake host with ui", () => {
     const no = await ask(STRANGER, "settings.list");
     expect(no).toMatchObject({ ok: false, error: "not_allowed" });
     expect((await ask(HOST, "nope")).ok).toBe(false);
+    // `17`'s candidates kinds are on the wire (W1) but not served yet (silo Q): bad_request, as for an MCP without them.
+    for (const kind of ["candidates.open", "candidates.ghost", "candidates.ghost.clear", "candidates.submit"]) expect(await ask(HOST, kind, { id: "c1" })).toMatchObject({ ok: false, error: "bad_request" });
     const from = host.ui.length;
     ok(await ask(KEV, "resync"));
     const after = host.ui.slice(from);

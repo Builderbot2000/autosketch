@@ -70,7 +70,7 @@ describe("protocol 2 golden vectors (N−1)", () => {
 
   roundTrips(V2);
 
-  it("carry none of protocol 3's additions, and protocol 3 changed only the hellos and the mismatch example (and gained prompt.close, ui and 17's candidates, feature-gated additions)", () => {
+  it("carry none of protocol 3's additions, and protocol 3 changed only the hellos and the mismatch example (and gained prompt.close, ui and 17's candidates, editor writes and save flash, feature-gated additions)", () => {
     const v2 = (n: string) => splitFrame(new Uint8Array(readFileSync(join(V2, `${n}.bin`))).subarray(4)).header;
     expect(v2("hello-mcp")).toMatchObject({ protocol: 2 });
     expect(v2("hello-mod-singleplayer").features).toEqual(["modes", "scan", "volumes.set"]);
@@ -86,6 +86,7 @@ describe("protocol 2 golden vectors (N−1)", () => {
       "replay-frame-delta",
       "replay-frame-keyframe",
       "ui-flash",
+      "ui-flash-save",
       "ui-ghost-clear",
       "ui-ghost-full",
       "ui-ghost-move",
@@ -95,6 +96,11 @@ describe("protocol 2 golden vectors (N−1)", () => {
       "ui-request-candidates-open",
       "ui-request-candidates-submit",
       "ui-request-ghost-anchor",
+      "ui-request-library-write-knowledge",
+      "ui-request-library-write-palette",
+      "ui-request-library-write-prefab",
+      "ui-request-library-write-prefab-new",
+      "ui-request-library-write-procedure",
       "ui-request-resync",
       "ui-request-settings-set",
       "ui-result-answered",
@@ -102,6 +108,9 @@ describe("protocol 2 golden vectors (N−1)", () => {
       "ui-result-candidates-open",
       "ui-result-candidates-submit",
       "ui-result-conflict",
+      "ui-result-library-write",
+      "ui-result-library-write-conflict",
+      "ui-result-library-write-palette",
       "ui-result-not-allowed",
       "ui-result-preview",
       "ui-result-settings-list",

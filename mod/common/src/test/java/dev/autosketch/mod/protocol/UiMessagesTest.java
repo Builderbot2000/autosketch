@@ -95,6 +95,23 @@ class UiMessagesTest {
         assertEquals(UiMessages.CANDIDATE_GHOST, ghost.result().get("ghost").getAsString());
     }
 
+    /** 17, pieces 6 and 8: the editor write kinds with their hash, and the save flash. */
+    @Test
+    void editorWritesAndSaveFlash() throws Exception {
+        for (String k : UiMessages.LIBRARY_WRITE_KINDS) assertTrue(UiMessages.REQUEST_KINDS.contains(k), k);
+        for (String n : List.of("prefab", "prefab-new", "palette", "procedure", "knowledge")) {
+            UiMessages.UiRequest r = UiMessages.UiRequest.decode(FrameCodec.decode(Golden.bin("ui-request-library-write-" + n)));
+            assertTrue(UiMessages.LIBRARY_WRITE_KINDS.contains(r.kind()), r.kind());
+            assertTrue(r.args().get("hash").getAsString().length() > 0, n);
+        }
+        UiMessages.UiResult ok = UiMessages.UiResult.decode(FrameCodec.decode(Golden.bin("ui-result-library-write")));
+        assertEquals(64, ok.result().get("hash").getAsString().length());
+        assertEquals("conflict", UiMessages.UiResult.decode(FrameCodec.decode(Golden.bin("ui-result-library-write-conflict"))).error());
+        UiMessages.UiFlash f = UiMessages.UiFlash.decode(FrameCodec.decode(Golden.bin("ui-flash-save")));
+        assertEquals(UiMessages.SAVE_FLASH_JOB, f.flashes().get(0).job());
+        assertEquals(UiMessages.SAVE_FLASH_COLOUR, f.flashes().get(0).colour());
+    }
+
     private interface Edit {
         void apply(JsonObject h);
     }

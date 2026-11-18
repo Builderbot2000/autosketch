@@ -642,6 +642,93 @@ vector("upgrade-result-failed", "mod", "An upgrade where the fixer threw on one 
     error: "answered",
     message: "You already answered these candidates.",
   });
+  // `17` piece 6: the library editors' writes, each with the hash it started from.
+  const H_OLD = "5d41402abc4b2a76b9719d911017c592ae2f1c0e8e1a4b7f3c6d2e9a0b1c2d3e";
+  const H_NEW = "9a0364b9e99bb480dd25e1f0284c8555b3c2a1f4e6d7c8b9a0f1e2d3c4b5a697";
+  vector("ui-request-library-write-prefab", "mod", "The prefab editor saves prefab.json fields: tags, front, notes, an anchor and a role; the fields not sent stay as they are", {
+    type: "ui.request",
+    request: 14,
+    player: { name: "Kev", uuid: UUID_KEV },
+    kind: "library.write.prefab",
+    args: {
+      root: "user",
+      name: "gothic_tower_a",
+      hash: H_OLD,
+      meta: { tags: ["gothic", "tower", "corner"], front: "south", notes: "door on the south face", anchors: { base: [3, 0, 3] }, roles: { wall: ["minecraft:stone_bricks", "minecraft:cracked_stone_bricks"] } },
+    },
+  });
+  vector("ui-request-library-write-prefab-new", "mod", "A first write to a prefab folder with no prefab.json yet: the hash library.entry gave is \"absent\"", {
+    type: "ui.request",
+    request: 15,
+    player: { name: "Kev", uuid: UUID_KEV },
+    kind: "library.write.prefab",
+    args: { root: "user", name: "gate_small", hash: "absent", meta: { name: "Small gate", front: null } },
+  });
+  vector("ui-request-library-write-palette", "mod", "The palette editor saves tags, notes, a reweighted role, a removed member, a renamed and a dropped role, and a member added by block id", {
+    type: "ui.request",
+    request: 16,
+    player: { name: "Kev", uuid: UUID_KEV },
+    kind: "library.write.palette",
+    args: {
+      root: "user",
+      name: "castle",
+      hash: H_OLD,
+      tags: ["castle", "grey"],
+      notes: "",
+      edit: { weights: { wall: { "minecraft:stone_bricks": 3, "minecraft:andesite": 1 } }, remove: { trim: ["minecraft:polished_diorite"] }, drop: ["glass"], rename: { roof: "roofing" } },
+      addBlocks: { accent: ["minecraft:mossy_stone_bricks"] },
+    },
+  });
+  vector("ui-request-library-write-procedure", "mod", "The procedure editor saves the whole source", {
+    type: "ui.request",
+    request: 17,
+    player: { name: "Kev", uuid: UUID_KEV },
+    kind: "library.write.procedure",
+    args: { root: "user", name: "towers/round", hash: H_OLD, text: "// round tower\nexport default function (p) {\n  fill({ cylinder: { center: [0, 0, 0], radius: p.r, height: p.h } }, p.wall, \"walls\");\n}\n" },
+  });
+  vector("ui-request-library-write-knowledge", "mod", "The knowledge editor saves a kit's frontmatter and notes as one text", {
+    type: "ui.request",
+    request: 18,
+    player: { name: "Kev", uuid: UUID_KEV },
+    kind: "library.write.knowledge",
+    args: {
+      root: "user",
+      name: "kits/gothic_cathedral_kit",
+      hash: H_OLD,
+      text: "---\nkind: kit\nname: Gothic cathedral kit\nentries:\n  - { prefab: gothic_tower_a, label: corner tower }\n---\nUsed with palette `castle`.\n",
+    },
+  });
+  vector("ui-result-library-write", "mcp", "A write saved: the file's new hash, for the editor's next write", {
+    type: "ui.result",
+    request: 14,
+    player: UUID_KEV,
+    ok: true,
+    result: { hash: H_NEW },
+  });
+  vector("ui-result-library-write-palette", "mcp", "A palette write saved, with a warning for a member it couldn't add", {
+    type: "ui.result",
+    request: 16,
+    player: UUID_KEV,
+    ok: true,
+    result: { hash: H_NEW, warnings: ["accent: minecraft:mossy_stone_bricks is not a building block in this instance; not added"] },
+  });
+  vector("ui-result-library-write-conflict", "mcp", "A write refused: the agent saved the prefab since the editor opened it; the screen reloads", {
+    type: "ui.result",
+    request: 14,
+    player: UUID_KEV,
+    ok: false,
+    error: "conflict",
+    message: "prefab \"gothic_tower_a\" changed since it was opened (the agent may have saved it); reload it and edit again",
+  });
+  // `17` piece 8: a prefab_save's box, flashing in the fixed save colour, beside a job's edit in the same window.
+  vector("ui-flash-save", "mcp", "A prefab_save on the linked document flashes the saved box white (job \"save\", no job's edit), in the same window as an edit by the root", {
+    type: "ui.flash",
+    players,
+    flashes: [
+      { job: "save", colour: "#ffffff", dimension: OW, boxes: [{ min: [120, 64, -190], max: [126, 87, -184] }] },
+      { job: "base", colour: "#9b9b9b", dimension: OW, boxes: [{ min: [100, 63, -200], max: [100, 63, -200] }] },
+    ],
+  });
   vector("ui-result-settings-list", "mcp", "Settings rows for the settings screen: one toggle and one number field, with sources, an overridden launch value and a restart-needed mark", {
     type: "ui.result",
     request: 4,

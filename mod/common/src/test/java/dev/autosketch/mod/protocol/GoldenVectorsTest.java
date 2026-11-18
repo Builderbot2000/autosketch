@@ -58,7 +58,7 @@ class GoldenVectorsTest {
     @Test
     void everyMessageKindHasAVector() {
         List<String> names = Golden.frameNames();
-        assertTrue(names.size() >= 86, "found " + names.size() + " vectors in " + Golden.dir());
+        assertTrue(names.size() >= 95, "found " + names.size() + " vectors in " + Golden.dir());
         assertTrue(Golden.frameNames("v2/").size() >= 48, "the frozen version-2 vectors");
         assertTrue(Golden.frameNames("v1/").size() >= 36, "the frozen version-1 vectors");
     }

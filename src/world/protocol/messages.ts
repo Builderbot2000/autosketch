@@ -388,6 +388,14 @@ export interface ChatAction {
 export const UI_COALESCE_MS = 250;
 /** Most boxes one flash record lists; beyond that the MCP merges them into fewer, larger boxes. */
 export const UI_FLASH_BOXES = 64;
+/**
+ * The flash record of a `prefab_save` on a linked document (`17`, piece 8): not a job's edit, so its
+ * `job` is this reserved id, which no scope id takes (`"base"`, `"j<n>"`), and its colour is fixed.
+ * A client from before draws it like any flash, in the colour the record carries.
+ */
+export const SAVE_FLASH_JOB = "save";
+/** The save flash's fixed colour: white, which no job colour is (`jobColour` is saturated). */
+export const SAVE_FLASH_COLOUR = "#ffffff";
 /** Largest piece of a frame in one relay packet to a client (*Relay to the client*). */
 export const UI_PART_BYTES = 1_000_000;
 
@@ -401,7 +409,10 @@ export interface UiJob {
   context: WireBox[];
 }
 
-/** Boxes one job just changed. */
+/**
+ * Boxes one job just changed, or a save's box (`job` {@link SAVE_FLASH_JOB}, colour
+ * {@link SAVE_FLASH_COLOUR}; `17`, piece 8).
+ */
 export interface UiFlash {
   job: string;
   colour: string;
@@ -555,6 +566,10 @@ export const UI_REQUEST_KINDS = [
   "candidates.ghost",
   "candidates.ghost.clear",
   "candidates.submit",
+  "library.write.prefab",
+  "library.write.palette",
+  "library.write.procedure",
+  "library.write.knowledge",
 ] as const;
 export type UiRequestKind = (typeof UI_REQUEST_KINDS)[number];
 
@@ -616,6 +631,74 @@ export interface CandidatesSubmitArgs {
   id: string;
   picks: CandidatePick[];
   note?: string;
+}
+
+// ── Library editors (`17`, piece 6; `13`, *Request kinds*) ─────────────────────────────────────
+
+/**
+ * The editor write kinds, one per editable entry kind. Each carries the `hash` of the version the
+ * editor started from (`library.entry`'s `hash`: sha256 of the editable file, or `"absent"` for a
+ * prefab folder with no `prefab.json` yet) and is answered with the file's new `hash`, or `conflict`
+ * when the file changed since.
+ */
+export const LIBRARY_WRITE_KINDS = ["library.write.prefab", "library.write.palette", "library.write.procedure", "library.write.knowledge"] as const;
+
+/** `prefab.json` fields a prefab write may set; absent keys are left as they are, other fields of the file kept. */
+export interface PrefabMetaEdit {
+  name?: string;
+  tags?: string[];
+  /** `null` or `""` removes it. */
+  front?: "north" | "south" | "east" | "west" | "" | null;
+  /** `""` removes them. */
+  notes?: string;
+  anchors?: Record<string, Vec3>;
+  /** Role name → block ids. */
+  roles?: Record<string, string[]>;
+}
+
+export interface LibraryWritePrefabArgs {
+  root: string;
+  name: string;
+  hash: string;
+  meta: PrefabMetaEdit;
+}
+
+/** The `palette_edit` operations the in-game editor offers (`03`): no cell refs, since there is no sheet in game. */
+export interface PaletteMemberEdit {
+  /** Role → block or family id → new relative weight. */
+  weights?: Record<string, Record<string, number>>;
+  /** Role → block or family ids to remove. */
+  remove?: Record<string, string[]>;
+  /** Roles to delete. */
+  drop?: string[];
+  /** Role renames, old → new. */
+  rename?: Record<string, string>;
+}
+
+export interface LibraryWritePaletteArgs {
+  root: string;
+  name: string;
+  hash: string;
+  tags?: string[];
+  /** `""` removes them. */
+  notes?: string;
+  edit?: PaletteMemberEdit;
+  /** Role → block ids added at an even share (the role is created when new). */
+  addBlocks?: Record<string, string[]>;
+}
+
+/** A procedure's or knowledge pack's (kits included) whole new text. */
+export interface LibraryWriteTextArgs {
+  root: string;
+  name: string;
+  hash: string;
+  text: string;
+}
+
+/** What every write answers; `warnings` only for palettes (members not added, unknown ids). */
+export interface LibraryWriteResult {
+  hash: string;
+  warnings?: string[];
 }
 
 /** The answer to a `ui.request`. `body` only for `library.thumbnail` (PNG) and `library.preview` (a region body). */

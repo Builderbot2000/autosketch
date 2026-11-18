@@ -13,4 +13,4 @@ The lead's log, one line per step (*How to run this set* in the README). Read th
 | W2 | rc-w2 | running | | |
 | V2 | rc-v2 | running | | |
 | Q2 | rc-q2 | running | | |
-| K3 | rc-k3 | running | | |
+| K3 | rc-k3 | merged | 8af5746 | reminder via InGameRequestsOptions.componentSet on build/ask/plan and scan events (scan kept: spec says each request). Q3 must apply it to the picks event too. Silo K complete |

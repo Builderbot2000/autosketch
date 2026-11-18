@@ -93,6 +93,8 @@ export interface InGameRequestsOptions extends PromptSettings {
   palettes?: () => PaletteBook | undefined;
   /** Whether linking follows a volume change on its own (setting `world.autoLink`; default true), for `world_volumes`' result. */
   autoLink?: boolean;
+  /** The session's component set (`Session.componentSet`): its reminder line ends each request's event text while it has entries (`17`, piece 1, *Reminders*). */
+  componentSet?: { remind(text: string): string };
   log?: (msg: string) => void;
 }
 
@@ -218,6 +220,11 @@ export class InGameRequests implements InGameReplies {
     this.stream.stop();
   }
 
+  /** A request event's text with the component set's reminder line appended while the set has entries (`17`, piece 1). */
+  private remind(text: string): string {
+    return this.opts.componentSet?.remind(text) ?? text;
+  }
+
   /** Handles one `prompt`; resolves once `prompt.result` is sent. */
   async onPrompt(m: PromptMessage): Promise<void> {
     const refuse = (reason: PromptRefusal) => {
@@ -231,7 +238,7 @@ export class InGameRequests implements InGameReplies {
     const doc = this.link.doc, volumes = this.link.volumes;
     if (this.link.state !== "linked" || !doc || !volumes) return refuse("no_link");
     if (!this.opts.listening()) return refuse("no_listener");
-    const text = requestText(doc, volumes, m);
+    const text = this.remind(requestText(doc, volumes, m));
     this.opts.touch?.();
     try {
       await this.opts.notify(text, { request: String(m.id), player: m.player.name });
@@ -265,7 +272,7 @@ export class InGameRequests implements InGameReplies {
         note = `The probe couldn't be loaded: ${(e as Error).message}`;
       }
     }
-    const text = [`In-game scan request from ${m.player.name}: ${JSON.stringify(m.text)}.`, MODE_ALLOWS.scan, note, `Answer the player with world_reply (request ${m.id}); pass done: true when finished.`].join(" ");
+    const text = this.remind([`In-game scan request from ${m.player.name}: ${JSON.stringify(m.text)}.`, MODE_ALLOWS.scan, note, `Answer the player with world_reply (request ${m.id}); pass done: true when finished.`].join(" "));
     try {
       await this.opts.notify(text, { request: String(m.id), player: m.player.name });
     } catch (e) {

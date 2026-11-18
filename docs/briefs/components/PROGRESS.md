@@ -19,4 +19,5 @@ The lead's log, one line per step (*How to run this set* in the README). Read th
 | Q3 | rc-q3 | merged | d04738b | closed request reopens under its own id (mod's counter; accepted by lead); list with no request → {request: null}, 13 updated; rotation now core/rotate.ts orientBox, no copy. Lead fixed the ENOTEMPTY flake in test/unit/server/library.test.ts (4c8ee87). Silo Q complete |
 | E2 | rc-e2 | merged | a670454 | Edit beside Delete, only when editable; one class per form on EntryEditorScreen; conflict drops typed text and reloads. Tested together with V3 (655 client steps). Silo E complete |
 | V3 | rc-v3 | merged | 189863f | Preview here at the crosshair's block, no rotate; screen keeps ticks across a preview; fake MCP gained optional `args` match on replies (accepted). runServer not run (permission check blocked the pkill; client-only change). Silo V complete |
-| Z1 | rc-z1 | running | | |
+| Z1 | rc-z1 | merged | b1595fc | client side driven at the MCP's edge (headless server has no player with autosketch:ui; client harness on Craftoria is a manual 8 GB run). Lead re-ran the world tier on Craftoria: 13/13 (first lead attempt skipped all: forgot `server.sh wait`) |
+| Z2 | rc-z2 | running | | |

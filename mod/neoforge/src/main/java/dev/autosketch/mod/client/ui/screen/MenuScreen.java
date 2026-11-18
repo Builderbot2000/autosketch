@@ -13,8 +13,8 @@ import org.jetbrains.annotations.Nullable;
 /**
  * The Autosketch menu (16, *Autosketch menu and key bindings*), on {@code Home}: the four toggles
  * (HUD, job volumes, change flashes, ghosts, writing {@link UiToggles}) and the entry points:
- * Settings, Library, Replay (the log list), Ghost here, and the mod's own config screen (Cloth
- * Config), which stays separate from the MCP's settings.
+ * Settings, Library, Replay (the log list), Ghost here, Clear candidate ghost (17, piece 4), and the
+ * mod's own config screen (Cloth Config), which stays separate from the MCP's settings.
  */
 public final class MenuScreen extends PaneScreen {
     public MenuScreen(@Nullable Screen parent) {
@@ -33,8 +33,9 @@ public final class MenuScreen extends PaneScreen {
         addRenderableWidget(Button.builder(tr("menu.library"), b -> minecraft.setScreen(new LibraryScreen(this))).bounds(x2, y, w, 20).build());
         addRenderableWidget(Button.builder(tr("menu.replay"), b -> AutosketchScreens.openReplay(this)).bounds(x, y + 24, w, 20).build());
         addRenderableWidget(Button.builder(tr("menu.ghost_here"), b -> AutosketchScreens.ghostHere()).bounds(x2, y + 24, w, 20).build());
-        addRenderableWidget(Button.builder(tr("menu.mod_config"), b -> openModConfig()).bounds(x, y + 56, w, 20).build());
-        addRenderableWidget(Button.builder(tr("done"), b -> onClose()).bounds(x2, y + 56, w, 20).build());
+        addRenderableWidget(Button.builder(tr("menu.clear_candidate"), b -> AutosketchScreens.clearCandidateGhost()).bounds(x2, y + 48, w, 20).build());
+        addRenderableWidget(Button.builder(tr("menu.mod_config"), b -> openModConfig()).bounds(x, y + 80, w, 20).build());
+        addRenderableWidget(Button.builder(tr("done"), b -> onClose()).bounds(x2, y + 80, w, 20).build());
     }
 
     private @Nullable Component configError;
@@ -64,6 +65,6 @@ public final class MenuScreen extends PaneScreen {
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         super.render(g, mouseX, mouseY, partialTick);
         g.drawCenteredString(font, title, width / 2, Math.max(28, height / 2 - 70) - 16, TEXT);
-        if (configError != null) g.drawCenteredString(font, configError, width / 2, Math.max(28, height / 2 - 70) + 136, BAD);
+        if (configError != null) g.drawCenteredString(font, configError, width / 2, Math.max(28, height / 2 - 70) + 160, BAD);
     }
 }

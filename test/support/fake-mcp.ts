@@ -21,14 +21,16 @@
  *
  *   { "hello":   { "features": ["prompt.close", "ui"], "modes": ["ask", "scan", "plan", "build"] },
  *     "send":    [ <message>, … ],                                   sent once after each handshake
- *     "replies": [ { "on": "<type>", "kind"?: "<ui.request kind>", "send": <message> | [<message>, …] } ],
+ *     "replies": [ { "on": "<type>", "kind"?: "<ui.request kind>", "args"?: {…}, "send": <message> | [<message>, …] } ],
  *     "results": { "<ui.request kind>": { "ok": true, "result": {…}, "bodyBase64"?: "…" }
  *                                     | { "ok": false, "error": "<code>", "message": "…" } } }
  *
  * A <message> is the codec's message object (`src/world/protocol/messages.ts`) as JSON, with these
  * conveniences: in `ui.ghost` sections and `replay.frame` regions, `"fill": "<palette state>"` in
  * place of `states` fills the whole section or box with that state, and `states` may be a plain array;
- * a `ui.result`'s binary body is `bodyBase64`. `request` and `player` of a reply to a `ui.request` are
+ * a `ui.result`'s binary body is `bodyBase64`. A reply with `args` answers only a `ui.request` whose
+ * args hold each of those keys with an equal value (so a test can answer two requests of one kind
+ * differently, e.g. a candidate ghost at two positions). `request` and `player` of a reply to a `ui.request` are
  * filled in from the request when absent. A `ui.request` with no reply or result gets
  * `bad_request` ("the fake MCP has no scripted result for <kind>"), so a client never waits forever.
  */
@@ -43,7 +45,7 @@ import { parsePairing } from "../../src/world/protocol/pairing.js";
 export interface FakeMcpScript {
   hello?: { features?: string[]; modes?: RequestMode[] };
   send?: unknown[];
-  replies?: { on: string; kind?: string; send: unknown }[];
+  replies?: { on: string; kind?: string; args?: Record<string, unknown>; send: unknown }[];
   results?: Record<string, { ok: true; result?: Record<string, unknown>; bodyBase64?: string } | { ok: false; error: string; message?: string }>;
 }
 
@@ -187,6 +189,7 @@ export class FakeMcp {
     let answered = false;
     for (const r of script.replies ?? []) {
       if (r.on !== m.type || (r.kind !== undefined && r.kind !== req?.kind)) continue;
+      if (r.args && !Object.entries(r.args).every(([k, v]) => JSON.stringify(req?.args[k]) === JSON.stringify(v))) continue;
       for (const out of Array.isArray(r.send) ? r.send : [r.send]) {
         const o = { ...(out as Record<string, unknown>) };
         if (req && o.type === "ui.result") {

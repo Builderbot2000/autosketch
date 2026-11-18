@@ -9,6 +9,9 @@ import { tempDir, writeTree } from "../../helpers/fixtures.js";
 import { libraryContext } from "../library/fixture.js";
 
 let base: string;
+// Every connect() opens a Session whose autosave timer can fire after the last test; close them
+// before removing the temp tree, or the late journal write races rm (ENOTEMPTY).
+const sessions: Session[] = [];
 beforeAll(async () => {
   base = await tempDir("autosketch-srvlib-");
   // Never touch the real ~/autosketch or ~/.cache: library, cache and workspace all live in temp.
@@ -18,6 +21,7 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   vi.unstubAllEnvs();
+  await Promise.all(sessions.map((s) => s.close()));
   await rm(base, { recursive: true, force: true });
 });
 
@@ -26,7 +30,9 @@ const textOf = (r: { content: unknown }) => (r.content as Content).filter((c) =>
 
 async function connect() {
   const ctx = await libraryContext(join(base, "instance"));
-  const server = createServer(Promise.resolve(ctx), { session: new Session(join(base, "ws")) });
+  const session = new Session(join(base, "ws"));
+  sessions.push(session);
+  const server = createServer(Promise.resolve(ctx), { session });
   const [a, b] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "test", version: "0" });
   await Promise.all([server.connect(a), client.connect(b)]);

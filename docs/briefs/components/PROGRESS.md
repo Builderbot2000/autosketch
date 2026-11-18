@@ -10,7 +10,9 @@ The lead's log, one line per step (*How to run this set* in the README). Read th
 | K2 | rc-k2 | merged | e99305d | labels win over names and cells; stamp tool only, not scripts. Reminder cost estimated (3–4 chars/token), not counted with a tokenizer |
 | Q1 | rc-q1 | merged | 65e430f (17 conflict markers committed there; fixed in the next commit) | ids c1…; uncelled prefabs get #n; no set labels in candidates; line `[Show candidates (n)]`. Open: 13's status row still says all candidates.* answer bad_request (W's file, for Z) |
 | V1 | rc-v1 | merged | 7decd2d | ThumbnailGrid, OrbitPreview (package-private) in client/ui/screen |
-| W2 | rc-w2 | running | | |
+| W2 | rc-w2 | merged | a2c39d5 | library.write.{prefab,palette,procedure,knowledge}; stale hash = existing `conflict`; save flash = job "save", #ffffff. Lead fixed 13's stale candidates row. Seen once: ENOTEMPTY teardown race in test/unit/server/library.test.ts (passed on rerun). Silo W complete |
 | V2 | rc-v2 | running | | |
 | Q2 | rc-q2 | running | | |
 | K3 | rc-k3 | merged | 8af5746 | reminder via InGameRequestsOptions.componentSet on build/ask/plan and scan events (scan kept: spec says each request). Q3 must apply it to the picks event too. Silo K complete |
+| E1 | rc-e1 | running | | |
+| F2 | rc-f2 | running | | |

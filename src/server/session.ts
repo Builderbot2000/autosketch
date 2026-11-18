@@ -9,6 +9,7 @@ import { toPublic, type Vec3 } from "../core/region.js";
 import { dataVersionFor } from "../core/version.js";
 import { Document, type Facing } from "../document/document.js";
 import { loadNative, saveNative } from "../document/native.js";
+import { ComponentSet } from "../library/component-set.js";
 import type { PaletteBook } from "../palette/pick.js";
 import { BASE, refusal, ScopeManager } from "../scope/scopes.js";
 import type { ScopeLimits } from "../scope/settings.js";
@@ -124,6 +125,12 @@ export class Session {
   upgrader?: () => SchematicUpgrader | undefined;
   /** Answers to in-game requests (13, *Prompting from the game*), for `world_reply`; set beside `world`. */
   inGame?: InGameReplies;
+  /**
+   * The session's component set (17, piece 1): the prefabs the player picked, kept by
+   * `component_set`. Not tied to a document: it survives opening and closing documents and ends
+   * with the session (the process), never saved except as a kit the player asks for.
+   */
+  readonly componentSet = new ComponentSet();
   /** Hooks around each tool call, in order (see `CallHook`). */
   readonly callHooks: CallHook[] = [];
   /** The scope the current tool call addresses ("base" outside any call). */

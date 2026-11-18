@@ -242,9 +242,9 @@ export function registerLibraryTools({ tool, resource, session }: ToolDeps): voi
     {
       doc: false,
       title: "List knowledge packs",
-      description: "Style, heuristic, technique and skill packs in the library: names and one-line summaries only (cheap). Advice to weigh, not rules. Text.",
+      description: "Style, heuristic, technique, skill and kit packs in the library: names and one-line summaries only (cheap). Advice to weigh, not rules. Text.",
       inputSchema: {
-        kind: z.string().optional().describe("style | heuristic | technique"),
+        kind: z.string().optional().describe("style | heuristic | technique | skill | kit"),
         tags: z.array(z.string()).optional(),
       },
     },

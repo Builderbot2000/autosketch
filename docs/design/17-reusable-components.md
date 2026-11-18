@@ -57,6 +57,8 @@ One tool, `component_set`, keeps it:
 
 Every result shows the whole set afterwards. Unknown prefab names are refused with the nearest names, so a typo never ends up in the set.
 
+Settled while building it (K1): the arguments combine in one call and apply in the order `load` or `clear` (not both), `remove`, `add`, `save_as`, after every name has been checked, so a refused call leaves the set as it was. `add` takes a prefab's id or display name and stores the id; sheet cells are not accepted there (cells name the last sheet, which changes, while the set must outlive it). `remove` names that match nothing are reported, not refused. The record lives on the MCP `Session` (`session.componentSet`, logic in `src/library/component-set.ts`) and is not tied to the open document: opening or closing documents leaves it alone.
+
 **Reminders.** The set is in the agent's context from the moment it's made, but long sessions get summarised. While the set is not empty, one line (`set: corner tower = gothic_tower_a, gatehouse = gate_small`) is appended to the results of `prefab_search`, `prefab_sheet` and `stamp`, and to the text of each in-game request's channel event (`13`, *Prompting from the game*). Those are the moments the agent is choosing or placing components. Other tool results don't carry it, to save tokens.
 
 **Resolving by label.** `stamp({prefab: "corner tower"})` resolves a set label to its prefab before resolving library names and sheet cells. This is a convenience, not a constraint: any library prefab can still be stamped by name.
@@ -80,6 +82,8 @@ Used with palette `castle`.
 ```
 
 `knowledge_list({kind: "kit"})` lists them. A kit is written only when the player asks to keep a set. It is never saved automatically.
+
+Settled while building it (K1): `save_as` writes `knowledge/kits/<stem>.md`, the stem being the name lower-cased with other characters turned into `_` ("Gothic cathedral kit" → `gothic_cathedral_kit`), with the name as `name:` and a generated `summary`. Saving again under the same name rewrites only `entries`, keeping the player's other frontmatter and notes. `load` finds a kit by path, file name, title or that stem, and only packs of kind `kit`. An entry whose prefab is no longer in the library is skipped with a warning naming the nearest prefabs, rather than refusing the whole kit, since the rest are still valid picks. The light frontmatter reader takes one line per key, so `entries` has its own reader: flow maps as above, block maps (`- prefab: a` with indented `label:` lines) and bare prefab names, with quoted values for commas.
 
 ### 3. Candidates in a reply (MCP and wire)
 
@@ -180,4 +184,6 @@ All settled with the user on 2026-11-17.
 
 | Piece | Silo | Status |
 |---|---|---|
+| 1. Component set | K (K1) | Record and `component_set` tool built: `src/library/component-set.ts`, `src/server/tools/components.ts`, `Session.componentSet`. Tests: `test/unit/library/component-set.test.ts`, `test/unit/server/components.test.ts`. Label resolution in `stamp` and the reminder line: K2, K3. |
+| 2. Kits | K (K1) | Built. `save_as`, `load`, `knowledge_list({kind: "kit"})`; `src/library/knowledge.ts` (`findKit`, `readKit`, `writeKit`, `parseKitEntries`). |
 | 7. Save format | F (F1) | Built. `prefab_save({format})` with `schem`, `litematic`, `nbt`, `bp` in `src/library/prefabs.ts` (`savePrefab`, `PREFAB_FORMATS`), setting `library.prefabFormat` (group Library, live) beside it. Tests: `test/unit/library/prefab-formats.test.ts` (each format read back by stamp block for block, block entity kept except `.bp`, thumbnail, overwrite across formats, setting parse), `test/unit/server/library.test.ts` (format argument and setting default through the tools). |

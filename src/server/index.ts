@@ -208,6 +208,7 @@ function uiLibraryHost(session: Session): UiLibraryHost {
       return prefabThumbnail(p, { cacheDir: defaultCacheDir() });
     },
     registry: () => loaded?.registry,
+    paletteIndex: () => loaded?.palette,
   };
 }
 

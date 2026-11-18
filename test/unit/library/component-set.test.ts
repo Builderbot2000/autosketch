@@ -40,6 +40,20 @@ describe("component set record (17, piece 1)", () => {
     expect(s.reminderLine()).toBe("");
   });
 
+  it("maps a stamp reference through set labels only, and appends the reminder only while non-empty", () => {
+    const s = new ComponentSet();
+    expect(s.stampRef("corner tower")).toBe("corner tower");
+    expect(s.remind("ok")).toBe("ok");
+    s.add([{ prefab: "gothic_tower_a", label: "corner tower" }, { prefab: "gate_small", label: "B2" }, { prefab: "buttress_a" }]);
+    expect(s.stampRef(" Corner Tower ")).toBe("gothic_tower_a");
+    expect(s.stampRef("B2")).toBe("gate_small");
+    expect(s.stampRef("buttress_a")).toBe("buttress_a");
+    expect(s.stampRef("park_bench")).toBe("park_bench");
+    expect(s.remind("ok\nmore")).toBe("ok\nmore\nset: corner tower = gothic_tower_a, B2 = gate_small, buttress_a");
+    s.clear();
+    expect(s.remind("ok")).toBe("ok");
+  });
+
   it("suggests the nearest names for typos", () => {
     const names = ["gothic_tower_a", "gothic_tower_b", "gate_small", "axiom/castle/keep", "park_bench"];
     expect(nearestNames("gothic_towr_a", names)).toEqual(["gothic_tower_a", "gothic_tower_b"]);

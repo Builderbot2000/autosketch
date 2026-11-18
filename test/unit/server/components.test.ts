@@ -83,4 +83,70 @@ describe("component_set (17, pieces 1 and 2)", () => {
     expect((await two.call("component_set", { load: "nope" })).text).toMatch(/^no kit "nope" \(have: Gothic cathedral kit\)/);
     expect((await two.call("component_set", { load: "x", clear: true })).isError).toBe(true);
   });
+
+  it("stamp resolves a set label before library names and sheet cells (17, piece 1)", async () => {
+    const { call } = await connect();
+    await call("doc_new", { name: "parts" });
+    await call("set_blocks", { blocks: [{ pos: [0, 0, 0], block: "oak_planks" }, { pos: [2, 0, 0], block: "granite" }, { pos: [2, 1, 0], block: "granite" }] });
+    expect((await call("prefab_save", { name: "plank_post", box: { min: [0, 0, 0], max: [0, 0, 0] }, tags: ["k2"] })).isError).toBeFalsy();
+    expect((await call("prefab_save", { name: "stone_post", box: { min: [2, 0, 0], max: [2, 1, 0] }, tags: ["k2"] })).isError).toBeFalsy();
+    const sheet = await call("prefab_sheet", { tags: ["k2"] });
+    expect(sheet.text).toContain("A1 plank_post 1×1×1 · B1 stone_post 1×1×2");
+
+    await call("doc_new", { name: "site" });
+    // Labels win over a library name ("plank_post") and over a sheet cell ("A1").
+    await call("component_set", { add: [{ prefab: "stone_post", label: "plank_post" }, { prefab: "gate_small", label: "unused" }] });
+    const byName = await call("stamp", { prefab: "plank_post", at: [0, 0, 0] });
+    expect(byName.text).toMatch(/prefab stone_post at \(0,0,0\)/);
+    await call("component_set", { clear: true, add: [{ prefab: "stone_post", label: "A1" }] });
+    const byCell = await call("stamp", { prefab: "A1", at: [2, 0, 0] });
+    expect(byCell.text).toMatch(/prefab stone_post at \(2,0,0\)/);
+    // Not a constraint: names and cells outside the set still stamp.
+    const cell = await call("stamp", { prefab: "B1", at: [4, 0, 0], as: "c" });
+    expect(cell.text).toMatch(/prefab stone_post at \(4,0,0\)/);
+    await call("component_set", { clear: true, add: [{ prefab: "stone_post", label: "Corner Tower" }] });
+    const byLabel = await call("stamp", { prefab: "corner tower", at: [6, 0, 0] });
+    expect(byLabel.text).toMatch(/prefab stone_post at \(6,0,0\)/);
+    const plain = await call("stamp", { prefab: "plank_post", at: [8, 0, 0] });
+    expect(plain.text).toMatch(/prefab plank_post at \(8,0,0\)/);
+    const at = async (x: number, y: number) => (await call("query_block", { pos: [x, y, 0] })).text;
+    expect([await at(0, 0), await at(0, 1), await at(2, 1), await at(4, 1), await at(6, 1), await at(8, 0), await at(8, 1)]).toEqual([
+      "(0,0,0) granite · in: stone_post",
+      "(0,1,0) granite · in: stone_post",
+      "(2,1,0) granite · in: stone_post_2",
+      "(4,1,0) granite · in: c",
+      "(6,1,0) granite · in: stone_post_3",
+      "(8,0,0) oak_planks · in: plank_post",
+      "(8,1,0) air",
+    ]);
+  });
+
+  it("appends the reminder line to prefab_search, prefab_sheet and stamp only, and only while the set has entries", async () => {
+    const { call } = await connect();
+    await call("doc_new", { name: "parts2" });
+    await call("set_blocks", { blocks: [{ pos: [0, 0, 0], block: "granite" }] });
+    await call("prefab_save", { name: "pebble", box: { min: [0, 0, 0], max: [0, 0, 0] }, tags: ["k2r"] });
+    const named = ["prefab_search", "prefab_sheet", "stamp"] as const;
+    const run = async () => ({
+      prefab_search: (await call("prefab_search", { query: "pebble" })).text,
+      prefab_sheet: (await call("prefab_sheet", { tags: ["k2r"] })).text,
+      stamp: (await call("stamp", { prefab: "pebble", at: [0, 2, 0], as: "p" })).text,
+      miss: (await call("prefab_search", { query: "zzzz" })).text,
+      others: [(await call("doc_info")).text, (await call("fill", { box: { min: [3, 0, 0], max: [3, 0, 0] }, pattern: "dirt" })).text, (await call("knowledge_list")).text],
+    });
+    const empty = await run();
+    for (const k of named) expect(empty[k]).not.toMatch(/set: /);
+    expect(empty.miss).toBe("No prefabs match. Try fewer words or tags, or prefab_sheet to browse.");
+
+    await call("component_set", { add: [{ prefab: "gothic_tower_a", label: "corner tower" }, { prefab: "gate_small" }] });
+    const line = "set: corner tower = gothic_tower_a, gate_small";
+    const full = await run();
+    for (const k of named) expect(full[k].endsWith(`\n${line}`)).toBe(true);
+    expect(full.miss).toBe(`No prefabs match. Try fewer words or tags, or prefab_sheet to browse.\n${line}`);
+    for (const t of full.others) expect(t).not.toContain(line);
+
+    await call("component_set", { clear: true });
+    const cleared = await run();
+    for (const k of named) expect(cleared[k]).not.toMatch(/set: /);
+  });
 });

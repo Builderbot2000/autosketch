@@ -12,7 +12,10 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Checkbox;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -25,6 +28,12 @@ import org.jetbrains.annotations.Nullable;
  * nothing: the list, its cells and the request it answers come from the MCP, and the picks go back as
  * they were ticked. A list already answered comes back as the error {@code answered}, which the
  * screen shows in place of the list.
+ *
+ * <p><b>Preview here</b> sends {@code candidates.ghost} for the selected candidate at the block under
+ * the crosshair and closes the screen so the player can look around; the MCP answers with the
+ * candidate ghost ({@code ui.ghost} {@code candidate}), drawn by the ghost code like any other. The
+ * screen's ticks, labels, note and selection are kept for the list until it is submitted, so
+ * reopening it from the chat line after a preview carries on where the player left off.
  */
 public final class CandidatesScreen extends PaneScreen {
     private final String id;
@@ -36,6 +45,7 @@ public final class CandidatesScreen extends PaneScreen {
     private @Nullable Component message;
     private int messageColour = TEXT;
     private boolean submitting;
+    private boolean submitted;
     private int loads;
     private final List<String> detailLines = new ArrayList<>();
 
@@ -43,10 +53,21 @@ public final class CandidatesScreen extends PaneScreen {
     private final ThumbnailGrid grid = new ThumbnailGrid(() -> closed);
     private final OrbitPreview preview = new OrbitPreview(this);
 
+    /** What the player had chosen on the last list shown, until it is submitted or answered. Client UI state only. */
+    private record Draft(String id, @Nullable String selected, Map<String, Boolean> ticked, Map<String, String> fields) {}
+
+    private static @Nullable Draft draft;
+
     /** Opens the list {@code id} (a candidates id from a reply line's action). */
     public CandidatesScreen(@Nullable Screen parent, String id) {
         super(tr("candidates.title"), parent);
         this.id = id;
+        Draft d = draft;
+        if (d != null && d.id.equals(id)) {
+            selected = d.selected;
+            ticked.putAll(d.ticked);
+            d.fields.forEach(this::setFieldValue);
+        }
         load();
     }
 
@@ -119,13 +140,53 @@ public final class CandidatesScreen extends PaneScreen {
                 list = r.result();
                 loadError = null;
                 answered = false;
+                // A selection kept from before a preview: load its preview again.
+                JsonObject kept = entry(selected);
+                selected = null;
+                if (kept != null) {
+                    select(kept);
+                    return;
+                }
             } else {
                 list = null;
                 answered = "answered".equals(r.error());
                 loadError = answered ? tr("candidates.answered") : Component.literal(r.message());
+                if (answered) draft = null;
             }
             refresh();
         });
+    }
+
+    /**
+     * Preview here: the selected candidate as the candidate ghost at the block under the crosshair,
+     * in the player's dimension; the screen closes at once so the player can look at it. The answer
+     * (or a refusal) shows on the action bar.
+     */
+    private void previewHere(JsonObject e) {
+        BlockPos at = crosshairBlock();
+        if (at == null || minecraft == null || minecraft.player == null) {
+            message = tr("candidates.no_target");
+            messageColour = WARN;
+            refresh();
+            return;
+        }
+        JsonArray pos = new JsonArray();
+        pos.add(at.getX());
+        pos.add(at.getY());
+        pos.add(at.getZ());
+        String what = s(e, "cell") + " " + s(e, "prefab");
+        var mc = minecraft;
+        Requests.send("candidates.ghost", Requests.args("id", id, "prefab", s(e, "prefab"), "dimension", mc.player.level().dimension().location().toString(), "at", pos), r -> {
+            if (mc.player == null) return;
+            mc.player.displayClientMessage(r.ok() ? tr("candidates.previewing", what) : Component.literal("Autosketch: " + r.message()), true);
+        });
+        mc.setScreen(null);
+    }
+
+    /** The block the player is looking at, or null when the crosshair is on no block. */
+    private @Nullable BlockPos crosshairBlock() {
+        HitResult hit = minecraft == null ? null : minecraft.hitResult;
+        return hit instanceof BlockHitResult b && hit.getType() == HitResult.Type.BLOCK ? b.getBlockPos() : null;
     }
 
     private void select(JsonObject e) {
@@ -160,6 +221,8 @@ public final class CandidatesScreen extends PaneScreen {
         Requests.send("candidates.submit", args, r -> {
             submitting = false;
             if (r.ok()) {
+                submitted = true;
+                draft = null;
                 JsonElement req = r.result() == null ? null : r.result().get("request");
                 if (minecraft != null && minecraft.player != null)
                     minecraft.player.displayClientMessage(tr("candidates.sent", req == null || req.isJsonNull() ? "?" : req.getAsString()), true);
@@ -168,6 +231,7 @@ public final class CandidatesScreen extends PaneScreen {
             }
             if ("answered".equals(r.error())) {
                 answered = true;
+                draft = null;
                 list = null;
                 loadError = tr("candidates.answered");
             } else {
@@ -275,6 +339,8 @@ public final class CandidatesScreen extends PaneScreen {
         });
         put(p, label, 0, y + 1);
         y += 22;
+        put(p, Button.builder(tr("candidates.preview"), b -> previewHere(e)).size(Math.min(100, p.w - 6), 20).build(), 0, y);
+        y += 22;
         y = preview.layout(p, y);
         JsonArray size = e.has("size") && e.get("size").isJsonArray() ? e.getAsJsonArray("size") : null;
         if (size != null && size.size() == 3) y = row(p, y, "size", size.get(0).getAsString() + "×" + size.get(1).getAsString() + "×" + size.get(2).getAsString());
@@ -322,6 +388,16 @@ public final class CandidatesScreen extends PaneScreen {
     @Override
     public void removed() {
         closed = true;
+        if (list != null && !answered && !submitted) {
+            Map<String, String> fields = new HashMap<>();
+            for (JsonObject e : entries()) {
+                String v = fieldValue(labelKey(s(e, "cell")), "");
+                if (!v.isEmpty()) fields.put(labelKey(s(e, "cell")), v);
+            }
+            String note = fieldValue("note", "");
+            if (!note.isEmpty()) fields.put("note", note);
+            draft = new Draft(id, selected, Map.copyOf(ticked), fields);
+        }
         preview.close();
         grid.release();
     }

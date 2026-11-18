@@ -85,6 +85,28 @@ describe("fake MCP", () => {
     expect(() => h.playerClick(KEV, { type: "chat", request: 12, player: KEV.uuid, kind: "reply", lines: ["plain"] })).toThrow();
   });
 
+  it("a reply with args answers only the requests whose args match (a candidate ghost at two positions)", async () => {
+    const h = await host();
+    const ghostAt = (at: number[]) => ({ type: "ui.ghost", players: [KEV.uuid], ghost: "candidate", dimension: "minecraft:overworld", origin: at, tint: "#ffffff", full: true, palette: ["minecraft:stone"], sections: [{ section: [0, 0, 0], fill: "minecraft:stone" }] });
+    const ok = { type: "ui.result", ok: true, result: { ghost: "candidate" } };
+    const mcp = await FakeMcp.connect({
+      pairing: pairingPath(h.instanceDir),
+      script: {
+        replies: [
+          { on: "ui.request", kind: "candidates.ghost", args: { at: [1, 64, 2] }, send: [ok, ghostAt([1, 64, 2])] },
+          { on: "ui.request", kind: "candidates.ghost", args: { at: [5, 70, 9] }, send: [ok, ghostAt([5, 70, 9])] },
+        ],
+      },
+    });
+    cleanup.push(() => mcp.close());
+    const args = (at: number[]) => ({ id: "c1", prefab: "gothic_tower_a", dimension: "minecraft:overworld", at });
+    expect(await h.playerUiRequest(KEV, { kind: "candidates.ghost", args: args([5, 70, 9]) })).toMatchObject({ ok: true, result: { ghost: "candidate" } });
+    await h.waitFor(() => h.ui.some((m) => m.type === "ui.ghost"));
+    expect(h.ui.filter((m): m is UiGhost => m.type === "ui.ghost").map((g) => g.origin)).toEqual([[5, 70, 9]]);
+    expect(await h.playerUiRequest(KEV, { kind: "candidates.ghost", args: args([0, 0, 0]) })).toMatchObject({ ok: false, error: "bad_request" });
+    expect(h.ui.filter((m) => m.type === "ui.ghost")).toHaveLength(1);
+  });
+
   it("library editors and save flash (17, pieces 6 and 8): writes answered from the table, a save flash sent like any flash", async () => {
     const h = await host();
     const flash = { job: "save", colour: "#ffffff", dimension: "minecraft:overworld", boxes: [{ min: [1, 64, 2], max: [7, 80, 8] }] as { min: [number, number, number]; max: [number, number, number] }[] };

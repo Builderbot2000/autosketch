@@ -13,7 +13,8 @@ import org.jetbrains.annotations.Nullable;
 /**
  * Silo S's entry points (16, *Autosketch menu and key bindings*): attaches the menu key ({@code Home})
  * and the unbound open-settings, open-library and open-replay keys to their screens, and holds the
- * menu's two actions that aren't screens of their own: Ghost here ({@code ghost.anchor}) and Replay,
+ * menu's actions that aren't screens of their own: Ghost here ({@code ghost.anchor}), Clear candidate
+ * ghost ({@code candidates.ghost.clear}, 17 piece 4) and Replay,
  * which opens the log list ({@link LogListScreen}) unless the replay feature installs its own opener
  * ({@link #setReplayOpener}). {@link AutosketchKeys} only runs these while {@link LinkState} is
  * connected; otherwise a press shows the lock's line.
@@ -72,6 +73,19 @@ public final class AutosketchScreens {
             Component line = r.ok() ? PaneScreen.tr("menu.ghost_placed", r.result().has("ghost") ? r.result().get("ghost").getAsString() : "")
                     : Component.literal("Autosketch: " + r.message());
             mc.player.displayClientMessage(line, true);
+        });
+    }
+
+    /**
+     * Clear candidate ghost (17, piece 4): removes the ghost <i>Preview here</i> showed. The MCP
+     * answers {@code {}} whether or not one is shown, and sends the {@code ui.ghost.clear} itself.
+     */
+    static void clearCandidateGhost() {
+        Minecraft mc = Minecraft.getInstance();
+        mc.setScreen(null);
+        Requests.send("candidates.ghost.clear", new com.google.gson.JsonObject(), r -> {
+            if (mc.player == null) return;
+            mc.player.displayClientMessage(r.ok() ? PaneScreen.tr("menu.candidate_cleared") : Component.literal("Autosketch: " + r.message()), true);
         });
     }
 }

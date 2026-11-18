@@ -5,7 +5,8 @@ import { formatVec, type Box, type Vec3 } from "../../core/region.js";
 import { blockIndex, snapshotOf, type Snapshot } from "../../formats/snapshot.js";
 import type { Library } from "../../library/index.js";
 import { formatKnowledgeList, listKnowledge, readKnowledge } from "../../library/knowledge.js";
-import { loadPrefab, savePrefab, type Prefab } from "../../library/prefabs.js";
+import { LIBRARY_PREFAB_FORMAT, loadPrefab, PREFAB_FORMATS, savePrefab, type Prefab, type PrefabFormat } from "../../library/prefabs.js";
+import { librarySettings } from "../../library/roots.js";
 import { formatProcedureList, listProcedures } from "../../library/procedures.js";
 import { stampPrefab, type StampAt } from "../../ops/stamp.js";
 import type { InstanceContext } from "../context.js";
@@ -17,6 +18,15 @@ import { boxSchema, editWith, env, image, regionOf, selSchema, text, vec3, type 
 
 
 const footprintSchema = z.tuple([z.number().int().min(1), z.number().int().min(1)]).describe("Largest footprint [x, z]; either orientation fits");
+
+/** `library.prefabFormat` as config.toml and the launch values give it now; an invalid launch value falls back to schem. */
+function defaultPrefabFormat(): PrefabFormat {
+  try {
+    return librarySettings().get(LIBRARY_PREFAB_FORMAT);
+  } catch {
+    return "schem";
+  }
+}
 
 async function describePrefab(lib: Library, p: Prefab): Promise<string> {
   const s = await lib.size(p).catch(() => undefined);
@@ -135,7 +145,8 @@ export function registerLibraryTools({ tool, resource, session }: ToolDeps): voi
     {
       title: "Save prefab",
       description:
-        "Saves part of the open document (sel/box, or a component) to the user library as prefabs/<name>/prefab.schem + prefab.json, so it can be stamped later. " +
+        "Saves part of the open document (sel/box, or a component) to the user library as prefabs/<name>/prefab.<format> + prefab.json, so it can be stamped later. " +
+        "format: schem (default, or the library.prefabFormat setting), litematic, nbt or bp (.bp leaves out block entities). " +
         "Anchors are prefab-local (default: the component's anchors). Without roles, the most-used families become roles named after them. Text.",
       inputSchema: {
         name: z.string().describe("Prefab name (letters, digits, _ or -)"),
@@ -147,11 +158,13 @@ export function registerLibraryTools({ tool, resource, session }: ToolDeps): voi
         anchors: z.record(z.string(), vec3).optional().describe('Prefab-local points, e.g. {"base":[3,0,3]}'),
         roles: z.record(z.string(), z.array(z.string())).optional().describe('Role → block ids, e.g. {"log":["oak_log"]}'),
         overwrite: z.boolean().optional(),
+        format: z.enum(PREFAB_FORMATS).optional().describe("File format (default schem, or library.prefabFormat)"),
       },
       readOnly: false,
     },
     async (c, a) => {
       const doc = session.require();
+      const format: PrefabFormat = a.format ?? defaultPrefabFormat();
       let snap: Snapshot;
       let anchors: Record<string, Vec3> | undefined = a.anchors as Record<string, Vec3> | undefined;
       if (a.component) {
@@ -178,6 +191,8 @@ export function registerLibraryTools({ tool, resource, session }: ToolDeps): voi
           ...(a.roles ? { roles: a.roles } : {}),
           front: doc.meta.front,
           ...(a.overwrite ? { overwrite: true } : {}),
+          format,
+          ...(format === "bp" && libraryFor(c, session).opts.thumbnail ? { thumbnail: libraryFor(c, session).opts.thumbnail } : {}),
         },
         c.palette,
       );
@@ -185,9 +200,10 @@ export function registerLibraryTools({ tool, resource, session }: ToolDeps): voi
       const thumb = await lib.thumbnail(r.prefab).catch(() => undefined);
       return text(
         [
-          `${r.replaced ? "replaced" : "saved"} prefab "${a.name}" in ${r.dir}`,
+          `${r.replaced ? "replaced" : "saved"} prefab "${a.name}" in ${r.dir} as prefab.${format}`,
           await describePrefab(lib, r.prefab),
           thumb ? "thumbnail written" : "no thumbnail (renderer unavailable)",
+          ...r.warnings.map((w) => `warning: ${w}`),
           `Stamp it with stamp({prefab:"${a.name}", at:[x,y,z]}).`,
         ].join("\n"),
       );

@@ -1,16 +1,19 @@
 import { createHash } from "node:crypto";
-import { mkdir, open, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
 import nbt from "prismarine-nbt";
 import type { Registry } from "../assets/registry.js";
 import { stateId } from "../core/blockstate.js";
+import { parseOneOf, setting } from "../core/settings.js";
 import type { Vec3 } from "../core/region.js";
 import type { Facing } from "../document/document.js";
-import { BP_MAGIC, splitBlueprint } from "../formats/axiom.js";
+import { BP_MAGIC, encodeBlueprint, splitBlueprint } from "../formats/axiom.js";
 import { importFile, type ImportUpgrade } from "../formats/index.js";
+import { encodeLitematic } from "../formats/litematic.js";
 import { text as nbtText } from "../formats/nbt.js";
 import { snapshotOf, type Snapshot } from "../formats/snapshot.js";
 import { encodeSponge } from "../formats/sponge.js";
+import { encodeStructure } from "../formats/structure.js";
 import type { PaletteIndex } from "../palette/index.js";
 import { walk, words } from "./files.js";
 import { checkEntryName, isHidden, writableRoot, type LibraryRoot } from "./roots.js";
@@ -22,7 +25,18 @@ import { checkEntryName, isHidden, writableRoot, type LibraryRoot } from "./root
  * own names, tags and thumbnails.
  */
 
-export const PREFAB_EXTENSIONS = [".schem", ".nbt", ".bp", ".autosketch"];
+export const PREFAB_EXTENSIONS = [".schem", ".litematic", ".nbt", ".bp", ".autosketch"];
+
+/** Formats `prefab_save` writes (17, piece 7). Every one is also read back by stamp and the library screen. */
+export const PREFAB_FORMATS = ["schem", "litematic", "nbt", "bp"] as const;
+export type PrefabFormat = (typeof PREFAB_FORMATS)[number];
+
+// Read through `librarySettings()` on each save, like the other library.* settings: "live".
+export const LIBRARY_PREFAB_FORMAT = setting<PrefabFormat>("library.prefabFormat", "schem", "schem, litematic, nbt or bp", parseOneOf(PREFAB_FORMATS), {
+  group: "Library",
+  summary: "File format prefab_save writes when no format is given. .bp leaves out block entities.",
+  applies: "live",
+});
 
 export interface PrefabMeta {
   name: string;
@@ -287,15 +301,31 @@ export interface SavePrefabOptions {
   roles?: Record<string, string[]>;
   front?: Facing;
   overwrite?: boolean;
+  /** File format (default `schem`); the folder holds `prefab.<ext>` (17, piece 7). */
+  format?: PrefabFormat;
+  /** Renders the thumbnail a `.bp` embeds, so Axiom's browser shows it (a blank one otherwise). */
+  thumbnail?: ThumbnailRenderer;
+}
+
+export interface SavedPrefab {
+  prefab: Prefab;
+  dir: string;
+  replaced: boolean;
+  /** Lossy-format notes, as `export` gives them (08): `.bp` leaves out block entities and entities. */
+  warnings: string[];
 }
 
 /**
- * Writes `prefabs/<name>/prefab.schem` (Sponge v3) and `prefab.json` into the first writable root.
- * Without explicit roles, each of the most common families becomes a role named after it, so any
- * saved prefab can be recoloured by family name.
+ * Writes `prefabs/<name>/prefab.<ext>` (Sponge v3 `.schem` by default, or `.litematic`, structure
+ * `.nbt` or Axiom `.bp`) and `prefab.json` into the first writable root. A folder holds one
+ * schematic file: overwriting in another format removes the old one. Without explicit roles, each
+ * of the most common families becomes a role named after it, so any saved prefab can be recoloured
+ * by family name.
  */
-export async function savePrefab(roots: readonly LibraryRoot[], snapshot: Snapshot, opts: SavePrefabOptions, index?: PaletteIndex): Promise<{ prefab: Prefab; dir: string; replaced: boolean }> {
+export async function savePrefab(roots: readonly LibraryRoot[], snapshot: Snapshot, opts: SavePrefabOptions, index?: PaletteIndex): Promise<SavedPrefab> {
   checkEntryName("prefab", opts.name);
+  const format = opts.format ?? "schem";
+  if (!PREFAB_FORMATS.includes(format)) throw new Error(`format must be one of ${PREFAB_FORMATS.join(", ")} (got "${String(format)}")`);
   const root = writableRoot(roots);
   const dir = join(root.path, "prefabs", opts.name);
   let replaced = false;
@@ -319,12 +349,43 @@ export async function savePrefab(roots: readonly LibraryRoot[], snapshot: Snapsh
     requires,
     ...(opts.notes ? { notes: opts.notes } : {}),
   };
+  const warnings: string[] = [];
+  const named = { ...snapshot, name: opts.name };
+  let buf: Buffer;
+  switch (format) {
+    case "schem":
+      buf = encodeSponge(named);
+      break;
+    case "litematic":
+      buf = encodeLitematic(named);
+      break;
+    case "nbt":
+      buf = encodeStructure(named);
+      break;
+    case "bp": {
+      if (snapshot.blockEntities.length || snapshot.entities.length)
+        warnings.push(
+          `left out ${[snapshot.blockEntities.length ? `${snapshot.blockEntities.length} block entities (chest contents, sign text…)` : "", snapshot.entities.length ? `${snapshot.entities.length} entities` : ""].filter(Boolean).join(" and ")}: their .bp layout isn't verified yet. Save with format "schem" to keep them.`,
+        );
+      let thumbnail: Buffer | undefined;
+      if (opts.thumbnail)
+        try {
+          thumbnail = await opts.thumbnail(named);
+        } catch (e) {
+          warnings.push(`thumbnail failed (${(e as Error).message}); embedded a blank one`);
+        }
+      buf = encodeBlueprint(named, { ...(thumbnail ? { thumbnail } : {}), ...(meta.tags.length ? { tags: meta.tags } : {}) });
+      break;
+    }
+  }
   await mkdir(dir, { recursive: true });
-  const file = join(dir, "prefab.schem");
-  await writeFile(`${file}.tmp`, encodeSponge({ ...snapshot, name: opts.name }));
+  const file = join(dir, `prefab.${format}`);
+  await writeFile(`${file}.tmp`, buf);
   await rename(`${file}.tmp`, file);
+  // One schematic file per folder: an overwrite in another format drops the old file.
+  for (const f of await readdir(dir)) if (f !== basename(file) && f.startsWith("prefab.") && isPrefabFile(f)) await unlink(join(dir, f)).catch(() => undefined);
   await writeFile(join(dir, "prefab.json"), JSON.stringify(meta, null, 2) + "\n");
-  return { prefab: { id: opts.name, root, file, dir, meta }, dir, replaced };
+  return { prefab: { id: opts.name, root, file, dir, meta }, dir, replaced, warnings };
 }
 
 /** Up to 8 roles, one per most-used family, named after the family's base block. */

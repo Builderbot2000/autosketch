@@ -14,6 +14,7 @@ The lead's log, one line per step (*How to run this set* in the README). Read th
 | V2 | rc-v2 | running | | |
 | Q2 | rc-q2 | merged | aff4b6b | placed like stamp (rotate, base anchor on `at`), untinted #ffffff, overlay players, resent on resync. Rotation copied from stamp's prefabFrame into ui/candidates.ts (ui/ can't import ops/): Q3 dedupes into core/ if the layer rules allow |
 | K3 | rc-k3 | merged | 8af5746 | reminder via InGameRequestsOptions.componentSet on build/ask/plan and scan events (scan kept: spec says each request). Q3 must apply it to the picks event too. Silo K complete |
-| E1 | rc-e1 | running | | |
+| E1 | rc-e1 | merged | 1242463 | stale hash = EntryChangedError → conflict; read-only checked before hash; palette edits weights/remove/drop/rename only; no instance → bad_request; LibraryHost.paletteIndex wired in server/index.ts. Lead fixed W's piece 6 row |
 | F2 | rc-f2 | merged | f7107a8 | Session.saveFlash hook wired to UiFeed.saveFlash; linked check in the feed (anchored-only docs get none); not a session event, so never in replay. Silo F complete |
 | Q3 | rc-q3 | running | | |
+| E2 | rc-e2 | running | | |

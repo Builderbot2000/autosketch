@@ -133,6 +133,7 @@ async function main(): Promise<void> {
       host: session,
       palettes: () => book,
       autoLink,
+      componentSet: session.componentSet,
       log,
     });
   } catch (e) {

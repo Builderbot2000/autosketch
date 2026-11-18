@@ -74,6 +74,7 @@ async function setup(opts: { promptPlayers?: string[]; singleplayer?: boolean; a
     notify: (content, meta) => server.server.notification({ method: CHANNEL_METHOD, params: { content, meta } } as never),
     listening: () => server.server.getClientCapabilities() !== undefined,
     touch: () => session.touch(),
+    componentSet: session.componentSet,
   });
   session.inGame = inGame;
   session.callHooks.push(inGame.modeRule);
@@ -152,6 +153,25 @@ describe("delivery (W11)", () => {
     expect(d[0]).toBeCloseTo(0, 6);
     expect(d[1]).toBeCloseTo(-16 * Math.sin(Math.PI / 6), 6);
     expect(d[2]).toBeCloseTo(-16 * Math.cos(Math.PI / 6), 6);
+  });
+
+  it("ends the event text with the component set's reminder line only while the set has entries (17, piece 1)", async () => {
+    const { session, host, events } = await setup();
+    await host.playerAsk(HOST, "a tower here", {});
+    await host.waitFor(() => events.length === 1);
+    expect(events[0]!.content).not.toContain("set:");
+    expect(events[0]!.content).not.toContain("\n");
+    session.componentSet.add([{ prefab: "gothic_tower_a", label: "corner tower" }, { prefab: "gate_small" }]);
+    await host.playerAsk(HOST, "another one", {});
+    await host.waitFor(() => events.length === 2);
+    const lines = events[1]!.content.split("\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatch(/^In-game build request from Dev: "another one"\..*pass done: true when finished\.$/);
+    expect(lines[1]).toBe("set: corner tower = gothic_tower_a, gate_small");
+    session.componentSet.clear();
+    await host.playerAsk(HOST, "and a third", {});
+    await host.waitFor(() => events.length === 3);
+    expect(events[2]!.content).not.toContain("set:");
   });
 
   it("marks a target in the context volume read-only, reports one outside both volumes without saving it, and drops stale handles", async () => {

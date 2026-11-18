@@ -79,6 +79,7 @@ async function setup(hostOpts: FakeHostOptions = {}) {
     notify: (content, meta) => server.server.notification({ method: CHANNEL_METHOD, params: { content, meta } } as never),
     listening: () => server.server.getClientCapabilities() !== undefined,
     host: session,
+    componentSet: session.componentSet,
     log: () => {},
   });
   session.inGame = inGame;
@@ -167,6 +168,16 @@ describe("the probe (13, B4)", () => {
     await scan(host, events);
     expect(events[0]!.content).toContain("No probe: the mod sent no scan grant");
     expect(session.doc).toBeUndefined();
+  });
+
+  it("ends a scan request's event text with the component set's reminder line while the set has entries (17, piece 1)", async () => {
+    const { host, events, session } = await setup({ features: ["modes", "volumes.set"] });
+    session.componentSet.add([{ prefab: "gate_small", label: "gatehouse" }]);
+    await scan(host, events);
+    const lines = events[0]!.content.split("\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatch(/^In-game scan request from Dev/);
+    expect(lines[1]).toBe("set: gatehouse = gate_small");
   });
 });
 

@@ -108,7 +108,7 @@ public final class ClientTestDriver {
             if (suite != null) suite.frames++;
         });
         NeoForge.EVENT_BUS.addListener((ClientChatReceivedEvent.System e) -> {
-            if (suite != null) suite.message(e.getMessage().getString(), e.isOverlay());
+            if (suite != null) suite.message(e.getMessage(), e.isOverlay());
         });
     }
 

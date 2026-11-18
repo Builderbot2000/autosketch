@@ -45,7 +45,7 @@ public final class PromptModule {
         });
         e.messages().register("chat", (m, x) -> {
             var server = Platform.get().currentServer();
-            if (server != null) InGamePrompts.onChat(m.header(), server);
+            if (server != null) InGamePrompts.onChat(dev.autosketch.mod.protocol.Messages.Chat.decode(m.frame()), server);
         });
         e.commands(PromptModule::commands);
         e.wandModes(FOCUS_MODE);

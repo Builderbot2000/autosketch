@@ -32,6 +32,7 @@ public final class AutosketchScreens {
         AutosketchKeys.on(AutosketchKeys.OPEN_SETTINGS, () -> open(new SettingsScreen(null)));
         AutosketchKeys.on(AutosketchKeys.OPEN_LIBRARY, () -> open(new LibraryScreen(null)));
         AutosketchKeys.on(AutosketchKeys.OPEN_REPLAY, () -> openReplay(null));
+        ReplyActions.attach(); // 17, piece 3: a reply's clickable line opens the candidates screen
         LinkState.addListener(s -> {
             if (s != LinkState.State.CONNECTED) Requests.reset();
         });

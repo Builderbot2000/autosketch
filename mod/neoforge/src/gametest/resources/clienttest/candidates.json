@@ -1,0 +1,96 @@
+{
+ "hello": {
+  "features": [
+   "prompt.close",
+   "ui"
+  ],
+  "modes": [
+   "build",
+   "ask",
+   "plan",
+   "scan"
+  ]
+ },
+ "results": {
+  "library.thumbnail": {
+   "ok": true,
+   "result": {
+    "format": "png",
+    "width": 32,
+    "height": 32
+   },
+   "bodyBase64": "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAATElEQVR4nO3OMREAIAxD0YpgRhiakIgIHBQH7cDlsvwh47+8mOtktbtHud8+AAAAYAeoD7oeAAAAfoD6oOsBAADgB6gPuh4AAAB2wAMTQsSIm20JmAAAAABJRU5ErkJggg=="
+  },
+  "library.preview": {
+   "ok": true,
+   "result": {
+    "size": [
+     4,
+     3,
+     4
+    ]
+   },
+   "bodyBase64": "BBRtaW5lY3JhZnQ6Z29sZF9ibG9jaw9taW5lY3JhZnQ6c3RvbmUNbWluZWNyYWZ0OmFpchdtaW5lY3JhZnQ6ZW1lcmFsZF9ibG9jawAAAAAAAAAAAAAAAAAAAAABAQEBAQICAQECAgEBAQEBAgICAgIDAgICAgICAgICAgA="
+  },
+  "candidates.open": {
+   "ok": true,
+   "result": {
+    "id": "c1",
+    "request": 12,
+    "question": "show me a tower",
+    "entries": [
+     {
+      "cell": "B2",
+      "prefab": "gothic_tower_a",
+      "root": "user",
+      "size": [
+       7,
+       24,
+       7
+      ],
+      "tags": [
+       "gothic",
+       "tower"
+      ],
+      "notes": "corner piece, door on the south face"
+     },
+     {
+      "cell": "C2",
+      "prefab": "round_keep_tower",
+      "root": "user",
+      "size": [
+       9,
+       18,
+       9
+      ],
+      "tags": [
+       "tower",
+       "keep"
+      ],
+      "notes": null
+     },
+     {
+      "cell": "A3",
+      "prefab": "gate_small",
+      "root": "starter",
+      "size": [
+       11,
+       9,
+       5
+      ],
+      "tags": [
+       "gate"
+      ],
+      "notes": null
+     }
+    ]
+   }
+  },
+  "candidates.submit": {
+   "ok": true,
+   "result": {
+    "request": 12
+   }
+  }
+ }
+}

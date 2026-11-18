@@ -59,11 +59,15 @@ afterEach(async () => {
 type Content = { type: string; text?: string }[];
 const textOf = (r: { content: unknown }) => (r.content as Content).filter((c) => c.type === "text").map((c) => c.text).join("\n");
 
-async function setup(opts: { features?: string[] } = {}) {
+/** Channel events the agent received: text and meta. */
+type Sent = { content: string; meta: Record<string, string> };
+
+async function setup(opts: { features?: string[]; listening?: () => boolean } = {}) {
   host = await FakeHost.start({ volumes: { work: WORK }, ...(opts.features ? { features: opts.features } : {}) });
   const ctx = await libraryContext(host.instanceDir);
   const workspace = await tempDir("autosketch-cand-ws-");
   const session = new Session(workspace);
+  const events: Sent[] = [];
   link = new LiveLink(session, { ackWaitMs: 2000, backoff: { minMs: 20, maxMs: 50 }, features: ["prompt.close", "ui"] });
   link.setSync(syncLink);
   session.world = link;
@@ -77,9 +81,10 @@ async function setup(opts: { features?: string[] } = {}) {
     idleMs: 60_000,
     activityMs: 0,
     subscribe: (fn) => session.subscribe(fn),
-    notify: async () => {},
-    listening: () => true,
+    notify: async (content, meta) => void events.push({ content, meta }),
+    listening: opts.listening ?? (() => true),
     touch: () => session.touch(),
+    componentSet: session.componentSet,
   });
   inGame = g;
   session.inGame = g;
@@ -107,7 +112,7 @@ async function setup(opts: { features?: string[] } = {}) {
     return { ...r, text: textOf(r) };
   };
   expect((await call("doc_open", { world: true })).text).toContain("Linked to the world");
-  return { session, host, call };
+  return { session, host, call, events };
 }
 
 const replies = (h: FakeHost) => h.chats.filter((c) => c.kind === "reply");
@@ -194,7 +199,8 @@ describe("world_reply candidates (17, piece 3)", () => {
     await call("world_reply", { lines: ["Pick"], candidates: [{ prefab: "park_bench" }] });
     expect(await host.playerUiRequest(HOST, { kind: "candidates.open", args: { id: "c9" } })).toMatchObject({ ok: false, error: "not_found" });
     expect(await host.playerUiRequest(HOST, { kind: "candidates.open", args: {} })).toMatchObject({ ok: false, error: "bad_request" });
-    session.candidates.get("c1")!.answered = true; // what a submit does (Q3)
+    ok(await host.playerUiRequest(HOST, { kind: "candidates.submit", args: { id: "c1", picks: [{ prefab: "park_bench", cell: "#1" }] } }));
+    expect(session.candidates.get("c1")!.answered).toBe(true);
     expect(await host.playerUiRequest(HOST, { kind: "candidates.open", args: { id: "c1" } })).toMatchObject({ ok: false, error: "answered" });
   });
 });
@@ -282,5 +288,101 @@ describe("the candidate ghost (17, piece 3; candidates.ghost, candidates.ghost.c
     expect(await ghost({ rotate: 45 })).toMatchObject({ ok: false, error: "bad_request" });
     expect(await ghost({ dimension: "" })).toMatchObject({ ok: false, error: "bad_request" });
     expect(ghosts(host)).toHaveLength(0);
+  });
+});
+
+describe("candidates.submit: picks as text (17, piece 5)", () => {
+  const submit = (h: FakeHost, args: Record<string, unknown>) => h.playerUiRequest(HOST, { kind: "candidates.submit", args });
+  const clears = (h: FakeHost) => h.ui.filter((m) => m.type === "ui.ghost.clear" && m.ghost === "candidate");
+  const PICKS = [
+    { prefab: "village_well", cell: "D1", label: "  town well " },
+    { prefab: "park_bench", cell: "B1" },
+  ];
+
+  it("sends the picks as a channel event on the open request, with the set's reminder line, clears the ghost and marks the list answered", async () => {
+    const { host, call, session, events } = await setup();
+    await host.playerAsk(HOST, "a well and a bench?", {}, { mode: "ask" });
+    await host.waitFor(() => inGame!.current?.id === 1);
+    await call("prefab_sheet");
+    await call("world_reply", { lines: ["These:"], candidates: [{ prefab: "village_well" }, { prefab: "park_bench" }, { prefab: "lamp_post" }] });
+    session.componentSet.add([{ prefab: "small_oak_tree", label: "tree" }]);
+    ok(await host.playerUiRequest(HOST, { kind: "candidates.ghost", args: { id: "c1", prefab: "village_well", dimension: "minecraft:overworld", at: [0, 64, 0] } }));
+    const before = events.length;
+
+    expect(ok(await submit(host, { id: "c1", picks: PICKS, note: "smaller if possible" }))).toEqual({ request: 1 });
+    expect(events.slice(before)).toEqual([
+      {
+        content: 'Candidates answer from Dev (request 1): picked D1 village_well as "town well", B1 park_bench. Note: smaller if possible.\nset: tree = small_oak_tree',
+        meta: { request: "1", player: "Dev" },
+      },
+    ]);
+    await host.waitFor(() => clears(host).length === 1);
+    // The request stays the same one, and the MCP never touched the set.
+    expect(inGame!.current).toMatchObject({ id: 1, mode: "ask" });
+    expect(session.componentSet.entries).toEqual([{ prefab: "small_oak_tree", label: "tree" }]);
+    // Answered: open and submit say so, and nothing more is sent.
+    expect(await host.playerUiRequest(HOST, { kind: "candidates.open", args: { id: "c1" } })).toMatchObject({ ok: false, error: "answered" });
+    expect(await submit(host, { id: "c1", picks: PICKS })).toMatchObject({ ok: false, error: "answered" });
+    expect(events).toHaveLength(before + 1);
+  });
+
+  it("reopens a closed request in its mode, under the same id, with the picks as its text", async () => {
+    const { host, call, events } = await setup();
+    await host.playerAsk(HOST, "which bench?", {}, { mode: "ask" });
+    await host.waitFor(() => inGame!.current?.id === 1);
+    await call("world_reply", { lines: ["One of these"], candidates: [{ prefab: "park_bench" }, { prefab: "lamp_post" }], done: true });
+    await host.playerDone(HOST);
+    await host.waitFor(() => !inGame!.heldRequest && !inGame!.current);
+    const before = events.length;
+
+    expect(ok(await submit(host, { id: "c1", picks: [{ prefab: "lamp_post", cell: "#2", label: "" }] }))).toEqual({ request: 1 });
+    expect(events.slice(before)).toEqual([{ content: "Candidates answer from Dev (request 1): picked #2 lamp_post.", meta: { request: "1", player: "Dev" } }]);
+    // Open again, in ask mode (held until the player ends it), with the question it answers.
+    expect(inGame!.current).toMatchObject({ id: 1, mode: "ask", player: HOST, text: "which bench?" });
+    expect(inGame!.heldRequest).toMatchObject({ id: 1, mode: "ask" });
+    // The agent's answer goes to it.
+    const r = await call("world_reply", { lines: ["Lamp post it is."] });
+    expect(r.text).toContain("to Dev (request 1)");
+  });
+
+  it("reopens a closed build request as build", async () => {
+    const { host, call } = await setup();
+    await host.playerAsk(HOST, "a bench here", {});
+    await host.waitFor(() => inGame!.current?.id === 1);
+    await call("world_reply", { lines: ["Pick"], candidates: [{ prefab: "park_bench" }], done: true });
+    expect(inGame!.current).toBeUndefined();
+    expect(ok(await submit(host, { id: "c1", picks: [{ prefab: "park_bench", cell: "#1" }] }))).toEqual({ request: 1 });
+    expect(inGame!.current).toMatchObject({ id: 1, mode: "build" });
+    expect(inGame!.heldRequest).toBeUndefined();
+  });
+
+  it("answers a list that went to no request with an event naming none, opening nothing", async () => {
+    const { host, call, events } = await setup();
+    await call("world_reply", { lines: ["Pick"], candidates: [{ prefab: "park_bench" }] });
+    const before = events.length;
+    expect(ok(await submit(host, { id: "c1", picks: [{ prefab: "park_bench", cell: "#1" }] }))).toEqual({ request: null });
+    expect(events.slice(before)).toEqual([{ content: "Candidates answer from Dev: picked #1 park_bench.", meta: { player: "Dev" } }]);
+    expect(inGame!.current).toBeUndefined();
+  });
+
+  it("refuses bad picks, an unknown id, and an unreachable agent, sending nothing and leaving the list open", async () => {
+    let listening = true;
+    const { host, call, session, events } = await setup({ listening: () => listening });
+    await call("world_reply", { lines: ["Pick"], candidates: [{ prefab: "park_bench" }, { prefab: "lamp_post" }] });
+    const before = events.length;
+    expect(await submit(host, { id: "c9", picks: [{ prefab: "park_bench", cell: "#1" }] })).toMatchObject({ ok: false, error: "not_found" });
+    expect(await submit(host, { id: "c1", picks: [] })).toMatchObject({ ok: false, error: "bad_request" });
+    expect(await submit(host, { id: "c1" })).toMatchObject({ ok: false, error: "bad_request" });
+    expect(await submit(host, { id: "c1", picks: [{ prefab: "park_bench" }] })).toMatchObject({ ok: false, error: "bad_request" });
+    expect(await submit(host, { id: "c1", picks: [{ prefab: "park_bench", cell: "#1" }, { prefab: "park_bench", cell: "#1" }] })).toMatchObject({ ok: false, error: "bad_request" });
+    expect(await submit(host, { id: "c1", picks: [{ prefab: "village_well", cell: "#1" }] })).toMatchObject({ ok: false, error: "not_found" });
+    expect(await submit(host, { id: "c1", picks: [{ prefab: "park_bench", cell: "#2" }] })).toMatchObject({ ok: false, error: "not_found" });
+    expect(await submit(host, { id: "c1", picks: [{ prefab: "park_bench", cell: "#1" }], note: 3 })).toMatchObject({ ok: false, error: "bad_request" });
+    listening = false;
+    expect(await submit(host, { id: "c1", picks: [{ prefab: "park_bench", cell: "#1" }] })).toMatchObject({ ok: false, error: "internal" });
+    expect(events).toHaveLength(before);
+    expect(session.candidates.get("c1")!.answered).toBe(false);
+    listening = true;
+    expect(ok(await submit(host, { id: "c1", picks: [{ prefab: "park_bench", cell: "#1" }] }))).toEqual({ request: null });
   });
 });

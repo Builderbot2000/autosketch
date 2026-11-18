@@ -182,3 +182,25 @@ export function transformBox(b: Box, f: (p: Vec3) => Vec3): Box {
 export function defaultPivot(b: Box): Vec3 {
   return [Math.floor((b.min[0] + b.max[0] - 1) / 2), Math.floor((b.min[1] + b.max[1] - 1) / 2), Math.floor((b.min[2] + b.max[2] - 1) / 2)];
 }
+
+/**
+ * A box of `size` (from 0,0,0) mirrored across its centre plane on `mirror`, then turned `turns`
+ * clockwise quarter turns, and moved back so it fills [0, size') again: `place` maps a position in
+ * the original box to the oriented one. The positional half of `stamp`'s prefab frame
+ * (`ops/stamp.ts`, `prefabFrame`), shared with the candidate ghost (`ui/candidates.ts`) so a
+ * preview lands where a stamp would (`17`, piece 3).
+ */
+export function orientBox(size: Vec3, turns: number, mirror?: "x" | "z"): { place: (p: Vec3) => Vec3; size: Vec3 } {
+  const t = ((turns % 4) + 4) % 4;
+  if (!t && !mirror) return { place: (p) => p, size };
+  const a = mirror === "x" ? 0 : 2;
+  const raw = (p: Vec3): Vec3 => rotatePos(mirror ? mirrorPos(p, mirror, (size[a]! - 1) / 2) : p, t, [0, 0, 0]);
+  const bb = transformBox({ min: [0, 0, 0], max: size }, raw);
+  return {
+    place: (p) => {
+      const q = raw(p);
+      return [q[0] - bb.min[0], q[1] - bb.min[1], q[2] - bb.min[2]];
+    },
+    size: [bb.max[0] - bb.min[0], bb.max[1] - bb.min[1], bb.max[2] - bb.min[2]],
+  };
+}

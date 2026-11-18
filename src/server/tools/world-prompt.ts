@@ -54,6 +54,7 @@ export function registerWorldPromptTools({ tool, session }: ToolDeps): void {
       if (list) {
         list.request = request?.id ?? null;
         list.question = request?.text ?? "";
+        if (request?.mode) list.mode = request.mode;
       }
       const n = `${a.lines.length} line${a.lines.length === 1 ? "" : "s"}`;
       const to = request

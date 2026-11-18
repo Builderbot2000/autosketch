@@ -220,6 +220,26 @@ export class InGameRequests implements InGameReplies {
     this.stream.stop();
   }
 
+  /**
+   * The player's candidates picks as text (`17`, piece 5; the text is built by `ui/candidates.ts`):
+   * one channel event on `request`, ending with the component set's reminder line as other request
+   * events do. When that request is no longer open, it opens again as a new in-game request under
+   * the same id, in `mode`, by the player who picked, with the list's question as its text: request
+   * ids come from the mod's prompt counter, so the MCP has none of its own to give it (decided Q3).
+   * A list that went to no request (`request` null) is answered with an event naming no request,
+   * and nothing opens. Throws, opening nothing, when no agent session can receive the event.
+   */
+  async candidatesAnswer(a: { request: number | null; mode?: RequestMode; player: PlayerRef; question: string; text: string }): Promise<void> {
+    if (!this.opts.listening()) throw new Error("no agent session is listening for in-game requests");
+    const id = a.request;
+    const open = id !== null && (this.stream.current?.id === id || this.held?.id === id);
+    await this.opts.notify(this.remind(a.text), { ...(id !== null ? { request: String(id) } : {}), player: a.player.name });
+    if (id === null || open) return;
+    if (this.link.state === "linked" && this.link.doc) this.modeRule.attach(this.link.doc);
+    this.open({ id, player: a.player, mode: a.mode ?? "build", text: a.question });
+    this.opts.log?.(`in-game ${a.mode ?? "build"} request ${id} reopened by ${a.player.name}'s candidates answer`);
+  }
+
   /** A request event's text with the component set's reminder line appended while the set has entries (`17`, piece 1). */
   private remind(text: string): string {
     return this.opts.componentSet?.remind(text) ?? text;

@@ -3,7 +3,7 @@ import type { Registry } from "../assets/registry.js";
 import { canonicalState, formatState, parseState, stateId } from "../core/blockstate.js";
 import type { Box, Vec3 } from "../core/region.js";
 import { hash01, hashString } from "../core/rng.js";
-import { mirrorPos, rotatePos, stateTransformer, transformBox, type StateTransform } from "../core/rotate.js";
+import { orientBox, stateTransformer, type StateTransform } from "../core/rotate.js";
 import type { Document, EditResult } from "../document/document.js";
 import { checkComponentId } from "../document/components.js";
 import type { Family, ShapeGroup, ShapeKind } from "../palette/families.js";
@@ -140,18 +140,12 @@ export function prefabFrame(size: Vec3, opts: Pick<StampOptions, "rotate" | "mir
   const axis = opts.mirror;
   if (axis !== undefined && axis !== "x" && axis !== "z") throw new Error('mirror must be "x" (east↔west) or "z" (north↔south)');
   if (!turns && !axis) return { place: (p) => p, size, label: "", turns: 0 };
-  const a = axis === "x" ? 0 : 2;
-  const raw = (p: Vec3): Vec3 => rotatePos(axis ? mirrorPos(p, axis, (size[a]! - 1) / 2) : p, turns, [0, 0, 0]);
-  const bb = transformBox({ min: [0, 0, 0], max: size }, raw);
-  const place = (p: Vec3): Vec3 => {
-    const q = raw(p);
-    return [q[0] - bb.min[0], q[1] - bb.min[1], q[2] - bb.min[2]];
-  };
+  const box = orientBox(size, turns, axis);
   const t: StateTransform = { turns, ...(axis ? { mirror: axis } : {}) };
   const overrides = (env.plugins ?? []).flatMap((pl) => (pl.rotate ? [pl.rotate.bind(pl)] : []));
   const state = stateTransformer(t, { ...(env.registry ? { registry: env.registry } : {}), overrides });
   const label = `${axis ? ` mirror ${axis}` : ""}${turns ? ` rotate ${turns * 90}°` : ""}`;
-  return { place, state, size: [bb.max[0] - bb.min[0], bb.max[1] - bb.min[1], bb.max[2] - bb.min[2]], label, turns, ...(axis ? { mirror: axis } : {}) };
+  return { place: box.place, state, size: box.size, label, turns, ...(axis ? { mirror: axis } : {}) };
 }
 
 // -- entities --------------------------------------------------------------------------------------

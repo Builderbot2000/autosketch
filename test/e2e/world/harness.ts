@@ -14,6 +14,7 @@ import { DEFAULT_VOLATILE, mergeVolatile } from "../../../src/world/protocol/has
 import type { Compound } from "../../../src/world/protocol/index.js";
 import { watchGameReport } from "../../../src/assets/report.js";
 import { bridgeUpgrader } from "../../../src/world/upgrade.js";
+import type { McpFeature } from "../../../src/world/protocol/messages.js";
 import { Rcon } from "./rcon.js";
 
 /**
@@ -82,14 +83,16 @@ export interface Mcp {
 }
 
 /**
- * The MCP side, as `server/index.ts` builds it (without observe/ and in-game requests), connected
+ * The MCP side, as `server/index.ts` builds it (without observe/, in-game requests and src/ui/; a test
+ * that needs them wires them itself, as `components.test.ts` does), connected
  * to the game before it returns: the mod is locked while no MCP is connected (`16`, *Mod side*), so
  * volumes can be marked only once it is. The hello carries the volatile list `doc_open` would send.
  */
-export async function startMcp(opts: { ackWaitMs?: number } = {}): Promise<Mcp> {
+export async function startMcp(opts: { ackWaitMs?: number; features?: McpFeature[] } = {}): Promise<Mcp> {
   const workspace = mkdtempSync(join(tmpdir(), "autosketch-e2e-world-"));
   const session = new Session(workspace);
-  const link = new LiveLink(session, { gameDir: SERVER_DIR, ackWaitMs: opts.ackWaitMs ?? 5000, backoff: { minMs: 200, maxMs: 2000 } });
+  // `features`: the hello's list, as the entry point passes MCP_FEATURES once src/ui/ answers requests (16).
+  const link = new LiveLink(session, { gameDir: SERVER_DIR, ackWaitMs: opts.ackWaitMs ?? 5000, backoff: { minMs: 200, maxMs: 2000 }, ...(opts.features ? { features: opts.features } : {}) });
   link.setSync(syncLink);
   session.world = link;
   session.callHooks.push(autoSyncHook(() => session.world));

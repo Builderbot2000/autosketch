@@ -153,12 +153,15 @@ export class UiRequests {
         return this.candidates(kind).ghostClear();
       case "candidates.submit":
         throw new UiRequestError("bad_request", `This Autosketch doesn't serve ${kind} yet.`);
-      // `17` piece 6: names and shapes frozen in `13` (*Request kinds*); silo E serves them.
+      // `17` piece 6: names and shapes frozen in `13` (*Request kinds*); handlers in `library.ts`.
       case "library.write.prefab":
+        return { result: await lib.writePrefab(a) };
       case "library.write.palette":
+        return { result: await lib.writePalette(a) };
       case "library.write.procedure":
+        return { result: await lib.writeProcedure(a) };
       case "library.write.knowledge":
-        throw new UiRequestError("bad_request", `This Autosketch doesn't serve ${kind} yet.`);
+        return { result: await lib.writeKnowledge(a) };
     }
   }
 

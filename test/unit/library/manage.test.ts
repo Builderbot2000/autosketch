@@ -3,7 +3,7 @@ import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Settings } from "../../../src/core/settings.js";
 import { listKnowledge } from "../../../src/library/knowledge.js";
-import { copyToLibrary, deleteEntry, duplicateEntry, emptyTrash, listEntries, listTrash, renameEntry, resolveEntry, restoreEntry } from "../../../src/library/manage.js";
+import { copyToLibrary, deleteEntry, duplicateEntry, emptyTrash, entryHash, EntryChangedError, LibraryError, listEntries, listTrash, renameEntry, resolveEntry, restoreEntry, writeEntryText, writePaletteFile, writePrefabMeta } from "../../../src/library/manage.js";
 import { listLibraryPalettes } from "../../../src/library/palettes.js";
 import { scanPrefabs } from "../../../src/library/prefabs.js";
 import { listProcedures } from "../../../src/library/procedures.js";
@@ -122,5 +122,83 @@ describe("library management (15, *Library tab*)", () => {
     expect(await copyToLibrary(lamp, roots)).toEqual({ root: "user", name: "lamp_post" });
     await expect(copyToLibrary(lamp, roots)).rejects.toMatchObject({ status: 409 });
     expect((await listEntries(roots)).prefabs.find((e) => e.root === "user" && e.name === "lamp_post")).toMatchObject({ overrides: ["starter"] });
+  });
+});
+
+describe("library editor writes (15, U3b; 17, piece 6)", () => {
+  const roots = (dir: string) => libraryRoots({ workspace: "/ws", env: { AUTOSKETCH_LIBRARY: dir } });
+
+  it("saves text with the hash it started from; a file changed meanwhile is refused and keeps the agent's version", async () => {
+    const dir = await userRoot();
+    const e = await resolveEntry(roots(dir), "user", "knowledge", "styles/gothic");
+    const hash = await entryHash(e);
+    expect(hash).toMatch(/^[0-9a-f]{64}$/);
+    // The agent (or a hand edit) changes the pack after the editor read it.
+    const file = join(dir, "knowledge/styles/gothic.md");
+    await writeFile(file, "agent's version\n");
+    await expect(writeEntryText(e, "mine", hash)).rejects.toBeInstanceOf(EntryChangedError);
+    expect(await readFile(file, "utf8")).toBe("agent's version\n");
+    await expect(writeEntryText(e, "mine", undefined)).rejects.toMatchObject({ status: 400 });
+    const fresh = await entryHash(e);
+    const next = await writeEntryText(e, "mine\n", fresh);
+    expect(await readFile(file, "utf8")).toBe("mine\n");
+    expect(await entryHash(e)).toBe(next);
+    const proc = await resolveEntry(roots(dir), "user", "procedures", "bay");
+    await writeEntryText(proc, "/** Bay. */\n", await entryHash(proc));
+    expect(await readFile(join(dir, "procedures/bay.js"), "utf8")).toBe("/** Bay. */\n");
+    await expect(writeEntryText(proc, 42, await entryHash(proc))).rejects.toMatchObject({ status: 400 });
+    // Read-only entries are refused as read-only, not as stale.
+    const starter = await resolveEntry(roots(dir), "starter", "knowledge", "heuristics/roofs");
+    const err = await writeEntryText(starter, "x", await entryHash(starter)).catch((x: unknown) => x);
+    expect(err).toBeInstanceOf(LibraryError);
+    expect(err).not.toBeInstanceOf(EntryChangedError);
+    expect((err as Error).message).toMatch(/read-only/);
+  });
+
+  it("edits prefab.json fields, keeping the others, and validates them", async () => {
+    const dir = await userRoot();
+    const e = await resolveEntry(roots(dir), "user", "prefabs", "park_bench");
+    const file = join(dir, "prefabs/park_bench/prefab.json");
+    const before = JSON.parse(await readFile(file, "utf8"));
+    const hash = await entryHash(e);
+    await expect(writePrefabMeta(e, { anchors: { seat: [1, "x", 0] } }, hash)).rejects.toMatchObject({ status: 400 });
+    await expect(writePrefabMeta(e, { front: "up" }, hash)).rejects.toMatchObject({ status: 400 });
+    await expect(writePrefabMeta(e, { name: " " }, hash)).rejects.toMatchObject({ status: 400 });
+    await expect(writePrefabMeta(e, { roles: { wood: ["Oak Planks"] } }, hash)).rejects.toMatchObject({ status: 400 });
+    const next = await writePrefabMeta(e, { name: "Bench", tags: ["Park", "seat", "park"], front: "east", notes: "for plazas", anchors: { seat: [1, 1, 0] }, roles: { wood: ["oak_planks"] } }, hash);
+    const after = JSON.parse(await readFile(file, "utf8"));
+    expect(after).toMatchObject({ name: "Bench", tags: ["park", "seat"], front: "east", notes: "for plazas", anchors: { seat: [1, 1, 0] }, roles: { wood: ["minecraft:oak_planks"] } });
+    expect(after.footprint).toEqual(before.footprint);
+    expect(await entryHash(e)).toBe(next);
+    // front null and notes "" remove them; absent keys stay.
+    await writePrefabMeta(e, { front: null, notes: "" }, next);
+    const cleared = JSON.parse(await readFile(file, "utf8"));
+    expect(cleared.front).toBeUndefined();
+    expect(cleared.notes).toBeUndefined();
+    expect(cleared.name).toBe("Bench");
+    await expect(writePrefabMeta(e, { name: "Late" }, next)).rejects.toBeInstanceOf(EntryChangedError);
+  });
+
+  it("a prefab folder without prefab.json has the hash \"absent\" and a write with it creates the file", async () => {
+    const dir = await userRoot();
+    await mkdir(join(dir, "prefabs", "shed"), { recursive: true });
+    await cp(join(starterRoot().path, "prefabs", "park_bench", "prefab.schem"), join(dir, "prefabs", "shed", "prefab.schem"));
+    const e = await resolveEntry(roots(dir), "user", "prefabs", "shed");
+    expect(await entryHash(e)).toBe("absent");
+    await writePrefabMeta(e, { name: "Shed", tags: ["garden"] }, "absent");
+    expect(JSON.parse(await readFile(join(dir, "prefabs/shed/prefab.json"), "utf8"))).toEqual({ name: "Shed", tags: ["garden"] });
+    await expect(writePrefabMeta(e, { name: "Again" }, "absent")).rejects.toBeInstanceOf(EntryChangedError);
+  });
+
+  it("writes a palette file with the hash check", async () => {
+    const dir = await userRoot();
+    const e = await resolveEntry(roots(dir), "user", "palettes", "stone");
+    const hash = await entryHash(e);
+    const data = { name: "stone", tags: ["grey"], notes: "plain", roles: { wall: [{ family: "minecraft:stone", block: "minecraft:stone", weight: 1 }] } };
+    const next = await writePaletteFile(e, data, hash);
+    expect(JSON.parse(await readFile(join(dir, "palettes/stone.json"), "utf8"))).toEqual(data);
+    expect(await entryHash(e)).toBe(next);
+    await expect(writePaletteFile(e, data, hash)).rejects.toBeInstanceOf(EntryChangedError);
+    await expect(writePaletteFile(await resolveEntry(roots(dir), "user", "knowledge", "styles/gothic"), data, hash)).rejects.toMatchObject({ status: 400 });
   });
 });

@@ -264,7 +264,7 @@ export async function emptyTrash(root: LibraryRoot): Promise<number> {
   return n;
 }
 
-// -- editors (15, U3b) ------------------------------------------------------------------------------
+// -- editors (15, U3b; in game since 17, piece 6) ----------------------------------------------------
 //
 // Every write names the hash of the file the editor started from and is refused (409) when the file
 // changed since: the agent may have saved the same entry meanwhile (`prefab_save`, `palette_save`),
@@ -285,4 +285,102 @@ export async function entryHash(e: ResolvedEntry): Promise<string> {
   } catch {
     return ABSENT;
   }
+}
+
+/** A write whose hash is stale: the file changed since the editor read it (the in-game UI answers `conflict`). */
+export class EntryChangedError extends LibraryError {
+  constructor(message: string) {
+    super(409, message);
+    this.name = "EntryChangedError";
+  }
+}
+
+/**
+ * Writes the editable file when its hash is still `expected`. A read-only root is refused before the
+ * hash is looked at, so the editor offers *Copy to my library* rather than a reload (`17`, piece 6).
+ */
+async function writeChecked(e: ResolvedEntry, expected: unknown, text: string): Promise<string> {
+  writable(e);
+  const f = editableFile(e);
+  if (!f) throw new LibraryError(409, `${e.name} is a single schematic file with no prefab.json; save it again with prefab_save to give it metadata`);
+  if (typeof expected !== "string") throw new LibraryError(400, "a write needs the hash of the version it edits");
+  inside(e.rootRef, f);
+  if ((await entryHash(e)) !== expected) throw new EntryChangedError(`${e.kind.replace(/s$/, "")} "${e.name}" changed since it was opened (the agent may have saved it); reload it and edit again`);
+  const tmp = `${f}.${randomBytes(4).toString("hex")}.tmp`;
+  await writeFile(tmp, text);
+  await rename(tmp, f);
+  return hashText(text);
+}
+
+/** A procedure's or knowledge pack's (kits included) new text, at most 1 MB. */
+export async function writeEntryText(e: ResolvedEntry, text: unknown, expected: unknown): Promise<string> {
+  if (e.kind !== "procedures" && e.kind !== "knowledge") throw new LibraryError(400, `${e.kind} are edited as metadata, not text`);
+  if (typeof text !== "string" || text.length > 1024 * 1024) throw new LibraryError(400, "text must be a string of at most 1 MB");
+  return writeChecked(e, expected, text);
+}
+
+const FACINGS = ["north", "south", "east", "west"];
+const KEY = /^[A-Za-z0-9_.-]{1,64}$/;
+
+/**
+ * A prefab's `prefab.json` fields from the editor (name, tags, front, notes, anchors, roles); absent
+ * keys stay as they are and the file's other fields are kept. A folder without `prefab.json` has the
+ * hash `ABSENT`, and a write with it creates the file.
+ */
+export async function writePrefabMeta(e: ResolvedEntry, meta: unknown, expected: unknown): Promise<string> {
+  if (e.kind !== "prefabs") throw new LibraryError(400, "only prefabs have prefab.json");
+  if (meta !== undefined && (typeof meta !== "object" || meta === null || Array.isArray(meta))) throw new LibraryError(400, "prefab.json: meta must be an object of fields");
+  writable(e);
+  const m = (meta ?? {}) as Record<string, unknown>;
+  const bad = (what: string) => new LibraryError(400, `prefab.json: ${what}`);
+  const out: Record<string, unknown> = {};
+  const f = editableFile(e);
+  if (f) {
+    try {
+      Object.assign(out, JSON.parse(await readFile(f, "utf8")));
+    } catch {
+      /* new, or unreadable: replaced */
+    }
+  }
+  if (m.name !== undefined) {
+    if (typeof m.name !== "string" || !m.name.trim() || m.name.length > 100) throw bad("name must be text (at most 100 characters)");
+    out.name = m.name.trim();
+  }
+  if (m.tags !== undefined) {
+    if (!Array.isArray(m.tags) || !m.tags.every((t) => typeof t === "string")) throw bad("tags must be a list of text");
+    out.tags = [...new Set((m.tags as string[]).map((t) => t.trim().toLowerCase()).filter(Boolean))];
+  }
+  if (m.front !== undefined) {
+    if (m.front === null || m.front === "") delete out.front;
+    else if (!FACINGS.includes(m.front as string)) throw bad(`front must be one of ${FACINGS.join(", ")}`);
+    else out.front = m.front;
+  }
+  if (m.notes !== undefined) {
+    if (typeof m.notes !== "string") throw bad("notes must be text");
+    if (m.notes.trim()) out.notes = m.notes;
+    else delete out.notes;
+  }
+  if (m.anchors !== undefined) {
+    const a = m.anchors as Record<string, unknown>;
+    if (typeof a !== "object" || a === null || Array.isArray(a)) throw bad("anchors must map names to [x, y, z]");
+    for (const [k, v] of Object.entries(a)) if (!KEY.test(k) || !Array.isArray(v) || v.length !== 3 || !v.every((n) => Number.isInteger(n))) throw bad(`anchor "${k}" must be a name and [x, y, z] integers`);
+    out.anchors = a;
+  }
+  if (m.roles !== undefined) {
+    const r = m.roles as Record<string, unknown>;
+    if (typeof r !== "object" || r === null || Array.isArray(r)) throw bad("roles must map names to block lists");
+    const roles: Record<string, string[]> = {};
+    for (const [k, v] of Object.entries(r)) {
+      if (!KEY.test(k) || !Array.isArray(v) || !v.every((b) => typeof b === "string" && /^[a-z0-9_.:-]+$/.test(b.trim()))) throw bad(`role "${k}" must be a name and a list of block ids`);
+      roles[k] = (v as string[]).map((b) => (b.includes(":") ? b.trim() : `minecraft:${b.trim()}`));
+    }
+    out.roles = roles;
+  }
+  return writeChecked(e, expected, JSON.stringify(out, null, 2) + "\n");
+}
+
+/** A palette file's new content (already edited: `LibraryRequests.writePalette` applies the editor's operations). */
+export async function writePaletteFile(e: ResolvedEntry, data: object, expected: unknown): Promise<string> {
+  if (e.kind !== "palettes") throw new LibraryError(400, "not a palette");
+  return writeChecked(e, expected, JSON.stringify(data, null, 2) + "\n");
 }

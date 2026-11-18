@@ -153,8 +153,8 @@ describe("against the fake host with ui", () => {
     for (const kind of ["candidates.open", "candidates.ghost"]) expect(await ask(HOST, kind, { id: "c1" })).toMatchObject({ ok: false, error: "not_found" });
     expect(await ask(HOST, "candidates.ghost.clear")).toMatchObject({ ok: true, result: {} });
     expect(await ask(HOST, "candidates.submit", { id: "c1" })).toMatchObject({ ok: false, error: "bad_request" });
-    // `17`'s editor writes likewise (W2) until silo E serves them.
-    for (const kind of ["library.write.prefab", "library.write.palette", "library.write.procedure", "library.write.knowledge"]) expect(await ask(HOST, kind, { root: "user", name: "x", hash: "absent" })).toMatchObject({ ok: false, error: "bad_request" });
+    // `17`'s editor writes are served (E1), so an unknown entry is not_found.
+    for (const kind of ["library.write.prefab", "library.write.palette", "library.write.procedure", "library.write.knowledge"]) expect(await ask(HOST, kind, { root: "user", name: "x", hash: "absent" })).toMatchObject({ ok: false, error: "not_found" });
     const from = host.ui.length;
     ok(await ask(KEV, "resync"));
     const after = host.ui.slice(from);
@@ -191,6 +191,11 @@ describe("against the fake host with ui", () => {
     expect(entry).toMatchObject({ name: "gothic", text: expect.stringContaining("Body"), editable: true, hash: expect.any(String) });
     expect(await ask(HOST, "library.entry", { root: "user", kind: "knowledge", name: "../../etc" })).toMatchObject({ ok: false, error: "bad_request" });
     expect(await ask(HOST, "library.entry", { root: "user", kind: "knowledge", name: "nope" })).toMatchObject({ ok: false, error: "not_found" });
+    // An editor write (`17`, piece 6): the new hash, then conflict on the hash it started from.
+    const wrote = ok(await ask(HOST, "library.write.knowledge", { root: "user", name: "gothic", hash: entry.hash, text: "---\nkind: style\nsummary: Taller.\n---\nBody\n" })).result;
+    expect(wrote.hash).toBe(ok(await ask(HOST, "library.entry", { root: "user", kind: "knowledge", name: "gothic" })).result.hash);
+    expect(await ask(HOST, "library.write.knowledge", { root: "user", name: "gothic", hash: entry.hash, text: "x" })).toMatchObject({ ok: false, error: "conflict" });
+    expect(await ask(HOST, "library.write.knowledge", { root: "starter", name: "heuristics/roofs", hash: "absent", text: "x" })).toMatchObject({ ok: false, error: "bad_request" });
 
     const thumb = ok(await ask(HOST, "library.thumbnail", { root: "user", name: "park_bench" }));
     expect(thumb.result).toEqual({ format: "png", width: 4, height: 4 });

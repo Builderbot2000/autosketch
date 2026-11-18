@@ -5,7 +5,7 @@ import { mergeBoxes } from "../../../src/ui/boxes.js";
 import { jobColour } from "../../../src/ui/colours.js";
 import { UiFeed } from "../../../src/ui/feed.js";
 import type { WorldFrame } from "../../../src/ui/frame.js";
-import type { UiFlashMessage, UiMcpMessage, UiRequestInfo, UiState } from "../../../src/world/protocol/messages.js";
+import { SAVE_FLASH_COLOUR, SAVE_FLASH_JOB, type UiFlashMessage, type UiMcpMessage, type UiRequestInfo, type UiState } from "../../../src/world/protocol/messages.js";
 
 /** The overlay feed (16, *MCP side*, Feed; 13, *In-game UI*): coalescing, resync, job colours. */
 
@@ -29,10 +29,10 @@ class FakeBridge {
   }
 }
 
-function setup(opts: { frame?: WorldFrame | undefined; players?: string[] } = {}) {
+function setup(opts: { frame?: WorldFrame | undefined; players?: string[]; linked?: boolean } = {}) {
   const bridge = new FakeBridge();
-  const state = { frame: "frame" in opts ? opts.frame : { dimension: "minecraft:overworld", origin: [100, 64, -200] as [number, number, number] }, players: opts.players ?? [P1], request: null as UiRequestInfo | null };
-  const feed = new UiFeed({ bridge, frame: () => state.frame, players: () => state.players, request: () => state.request, intervalMs: 1e9 });
+  const state = { frame: "frame" in opts ? opts.frame : { dimension: "minecraft:overworld", origin: [100, 64, -200] as [number, number, number] }, players: opts.players ?? [P1], request: null as UiRequestInfo | null, linked: opts.linked ?? true };
+  const feed = new UiFeed({ bridge, frame: () => state.frame, players: () => state.players, request: () => state.request, linked: () => state.linked, intervalMs: 1e9 });
   let seq = 0;
   const pub = (doc: string, e: ObserveEvent) => feed.onEvent({ v: 1, seq: ++seq, t: seq * 10, doc, ...e } as LoggedEvent);
   const states = () => bridge.sent.filter((m): m is UiState => m.type === "ui.state");
@@ -78,6 +78,25 @@ describe("ui feed", () => {
     expect(j1).toEqual({ job: "j1", colour: jobColour("j1"), dimension: "minecraft:overworld", boxes: [{ min: [110, 64, -200], max: [111, 65, -199] }] });
     feed.tick();
     expect(flashes()).toHaveLength(1); // flashes are not repeated
+    feed.close();
+  });
+
+  it("save flash (17, piece 8): the saved box in white with job save, beside a job's in the same window, sandbox boxes translated; nothing unlinked", () => {
+    const { feed, pub, flashes, state } = setup();
+    pub("base", fork("j1", B([10, 0, 0], [40, 9, 9])));
+    pub("base", op(B([0, 0, 0], [0, 0, 0])));
+    feed.saveFlash(B([0, 0, 0], [3, 2, 1]));
+    feed.saveFlash(B([0, 0, 0], [1, 1, 1]), "j1");
+    feed.tick();
+    expect(flashes()).toHaveLength(1);
+    expect(flashes()[0]!.flashes).toEqual([
+      { job: "base", colour: jobColour("base"), dimension: "minecraft:overworld", boxes: [{ min: [100, 64, -200], max: [100, 64, -200] }] },
+      { job: SAVE_FLASH_JOB, colour: SAVE_FLASH_COLOUR, dimension: "minecraft:overworld", boxes: [{ min: [100, 64, -200], max: [103, 66, -199] }, { min: [110, 64, -200], max: [111, 65, -199] }] },
+    ]);
+    state.linked = false; // an unlinked document (anchored or not) sends no save flash
+    feed.saveFlash(B([0, 0, 0], [3, 2, 1]));
+    feed.tick();
+    expect(flashes()).toHaveLength(1);
     feed.close();
   });
 

@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { NO_EVENTS, type EventSink } from "../core/events.js";
 import { EventFanout, type EventListener } from "../core/fanout.js";
-import { toPublic, type Vec3 } from "../core/region.js";
+import { toPublic, type PublicBox, type Vec3 } from "../core/region.js";
 import { dataVersionFor } from "../core/version.js";
 import { Document, type Facing } from "../document/document.js";
 import { loadNative, saveNative } from "../document/native.js";
@@ -124,6 +124,12 @@ export class Session {
    * it only through `schematicVersion`.
    */
   upgrader?: () => SchematicUpgrader | undefined;
+  /**
+   * The flash on save (17, piece 8): `prefab_save` hands it the saved box, local to `doc` ("base" or
+   * a scope id). Set by the entry point to the in-game UI's feed, which sends it only while the base
+   * document is linked; undefined without the UI. Tools never see the link.
+   */
+  saveFlash?: (box: PublicBox, doc: string) => void;
   /** Answers to in-game requests (13, *Prompting from the game*), for `world_reply`; set beside `world`. */
   inGame?: InGameReplies;
   /**

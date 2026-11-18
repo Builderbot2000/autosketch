@@ -200,6 +200,9 @@ export function registerLibraryTools({ tool, resource, session }: ToolDeps): voi
         },
         c.palette,
       );
+      // 17 piece 8: the saved box flashes in the world while linked (the feed decides).
+      const o = snap.offset;
+      session.saveFlash?.({ min: [...o], max: [o[0] + snap.size[0] - 1, o[1] + snap.size[1] - 1, o[2] + snap.size[2] - 1] }, session.scope);
       const lib = libraryFor(c, session);
       const thumb = await lib.thumbnail(r.prefab).catch(() => undefined);
       return text(

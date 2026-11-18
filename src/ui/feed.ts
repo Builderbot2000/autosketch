@@ -2,7 +2,7 @@ import type { LoggedEvent } from "../core/events.js";
 import type { PublicBox } from "../core/region.js";
 import { SessionModel, type Scope } from "../observe/session-model.js";
 import type { BridgeConnection } from "../world/bridge.js";
-import { UI_COALESCE_MS, UI_FLASH_BOXES, type UiFlash, type UiJob, type UiRefusal, type UiRequestInfo, type UiState, type UiTokens } from "../world/protocol/messages.js";
+import { SAVE_FLASH_COLOUR, SAVE_FLASH_JOB, UI_COALESCE_MS, UI_FLASH_BOXES, type UiFlash, type UiJob, type UiRefusal, type UiRequestInfo, type UiState, type UiTokens } from "../world/protocol/messages.js";
 import { mergeBoxes, translatePublic } from "./boxes.js";
 import { jobColour } from "./colours.js";
 import { toWorldBox, type WorldFrame } from "./frame.js";
@@ -21,6 +21,8 @@ export interface FeedHost {
   readonly bridge: Pick<BridgeConnection, "send" | "ui" | "onConnection">;
   /** Where the base document is in the world, or undefined (unlinked and not anchored: jobs and flashes can't be placed). */
   frame(): WorldFrame | undefined;
+  /** True while the base document is linked (`17`, piece 8: only a linked save flashes). Default: never. */
+  linked?(): boolean;
   /** The overlay player set (`UiPlayers.overlay`). */
   players(): string[];
   /** The open in-game request, or null. */
@@ -75,6 +77,23 @@ export class UiFeed {
     if (list.length > PENDING_CAP) this.pending.set(e.doc, mergeBoxes(list, UI_FLASH_BOXES));
   };
 
+  /**
+   * The save flash (docs/design/17-reusable-components.md, piece 8; `13`, *Save flash*): `box`, local
+   * to `doc` ("base" or a scope id), goes out in the next window's `ui.flash` as a Flash record with
+   * job {@link SAVE_FLASH_JOB} in {@link SAVE_FLASH_COLOUR}, beside any job's records. Only while the
+   * base document is linked (an anchored unlinked document sends nothing) and a mod with `ui` is
+   * connected. It is not an event, so the session log, and replay frames built from it, never carry it.
+   */
+  saveFlash(box: PublicBox, doc = "base"): void {
+    if (!this.timer || !this.host.linked?.()) return;
+    const b = doc === "base" ? box : this.inBase(doc, box);
+    if (!b) return;
+    let list = this.pending.get(SAVE_FLASH_JOB);
+    if (!list) this.pending.set(SAVE_FLASH_JOB, (list = []));
+    list.push(b);
+    if (list.length > PENDING_CAP) this.pending.set(SAVE_FLASH_JOB, mergeBoxes(list, UI_FLASH_BOXES));
+  }
+
   /** Sends what changed since the last window: a `ui.state` if anything did, then a `ui.flash`. */
   tick(): void {
     if (!this.host.bridge.ui) return;
@@ -95,7 +114,7 @@ export class UiFeed {
     if (this.pending.size && frame) {
       const flashes: UiFlash[] = [];
       for (const [job, boxes] of this.pending)
-        flashes.push({ job, colour: jobColour(job), dimension: frame.dimension, boxes: mergeBoxes(boxes, UI_FLASH_BOXES).map((b) => toWorldBox(frame, b)) });
+        flashes.push({ job, colour: job === SAVE_FLASH_JOB ? SAVE_FLASH_COLOUR : jobColour(job), dimension: frame.dimension, boxes: mergeBoxes(boxes, UI_FLASH_BOXES).map((b) => toWorldBox(frame, b)) });
       this.host.bridge.send({ type: "ui.flash", players, flashes });
     }
     this.pending.clear();

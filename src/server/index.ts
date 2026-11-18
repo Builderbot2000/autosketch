@@ -161,6 +161,8 @@ async function main(): Promise<void> {
     inGame: () => inGame,
     log,
   });
+  // The flash on save (17, piece 8): prefab_save's box, sent only while linked.
+  session.saveFlash = (box, doc) => ui.feed.saveFlash(box, doc);
   // Request modes (13, B6): while an ask, plan or scan request is open, edits on the linked document are refused.
   session.callHooks.push(inGame.modeRule);
   // Once an instance loads (at startup, or later in place).

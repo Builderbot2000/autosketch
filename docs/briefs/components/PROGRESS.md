@@ -17,5 +17,6 @@ The lead's log, one line per step (*How to run this set* in the README). Read th
 | E1 | rc-e1 | merged | 1242463 | stale hash = EntryChangedError → conflict; read-only checked before hash; palette edits weights/remove/drop/rename only; no instance → bad_request; LibraryHost.paletteIndex wired in server/index.ts. Lead fixed W's piece 6 row |
 | F2 | rc-f2 | merged | f7107a8 | Session.saveFlash hook wired to UiFeed.saveFlash; linked check in the feed (anchored-only docs get none); not a session event, so never in replay. Silo F complete |
 | Q3 | rc-q3 | merged | d04738b | closed request reopens under its own id (mod's counter; accepted by lead); list with no request → {request: null}, 13 updated; rotation now core/rotate.ts orientBox, no copy. Lead fixed the ENOTEMPTY flake in test/unit/server/library.test.ts (4c8ee87). Silo Q complete |
-| E2 | rc-e2 | running | | |
-| V3 | rc-v3 | running | | |
+| E2 | rc-e2 | merged | a670454 | Edit beside Delete, only when editable; one class per form on EntryEditorScreen; conflict drops typed text and reloads. Tested together with V3 (655 client steps). Silo E complete |
+| V3 | rc-v3 | merged | 189863f | Preview here at the crosshair's block, no rotate; screen keeps ticks across a preview; fake MCP gained optional `args` match on replies (accepted). runServer not run (permission check blocked the pkill; client-only change). Silo V complete |
+| Z1 | rc-z1 | running | | |

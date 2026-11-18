@@ -62,3 +62,35 @@ The user paused the follow-up work. State at the pause:
 - **Ghost meshing off the render thread, and a distance cap:** not started in any lasting form. The agent was stopped before it committed, so its work was lost.
 - **Intermittent `npm test` failure:** not investigated yet.
 
+
+## Task prompts for the remaining follow-ups
+
+Start each one as a fresh agent, in a worktree on its own branch from `main`, with no silo history. The prompts below stand alone. A lead merges each branch after running every tier, then pushes `main` and watches the `mod` workflow on GitHub.
+
+Environment notes that apply to all three:
+- Run Gradle as `JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 ./gradlew …` from `mod/`.
+- Run `npm install` if `node_modules` is missing. A worktree can instead symlink the main checkout's `node_modules`, which the client harness needs for the fake MCP.
+- The tiers are `npm run typecheck`, `npm test`, `./gradlew build test runGameTestServer`, and `mod/clienttest.sh`. The last runs every client suite headless under xvfb, with output in `mod/run/clienttest/`.
+- Commit messages end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+- Don't merge or push.
+
+### Task 1: replay follow-ups
+
+> In the autosketch repo, finish three follow-ups to the in-game replay (docs/design/16-in-game-ui.md, *Replay in the world*; code in `mod/neoforge/src/main/java/dev/autosketch/mod/client/ui/replay/`). Start from the local branch `fix/replay-followups`. Its last commit, `b4e907d`, is untested work in progress that moves replay's job volumes and flashes onto O's overlay drawing (`client/ui/overlay/DrawList.java`, `OverlayClient.java`). If that branch isn't available, start from `main`.
+> 1. Draw replay's job volumes and flashes with O's `DrawList` / `OverlayRenderer` instead of replay's own minimal line boxes. Keep the visual rules: solid work box, dashed context boxes, labels, flash pulses, `UiToggles`, and the player's dimension only.
+> 2. S's log list (`client/ui/screen/`) opens a replay by running `/autosketch replay <log>`, because `ReplayClient.open` is package-private. Install a direct opener through `AutosketchScreens.setReplayOpener` and `LogListScreen.setOpener`, and keep the command path working.
+> 3. Check that the `OPEN_REPLAY` key, the menu's Replay button and `/autosketch replay` all show the same log list, with nothing handled twice.
+> Update the replay client tests (`mod/neoforge/src/gametest/java/dev/autosketch/mod/gametest/client/replay/`) and 16's R row. Run every tier, and run `mod/clienttest.sh` twice. Commit, then report.
+
+### Task 2: ghost meshing off the render thread
+
+> In the autosketch repo, fix ghost-block performance (docs/design/16-in-game-ui.md, *Ghost blocks*, the ghost timings table and the G row in *Implementation status*). The code is in `mod/neoforge/src/main/java/dev/autosketch/mod/client/ui/blocks/` (`BlockMesher`, `BlockDrawer`, `BlockMesh`, `PaletteRegion`) and `client/ui/ghost/` (`Ghost`, `Ghosts`). The tests are in the `ghost` and `ghost-measure` client suites under `mod/neoforge/src/gametest/java/dev/autosketch/mod/gametest/client/ghost/`.
+> Measured problem: meshing runs on the render thread with a 4 ms budget per frame. A solid 256³ ghost takes about 45 s to fill in, and a scattered 256³ ghost needs 3.3 GiB of meshes.
+> 1. Build section meshes on a worker from an immutable snapshot of the section and its neighbours, for culling. Capture biome tints on the render or main thread. The render thread only uploads. Keep re-meshing limited to touched sections, keep results deterministic for the tests, drop stale results, and free everything on clear, disconnect and logout.
+> 2. Mesh only the sections within a distance of the camera (render distance by default) and free far meshes. Keep the blocks. Document the choice in 16.
+> 3. Keep S's 3D preview, which calls `BlockMesher.all` from screens, working; synchronous meshing is fine there.
+> Re-measure with `mod/clienttest.sh ghost-measure` and update 16's table. Run every tier, commit, then report the numbers before and after.
+
+### Task 3: intermittent unit-test failure
+
+> In the autosketch repo, `npm test` (vitest, about 970 tests) has failed intermittently with a single test, seen twice and never identified; reruns passed. Find it. Run the suite repeatedly, for example `for i in $(seq 1 20); do npx vitest run 2>&1 | grep -E "FAIL|×|Tests "; done`, and also under CPU load or with `--sequence.shuffle`, until it fails. Then name the test and fix the root cause: shared temp folders, ports, timers, ordering, or reliance on wall-clock time. Don't add retries. Run `npm run typecheck` and `npm test` several times, commit, then report what it was.

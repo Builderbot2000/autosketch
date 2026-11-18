@@ -70,6 +70,7 @@ The agent has to understand (a) **what it can build with**: blocks, materials, p
 | 14 | Distribution | One-command install and setup, instance discovery in known places only, the mod on CurseForge and Modrinth, what changes across versions and loaders, version skew between mod and MCP | [design/14-distribution.md](design/14-distribution.md) |
 | 15 | Management UI | The viewer grown into the user's UI for the MCP: Observe, Settings (generated from the registry, written to `config.toml`), Library (browse, edit metadata, rename, copy, hide, recoverable delete) and Instance (including first-run setup) tabs; token-guarded writes | [design/15-management-ui.md](design/15-management-ui.md) |
 | 16 | In-game UI | Replaces the browser UI (`15`, `12`'s viewer): command line for startup and outside actions, the mod's client half for everything else; thin client over the existing bridge; overlays, HUD, ghost blocks, replay in the world, settings and library screens; headless real-client tests | [design/16-in-game-ui.md](design/16-in-game-ui.md) |
+| 17 | Reusable components | Save components built with the agent, find them by prompt through an in-game candidates screen whose picks reach the agent as text, a session-scoped component set the agent stamps from, kits for keeping sets, in-game library editors | [design/17-reusable-components.md](design/17-reusable-components.md) |
 
 ## Dependency rules
 

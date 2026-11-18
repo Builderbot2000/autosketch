@@ -75,6 +75,7 @@ async function setup(opts: { features?: string[] } = {}) {
     configPath,
     promptPlayers: () => ["Kev"],
     library: { roots: () => libraryRoots({ workspace, env: { AUTOSKETCH_LIBRARY: lib }, settings: Settings.from([], {}, readConfig(configPath)) }), thumbnail: async () => png, registry: () => env.registry },
+    candidates: session.candidates,
     baseDoc: () => session.doc,
     scopes: session.scopes,
     linkFrame: () => (link!.volumes ? { dimension: link!.volumes.dimension, origin: link!.volumes.origin } : undefined),
@@ -125,8 +126,9 @@ describe("against the fake host with ui", () => {
     const no = await ask(STRANGER, "settings.list");
     expect(no).toMatchObject({ ok: false, error: "not_allowed" });
     expect((await ask(HOST, "nope")).ok).toBe(false);
-    // `17`'s candidates kinds are on the wire (W1) but not served yet (silo Q): bad_request, as for an MCP without them.
-    for (const kind of ["candidates.open", "candidates.ghost", "candidates.ghost.clear", "candidates.submit"]) expect(await ask(HOST, kind, { id: "c1" })).toMatchObject({ ok: false, error: "bad_request" });
+    // `17`'s candidates kinds: open is served (Q1), so an unknown id is not_found; the ghost and submit kinds aren't yet (Q2, Q3).
+    expect(await ask(HOST, "candidates.open", { id: "c1" })).toMatchObject({ ok: false, error: "not_found" });
+    for (const kind of ["candidates.ghost", "candidates.ghost.clear", "candidates.submit"]) expect(await ask(HOST, kind, { id: "c1" })).toMatchObject({ ok: false, error: "bad_request" });
     const from = host.ui.length;
     ok(await ask(KEV, "resync"));
     const after = host.ui.slice(from);

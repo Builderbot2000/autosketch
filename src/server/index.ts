@@ -151,6 +151,7 @@ async function main(): Promise<void> {
     configPath: file.path,
     promptPlayers: () => settings.get(WORLD_PROMPT_PLAYERS),
     library: uiLibraryHost(session),
+    candidates: session.candidates,
     baseDoc: () => session.doc,
     scopes: session.scopes,
     linkFrame: () => (link.volumes ? { dimension: link.volumes.dimension, origin: link.volumes.origin } : undefined),

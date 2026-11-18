@@ -1,6 +1,7 @@
 import type { EventListener } from "../core/fanout.js";
 import type { LoggedEvent } from "../core/events.js";
 import type { Settings } from "../core/settings.js";
+import type { Candidates } from "../library/candidates.js";
 import type { Document } from "../document/document.js";
 import type { ScopeManager } from "../scope/scopes.js";
 import type { BridgeConnection } from "../world/bridge.js";
@@ -9,6 +10,7 @@ import type { OpenRequest } from "../world/chat-stream.js";
 import type { UiRequestInfo } from "../world/protocol/messages.js";
 import { UiFeed } from "./feed.js";
 import type { WorldFrame } from "./frame.js";
+import { CandidateRequests } from "./candidates.js";
 import { GhostRegions } from "./ghosts.js";
 import { LibraryRequests, type LibraryHost } from "./library.js";
 import { UiPlayers } from "./players.js";
@@ -40,6 +42,8 @@ export interface UiOptions {
   /** `world.promptPlayers`, read on each use. */
   promptPlayers(): readonly string[];
   library: LibraryHost;
+  /** The session's candidates lists (`17`, piece 3), which `candidates.*` requests read. */
+  candidates?: Pick<Candidates, "get">;
   baseDoc(): Document | undefined;
   scopes: Pick<ScopeManager, "scopes" | "baseOffset">;
   /** The link's frame while the base document is linked. */
@@ -78,6 +82,11 @@ export function startUi(o: UiOptions): UiCore {
     const r = g?.current ?? g?.heldRequest;
     return r ? { id: r.id, mode: r.mode ?? "build", text: texts.get(r.id) ?? "" } : null;
   };
+  // A request is open while its activity stream is, or while its read-only mode holds (B6).
+  const openRequest = (id: number): boolean => {
+    const g = o.inGame?.();
+    return g?.current?.id === id || g?.heldRequest?.id === id;
+  };
   const intervalMs = o.intervalMs !== undefined ? { intervalMs: o.intervalMs } : {};
   const ghosts = new GhostRegions({
     bridge: o.bridge,
@@ -99,6 +108,7 @@ export function startUi(o: UiOptions): UiCore {
     ghosts,
     settings,
     library: new LibraryRequests(o.library, settings),
+    ...(o.candidates ? { candidates: new CandidateRequests({ lists: o.candidates, openRequest }) } : {}),
     workspace: o.workspace,
     live: () => ({ session: o.sessionId, doc: o.baseDoc()?.meta.name }),
     linked: () => o.linkFrame() !== undefined,

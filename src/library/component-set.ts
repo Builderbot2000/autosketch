@@ -75,6 +75,21 @@ export class ComponentSet {
     return `set: ${this.list.map((x) => (x.label ? `${x.label} = ${x.prefab}` : x.prefab)).join(", ")}`;
   }
 
+  /**
+   * The prefab name `stamp({prefab})` should look up (piece 1, *Resolving by label*): a set label's
+   * prefab, else the reference unchanged, so library names and sheet cells resolve as before. A
+   * lookup ahead of the others, never a constraint.
+   */
+  stampRef(ref: string): string {
+    return this.resolve(ref) ?? ref;
+  }
+
+  /** `text` with the reminder line appended on its own line while the set has entries; unchanged otherwise. */
+  remind(text: string): string {
+    const line = this.reminderLine();
+    return line ? `${text}\n${line}` : text;
+  }
+
   /** The whole set, one entry per line, as every component_set result shows it. */
   format(): string {
     if (!this.list.length) return "component set: empty";

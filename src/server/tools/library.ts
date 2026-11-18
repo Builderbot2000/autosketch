@@ -69,8 +69,9 @@ export function registerLibraryTools({ tool, resource, session }: ToolDeps): voi
         ...(a.max_footprint ? { maxFootprint: a.max_footprint as [number, number] } : {}),
         ...(a.page ? { page: a.page } : {}),
       });
-      if (!s) return text(`No prefabs match. Library roots: ${lib.roots.map((r) => `${r.label} ${r.path}`).join("; ")}. Save one with prefab_save.`);
-      return image(s.png, s.caption);
+      const set = session.componentSet;
+      if (!s) return text(set.remind(`No prefabs match. Library roots: ${lib.roots.map((r) => `${r.label} ${r.path}`).join("; ")}. Save one with prefab_save.`));
+      return image(s.png, set.remind(s.caption));
     },
   );
 
@@ -89,10 +90,11 @@ export function registerLibraryTools({ tool, resource, session }: ToolDeps): voi
     async (c, a) => {
       const lib = libraryFor(c, session);
       const found = await lib.search({ ...(a.query ? { query: a.query } : {}), ...(a.tags ? { tags: a.tags } : {}), ...(a.max_footprint ? { maxFootprint: a.max_footprint as [number, number] } : {}) });
-      if (!found.length) return text("No prefabs match. Try fewer words or tags, or prefab_sheet to browse.");
+      const set = session.componentSet;
+      if (!found.length) return text(set.remind("No prefabs match. Try fewer words or tags, or prefab_sheet to browse."));
       const lines = await Promise.all(found.slice(0, 10).map((p) => describePrefab(lib, p)));
       if (found.length > 10) lines.push(`…${found.length - 10} more; narrow the query or browse with prefab_sheet.`);
-      return text(lines.join("\n"));
+      return text(set.remind(lines.join("\n")));
     },
   );
 
@@ -105,11 +107,11 @@ export function registerLibraryTools({ tool, resource, session }: ToolDeps): voi
     {
       title: "Stamp prefab",
       description:
-        "Places a library prefab (by name, or a cell of the last prefab_sheet) so its anchor (default \"base\", else its minimum corner) lands on at. " +
+        "Places a library prefab (by component_set label, name, or a cell of the last prefab_sheet) so its anchor (default \"base\", else its minimum corner) lands on at. " +
         'palette_remap recolours prefab roles, keeping shapes and states: {"log":"palette:castle.trim"} or {"leaves":"spruce_leaves"}; a family or block in the prefab works as a key too. ' +
         "rotate/mirror orient it first (the anchor stays on at). Air in the prefab leaves existing blocks unless include_air. Registers a component (kind prefab:<id>) with the prefab's anchors. One undo step. Text.",
       inputSchema: {
-        prefab: z.string().describe('Prefab id/name, or a cell like "B2" from the last prefab_sheet'),
+        prefab: z.string().describe('A component_set label, a prefab id/name, or a cell like "B2" from the last prefab_sheet (tried in that order)'),
         at: atSchema,
         anchor: z.string().optional().describe("Prefab anchor to place at `at`"),
         palette_remap: z.record(z.string(), z.string()).optional(),
@@ -123,7 +125,8 @@ export function registerLibraryTools({ tool, resource, session }: ToolDeps): voi
     async (c, a) => {
       const doc = session.require();
       const lib = libraryFor(c, session);
-      const p = await lib.resolve(a.prefab);
+      const set = session.componentSet;
+      const p = await lib.resolve(set.stampRef(a.prefab));
       const loaded = await loadPrefab(p, c.registry, session.schematicVersion(c.registry, dataVersionFor(c.info.mcVersion)));
       return editWith(session, () => {
         const r = stampPrefab(doc, env(c), p, loaded, {
@@ -135,7 +138,7 @@ export function registerLibraryTools({ tool, resource, session }: ToolDeps): voi
           ...(a.rotate ? { rotate: a.rotate } : {}),
           ...(a.mirror ? { mirror: a.mirror } : {}),
         });
-        return formatEdit(doc, r, [`prefab ${p.id} at ${formatVec(r.at)} (min corner ${formatVec(r.origin)}) · component: ${r.component}`]);
+        return set.remind(formatEdit(doc, r, [`prefab ${p.id} at ${formatVec(r.at)} (min corner ${formatVec(r.origin)}) · component: ${r.component}`]));
       });
     },
   );

@@ -63,6 +63,8 @@ Settled while building it (K1): the arguments combine in one call and apply in t
 
 **Resolving by label.** `stamp({prefab: "corner tower"})` resolves a set label to its prefab before resolving library names and sheet cells. This is a convenience, not a constraint: any library prefab can still be stamped by name.
 
+Settled while building it (K2): a label wins even when it equals another prefab's name or a sheet cell id ("A1"), since the order is labels, then names, then cells; labels match case-insensitively, as everywhere in the set. Resolution is in the `stamp` tool only, not in `stamp` inside scripts and procedures, because a saved procedure must not depend on one session's labels. The reminder is the last line of the result text (the caption for `prefab_sheet`), also on "No prefabs match" results, and not on refused calls. Logic: `ComponentSet.stampRef` and `ComponentSet.remind`.
+
 ### 2. Kits
 
 A kit is a knowledge pack (`07`) with `kind: kit` under `knowledge/kits/`. Its frontmatter lists the entries, and the body holds free notes from the player or the agent:
@@ -158,7 +160,7 @@ When `prefab_save` runs on a linked document, the saved box is sent as a change 
 
 | Piece | Silo | Status |
 |---|---|---|
-| 1. Component set | K (K1) | Record and `component_set` tool built: `src/library/component-set.ts`, `src/server/tools/components.ts`, `Session.componentSet`. Tests: `test/unit/library/component-set.test.ts`, `test/unit/server/components.test.ts`. Label resolution in `stamp` and the reminder line: K2, K3. |
+| 1. Component set | K (K1) | Record and `component_set` tool built: `src/library/component-set.ts`, `src/server/tools/components.ts`, `Session.componentSet`. Tests: `test/unit/library/component-set.test.ts`, `test/unit/server/components.test.ts`. Label resolution in `stamp` and the reminder on `prefab_search`, `prefab_sheet` and `stamp` built (K2): `ComponentSet.stampRef`, `ComponentSet.remind`, `src/server/tools/library.ts`; tests in the same two files (label before name and cell, block-level; reminder only on the named results and only while non-empty). Token cost measured under *Open questions*. Reminder on in-game request events: K3. |
 | 2. Kits | K (K1) | Built. `save_as`, `load`, `knowledge_list({kind: "kit"})`; `src/library/knowledge.ts` (`findKit`, `readKit`, `writeKit`, `parseKitEntries`). |
 | 3. Candidates in a reply, wire | W (step W1) | Built. The four `candidates.*` kinds, the error `answered` and the `chat` `action` in `13` (*Request kinds*, `chat`), both codecs (`src/world/protocol/`, `mod/common/.../protocol/`: `Messages.Chat`, `UiMessages`), golden vectors, the fake host's `playerClick`, the fake MCP answering the kinds from its table. The MCP answers the kinds `bad_request` until Q serves them (`13`, *Implementation status*) |
 | 3. Candidates in a reply, MCP | Q | Not built |
@@ -183,6 +185,7 @@ When `prefab_save` runs on a linked document, the saved box is sent as a change 
 ## Open questions
 
 - **Reminder placement.** Is a line on search, sheet, stamp and in-game request text enough to survive summarising, or should it go on every result of a linked document while the set has entries? Measure the token cost before widening it.
+  - *Measured (K2, 2026-11-18)*, on a cathedral set with two-word labels and library-style ids: 5 entries make a 148-character line (`set: corner tower = gothic_tower_a, gatehouse = gate_small, buttress = buttress_flying_a, rose window = rose_window_round, spire = spire_octagonal_b`), about 40–50 tokens; 15 entries make 430 characters, about 110–145 tokens. Estimated at 3–4 characters a token (underscore ids sit near 3), since no tokenizer is available offline; a count through the token-counting API would firm it up. On the current placement this is paid only on search, sheet and stamp results. Widened to every result of a linked document, a 15-entry set would add roughly 11–14k tokens over 100 tool calls. Placement not widened.
 - **Candidates limit.** 24 fits one sheet page (6×4). Should a reply be able to carry more, paged like the sheet?
 
 ## Decisions

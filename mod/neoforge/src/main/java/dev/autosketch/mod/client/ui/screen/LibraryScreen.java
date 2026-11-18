@@ -23,8 +23,9 @@ import org.jetbrains.annotations.Nullable;
  * trash), and one tab per kind (prefabs as a thumbnail grid, the others as rows), filtered by text
  * and {@code tag:}, hidden entries shown on request. Each entry carries its flags (root, overrides,
  * shadowed by, hidden). The detail pane shows the selected entry ({@code library.entry}) and its
- * actions: rename, duplicate and delete in a writable root; copy to my library and hide or unhide in
- * a read-only one. Delete and Empty trash ask first.
+ * actions: edit (the kind's {@link EntryEditorScreen}, when the MCP says the entry is editable),
+ * rename, duplicate and delete in a writable root; copy to my library and hide or unhide in a
+ * read-only one. Delete and Empty trash ask first.
  *
  * <p>The prefab grid is a {@link ThumbnailGrid}: the MCP's PNGs ({@code library.thumbnail}), asked
  * for one at a time as cards come into view, loaded as dynamic textures, and freed when the screen
@@ -50,7 +51,7 @@ public final class LibraryScreen extends PaneScreen {
     private @Nullable List<JsonObject> trash;
     private int loads;
 
-    private boolean closed, childOpen;
+    private boolean closed, childOpen, editing;
     private final ThumbnailGrid grid = new ThumbnailGrid(() -> closed);
     private final OrbitPreview preview = new OrbitPreview(this);
 
@@ -224,6 +225,13 @@ public final class LibraryScreen extends PaneScreen {
         pendingSelect = new String[] {root, kind, name};
         selected = null;
         entry = null;
+    }
+
+    /** Opens the entry's editor (17, piece 6); coming back reloads the list and the entry. */
+    private void edit(JsonObject e) {
+        childOpen = true;
+        editing = true;
+        minecraft.setScreen(EntryEditorScreen.open(this, s(e, "root"), s(e, "kind"), s(e, "name")));
     }
 
     private void confirm(Component title, Component text, Runnable yes) {
@@ -419,8 +427,10 @@ public final class LibraryScreen extends PaneScreen {
             put(p, field("act:duplicate", w, s(e, "name") + "_copy", Component.empty()), 0, y + 1);
             put(p, Button.builder(tr("library.duplicate"), b -> duplicate(e, fieldValue("act:duplicate", s(e, "name") + "_copy"))).size(64, 18).build(), w + 4, y);
             y += 20;
+            Button edit = put(p, Button.builder(tr("library.edit"), b -> edit(e)).size(64, 18).build(), 0, y);
+            edit.active = entry != null && bool(entry, "editable");
             put(p, Button.builder(tr("library.delete"), b -> confirm(tr("library.delete"), tr("library.delete_confirm", s(e, "kind") + "/" + s(e, "name"), s(e, "root")), () -> delete(e)))
-                    .size(64, 18).build(), 0, y);
+                    .size(64, 18).build(), 68, y);
             y += 22;
         } else {
             put(p, Button.builder(tr("library.copy"), b -> copy(e)).size(Math.min(p.w - 4, 120), 18).build(), 0, y);
@@ -552,6 +562,11 @@ public final class LibraryScreen extends PaneScreen {
     @Override
     public void added() {
         closed = false;
+        if (editing) {
+            editing = false;
+            load();
+            if (selected != null) select(selected);
+        }
     }
 
     // ── widgets ─────────────────────────────────────────────────────────────────────────────────

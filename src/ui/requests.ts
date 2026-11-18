@@ -148,7 +148,9 @@ export class UiRequests {
       case "candidates.open":
         return { result: { ...this.candidates(kind).open(a) } };
       case "candidates.ghost":
+        return this.candidates(kind).ghost(a);
       case "candidates.ghost.clear":
+        return this.candidates(kind).ghostClear();
       case "candidates.submit":
         throw new UiRequestError("bad_request", `This Autosketch doesn't serve ${kind} yet.`);
       // `17` piece 6: names and shapes frozen in `13` (*Request kinds*); silo E serves them.

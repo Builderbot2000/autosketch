@@ -3,7 +3,7 @@ import type { Mask } from "../core/mask.js";
 import type { PublicBox, Vec3 } from "../core/region.js";
 import type { Document } from "../document/document.js";
 import type { BridgeConnection } from "../world/bridge.js";
-import { UI_COALESCE_MS, type UiGhost, type UiGhostSection } from "../world/protocol/messages.js";
+import { CANDIDATE_GHOST, UI_COALESCE_MS, type UiGhost, type UiGhostSection } from "../world/protocol/messages.js";
 import { jobColour } from "./colours.js";
 import { sameFrame, toWorld, type WorldFrame } from "./frame.js";
 
@@ -18,6 +18,10 @@ import { sameFrame, toWorld, type WorldFrame } from "./frame.js";
  * - **Anchored document.** An unlinked base document drawn at an anchor the player chose
  *   (`ghost.anchor`): its blocks, the anchor taking the place of the document's minimum corner.
  *   Its local grid is the base document's frame, so the anchor also places the jobs (`frame`).
+ * - **Candidate.** One prefab the player previews from the candidates screen (`17`, piece 3;
+ *   `candidates.ghost`), id `candidate`: its blocks, already oriented, at a world position of its
+ *   own, so it needs neither a link nor an anchor. A new one replaces it; it is fixed (no deltas),
+ *   and forgotten with a lost connection, as the anchor is.
  *
  * Updates come from `doc.op`, `doc.undo` and `doc.redo` boxes: the sections they touch are rebuilt
  * from the document on the next window (250 ms) and sent whole, one `ui.ghost` per ghost.
@@ -44,6 +48,19 @@ export interface GhostHost {
   intervalMs?: number;
 }
 
+/**
+ * The candidate ghost's blocks (`candidates.ghost`): `size` blocks from its world `origin`, palette
+ * indices x fastest, then z, then y; index 0 is air.
+ */
+export interface CandidateBlocks {
+  dimension: string;
+  /** World position of the ghost's (0,0,0). */
+  origin: Vec3;
+  size: Vec3;
+  palette: string[];
+  blocks: Uint32Array;
+}
+
 /** The id of the anchored document's ghost. */
 export const DOC_GHOST = "doc";
 const AIR = "minecraft:air";
@@ -56,6 +73,8 @@ const bySection = (a: Vec3, b: Vec3) => a[1] - b[1] || a[2] - b[2] || a[0] - b[0
 export class GhostRegions {
   /** The anchored document's frame, while one is set. */
   anchor?: WorldFrame;
+  /** The candidate ghost, while one is shown. */
+  private candidate?: CandidateBlocks;
   /** Sections to resend per ghost (local section keys); "full" for a whole resend. */
   private dirty = new Map<string, Set<string> | "full">();
   /** Ghosts the client holds (sent, not cleared), with the frame they were sent in. */
@@ -95,6 +114,20 @@ export class GhostRegions {
     } else if (!this.host.scope(id)) return false;
     this.dirty.delete(id);
     this.sendClear(id);
+    return true;
+  }
+
+  /** Shows `c` as the candidate ghost, whole, replacing any earlier one (`candidates.ghost`). */
+  showCandidate(c: CandidateBlocks, players: string[] = this.host.players()): void {
+    this.candidate = c;
+    this.sendGhost(CANDIDATE_GHOST, players, true);
+  }
+
+  /** Removes the candidate ghost (`candidates.ghost.clear`). False when none is shown. */
+  clearCandidate(): boolean {
+    if (!this.candidate) return false;
+    this.candidate = undefined;
+    this.sendClear(CANDIDATE_GHOST);
     return true;
   }
 
@@ -143,6 +176,7 @@ export class GhostRegions {
     const work = [...this.dirty];
     this.dirty.clear();
     for (const [id, d] of work) {
+      if (id === CANDIDATE_GHOST) continue;
       if (id !== DOC_GHOST && !this.host.scope(id)) continue;
       if (id === DOC_GHOST && !this.anchor) continue;
       this.sendGhost(id, players, d === "full" || !this.shown.has(id), d === "full" ? undefined : [...d].map(keyVec));
@@ -151,7 +185,9 @@ export class GhostRegions {
 
   /** Every open ghost, whole, to these players (a `resync`). */
   resync(players: string[]): void {
-    if (!this.host.bridge.ui || !this.frame()) return;
+    if (!this.host.bridge.ui) return;
+    if (this.candidate) this.sendGhost(CANDIDATE_GHOST, players, true);
+    if (!this.frame()) return;
     for (const id of this.host.scopeIds()) this.sendGhost(id, players, true);
     if (this.anchor) this.sendGhost(DOC_GHOST, players, true);
   }
@@ -188,17 +224,28 @@ export class GhostRegions {
           }
       if (any || !full) out.push({ section: s, states });
     }
-    return { type: "ui.ghost", players, ghost: id, dimension: frame.dimension, origin: toWorld(frame, src.offset), tint: id === DOC_GHOST ? DOC_TINT : jobColour(id), full, palette, sections: out };
+    return { type: "ui.ghost", players, ghost: id, dimension: frame.dimension, origin: toWorld(frame, src.offset), tint: id === DOC_GHOST || id === CANDIDATE_GHOST ? DOC_TINT : jobColour(id), full, palette, sections: out };
   }
 
   // -- internals ------------------------------------------------------------------------------
 
   private frameOf(id: string): WorldFrame | undefined {
+    if (id === CANDIDATE_GHOST) return this.candidate && { dimension: this.candidate.dimension, origin: this.candidate.origin };
     return id === DOC_GHOST ? this.anchor : this.frame();
   }
 
   /** What a ghost draws: its state at a ghost-local position, the sections worth sending, its base-local offset. */
   private source(id: string): { state: (x: number, y: number, z: number) => string; sections: () => Vec3[]; offset: Vec3 } | undefined {
+    if (id === CANDIDATE_GHOST) {
+      const c = this.candidate;
+      if (!c) return undefined;
+      const [w, h, l] = c.size;
+      return {
+        offset: [0, 0, 0],
+        state: (x, y, z) => (x < w && y < h && z < l ? c.palette[c.blocks[x + z * w + y * w * l]!] ?? AIR : AIR),
+        sections: () => (w && h && l ? sectionsOf({ min: [0, 0, 0], max: [w - 1, h - 1, l - 1] }) : []),
+      };
+    }
     if (id === DOC_GHOST) {
       const doc = this.host.baseDoc();
       if (!doc) return undefined;
@@ -258,6 +305,7 @@ export class GhostRegions {
   private down(): void {
     clearInterval(this.timer);
     this.timer = undefined;
+    this.candidate = undefined;
     this.dirty.clear();
     this.shown.clear();
   }

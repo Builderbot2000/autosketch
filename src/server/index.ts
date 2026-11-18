@@ -19,6 +19,7 @@
  */
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { Settings } from "../core/settings.js";
+import type { StateOverride } from "../core/rotate.js";
 import { startObserve, type Observer } from "../observe/index.js";
 import type { PaletteBook } from "../palette/pick.js";
 import { scopeLimits } from "../scope/settings.js";
@@ -153,6 +154,7 @@ async function main(): Promise<void> {
     promptPlayers: () => settings.get(WORLD_PROMPT_PLAYERS),
     library: uiLibraryHost(session),
     candidates: session.candidates,
+    stateOverrides: candidateStateOverrides(session),
     baseDoc: () => session.doc,
     scopes: session.scopes,
     linkFrame: () => (link.volumes ? { dimension: link.volumes.dimension, origin: link.volumes.origin } : undefined),
@@ -205,6 +207,13 @@ function uiLibraryHost(session: Session): UiLibraryHost {
     },
     registry: () => loaded?.registry,
   };
+}
+
+/** The loaded instance's plugin state overrides, for turning a candidate ghost as `stamp` turns blocks (09). */
+function candidateStateOverrides(session: Session): () => StateOverride[] {
+  let loaded: InstanceContext | undefined;
+  void session.whenInstance().then((c) => (loaded = c));
+  return () => (loaded?.plugins ?? []).flatMap((pl) => (pl.rotate ? [pl.rotate.bind(pl)] : []));
 }
 
 const command = process.argv[2];

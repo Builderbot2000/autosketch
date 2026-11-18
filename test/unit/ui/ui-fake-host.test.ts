@@ -126,9 +126,10 @@ describe("against the fake host with ui", () => {
     const no = await ask(STRANGER, "settings.list");
     expect(no).toMatchObject({ ok: false, error: "not_allowed" });
     expect((await ask(HOST, "nope")).ok).toBe(false);
-    // `17`'s candidates kinds: open is served (Q1), so an unknown id is not_found; the ghost and submit kinds aren't yet (Q2, Q3).
-    expect(await ask(HOST, "candidates.open", { id: "c1" })).toMatchObject({ ok: false, error: "not_found" });
-    for (const kind of ["candidates.ghost", "candidates.ghost.clear", "candidates.submit"]) expect(await ask(HOST, kind, { id: "c1" })).toMatchObject({ ok: false, error: "bad_request" });
+    // `17`'s candidates kinds: open and ghost are served (Q1, Q2), so an unknown id is not_found, and clearing with no ghost is {}; submit isn't yet (Q3).
+    for (const kind of ["candidates.open", "candidates.ghost"]) expect(await ask(HOST, kind, { id: "c1" })).toMatchObject({ ok: false, error: "not_found" });
+    expect(await ask(HOST, "candidates.ghost.clear")).toMatchObject({ ok: true, result: {} });
+    expect(await ask(HOST, "candidates.submit", { id: "c1" })).toMatchObject({ ok: false, error: "bad_request" });
     // `17`'s editor writes likewise (W2) until silo E serves them.
     for (const kind of ["library.write.prefab", "library.write.palette", "library.write.procedure", "library.write.knowledge"]) expect(await ask(HOST, kind, { root: "user", name: "x", hash: "absent" })).toMatchObject({ ok: false, error: "bad_request" });
     const from = host.ui.length;

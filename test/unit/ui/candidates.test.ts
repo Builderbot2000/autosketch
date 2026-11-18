@@ -12,7 +12,7 @@ import { Session } from "../../../src/server/session.js";
 import { startUi, type UiCore } from "../../../src/ui/index.js";
 import { LiveLink } from "../../../src/world/live-link.js";
 import { CHANNEL_INSTRUCTIONS, InGameRequests } from "../../../src/world/prompt.js";
-import { CANDIDATES_MAX, type ChatMessage, type PlayerRef, type UiResult, type WireBox } from "../../../src/world/protocol/messages.js";
+import { CANDIDATES_MAX, type ChatMessage, type PlayerRef, type UiGhost, type UiResult, type WireBox } from "../../../src/world/protocol/messages.js";
 import { autoSyncHook, syncLink } from "../../../src/world/sync.js";
 import { FakeHost } from "../../support/fake-host.js";
 import { tempDir } from "../../helpers/fixtures.js";
@@ -196,5 +196,91 @@ describe("world_reply candidates (17, piece 3)", () => {
     expect(await host.playerUiRequest(HOST, { kind: "candidates.open", args: {} })).toMatchObject({ ok: false, error: "bad_request" });
     session.candidates.get("c1")!.answered = true; // what a submit does (Q3)
     expect(await host.playerUiRequest(HOST, { kind: "candidates.open", args: { id: "c1" } })).toMatchObject({ ok: false, error: "answered" });
+  });
+});
+
+/** A `ui.ghost`'s blocks by world position ("x,y,z" → state), air left out. */
+function ghostBlocks(g: UiGhost): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const sec of g.sections)
+    for (let i = 0; i < 4096; i++) {
+      const st = g.palette[sec.states[i]!]!;
+      if (st === "minecraft:air") continue;
+      const x = i & 15, z = (i >> 4) & 15, y = i >> 8;
+      out.set([g.origin[0] + sec.section[0] * 16 + x, g.origin[1] + sec.section[1] * 16 + y, g.origin[2] + sec.section[2] * 16 + z].join(","), st);
+    }
+  return out;
+}
+
+describe("the candidate ghost (17, piece 3; candidates.ghost, candidates.ghost.clear)", () => {
+  const ghosts = (h: FakeHost) => h.ui.filter((m) => (m.type === "ui.ghost" || m.type === "ui.ghost.clear") && m.ghost === "candidate");
+  const AT = [10, 64, 20];
+  const OVERWORLD = "minecraft:overworld";
+
+  it("draws one of the list's prefabs as stamp would place it, replaces it on the next, and clears it", async () => {
+    const { host, call } = await setup();
+    await call("world_reply", { lines: ["Pick"], candidates: [{ prefab: "lamp_post" }, { prefab: "park_bench" }] });
+    expect(ok(await host.playerUiRequest(HOST, { kind: "candidates.ghost", args: { id: "c1", prefab: "lamp_post", dimension: OVERWORLD, at: AT } }))).toEqual({ ghost: "candidate" });
+    await host.waitFor(() => ghosts(host).length === 1);
+    const first = ghosts(host)[0] as UiGhost;
+    expect(first).toMatchObject({ type: "ui.ghost", ghost: "candidate", players: [HOST.uuid], dimension: OVERWORLD, origin: [10, 64, 20], tint: "#ffffff", full: true });
+    // lamp_post (starter library): post at (0,0..4,0), arm and lantern at z 1, anchor base (0,0,0).
+    const b = ghostBlocks(first);
+    expect(b.size).toBe(7);
+    expect(b.get("10,64,20")).toBe("minecraft:stone_bricks");
+    for (const y of [65, 66, 67]) expect(b.get(`10,${y},20`)).toMatch(/^minecraft:stone_brick_wall/);
+    expect(b.get("10,68,20")).toMatch(/^minecraft:stone_brick_slab\[.*type=bottom/);
+    expect(b.get("10,68,21")).toMatch(/^minecraft:oak_fence/);
+    expect(b.get("10,67,21")).toMatch(/^minecraft:lantern\[.*hanging=true/);
+
+    // Turned 90° clockwise: the arm points west, and the base anchor stays on `at`.
+    ok(await host.playerUiRequest(HOST, { kind: "candidates.ghost", args: { id: "c1", prefab: "lamp_post", dimension: OVERWORLD, at: AT, rotate: 90 } }));
+    await host.waitFor(() => ghosts(host).length === 2);
+    const turned = ghosts(host)[1] as UiGhost;
+    expect(turned).toMatchObject({ type: "ui.ghost", ghost: "candidate", origin: [9, 64, 20], full: true });
+    const t = ghostBlocks(turned);
+    expect(t.size).toBe(7);
+    expect(t.get("10,64,20")).toBe("minecraft:stone_bricks");
+    expect(t.get("9,68,20")).toMatch(/^minecraft:oak_fence/);
+    expect(t.get("9,67,20")).toMatch(/^minecraft:lantern/);
+
+    // Another candidate replaces it: a full ghost under the same id.
+    ok(await host.playerUiRequest(HOST, { kind: "candidates.ghost", args: { id: "c1", prefab: "park_bench", dimension: OVERWORLD, at: AT } }));
+    await host.waitFor(() => ghosts(host).length === 3);
+    const bench = ghosts(host)[2] as UiGhost;
+    expect(bench).toMatchObject({ ghost: "candidate", origin: [10, 64, 20], full: true });
+    expect([...ghostBlocks(bench)].map(([k, v]) => [k, v.replace(/\[.*/, "")])).toEqual([
+      ["10,64,20", "minecraft:oak_trapdoor"],
+      ["11,64,20", "minecraft:oak_stairs"],
+      ["12,64,20", "minecraft:oak_stairs"],
+      ["13,64,20", "minecraft:oak_stairs"],
+      ["14,64,20", "minecraft:oak_trapdoor"],
+    ]);
+
+    // A resync sends it again, whole.
+    ok(await host.playerUiRequest(HOST, { kind: "resync" }));
+    await host.waitFor(() => ghosts(host).length === 4);
+    expect(ghosts(host)[3]).toMatchObject({ ghost: "candidate", origin: [10, 64, 20], full: true });
+
+    // Clearing sends one ui.ghost.clear; clearing again is {} and sends nothing.
+    expect(ok(await host.playerUiRequest(HOST, { kind: "candidates.ghost.clear", args: {} }))).toEqual({});
+    await host.waitFor(() => ghosts(host).length === 5);
+    expect(ghosts(host)[4]).toEqual({ type: "ui.ghost.clear", players: [HOST.uuid], ghost: "candidate" });
+    expect(ok(await host.playerUiRequest(HOST, { kind: "candidates.ghost.clear", args: {} }))).toEqual({});
+    ok(await host.playerUiRequest(HOST, { kind: "resync" }));
+    expect(ghosts(host)).toHaveLength(5);
+  });
+
+  it("refuses an unknown id or a prefab not in the list (not_found) and malformed arguments (bad_request), drawing nothing", async () => {
+    const { host, call } = await setup();
+    await call("world_reply", { lines: ["Pick"], candidates: [{ prefab: "park_bench" }] });
+    const ghost = (args: Record<string, unknown>) => host.playerUiRequest(HOST, { kind: "candidates.ghost", args: { id: "c1", prefab: "park_bench", dimension: OVERWORLD, at: AT, ...args } });
+    expect(await ghost({ id: "c9" })).toMatchObject({ ok: false, error: "not_found" });
+    expect(await ghost({ prefab: "lamp_post" })).toMatchObject({ ok: false, error: "not_found" });
+    expect(await ghost({ at: [1, 2] })).toMatchObject({ ok: false, error: "bad_request" });
+    expect(await ghost({ at: [1, 2.5, 3] })).toMatchObject({ ok: false, error: "bad_request" });
+    expect(await ghost({ rotate: 45 })).toMatchObject({ ok: false, error: "bad_request" });
+    expect(await ghost({ dimension: "" })).toMatchObject({ ok: false, error: "bad_request" });
+    expect(ghosts(host)).toHaveLength(0);
   });
 });

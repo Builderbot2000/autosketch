@@ -8,6 +8,9 @@ The lead's log, one line per step (*How to run this set* in the README). Read th
 | K1 | rc-k1 | merged | 45227fa | rebased on F1, status tables combined; add takes ids or names, not cells; kit load skips missing prefabs with a warning |
 | F1 | rc-f1 | merged | bfe56c0 | .litematic now listed; format change replaces old prefab file; 17 status table started (W2 extends) |
 | K2 | rc-k2 | merged | e99305d | labels win over names and cells; stamp tool only, not scripts. Reminder cost estimated (3–4 chars/token), not counted with a tokenizer |
-| Q1 | rc-q1 | running | | |
-| V1 | rc-v1 | running | | |
+| Q1 | rc-q1 | merged |  | ids c1…; uncelled prefabs get #n; no set labels in candidates; line `[Show candidates (n)]`. Open: 13's status row still says all candidates.* answer bad_request (W's file, for Z) |
+| V1 | rc-v1 | merged | 7decd2d | ThumbnailGrid, OrbitPreview (package-private) in client/ui/screen |
 | W2 | rc-w2 | running | | |
+| V2 | rc-v2 | running | | |
+| Q2 | rc-q2 | running | | |
+| K3 | rc-k3 | running | | |

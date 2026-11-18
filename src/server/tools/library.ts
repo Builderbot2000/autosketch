@@ -71,6 +71,7 @@ export function registerLibraryTools({ tool, resource, session }: ToolDeps): voi
       });
       const set = session.componentSet;
       if (!s) return text(set.remind(`No prefabs match. Library roots: ${lib.roots.map((r) => `${r.label} ${r.path}`).join("; ")}. Save one with prefab_save.`));
+      session.candidates.rememberSheet(s.layout); // 17 piece 3: world_reply candidates default to these cells
       return image(s.png, set.remind(s.caption));
     },
   );

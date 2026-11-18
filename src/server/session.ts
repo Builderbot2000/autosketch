@@ -9,6 +9,7 @@ import { toPublic, type Vec3 } from "../core/region.js";
 import { dataVersionFor } from "../core/version.js";
 import { Document, type Facing } from "../document/document.js";
 import { loadNative, saveNative } from "../document/native.js";
+import { Candidates } from "../library/candidates.js";
 import { ComponentSet } from "../library/component-set.js";
 import type { PaletteBook } from "../palette/pick.js";
 import { BASE, refusal, ScopeManager } from "../scope/scopes.js";
@@ -131,6 +132,11 @@ export class Session {
    * with the session (the process), never saved except as a kit the player asks for.
    */
   readonly componentSet = new ComponentSet();
+  /**
+   * The last prefab sheet's cells and the candidates lists offered with `world_reply` (17, piece 3),
+   * which the in-game UI's `candidates.*` requests read. Session-long, in memory only.
+   */
+  readonly candidates = new Candidates();
   /** Hooks around each tool call, in order (see `CallHook`). */
   readonly callHooks: CallHook[] = [];
   /** The scope the current tool call addresses ("base" outside any call). */

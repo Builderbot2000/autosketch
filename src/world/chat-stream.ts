@@ -1,7 +1,7 @@
 import type { ObserveEvent } from "../core/events.js";
 import type { EventListener } from "../core/fanout.js";
 import { READ_ONLY_MODES } from "./modes.js";
-import type { ChatMessage, PlayerRef, RequestMode } from "./protocol/messages.js";
+import type { ChatAction, ChatMessage, PlayerRef, RequestMode } from "./protocol/messages.js";
 
 /**
  * What streams back to the game chat (docs/design/13-live-world.md, *Prompting from the game*,
@@ -30,6 +30,8 @@ export interface OpenRequest {
   player: PlayerRef;
   /** The request's mode (B6); absent means `build`. */
   mode?: RequestMode;
+  /** The player's text, as the prompt carried it (`17` piece 3: the question a candidates list answers). */
+  text?: string;
 }
 
 export interface ActivityStreamOptions {
@@ -133,15 +135,16 @@ export class ActivityStream {
   /**
    * Sends a reply (`world_reply`): pending activity first, so the chat keeps the order things
    * happened in. `request` defaults to the open request; a recent closed one still reaches its
-   * player, without reopening its stream. `done` closes the open request it answers. Returns the
-   * request answered (undefined when none: then only players with log `all` see it).
+   * player, without reopening its stream. `done` closes the open request it answers. `action` makes
+   * one line clickable (`13`, `chat`; the caller sends it only when both hellos list `ui`). Returns
+   * the request answered (undefined when none: then only players with log `all` see it).
    */
-  reply(lines: string[], opts: { done?: boolean; request?: number } = {}): { request: OpenRequest | undefined; open: boolean } {
+  reply(lines: string[], opts: { done?: boolean; request?: number; action?: ChatAction } = {}): { request: OpenRequest | undefined; open: boolean } {
     this.flush();
     const open = opts.request === undefined || opts.request === this.request?.id;
     const target = open ? this.request : this.recent.get(opts.request!);
     const request = opts.request ?? target?.id ?? null;
-    this.opts.send({ type: "chat", request, player: target?.player.uuid ?? null, kind: "reply", lines });
+    this.opts.send({ type: "chat", request, player: target?.player.uuid ?? null, kind: "reply", lines, ...(opts.action ? { action: opts.action } : {}) });
     const isOpen = open && !!target;
     if (isOpen) this.touch();
     if (opts.done && isOpen) this.closeRequest();

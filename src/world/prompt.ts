@@ -7,7 +7,7 @@ import { refusal } from "../scope/scopes.js";
 import { ActivityStream, type OpenRequest } from "./chat-stream.js";
 import type { LinkVolumes, WorldLink } from "./link.js";
 import { MODE_ALLOWS, modeOf, READ_ONLY_MODES, RequestModeRule, type ModeRequest } from "./modes.js";
-import type { GameContext, ModHello, PlayerRef, PromptClose, PromptMessage, PromptRefusal, RequestMode, WireBox } from "./protocol/messages.js";
+import type { ChatAction, GameContext, ModHello, PlayerRef, PromptClose, PromptMessage, PromptRefusal, RequestMode, WireBox } from "./protocol/messages.js";
 import { loadProbe, probeText, type Probe } from "./probe.js";
 import { setVolumes, type ContextArg, type VolumesFrame } from "./set-volumes.js";
 import type { PromptSettings } from "./settings.js";
@@ -62,9 +62,12 @@ export interface InGameReplies {
   /**
    * Sends reply lines; `done` marks the request answered and closes its stream. `open` says whether
    * the request answered was the open one; `held` names the read-only mode still in force after it
-   * (only the player ends that, B6).
+   * (only the player ends that, B6). `action` makes one line clickable (`17`, piece 3); it is sent
+   * only when both hellos list `ui` (`clickable`), else dropped and the line goes as plain text.
    */
-  reply(lines: string[], opts?: { done?: boolean; request?: number }): { request: OpenRequest | undefined; open: boolean; held?: RequestMode };
+  reply(lines: string[], opts?: { done?: boolean; request?: number; action?: ChatAction }): { request: OpenRequest | undefined; open: boolean; held?: RequestMode };
+  /** Whether a reply line can be clickable now: both hellos list `ui` (`13`, `chat`). */
+  readonly clickable: boolean;
   /** Sets the player's volumes (`world_volumes`, B4) in the coordinates of the open probe or linked document; resolves with the result text. */
   setVolumes(work: PublicBox, context?: ContextArg): Promise<string>;
 }
@@ -152,9 +155,14 @@ export class InGameRequests implements InGameReplies {
     return this.stream.current;
   }
 
-  reply(lines: string[], opts: { done?: boolean; request?: number } = {}): { request: OpenRequest | undefined; open: boolean; held?: RequestMode } {
-    const r = this.stream.reply(lines, opts);
+  reply(lines: string[], opts: { done?: boolean; request?: number; action?: ChatAction } = {}): { request: OpenRequest | undefined; open: boolean; held?: RequestMode } {
+    const { action: _a, ...plain } = opts;
+    const r = this.stream.reply(lines, this.clickable ? opts : plain);
     return this.held ? { ...r, held: this.held.mode } : r;
+  }
+
+  get clickable(): boolean {
+    return this.link.bridge.ui;
   }
 
   /** The read-only request whose mode is in force, if any (B6). */
@@ -185,7 +193,7 @@ export class InGameRequests implements InGameReplies {
   open(r: OpenRequest): void {
     const mode = modeOf(r);
     this.held = READ_ONLY_MODES.has(mode) ? { id: r.id, player: r.player, mode } : undefined;
-    this.stream.open({ id: r.id, player: r.player, mode });
+    this.stream.open({ id: r.id, player: r.player, mode, ...(r.text !== undefined ? { text: r.text } : {}) });
   }
 
   /** The scan probe while it is the session's open document. */
@@ -233,7 +241,7 @@ export class InGameRequests implements InGameReplies {
     }
     this.modeRule.attach(doc);
     this.link.bridge.send({ type: "prompt.result", id: m.id, delivered: true });
-    this.open({ id: m.id, player: m.player, mode: modeOf(m) });
+    this.open({ id: m.id, player: m.player, mode: modeOf(m), text: m.text });
   }
 
   /**
@@ -265,7 +273,7 @@ export class InGameRequests implements InGameReplies {
       return refuse("no_listener");
     }
     this.link.bridge.send({ type: "prompt.result", id: m.id, delivered: true });
-    this.open({ id: m.id, player: m.player, mode: "scan" });
+    this.open({ id: m.id, player: m.player, mode: "scan", text: m.text });
   }
 }
 

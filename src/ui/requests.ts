@@ -6,6 +6,7 @@ import { UiRequestError, uiErrorOf } from "./errors.js";
 import type { UiFeed } from "./feed.js";
 import type { WorldFrame } from "./frame.js";
 import { DOC_GHOST, type GhostRegions } from "./ghosts.js";
+import type { CandidateRequests } from "./candidates.js";
 import type { LibraryRequests } from "./library.js";
 import type { UiPlayers } from "./players.js";
 import { loadReplayLog, ReplaySession, type ReplayLog } from "./replay-frames.js";
@@ -26,6 +27,8 @@ export interface RequestsHost {
   readonly ghosts: GhostRegions;
   readonly settings: SettingsRows;
   readonly library: LibraryRequests;
+  /** The candidates lists (`17`, piece 3); without them the `candidates.*` kinds answer `bad_request`. */
+  readonly candidates?: CandidateRequests;
   readonly workspace: string;
   /** The live session: its id (the folder name of its logs) and the open document's name. */
   live(): { session: string; doc: string | undefined };
@@ -141,13 +144,19 @@ export class UiRequests {
         if (!this.host.ghosts.anchor) throw new UiRequestError("not_found", "No anchored ghost to clear.");
         return { result: {}, after: () => void this.host.ghosts.clear(DOC_GHOST) };
       }
-      // `17` piece 3: names and shapes frozen in `13` (*Request kinds*); silo Q serves them.
+      // `17` piece 3: names and shapes frozen in `13` (*Request kinds*); handlers in `candidates.ts`.
       case "candidates.open":
+        return { result: { ...this.candidates(kind).open(a) } };
       case "candidates.ghost":
       case "candidates.ghost.clear":
       case "candidates.submit":
         throw new UiRequestError("bad_request", `This Autosketch doesn't serve ${kind} yet.`);
     }
+  }
+
+  private candidates(kind: UiRequestKind): CandidateRequests {
+    if (!this.host.candidates) throw new UiRequestError("bad_request", `This Autosketch doesn't serve ${kind}.`);
+    return this.host.candidates;
   }
 
   private async logs(): Promise<Record<string, unknown>[]> {

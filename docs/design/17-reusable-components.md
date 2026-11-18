@@ -158,14 +158,14 @@ When `prefab_save` runs on a linked document, the saved box is sent as a change 
 
 | Piece | Silo | Status |
 |---|---|---|
-| 1. Component set | K | Not built |
-| 2. Kits | K | Not built |
+| 1. Component set | K (K1) | Record and `component_set` tool built: `src/library/component-set.ts`, `src/server/tools/components.ts`, `Session.componentSet`. Tests: `test/unit/library/component-set.test.ts`, `test/unit/server/components.test.ts`. Label resolution in `stamp` and the reminder line: K2, K3. |
+| 2. Kits | K (K1) | Built. `save_as`, `load`, `knowledge_list({kind: "kit"})`; `src/library/knowledge.ts` (`findKit`, `readKit`, `writeKit`, `parseKitEntries`). |
 | 3. Candidates in a reply, wire | W (step W1) | Built. The four `candidates.*` kinds, the error `answered` and the `chat` `action` in `13` (*Request kinds*, `chat`), both codecs (`src/world/protocol/`, `mod/common/.../protocol/`: `Messages.Chat`, `UiMessages`), golden vectors, the fake host's `playerClick`, the fake MCP answering the kinds from its table. The MCP answers the kinds `bad_request` until Q serves them (`13`, *Implementation status*) |
 | 3. Candidates in a reply, MCP | Q | Not built |
 | 4. Candidates screen | V | Not built |
 | 5. Picks as text | Q | Not built |
 | 6. Library editors in game | W (wire, step W2), E | Not built |
-| 7. Save format | F | Not built |
+| 7. Save format | F (F1) | Built. `prefab_save({format})` with `schem`, `litematic`, `nbt`, `bp` in `src/library/prefabs.ts` (`savePrefab`, `PREFAB_FORMATS`), setting `library.prefabFormat` (group Library, live) beside it. Tests: `test/unit/library/prefab-formats.test.ts` (each format read back by stamp block for block, block entity kept except `.bp`, thumbnail, overwrite across formats, setting parse), `test/unit/server/library.test.ts` (format argument and setting default through the tools). |
 | 8. Flash on save | W (wire, step W2), F | Not built |
 
 ## Deferred
@@ -200,11 +200,3 @@ All settled with the user on 2026-11-17.
 - **Web sourcing is deferred.**
 - **Rejected: ghosts of every candidate lined up in the world.** Reason: cluttered and slow with several large candidates, and the player had already dropped ghost-based approval.
 - **Rejected: a text-only candidate list in chat** as the main view. Reason: names and sizes don't show what a tower looks like. Typing picks in chat still works alongside the screen.
-
-## Implementation status
-
-| Piece | Silo | Status |
-|---|---|---|
-| 1. Component set | K (K1) | Record and `component_set` tool built: `src/library/component-set.ts`, `src/server/tools/components.ts`, `Session.componentSet`. Tests: `test/unit/library/component-set.test.ts`, `test/unit/server/components.test.ts`. Label resolution in `stamp` and the reminder line: K2, K3. |
-| 2. Kits | K (K1) | Built. `save_as`, `load`, `knowledge_list({kind: "kit"})`; `src/library/knowledge.ts` (`findKit`, `readKit`, `writeKit`, `parseKitEntries`). |
-| 7. Save format | F (F1) | Built. `prefab_save({format})` with `schem`, `litematic`, `nbt`, `bp` in `src/library/prefabs.ts` (`savePrefab`, `PREFAB_FORMATS`), setting `library.prefabFormat` (group Library, live) beside it. Tests: `test/unit/library/prefab-formats.test.ts` (each format read back by stamp block for block, block entity kept except `.bp`, thumbnail, overwrite across formats, setting parse), `test/unit/server/library.test.ts` (format argument and setting default through the tools). |

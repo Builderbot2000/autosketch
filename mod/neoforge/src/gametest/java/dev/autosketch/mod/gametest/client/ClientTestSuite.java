@@ -71,6 +71,7 @@ public final class ClientTestSuite {
     private final List<Step> steps = new ArrayList<>();
     private String test = "";
     private final List<String> actionBar = new ArrayList<>(), chat = new ArrayList<>();
+    private final List<net.minecraft.network.chat.Component> chatComponents = new ArrayList<>();
     FakeMcp mcp;
     long frames;
 
@@ -195,6 +196,13 @@ public final class ClientTestSuite {
     }
 
     /** True when an action-bar text since the last clear contains {@code text}. */
+    /** The chat lines of {@link #chat()} as the components that arrived, styles (click events) included. */
+    public List<net.minecraft.network.chat.Component> chatComponents() {
+        synchronized (chat) {
+            return List.copyOf(chatComponents);
+        }
+    }
+
     public boolean actionBarHas(String text) {
         return actionBar().stream().anyMatch(s -> s.contains(text));
     }
@@ -205,13 +213,15 @@ public final class ClientTestSuite {
         }
         synchronized (chat) {
             chat.clear();
+            chatComponents.clear();
         }
     }
 
-    void message(String text, boolean overlay) {
+    void message(net.minecraft.network.chat.Component message, boolean overlay) {
         List<String> list = overlay ? actionBar : chat;
         synchronized (list) {
-            list.add(text);
+            list.add(message.getString());
+            if (!overlay) chatComponents.add(message);
         }
     }
 

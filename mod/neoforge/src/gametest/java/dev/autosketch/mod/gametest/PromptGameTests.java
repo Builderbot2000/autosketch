@@ -10,6 +10,7 @@ import dev.autosketch.mod.api.LinkVolumes;
 import dev.autosketch.mod.protocol.Box;
 import dev.autosketch.mod.protocol.Frame;
 import dev.autosketch.mod.protocol.Json;
+import dev.autosketch.mod.protocol.Messages;
 import dev.autosketch.mod.prompt.ChatRules.LogMode;
 import dev.autosketch.mod.prompt.InGamePrompts;
 import dev.autosketch.mod.prompt.PromptModule;
@@ -100,6 +101,7 @@ public final class PromptGameTests {
     private static final class Recorder implements InGamePrompts.Output {
         final Map<UUID, List<String>> bar = new HashMap<>();
         final Map<UUID, List<String>> chat = new HashMap<>();
+        final Map<UUID, List<Component>> components = new HashMap<>();
 
         @Override
         public void actionBar(ServerPlayer player, Component text) {
@@ -109,6 +111,7 @@ public final class PromptGameTests {
         @Override
         public void chat(ServerPlayer player, Component text) {
             chat.computeIfAbsent(player.getUUID(), k -> new ArrayList<>()).add(text.getString());
+            components.computeIfAbsent(player.getUUID(), k -> new ArrayList<>()).add(text);
         }
 
         List<String> chatOf(ServerPlayer p) {
@@ -399,6 +402,52 @@ public final class PromptGameTests {
         helper.succeed();
     }
 
+    /**
+     * A reply's action (17, piece 3): the line it names is clickable, running
+     * {@code /autosketch action <n>} that looks the action up, only for players whose client runs the
+     * client half; everyone else, and every other line, is plain text, worded the same.
+     */
+    @GameTest(template = "empty")
+    public static void replyActionIsClickableOnlyForTheClientHalf(GameTestHelper helper) {
+        MinecraftServer server = helper.getLevel().getServer();
+        ServerPlayer modded = helper.makeMockServerPlayerInLevel();
+        ServerPlayer vanilla = helper.makeMockServerPlayerInLevel();
+        for (ServerPlayer p : List.of(modded, vanilla)) server.getPlayerList().getOps().add(new ServerOpListEntry(p.getGameProfile(), 2, false));
+        InGamePrompts.setLogMode(vanilla, LogMode.ALL);
+        Recorder out = new Recorder();
+        JsonObject args = new JsonObject();
+        args.addProperty("id", "c1");
+        var prev = InGamePrompts.setClickable(p -> p == modded);
+        try {
+            with(new RecordingBridge(true), fixed(null), out, () -> InGamePrompts.onChat(new Messages.Chat(12L, modded.getUUID(), Messages.Chat.REPLY,
+                    List.of("Three towers match.", "[Show candidates (3)]"), new Messages.ChatAction(1, "candidates.open", args)), server));
+        } finally {
+            InGamePrompts.setClickable(prev);
+        }
+        List<String> want = List.of("Agent: Three towers match.", "Agent: [Show candidates (3)]");
+        helper.assertTrue(out.chatOf(modded).equals(want) && out.chatOf(vanilla).equals(want), "same text for both: " + out.chatOf(modded) + " / " + out.chatOf(vanilla));
+        List<Component> m = out.components.get(modded.getUUID()), v = out.components.get(vanilla.getUUID());
+        helper.assertTrue(click(m.get(0)) == null, "the agent's own line isn't clickable");
+        String command = click(m.get(1));
+        helper.assertTrue(command != null && command.startsWith("/autosketch action "), "the action line runs /autosketch action <n>: " + command);
+        var action = InGamePrompts.action(Long.parseLong(command.substring("/autosketch action ".length())));
+        helper.assertTrue(action != null && action.kind().equals("candidates.open") && action.args().equals(args) && action.line() == 1, "the number names the action: " + action);
+        helper.assertTrue(dev.autosketch.mod.ui.ReplyActionCommand.clientAction(action).equals("chat.action candidates.open {\"id\":\"c1\"}"), "the client action: " + dev.autosketch.mod.ui.ReplyActionCommand.clientAction(action));
+        helper.assertTrue(click(v.get(0)) == null && click(v.get(1)) == null, "a client without the client half gets plain text");
+        leave(modded, vanilla);
+        helper.succeed();
+    }
+
+    /** The click command anywhere in a chat line, or null. */
+    private static @Nullable String click(Component c) {
+        String[] found = {null};
+        c.visit((style, text) -> {
+            if (style.getClickEvent() != null) found[0] = style.getClickEvent().getValue();
+            return java.util.Optional.empty();
+        }, net.minecraft.network.chat.Style.EMPTY);
+        return found[0];
+    }
+
     private static void chat(MinecraftServer server, @Nullable Long request, @Nullable UUID player, String kind, String... lines) {
         JsonObject h = Json.header("chat");
         h.add("request", Json.nullable(request));
@@ -406,7 +455,7 @@ public final class PromptGameTests {
         h.addProperty("kind", kind);
         h.add("lines", Json.strings(List.of(lines)));
         try {
-            InGamePrompts.onChat(h, server);
+            InGamePrompts.onChat(Messages.Chat.decode(new Frame(h)), server);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

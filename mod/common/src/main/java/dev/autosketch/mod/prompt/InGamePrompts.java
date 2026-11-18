@@ -1,6 +1,5 @@
 package dev.autosketch.mod.prompt;
 
-import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import dev.autosketch.mod.AutosketchConfig;
 import dev.autosketch.mod.api.Autosketch;
@@ -25,7 +24,9 @@ import java.util.concurrent.atomic.AtomicLong;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
@@ -262,44 +263,96 @@ public final class InGamePrompts {
     /**
      * Handles {@code chat}: shows the lines to the named player (a reply always, activity unless their
      * log is off) and to every other player whose log is {@code all}. Only players allowed to use
-     * {@code /autosketch} (op level 2) ever see agent output. Returns how many players it reached.
+     * {@code /autosketch} (op level 2) ever see agent output. A reply's {@code action} (17, piece 3)
+     * makes its line clickable for players whose client runs the client half ({@link #setClickable});
+     * everyone else sees the same line as plain text. Returns how many players it reached.
      */
-    public static int onChat(JsonObject h, MinecraftServer server) throws ProtocolException {
-        Long request = Json.reqNullableLong(h, "request", null);
-        String player = Json.optString(h, "player", null);
-        String kind = Json.reqString(h, "kind", null);
-        if (!kind.equals("activity") && !kind.equals("reply")) throw ProtocolException.badRequest(null, "\"kind\" must be \"activity\" or \"reply\"");
-        List<String> lines = new ArrayList<>();
-        for (JsonElement e : Json.reqArray(h, "lines", null)) {
-            if (!e.isJsonPrimitive() || !e.getAsJsonPrimitive().isString()) throw ProtocolException.badRequest(null, "\"lines\" must be strings");
-            lines.add(e.getAsString());
-        }
-        UUID target;
-        try {
-            target = player == null ? null : UUID.fromString(player);
-        } catch (IllegalArgumentException ex) {
-            throw ProtocolException.badRequest(null, "\"player\" must be a UUID");
-        }
-        boolean reply = kind.equals("reply");
-        List<Component> shown = format(lines, reply);
+    public static int onChat(Messages.Chat chat, MinecraftServer server) {
+        UUID target = chat.player();
+        boolean reply = chat.reply();
+        Messages.ChatAction action = chat.action();
+        long actionId = action == null ? 0 : remember(action);
+        List<Component> plain = format(chat.lines(), reply, -1, 0);
+        List<Component> withAction = action == null ? plain : format(chat.lines(), reply, action.line(), actionId);
         int reached = 0;
         for (ServerPlayer p : server.getPlayerList().getPlayers()) {
             if (!p.hasPermissions(CommandExtension.OP_LEVEL)) continue;
             if (!ChatRules.visible(logMode(p), p.getUUID(), target, reply)) continue;
-            for (Component c : shown) out.chat(p, c);
+            for (Component c : action != null && clickable.test(p) ? withAction : plain) out.chat(p, c);
             reached++;
         }
         return reached;
     }
 
+    // ── clickable reply lines (17, piece 3) ───────────────────────────────────────────────────
+
+    /** How many reply-line actions are kept for {@code /autosketch action <n>}; older lines expire. */
+    public static final int ACTIONS_KEPT = 256;
+
+    private static final AtomicLong ACTION_IDS = new AtomicLong();
+    private static final Map<Long, Messages.ChatAction> ACTIONS = java.util.Collections.synchronizedMap(new java.util.LinkedHashMap<>() {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<Long, Messages.ChatAction> eldest) {
+            return size() > ACTIONS_KEPT;
+        }
+    });
+
+    private static volatile java.util.function.Predicate<ServerPlayer> clickable = p -> false;
+
+    /**
+     * Says which players get a reply's action as a clickable line: those whose client runs the client
+     * half (the loader wires the {@code autosketch:ui} channel check). Returns the previous one (tests).
+     */
+    public static java.util.function.Predicate<ServerPlayer> setClickable(java.util.function.Predicate<ServerPlayer> c) {
+        java.util.function.Predicate<ServerPlayer> prev = clickable;
+        clickable = c;
+        return prev;
+    }
+
+    private static long remember(Messages.ChatAction action) {
+        long id = ACTION_IDS.incrementAndGet();
+        ACTIONS.put(id, action);
+        return id;
+    }
+
+    /**
+     * The action a clickable line numbered {@code id} carries, or null once it expired. The click
+     * runs {@link #actionCommand}, which looks it up here, so the command stays short whatever the
+     * action's arguments (a command a client sends is at most 256 characters).
+     */
+    public static Messages.@Nullable ChatAction action(long id) {
+        return ACTIONS.get(id);
+    }
+
+    /** The command a clickable line runs. */
+    public static String actionCommand(long id) {
+        return "/autosketch action " + id;
+    }
+
+    /** The hover text of a clickable line. */
+    public static final String ACTION_HOVER = "Click to open";
+
     /** Activity dimmed and italic; replies prominent, with the agent named. Long lines wrapped. */
     public static List<Component> format(List<String> lines, boolean reply) {
+        return format(lines, reply, -1, 0);
+    }
+
+    /** As {@link #format(List, boolean)}; every piece of line {@code clickLine} runs action {@code actionId} when clicked. */
+    static List<Component> format(List<String> lines, boolean reply, int clickLine, long actionId) {
         List<Component> out = new ArrayList<>();
-        for (String line : lines)
-            for (String piece : ChatRules.wrap(line, ChatRules.WRAP)) {
+        for (int i = 0; i < lines.size(); i++)
+            for (String piece : ChatRules.wrap(lines.get(i), ChatRules.WRAP)) {
                 MutableComponent c;
-                if (reply) c = Component.literal("Agent: ").withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD).append(Component.literal(piece).withStyle(ChatFormatting.WHITE));
-                else c = Component.literal("· " + piece).withStyle(ChatFormatting.DARK_GRAY, ChatFormatting.ITALIC);
+                if (reply) {
+                    MutableComponent text = Component.literal(piece).withStyle(ChatFormatting.WHITE);
+                    if (i == clickLine) {
+                        String command = actionCommand(actionId);
+                        text = Component.literal(piece).withStyle(s -> s.withColor(ChatFormatting.AQUA).withUnderlined(true)
+                                .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, command))
+                                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal(ACTION_HOVER))));
+                    }
+                    c = Component.literal("Agent: ").withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD).append(text);
+                } else c = Component.literal("· " + piece).withStyle(ChatFormatting.DARK_GRAY, ChatFormatting.ITALIC);
                 out.add(c);
             }
         return out;

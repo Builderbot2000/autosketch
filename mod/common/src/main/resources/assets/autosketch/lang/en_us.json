@@ -151,5 +151,20 @@
   "autosketch.screen.library.preview_hint": "Drag to turn the preview.",
   "autosketch.screen.library.preview_unknown": "Not drawn (unknown in this game): %s",
   "autosketch.screen.library.preview_failed": "The 3D preview failed: %s",
-  "autosketch.screen.menu.mod_config_failed": "The mod's config screen failed to open: %s"
+  "autosketch.screen.menu.mod_config_failed": "The mod's config screen failed to open: %s",
+  "autosketch.screen.cancel": "Cancel",
+  "autosketch.screen.candidates.title": "Autosketch candidates",
+  "autosketch.screen.candidates.question": "Agent's question: %s",
+  "autosketch.screen.candidates.no_question": "The agent offered these without a question.",
+  "autosketch.screen.candidates.request_closed": "That request has ended; your picks go to the agent as a new one.",
+  "autosketch.screen.candidates.answered": "These candidates were already answered.",
+  "autosketch.screen.candidates.none": "The list is empty.",
+  "autosketch.screen.candidates.hint": "Select a candidate to see it, tick the ones you want and label them if you like.",
+  "autosketch.screen.candidates.pick": "Pick %s",
+  "autosketch.screen.candidates.label": "Label (optional)",
+  "autosketch.screen.candidates.note": "Note for the agent (optional)",
+  "autosketch.screen.candidates.none_picked": "Nothing picked yet.",
+  "autosketch.screen.candidates.picked": "Picked: %s",
+  "autosketch.screen.candidates.submit": "Submit",
+  "autosketch.screen.candidates.sent": "Autosketch: picks sent to the agent (request %s)"
 }

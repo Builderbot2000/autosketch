@@ -103,7 +103,7 @@ export function startUi(o: UiOptions): UiCore {
     scopeIds: () => [...o.scopes.scopes.keys()],
     ...intervalMs,
   });
-  const feed = new UiFeed({ bridge: o.bridge, frame: () => ghosts.frame(), players: () => players.overlay(), request, ...intervalMs });
+  const feed = new UiFeed({ bridge: o.bridge, frame: () => ghosts.frame(), linked: () => o.linkFrame() !== undefined, players: () => players.overlay(), request, ...intervalMs });
   const settings = new SettingsRows(o.settings, o.configPath, o.log);
   settings.watch();
   const requests = new UiRequests({

@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { cp, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { readConfig } from "../../../src/core/config.js";
@@ -8,15 +10,17 @@ import { Settings } from "../../../src/core/settings.js";
 import { libraryRoots, starterRoot } from "../../../src/library/roots.js";
 import { fill } from "../../../src/ops/edit.js";
 import { PaletteBook } from "../../../src/palette/pick.js";
+import { createServer } from "../../../src/server/server.js";
 import { Session } from "../../../src/server/session.js";
 import { startUi, type UiCore } from "../../../src/ui/index.js";
 import { LiveLink } from "../../../src/world/live-link.js";
 import { decodePreviewBody } from "../../../src/world/protocol/body.js";
-import type { PlayerRef, ReplayFrame, UiGhost, UiMcpMessage, UiResult, UiState, WireBox } from "../../../src/world/protocol/messages.js";
+import { SAVE_FLASH_COLOUR, SAVE_FLASH_JOB, type PlayerRef, type ReplayFrame, UiGhost, UiMcpMessage, UiResult, UiState, WireBox } from "../../../src/world/protocol/messages.js";
 import { syncLink } from "../../../src/world/sync.js";
 import { FakeHost } from "../../support/fake-host.js";
 import { solidPng, tempDir } from "../../helpers/fixtures.js";
 import { vanillaRegistry } from "../../helpers/vanilla.js";
+import { libraryContext } from "../library/fixture.js";
 // Every area that declares settings, so the registry is the server's.
 import "../../../src/assets/settings.js";
 import "../../../src/server/settings.js";
@@ -35,6 +39,7 @@ let host: FakeHost | undefined;
 let link: LiveLink | undefined;
 let ui: UiCore | undefined;
 afterEach(async () => {
+  vi.unstubAllEnvs();
   ui?.close();
   link?.close();
   await host?.close();
@@ -84,6 +89,24 @@ async function setup(opts: { features?: string[] } = {}) {
   await session.linkWorld({ instanceDir: host.instanceDir, plugins: [], palettes: new PaletteBook() });
   await until(() => host!.connected && host!.uiEnabled);
   return { session, host, configPath, png };
+}
+
+/**
+ * The tools on `session`, with the entry point's save-flash wiring (`server/index.ts`), saving into a
+ * temporary library (never ~/autosketch).
+ */
+async function tools(session: Session) {
+  vi.stubEnv("AUTOSKETCH_LIBRARY", await tempDir("autosketch-ui-save-"));
+  session.saveFlash = (box, doc) => ui!.feed.saveFlash(box, doc);
+  const server = createServer(Promise.resolve(await libraryContext(await tempDir("autosketch-ui-inst-"))), { session });
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "test", version: "0" });
+  await Promise.all([server.connect(a), client.connect(b)]);
+  return async (name: string, args: Record<string, unknown>) => {
+    const r = await client.callTool({ name, arguments: args });
+    if (r.isError) throw new Error(JSON.stringify(r.content));
+    return r;
+  };
 }
 
 const ask = async (player: PlayerRef, kind: string, args: Record<string, unknown> = {}) => {
@@ -241,6 +264,20 @@ describe("against the fake host with ui", () => {
     expect(await ask(HOST, "replay.seek", { replay: open.replay, step: 0 })).toMatchObject({ ok: false, error: "not_found" });
   });
 
+  it("prefab_save on the linked document flashes the saved box in white (17, piece 8), and no replay frame carries it", async () => {
+    const { session, host } = await setup();
+    const call = await tools(session);
+    await call("set_blocks", { blocks: [{ pos: [2, 0, 3], block: "andesite" }, { pos: [4, 1, 3], block: "oak_planks" }] });
+    await until(() => host.ui.some((m) => m.type === "ui.flash"));
+    const from = host.ui.length;
+    await call("prefab_save", { name: "step", box: { min: [2, 0, 3], max: [4, 1, 3] } });
+    await until(() => host.ui.slice(from).some((m) => m.type === "ui.flash"));
+    const flash = host.ui.slice(from).find((m) => m.type === "ui.flash")!;
+    expect(flash).toEqual({ type: "ui.flash", players: [HOST.uuid], flashes: [{ job: SAVE_FLASH_JOB, colour: SAVE_FLASH_COLOUR, dimension: "minecraft:overworld", boxes: [{ min: [102, 64, -197], max: [104, 65, -197] }] }] });
+    // Replay frames are built from the session log, which a save never enters.
+    expect(host.ui.some((m) => m.type === "replay.frame")).toBe(false);
+  });
+
   it("ghosts: anchor refused while linked; ghost.clear of a job id is not_found", async () => {
     await setup();
     expect(await ask(HOST, "ghost.anchor", { dimension: "minecraft:overworld", pos: [0, 70, 0] })).toMatchObject({ ok: false, error: "bad_request" });
@@ -289,6 +326,12 @@ describe("against the fake host, unlinked", () => {
     const g = host.ui.slice(from).find((m): m is UiGhost => m.type === "ui.ghost")!;
     expect(g).toMatchObject({ ghost: "doc", origin: [40, 70, 12], full: true });
     expect(g.sections.length).toBe(1);
+    // An anchored unlinked document still sends no save flash (17, piece 8).
+    const call = await tools(session);
+    const before = host.ui.length;
+    await call("prefab_save", { name: "hut", box: { min: [0, 0, 0], max: [3, 0, 3] } });
+    await new Promise((r) => setTimeout(r, 80));
+    expect(host.ui.slice(before).filter((m) => m.type === "ui.flash")).toEqual([]);
     const at = host.ui.length;
     expect(ok(await ask(HOST, "ghost.clear", { ghost: "doc" })).result).toEqual({});
     await until(() => host!.ui.slice(at).some((m) => m.type === "ui.ghost.clear"));

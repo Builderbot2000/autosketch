@@ -43,7 +43,7 @@ All are recorded in `17` (in the body beside each piece, under *Settled while bu
 ## Follow-ups
 
 **Checks still to run**
-- **Dev `runServer`:** not run in this set, because the EULA in `mod/run` isn't accepted (it needs the user). The dedicated GameTest server (`runGameTestServer`) and the vanilla-join GameTests pass, and the jar boots on the Craftoria server in the e2e tier.
+- ~~**Dev `runServer`**~~ *Done 2026-11-18:* the user accepted the EULA in `mod/run`; `./gradlew runServer` boots clean (Done in 4.0 s; Autosketch loads with 6 command extensions, the bridge listens, the pointer file and registry report (1060 blocks) are written). The only ERROR is the first-run `NoSuchFileException: server.properties`, which Minecraft logs before creating the file.
 - **Client harness against Craftoria** (`mod/clienttest-craftoria.sh`): a manual run, needing about 8 GB more for the client instance's mods. The click, the candidates screen, *Preview here* and the editors are covered only against the fake MCP.
 - **In-game check by the user** on the real Craftoria client: the candidates screen from a reply line, *Preview here* and *Clear candidate ghost*, the four editors, the white save flash.
 

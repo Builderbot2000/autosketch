@@ -34,12 +34,15 @@ import {
   REPLAY_MARKERS,
   REQUEST_MODES,
   UI_ERRORS,
+  UI_FILL_SPANS,
   UI_MCP_TYPES,
   type ChatMessage,
   type ExpandBy,
   type SearchCluster,
+  type UiFill,
   type UiFlash,
   type UiJob,
+  type UiSpan,
   type UiState,
   type GameContext,
   type Message,
@@ -258,6 +261,7 @@ function split(m: Message): { header: Record<string, unknown>; body: Uint8Array 
       const changed = <T>(k: string, v: T | null | undefined) => (m.full || v !== undefined ? { [k]: v ?? null } : {});
       if (m.full && m.removed?.length) throw new ProtocolError("ui.state: a full state removes nothing");
       if (m.full && m.jobs === undefined) throw new ProtocolError("ui.state: a full state lists its jobs");
+      if (m.full && m.fillsRemoved?.length) throw new ProtocolError("ui.state: a full state removes no fills");
       return {
         header: {
           type: m.type,
@@ -269,6 +273,8 @@ function split(m: Message): { header: Record<string, unknown>; body: Uint8Array 
           ...changed("request", m.request && { id: m.request.id, mode: m.request.mode, text: m.request.text }),
           ...changed("tokens", m.tokens && { input: m.tokens.input, output: m.tokens.output, cacheRead: m.tokens.cacheRead, cacheCreation: m.tokens.cacheCreation, ...(m.tokens.cost !== undefined ? { cost: m.tokens.cost } : {}) }),
           ...changed("refusal", m.refusal && { code: m.refusal.code, text: m.refusal.text }),
+          ...(m.fills?.length ? { fills: m.fills.map(uiFill) } : {}),
+          ...(!m.full && m.fillsRemoved?.length ? { fillsRemoved: [...m.fillsRemoved] } : {}),
         },
         body: none,
       };
@@ -322,6 +328,29 @@ function uiJob(j: UiJob): UiJob {
 function uiFlash(f: UiFlash): UiFlash {
   if (!f.boxes.length) throw new ProtocolError(`ui flash for ${f.job}: no boxes`);
   return { job: f.job, colour: f.colour, dimension: f.dimension, boxes: f.boxes.map(box) };
+}
+
+function uiFill(f: UiFill): UiFill {
+  const out = { id: f.id, colour: f.colour, alpha: f.alpha, dimension: f.dimension, faces: f.faces.map((s) => span(s, 1, "faces")), edges: f.edges.map((s) => span(s, 2, "edges")) };
+  if (!Number.isInteger(f.alpha) || f.alpha < 1 || f.alpha > 255) throw new ProtocolError(`ui fill ${f.id}: alpha must be an integer from 1 to 255`);
+  if (f.faces.length + f.edges.length > UI_FILL_SPANS) throw new ProtocolError(`ui fill ${f.id}: more than ${UI_FILL_SPANS} faces and edges`);
+  return out;
+}
+
+/**
+ * A face (`flat` 1) or an edge (`flat` 2) on block boundaries: six integers, each min ≤ max, with
+ * exactly `flat` axes where min = max (`13`, *In-game UI*, Fill).
+ */
+function span(v: unknown, flat: 1 | 2, name: string): UiSpan {
+  if (!Array.isArray(v) || v.length !== 6 || !v.every(Number.isSafeInteger)) throw new ProtocolError(`${name}: [x1, y1, z1, x2, y2, z2] integers`);
+  const s = v as UiSpan;
+  let equal = 0;
+  for (let a = 0; a < 3; a++) {
+    if (s[a]! > s[a + 3]!) throw new ProtocolError(`${name}: min must not exceed max on any axis`);
+    if (s[a] === s[a + 3]) equal++;
+  }
+  if (equal !== flat) throw new ProtocolError(`${name}: ${flat === 1 ? "a face is flat on exactly one axis" : "an edge runs along exactly one axis"}`);
+  return [s[0], s[1], s[2], s[3], s[4], s[5]];
 }
 
 function player(p: PlayerRef): PlayerRef {
@@ -696,6 +725,11 @@ function decode(type: string, v: Fields, body: Uint8Array, sender: Sender): Mess
           out.refusal = { code: r.str("code"), text: r.str("text") };
         } else out.refusal = null;
       }
+      if (v.has("fills")) out.fills = v.arr("fills").map((_, i) => uiFillOf(v.objAt("fills", i)));
+      if (v.has("fillsRemoved")) {
+        if (full) throw new ProtocolError("ui.state: a full state removes no fills");
+        out.fillsRemoved = v.strings("fillsRemoved");
+      }
       return out;
     }
     case "ui.flash": {
@@ -758,6 +792,12 @@ function decode(type: string, v: Fields, body: Uint8Array, sender: Sender): Mess
 
 function uiJobOf(f: Fields): UiJob {
   return { id: f.str("id"), colour: f.colour("colour"), brief: f.str("brief"), dimension: f.str("dimension"), work: f.box("work"), context: f.arr("context").map((_, i) => f.boxAt("context", i)) };
+}
+
+function uiFillOf(f: Fields): UiFill {
+  const alpha = f.int("alpha");
+  if (alpha < 1 || alpha > 255) throw new ProtocolError(`alpha must be an integer from 1 to 255 (got ${alpha})`);
+  return uiFill({ id: f.str("id"), colour: f.colour("colour"), alpha, dimension: f.str("dimension"), faces: f.arr("faces") as UiSpan[], edges: f.arr("edges") as UiSpan[] });
 }
 
 function uiFlashOf(f: Fields): UiFlash {

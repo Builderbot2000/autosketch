@@ -162,6 +162,9 @@ export class UiRequests {
         return { result: await lib.writeProcedure(a) };
       case "library.write.knowledge":
         return { result: await lib.writeKnowledge(a) };
+      // `18` piece 7: name and shape frozen in `13` (*Request kinds*); P2 serves it.
+      case "choices.pick":
+        throw new UiRequestError("bad_request", `This Autosketch doesn't serve ${kind} yet.`);
     }
   }
 

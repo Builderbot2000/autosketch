@@ -659,9 +659,40 @@ export interface UiRefusal {
 }
 
 /**
+ * A rectangle or a line on block boundaries, in world corner coordinates `[x1, y1, z1, x2, y2, z2]`
+ * (a block at x spans x to x + 1), each min ≤ max. A face has exactly one axis with min = max (its
+ * plane); an edge has exactly two.
+ */
+export type UiSpan = [number, number, number, number, number, number];
+
+/**
+ * A steady fill (`18`, piece 8; `13`, *In-game UI*, Fill): faces drawn through blocks at a constant
+ * alpha, beside job outlines and flash pulses, and edges drawn as lines. For the select candidate
+ * (`id` {@link CANDIDATE_FILL}): `faces` the tinted shell of the sections the shape occupies, merged
+ * into rectangles, and `edges` the boundary edges of each touched section's mask, merged into
+ * segments. Which the client draws at which distance is the client's.
+ */
+export interface UiFill {
+  /** {@link CANDIDATE_FILL} or a job's scope id; keyed like jobs (replace by id). */
+  id: string;
+  colour: string;
+  /** Constant alpha of the faces, 1 to 255. */
+  alpha: number;
+  dimension: string;
+  faces: UiSpan[];
+  edges: UiSpan[];
+}
+
+/** The fill id of the select candidate (`18`, piece 8). Also the `job` of proposed hits' flash records. */
+export const CANDIDATE_FILL = "candidate";
+/** Most faces plus edges one fill record carries, so a `ui.state` stays far under `MAX_HEADER`; the MCP leaves edges out first. */
+export const UI_FILL_SPANS = 16_384;
+
+/**
  * Overlay and HUD state. Full: `jobs`, `request`, `tokens` and `refusal` are all given and replace
- * the client's state. Changes: `jobs` lists added or changed jobs whole (replace by id), `removed`
- * the ended ones, and `request`, `tokens`, `refusal` appear only when they changed (`null`: cleared).
+ * the client's state (`fills` too, absent meaning none). Changes: `jobs` and `fills` list added or
+ * changed records whole (replace by id), `removed` and `fillsRemoved` the ended ones, and `request`,
+ * `tokens`, `refusal` appear only when they changed (`null`: cleared).
  */
 export interface UiState {
   type: "ui.state";
@@ -673,6 +704,10 @@ export interface UiState {
   request?: UiRequestInfo | null;
   tokens?: UiTokens | null;
   refusal?: UiRefusal | null;
+  /** `18`, piece 8. Full: every fill, omitted when none. Changes: fills added or changed, whole (replace by id). */
+  fills?: UiFill[];
+  /** Changes only: ids of fills that ended. */
+  fillsRemoved?: string[];
 }
 
 export interface UiFlashMessage {
@@ -787,6 +822,7 @@ export const UI_REQUEST_KINDS = [
   "library.write.palette",
   "library.write.procedure",
   "library.write.knowledge",
+  "choices.pick",
 ] as const;
 export type UiRequestKind = (typeof UI_REQUEST_KINDS)[number];
 
@@ -848,6 +884,26 @@ export interface CandidatesSubmitArgs {
   id: string;
   picks: CandidatePick[];
   note?: string;
+}
+
+// ── Choices (`18`, piece 7; `13`, *Request kinds*) ─────────────────────────────────────────────
+
+/** Most choices one question offers: a player without the client half answers by typing one digit. */
+export const CHOICES_MAX = 9;
+
+/**
+ * `choices.pick`'s arguments: `id` the question's choices id (from the clicked line's `action`),
+ * `index` the choice, 0-based. Answered `{request}` ({@link ChoicesPickResult}), `not_found` for an
+ * unknown id or index, `answered` once a choice for that question was taken.
+ */
+export interface ChoicesPickArgs {
+  id: string;
+  index: number;
+}
+
+/** `choices.pick`'s result: the in-game request the answer went to as text, `null` when none. */
+export interface ChoicesPickResult {
+  request: number | null;
 }
 
 // ── Library editors (`17`, piece 6; `13`, *Request kinds*) ─────────────────────────────────────

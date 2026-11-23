@@ -194,6 +194,11 @@ describe("world_reply candidates (17, piece 3)", () => {
     expect(chat.action).toBeUndefined();
   });
 
+  it("choices.pick (18, piece 7) is a known kind, answered bad_request until the MCP serves choices (step P2)", async () => {
+    const { host } = await setup();
+    expect(await host.playerUiRequest(HOST, { kind: "choices.pick", args: { id: "q1", index: 0 } })).toMatchObject({ ok: false, error: "bad_request", message: expect.stringContaining("doesn't serve choices.pick") });
+  });
+
   it("candidates.open answers not_found for an unknown id, bad_request without one, and answered after a submit", async () => {
     const { host, call, session } = await setup();
     await call("world_reply", { lines: ["Pick"], candidates: [{ prefab: "park_bench" }] });

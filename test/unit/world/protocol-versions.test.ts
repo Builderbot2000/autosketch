@@ -70,13 +70,14 @@ describe("protocol 2 golden vectors (N−1)", () => {
 
   roundTrips(V2);
 
-  it("carry none of protocol 3's additions, and protocol 3 changed only the hellos and the mismatch example (and gained prompt.close, ui and 17's candidates, editor writes and save flash, and 18's select, feature-gated additions)", () => {
+  it("carry none of protocol 3's additions, and protocol 3 changed only the hellos and the mismatch example (and gained prompt.close, ui and 17's candidates, editor writes and save flash, and 18's select, choices and fills, feature-gated additions)", () => {
     const v2 = (n: string) => splitFrame(new Uint8Array(readFileSync(join(V2, `${n}.bin`))).subarray(4)).header;
     expect(v2("hello-mcp")).toMatchObject({ protocol: 2 });
     expect(v2("hello-mod-singleplayer").features).toEqual(["modes", "scan", "volumes.set"]);
     expect(changedFrames(V2, DIR)).toEqual(["error-protocol-mismatch", "hello-mcp", "hello-mcp-build-only", "hello-mod-dedicated", "hello-mod-singleplayer"]);
     expect(addedFrames(V2, DIR)).toEqual([
       "chat-reply-action",
+      "chat-reply-choice",
       "error-no-grant",
       "error-too-large",
       "expand-box",
@@ -110,6 +111,7 @@ describe("protocol 2 golden vectors (N−1)", () => {
       "snapshot-result-coarse",
       "snapshot-result-missing",
       "ui-flash",
+      "ui-flash-hits",
       "ui-flash-save",
       "ui-ghost-clear",
       "ui-ghost-full",
@@ -119,6 +121,7 @@ describe("protocol 2 golden vectors (N−1)", () => {
       "ui-request-candidates-ghost-clear",
       "ui-request-candidates-open",
       "ui-request-candidates-submit",
+      "ui-request-choices-pick",
       "ui-request-ghost-anchor",
       "ui-request-library-write-knowledge",
       "ui-request-library-write-palette",
@@ -131,6 +134,8 @@ describe("protocol 2 golden vectors (N−1)", () => {
       "ui-result-candidates-ghost",
       "ui-result-candidates-open",
       "ui-result-candidates-submit",
+      "ui-result-choices-answered",
+      "ui-result-choices-pick",
       "ui-result-conflict",
       "ui-result-library-write",
       "ui-result-library-write-conflict",
@@ -140,7 +145,10 @@ describe("protocol 2 golden vectors (N−1)", () => {
       "ui-result-settings-list",
       "ui-result-thumbnail",
       "ui-state-changes",
+      "ui-state-fill",
+      "ui-state-fill-removed",
       "ui-state-full",
+      "ui-state-full-fill",
       "ui-state-resync",
       "upgrade-elements",
       "upgrade-result-elements",

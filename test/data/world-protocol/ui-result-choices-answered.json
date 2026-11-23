@@ -1,0 +1,12 @@
+{
+  "description": "A second click on question q1 after a choice was taken",
+  "sender": "mcp",
+  "header": {
+    "type": "ui.result",
+    "request": 31,
+    "player": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    "ok": false,
+    "error": "answered",
+    "message": "You already answered this question."
+  }
+}

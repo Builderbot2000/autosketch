@@ -137,6 +137,13 @@ Details fixed with the wire (step W1, 2026-11-23), each the simplest reading of 
 - **The mask snapshot's margin** is measured from the sections' boxes, not the shape's blocks, so the request carries no mask, and it is answered as an ordinary blocks snapshot whose regions follow one layout rule on both sides. **Coarse cells** sit on the world's grid (boxes grown outward to multiples of the cell), so a region read twice lines up; ties go to the state met first in the cell.
 - **`no_grant`**, a new error code, refuses `search`, `fill` and `expand` while no select request's grant is in force.
 
+Details fixed with the wire's UI half (step W2, 2026-11-23):
+
+- **A clicked choice** is the `ui.request` `choices.pick {id, index}`: `id` names the question (the MCP keeps its choices and its request under it, as it keeps a candidates list), `index` the choice, 0-based; answered `{request}`, and `answered` once a choice for that question was taken. The click carries the index rather than the text, so the text the agent gets is the text it wrote. At most 9 choices (`CHOICES_MAX`): a player without the client half answers by typing the number, one digit.
+- **The steady fill record** (`ui.state` `fills`, keyed by id like jobs) carries both drawings of the candidate: `faces`, the sections' shell merged into rectangles, and `edges`, the mask's boundary edges merged into segments, all as spans on block boundaries in world corner coordinates, with a constant `alpha` (1 to 255). The near outline is edges rather than outline boxes, since boxes covering a mask would draw lines inside the shape. The client chooses what to draw at which distance; at most 16,384 spans per record, edges dropped first past it.
+- **Proposed hits** are `ui.flash` records with job `candidate`: a flash is already a pulse on boxes, so they need no new message.
+- **Volume outlines** come from the mod's server half to its own client half (relay op `4`), not from the MCP in `ui.state`: the volumes and the wand modes are the mod's state, the wand changes them on the server tick, and the outline should follow without a round trip. Players whose client lacks the client half keep the particles.
+
 ## Measure first
 
 On the Craftoria test server, before fixing defaults:
@@ -160,15 +167,15 @@ The select set's briefs are `docs/briefs/select/`; each silo updates its own row
 | Piece | Silo | Status |
 |---|---|---|
 | *Wire*: mode `select`; `search`, `fill`, `expand`; snapshot `mask` and `coarse`; the select-mode read grant | W (W1) | Built, wire only. Schemas in `13`, *Select*; codecs in `src/world/protocol/` and `mod/…/protocol/SelectMessages.java`; golden vectors in `test/data/world-protocol/` (and `mask-regions.json`); the fake host answers all of it (`test/support/fake-select.ts`), its fill with `{connected}`'s algorithm (parity tested at 6, 18 and 26). The bridge refuses the requests unsent (`world_mod_outdated`) without the mod feature `select` |
-| *Wire*: choice kind, steady fill record, volume lines | W (W2) | Not started |
+| *Wire*: choice kind, steady fill record, volume lines | W (W2) | Built, wire only. `ui.request` `choices.pick {id, index}`, `ui.state` `fills`/`fillsRemoved` (Fill records of faces and edges), proposed hits as `ui.flash` records with job `candidate`, and the volume outlines as relay op `4` from the mod's server half (specified, C3 builds it); schemas in `13` (*In-game UI*, *Request kinds*, *Relay to the client*); codecs in `src/world/protocol/` and `UiMessages.java`; vectors `chat-reply-choice`, `ui-*-choices-*`, `ui-state-fill*`, `ui-state-full-fill`, `ui-flash-hits`. The MCP answers `choices.pick` `bad_request` until P2 |
 | 1. Command and mode | C (C1), P (P1) | Wire built (W1: mode `select` on both sides, `select` read-only and volume-changing in `src/world/modes.ts` with placeholder lines); command and agent text not started |
 | 2. Material search | M (M1), T (T1) | Wire and fake host built (W1); mod and tool not started |
 | 3. Fill | M (M2), T (T2) | Wire and fake host built (W1); mod and tool not started |
 | 4. Expand | M (M2), T (T2) | Wire and fake host built (W1); mod and tool not started |
 | 5. World view (with snapshot `mask` and `coarse`) | V (V1, V2), M (M3) | Wire and fake host built (W1). V1 built (select set, silo V): `world/view.ts` (`WorldView` on `Session.worldView`, wired in `server/index.ts`), `view: "world"` on `render`, `view_slice`, `raycast`, `select`, `analyze` (`tools/perception.ts`, `tools/edit.ts`, `tools/world-view.ts`), `world_view_read({box \ |
 | 6. Isolated render with faded surroundings | V (V2) | Not started |
-| 7. Choices in chat | W (W2), P (P2), C (C1) | Not started |
-| 8. Outlines in the world | W (W2), C (C2, C3), P (P3) | Not started |
+| 7. Choices in chat | W (W2), P (P2), C (C1) | Wire built (W2: `choices.pick`, `CHOICES_MAX` 9, one reply per choice); MCP and click not started |
+| 8. Outlines in the world | W (W2), C (C2, C3), P (P3) | Wire built (W2: the Fill record, hits as flashes, volume outlines by relay op `4`); drawing and the MCP's faces not started |
 | 9. Confirming | T (T3) | Not started |
 | 10. Terrain | V (V2), P (P1) | Wire built (W1: surface snapshots inside the select grant); not started otherwise |
 | *Removal* | R (R1) | Not started |

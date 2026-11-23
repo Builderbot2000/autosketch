@@ -6,7 +6,7 @@ import { Bridge } from "../../../src/world/bridge.js";
 import { decodePreviewBody, encodePreviewBody } from "../../../src/world/protocol/body.js";
 import { decodeFrame, decodeMessage, encodeMessage, ProtocolError } from "../../../src/world/protocol/codec.js";
 import { DEFAULT_VOLATILE } from "../../../src/world/protocol/hash.js";
-import { LIBRARY_WRITE_KINDS, SAVE_FLASH_COLOUR, SAVE_FLASH_JOB, UI_ERRORS, UI_PART_BYTES, UI_REQUEST_KINDS, uiEnabled, type McpFeature, type Message, type UiGhost, type UiRequest } from "../../../src/world/protocol/messages.js";
+import { CANDIDATE_FILL, CHOICES_MAX, LIBRARY_WRITE_KINDS, SAVE_FLASH_COLOUR, UI_FILL_SPANS, SAVE_FLASH_JOB, UI_ERRORS, UI_PART_BYTES, UI_REQUEST_KINDS, uiEnabled, type McpFeature, type Message, type UiGhost, type UiRequest } from "../../../src/world/protocol/messages.js";
 import { FakeHost } from "../../support/fake-host.js";
 
 /** The in-game UI messages (docs/design/13-live-world.md, *In-game UI*; feature `ui`). */
@@ -123,6 +123,46 @@ describe("ui codec", () => {
     const m = decodeFrame(new Uint8Array(readFileSync(join(DIR, "ui-flash-save.bin"))), "mcp");
     expect(m).toMatchObject({ type: "ui.flash", flashes: [{ job: SAVE_FLASH_JOB, colour: SAVE_FLASH_COLOUR }, { job: "base" }] });
     expect(SAVE_FLASH_COLOUR).toMatch(/^#[0-9a-f]{6}$/);
+  });
+
+  it("choices (18, piece 7): one reply per choice line, clicked as choices.pick {id, index}; answered after a choice was taken", () => {
+    expect(UI_REQUEST_KINDS).toContain("choices.pick");
+    expect(CHOICES_MAX).toBe(9);
+    const read = (n: string, sender: "mcp" | "mod") => decodeFrame(new Uint8Array(readFileSync(join(DIR, `${n}.bin`))), sender);
+    expect(read("chat-reply-choice", "mcp")).toMatchObject({ kind: "reply", lines: [expect.any(String)], action: { line: 0, kind: "choices.pick", args: { id: "q1", index: 0 } } });
+    expect(read("ui-request-choices-pick", "mod")).toMatchObject({ kind: "choices.pick", args: { id: "q1", index: 1 } });
+    expect(read("ui-result-choices-pick", "mcp")).toMatchObject({ ok: true, result: { request: 21 } });
+    expect(read("ui-result-choices-answered", "mcp")).toMatchObject({ ok: false, error: "answered" });
+  });
+
+  it("steady fill (18, piece 8): faces flat on one axis, edges along one, alpha 1-255; full states list fills, changes add and remove them by id", () => {
+    const read = (n: string) => decodeFrame(new Uint8Array(readFileSync(join(DIR, `${n}.bin`))), "mcp");
+    const change = read("ui-state-fill") as Extract<Message, { type: "ui.state" }>;
+    expect(change.fills).toHaveLength(1);
+    expect(change.fills![0]).toMatchObject({ id: CANDIDATE_FILL, alpha: 64 });
+    expect(change.fills![0]!.faces).toHaveLength(6);
+    expect(change.fills![0]!.edges).toHaveLength(12);
+    expect("jobs" in change).toBe(false);
+    expect(read("ui-state-full-fill")).toMatchObject({ full: true, jobs: [], request: { mode: "select" }, fills: [{ id: "candidate" }] });
+    expect(read("ui-state-fill-removed")).toMatchObject({ full: false, fillsRemoved: ["candidate"], request: null });
+    // A full state with no fills omits the key (so ui-state-full is unchanged), and decodes without it.
+    expect("fills" in read("ui-state-full")).toBe(false);
+    expect(read("ui-flash-hits")).toMatchObject({ flashes: [{ job: CANDIDATE_FILL }] });
+
+    const bad = (edit: (h: Record<string, any>) => void, vector = "ui-state-fill") => expect(() => tweak(vector, "mcp", edit)).toThrow(ProtocolError);
+    bad((h) => (h.fills[0].alpha = 0));
+    bad((h) => (h.fills[0].alpha = 256));
+    bad((h) => (h.fills[0].alpha = 0.5));
+    bad((h) => (h.fills[0].colour = "pink"));
+    bad((h) => (h.fills[0].faces[0] = [128, 64, -240, 129, 80, -208])); // flat on no axis
+    bad((h) => (h.fills[0].faces[0] = [128, 64, -240, 128, 64, -208])); // flat on two: an edge
+    bad((h) => (h.fills[0].edges[0] = [140, 64, -230, 152, 65, -230])); // a face
+    bad((h) => (h.fills[0].edges[0] = [152, 64, -230, 140, 64, -230])); // min above max
+    bad((h) => (h.fills[0].edges[0] = [140, 64, -230, 152, 64]));
+    bad((h) => delete h.fills[0].edges);
+    bad((h) => (h.fillsRemoved = ["candidate"]), "ui-state-full-fill"); // a full state removes nothing
+    const many = Array.from({ length: UI_FILL_SPANS + 1 }, (_, i): [number, number, number, number, number, number] => [i, 0, 0, i, 1, 1]);
+    expect(() => encodeMessage({ type: "ui.state", players: [KEV], seq: 1, full: false, fills: [{ id: "candidate", colour: "#e84de0", alpha: 64, dimension: "minecraft:overworld", faces: many, edges: [] }] })).toThrow(ProtocolError);
   });
 
   it("a failed ui.result carries no body; an ok one may", () => {

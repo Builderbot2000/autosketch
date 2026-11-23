@@ -1,0 +1,27 @@
+{
+  "description": "Proposed hits pulsed as they are offered as choices: one flash record with job candidate, a box per cluster",
+  "sender": "mcp",
+  "header": {
+    "type": "ui.flash",
+    "players": [
+      "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+    ],
+    "flashes": [
+      {
+        "job": "candidate",
+        "colour": "#e84de0",
+        "dimension": "minecraft:overworld",
+        "boxes": [
+          {
+            "min": [128, 60, -240],
+            "max": [159, 90, -209]
+          },
+          {
+            "min": [-48, 55, -32],
+            "max": [-17, 80, -1]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "description": "A select request with no text: the block under the crosshair is the starting point",
+  "sender": "mod",
+  "header": {
+    "type": "prompt",
+    "id": 5,
+    "player": {
+      "name": "Kev",
+      "uuid": "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+    },
+    "text": "",
+    "context": {
+      "dimension": "minecraft:overworld",
+      "position": [-40.5, 68, 23.5],
+      "eye": [-40.5, 69.62, 23.5],
+      "yaw": -135,
+      "pitch": 20,
+      "facing": "north",
+      "target": {
+        "pos": [-31, 70, 14],
+        "state": "minecraft:mossy_stone_bricks",
+        "face": "south"
+      }
+    },
+    "mode": "select"
+  }
+}

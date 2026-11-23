@@ -1,6 +1,6 @@
 import { gunzipSync } from "node:zlib";
 import type { Compound } from "prismarine-nbt";
-import type { Message, PatchAck, PatchBlock, Sender, SnapshotResult, SurfaceLayer, SurfaceResult, WireArea, WireBox, WorldBlock } from "../../../src/world/protocol/messages.js";
+import type { FillResult, MaskSection, Message, PatchAck, SearchResult, PatchBlock, Sender, SnapshotResult, SurfaceLayer, SurfaceResult, WireArea, WireBox, WorldBlock } from "../../../src/world/protocol/messages.js";
 import { splitFrame } from "../../../src/world/protocol/codec.js";
 import { decodePreviewBody } from "../../../src/world/protocol/body.js";
 import { parseSnbt, toSnbt } from "../../../src/world/protocol/snbt.js";
@@ -74,7 +74,20 @@ export function sidecarOf(description: string, sender: Sender, m: Message, frame
         out.body = { bytes: Buffer.from(m.body).toString("base64"), ...(size ? { preview: (({ palette, states }) => ({ palette, states: Array.from(states) }))(decodePreviewBody(m.body, size)) } : {}) };
       }
       break;
+    case "search.result":
+      out.body = { chunks: m.chunks.map((c) => ({ chunk: c.chunk, counts: c.counts, cluster: c.cluster, sections: c.sections })), missing: m.missing };
+      break;
+    case "fill.result":
+      out.body = {
+        sections: m.sections.map((x) => ({ section: x.section, mask: x.mask === "full" ? "full" : Buffer.from(x.mask).toString("hex") })),
+        frontier: m.frontier.map((f) => ({ section: f.section, index: f.index, faces: f.faces })),
+      };
+      break;
     case "snapshot.result":
+      if ("kind" in m && m.kind === "coarse") {
+        out.body = { palette: m.palette, regions: m.regions.map((r) => ({ states: Array.from(r.states) })) };
+        break;
+      }
       if ("kind" in m) {
         const layer = (l: SurfaceLayer) => ({ heights: Array.from(l.heights), states: Array.from(l.states) });
         out.body = { palette: m.palette, surface: layer(m.surface), ...(m.ceilings ? { ceilings: layer(m.ceilings) } : {}) };
@@ -110,7 +123,20 @@ export function messageOf(s: Sidecar): Message {
     case "dirty":
       if (h.everything) return { type: "dirty", everything: true };
       return { type: "dirty", everything: false, blocks: (b.blocks as any[]).map((x) => clean({ pos: x.pos, state: x.state, nbt: nbt(x.nbt) })) };
+    case "search.result": {
+      const { chunks: _c, missing: _m, ...rest } = h;
+      return { ...(rest as object), chunks: b.chunks, missing: b.missing } as SearchResult;
+    }
+    case "fill.result": {
+      const { origin: _o, size: _s, sections: _x, frontier: _f, ...rest } = h;
+      const sections: MaskSection[] = (b.sections as { section: Pos; mask: string }[]).map((x) => ({ section: x.section, mask: x.mask === "full" ? "full" : new Uint8Array(Buffer.from(x.mask, "hex")) }));
+      return { ...(rest as object), sections, frontier: b.frontier } as FillResult;
+    }
     case "snapshot.result": {
+      if (h.kind === "coarse") {
+        const { regions, ...rest } = h;
+        return { ...(rest as object), palette: b.palette, regions: (regions as WireBox[]).map((box, i) => ({ box, states: Uint32Array.from(b.regions[i].states as number[]) })) } as Message;
+      }
       if (h.kind === "surface") {
         const layer = (l: { heights: number[]; states: number[] }): SurfaceLayer => ({ heights: Uint32Array.from(l.heights), states: Uint32Array.from(l.states) });
         const m: SurfaceResult = {
@@ -133,7 +159,7 @@ export function messageOf(s: Sidecar): Message {
         states: Uint32Array.from(b.regions[i].states as number[]),
         blockEntities: (b.regions[i].blockEntities as any[]).map((x) => ({ pos: x.pos, nbt: parseSnbt(x.nbt) })),
       }));
-      return { type: "snapshot.result", id: h.id as number, dimension: h.dimension as string, palette: b.palette, regions };
+      return { type: "snapshot.result", id: h.id as number, dimension: h.dimension as string, palette: b.palette, regions, ...(h.missing ? { missing: h.missing as [number, number][] } : {}) };
     }
     case "registry.result":
       if (h.unchanged) return h as unknown as Message;

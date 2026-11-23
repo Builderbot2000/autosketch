@@ -1,0 +1,31 @@
+{
+  "description": "Mod hello listing every feature, select included: it serves search, fill, expand, mask and coarse snapshots, and select-mode reads",
+  "sender": "mod",
+  "header": {
+    "type": "hello",
+    "protocol": 3,
+    "mod": {
+      "version": "0.2.0"
+    },
+    "game": {
+      "version": "1.21.1",
+      "dataVersion": 3955,
+      "loader": "neoforge",
+      "loaderVersion": "21.1.249"
+    },
+    "singleplayer": true,
+    "host": {
+      "name": "Kev",
+      "uuid": "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+    },
+    "features": [
+      "modes",
+      "scan",
+      "volumes.set",
+      "registry",
+      "upgrade",
+      "ui",
+      "select"
+    ]
+  }
+}

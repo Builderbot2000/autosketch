@@ -1,0 +1,14 @@
+{
+  "description": "Grow the read area four chunks west, with a smaller budget for this step",
+  "sender": "mcp",
+  "header": {
+    "type": "expand",
+    "id": 56,
+    "dimension": "minecraft:overworld",
+    "by": {
+      "direction": "west",
+      "chunks": 4
+    },
+    "budget": 500000
+  }
+}

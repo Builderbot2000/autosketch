@@ -29,7 +29,7 @@ public final class FrameCodec {
 
     /** The only messages that carry a body ({@code dirty} only when not {@code everything}). */
     public static final Set<String> BODY_TYPES = Set.of("patch", "snapshot.result", "patch.ack", "dirty", "registry.result", "upgrade", "upgrade.result",
-            "ui.ghost", "replay.frame", "ui.result");
+            "ui.ghost", "replay.frame", "ui.result", "search.result", "fill.result");
 
     /** The complete frame, length prefix included. */
     public static byte[] encode(Frame frame) {

@@ -30,9 +30,9 @@ import type { PlayerRef, RequestMode } from "./protocol/messages.js";
  */
 
 /** Modes that allow no edits on the linked document. */
-export const READ_ONLY_MODES: ReadonlySet<RequestMode> = new Set(["ask", "plan", "scan"]);
+export const READ_ONLY_MODES: ReadonlySet<RequestMode> = new Set(["ask", "plan", "scan", "select"]);
 /** Modes that allow volume changes. */
-export const VOLUME_MODES: ReadonlySet<RequestMode> = new Set(["scan", "build"]);
+export const VOLUME_MODES: ReadonlySet<RequestMode> = new Set(["scan", "build", "select"]);
 /** Tools that start a draft away from the linked document: refused in read-only modes. */
 export const DRAFT_TOOLS: ReadonlySet<string> = new Set(["scope_fork", "doc_new", "doc_open"]);
 /** Tools that change the player's volumes (B4). */
@@ -44,6 +44,7 @@ export const MODE_ALLOWS: Record<RequestMode, string> = {
   plan: "Plan mode: look, then propose what you would build in words, in a world_reply; edits, drafts (sandboxes, other documents) and volume changes are refused while this request is open.",
   scan: "Scan mode: look around and set the volumes with world_volumes; edits and drafts (sandboxes, other documents) are refused while this request is open.",
   build: "Build mode: you may edit the linked document.",
+  select: "Select mode: find what the player means, agree on its extent with them, and set the volumes with world_volumes; edits and drafts (sandboxes, other documents) are refused while this request is open.",
 };
 
 /** What a mode allows, as the refusal names it. */
@@ -52,6 +53,7 @@ const ALLOWS: Record<RequestMode, string> = {
   plan: "looking and proposing only",
   scan: "looking and setting the volumes only",
   build: "everything",
+  select: "looking and setting the volumes only",
 };
 
 /** An open request as the mode rule sees it. */

@@ -59,21 +59,24 @@ export type Cardinal = "north" | "south" | "west" | "east";
 export const REJECT_REASONS = ["unknown_state", "bad_nbt", "outside_volumes", "stale_link"] as const;
 export type RejectReason = (typeof REJECT_REASONS)[number];
 
-export const ERROR_CODES = ["protocol_mismatch", "bad_token", "not_ready", "bad_request", "unknown_type", "no_volumes", "wrong_dimension", "outside_volumes", "too_large", "replaced", "stale_link", "bad_extension", "bad_volumes", "internal"] as const;
+export const ERROR_CODES = ["protocol_mismatch", "bad_token", "not_ready", "bad_request", "unknown_type", "no_volumes", "wrong_dimension", "outside_volumes", "too_large", "replaced", "stale_link", "bad_extension", "bad_volumes", "internal", "no_grant"] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
 
 export const PROMPT_REFUSALS = ["no_link", "not_allowed", "no_listener", "unsupported_mode"] as const;
 export type PromptRefusal = (typeof PROMPT_REFUSALS)[number];
 
-/** Request modes, named by the player's subcommand (`13`, B6). */
-export const REQUEST_MODES = ["ask", "scan", "plan", "build"] as const;
+/**
+ * Request modes, named by the player's subcommand (`13`, B6). `select` (`18`, piece 1; feature
+ * `select`) is read-only and may change the volumes; its prompt carries no grant.
+ */
+export const REQUEST_MODES = ["ask", "scan", "plan", "build", "select"] as const;
 export type RequestMode = (typeof REQUEST_MODES)[number];
 
 /**
  * Optional capabilities a mod's `hello` lists in `features` (*Versions and features*). The MCP uses
  * an addition only when the mod lists it, never because of the protocol number.
  */
-export const MOD_FEATURES = ["modes", "scan", "volumes.set", "registry", "upgrade", "ui"] as const;
+export const MOD_FEATURES = ["modes", "scan", "volumes.set", "registry", "upgrade", "ui", "select"] as const;
 export type ModFeature = (typeof MOD_FEATURES)[number];
 
 /**
@@ -216,6 +219,218 @@ export interface SurfaceResult {
   ceilings?: SurfaceLayer;
 }
 
+// ── Select (`18`; mod feature `select`, added within protocol 3) ────────────────────────────────
+
+/** The interim margin around a shape's sections for `snapshot` kind `mask` (`18`, piece 5). */
+export const MASK_MARGIN = 8;
+/** Cell sizes a `snapshot` kind `coarse` takes (`18`, piece 5). */
+export const COARSE_CELLS = [2, 4] as const;
+export type CoarseCell = (typeof COARSE_CELLS)[number];
+/** Interim search defaults (`18`, piece 2; *Measure first* may change them, the mod's config holds them). */
+export const SEARCH_GAP = 2;
+export const SEARCH_STOP = 1;
+/** The interim `selectChunks`: search radius default and cap, and the select-mode read grant's radius, in chunks. */
+export const SELECT_CHUNKS = 256;
+/** Fill connectivity in the world when the request names none (`18`, piece 3). */
+export const FILL_CONNECTIVITY = 26;
+/**
+ * The match entry that matches every non-air block (`{connected}`'s `solid`). Every other entry is a
+ * block id (any state), a canonical state (exactly that state) or a block tag `#ns:path`.
+ */
+export const MATCH_SOLID = "solid";
+
+/**
+ * `snapshot` kind `mask` (`18`, piece 5): every position of the listed sections, plus every position
+ * within `margin` blocks of them (the sections' boxes, not the shape's blocks, so the request needs no
+ * mask). Answered by a blocks `snapshot.result` whose regions the mod lays out (*Message schemas*).
+ */
+export interface MaskSnapshotRequest {
+  type: "snapshot";
+  id: number;
+  dimension: string;
+  kind: "mask";
+  /** The shape's sections, unique; their order is the result's region order. */
+  sections: Vec3[];
+  /** 0 to 16 blocks; absent means {@link MASK_MARGIN}. */
+  margin?: number;
+}
+
+/**
+ * `snapshot` kind `coarse` (`18`, piece 5): each box, grown outward to whole cells of the world grid
+ * (multiples of `cell`), read as one block per cell: its most common non-air block (ties: the one met
+ * first in index order), air when the cell is all air.
+ */
+export interface CoarseSnapshotRequest {
+  type: "snapshot";
+  id: number;
+  dimension: string;
+  kind: "coarse";
+  cell: CoarseCell;
+  boxes: WireBox[];
+}
+
+/** A coarse region: `box` aligned to the cell grid, one palette index per cell, x fastest, then z, then y. */
+export interface CoarseRegion {
+  box: WireBox;
+  states: Uint32Array;
+}
+
+export interface CoarseResult {
+  type: "snapshot.result";
+  id: number;
+  dimension: string;
+  kind: "coarse";
+  cell: CoarseCell;
+  palette: string[];
+  regions: CoarseRegion[];
+  /** Chunks `[cx, cz]` the regions touch that aren't generated (they read as air); absent when none. */
+  missing?: [number, number][];
+}
+
+/**
+ * `search` (`18`, piece 2): a material search in rings of chunks outward from the centre, nearest
+ * first, stopping once `stop` more clusters are closed or at the radius. The continuing form walks on
+ * from where the previous search of this grant stopped, with its materials, centre, radius and gap.
+ */
+export type SearchRequest =
+  | {
+      type: "search";
+      id: number;
+      dimension: string;
+      /** Block ids (any state), canonical states, or tags `#ns:path`; the MCP resolves words and families to these. */
+      materials: string[];
+      /** Chunks around the centre; absent: the mod's `selectChunks`, which also caps it. */
+      radius?: number;
+      /** A world position whose chunk is the centre; absent: the select request's player. */
+      around?: Vec3;
+      /** Rings past a cluster's farthest chunk before it counts as closed; absent: {@link SEARCH_GAP}. */
+      gap?: number;
+      /** Closed clusters to stop at; absent: {@link SEARCH_STOP}. */
+      stop?: number;
+    }
+  | { type: "search"; id: number; dimension: string; continue: true; stop?: number };
+
+/** A cluster of touching (edge or corner) matching chunks; `min`/`max` are chunk coordinates `[cx, cz]`. */
+export interface SearchCluster {
+  min: [number, number];
+  max: [number, number];
+  chunks: number;
+  /** Matching blocks in its chunks, all materials together. */
+  blocks: number;
+  /** The walk has gone `gap` rings past its farthest chunk, so it can't grow. */
+  closed: boolean;
+}
+
+/** One chunk with matches. */
+export interface SearchChunk {
+  chunk: [number, number];
+  /** Matching blocks per material, in `materials` order. */
+  counts: number[];
+  /** Index into `clusters`. */
+  cluster: number;
+  /** Section y coordinates with matches, ascending. */
+  sections: number[];
+}
+
+/** The whole walk so far (a continuing search's answer includes the earlier rings). */
+export interface SearchResult {
+  type: "search.result";
+  id: number;
+  dimension: string;
+  materials: string[];
+  /** The centre chunk `[cx, cz]`. */
+  centre: [number, number];
+  /** The radius walked to, after clipping to `selectChunks`. */
+  radius: number;
+  /** The request asked for more than `selectChunks`. */
+  clipped?: true;
+  /** The last ring walked completely (0: the centre chunk). The walk is complete when it equals `radius`. */
+  reached: number;
+  /** The dimension's lowest section y. */
+  minSection: number;
+  /** In walk order of each cluster's first chunk. */
+  clusters: SearchCluster[];
+  /** Ascending by cz, then cx. */
+  chunks: SearchChunk[];
+  /** Walked chunks that aren't generated, ascending by cz, then cx. */
+  missing: [number, number][];
+}
+
+/**
+ * `fill` (`18`, piece 3): grows a shape from `seed` through `match`, depth-first as `{connected}`,
+ * inside a read area of chunks (initially those within `area` of the seed's chunk) and the select
+ * grant. Replaces the grant's current fill.
+ */
+export interface FillRequest {
+  type: "fill";
+  id: number;
+  dimension: string;
+  seed: Vec3;
+  /** Non-empty: block ids, canonical states, tags `#ns:path`, or {@link MATCH_SOLID}. */
+  match: string[];
+  /** 6, 18 or 26; absent: {@link FILL_CONNECTIVITY}. */
+  connectivity?: 6 | 18 | 26;
+  /** Most blocks this step adds; absent: the mod's `contextCap`. */
+  budget?: number;
+  /** Radius in chunks of the initial read area around the seed's chunk; absent: 1. */
+  area?: number;
+}
+
+/** How `expand` grows the read area: the chunks the frontier reaches, chunks in one direction, or the chunks a box touches. */
+export type ExpandBy = "frontier" | { direction: Cardinal; chunks: number } | { box: WireBox };
+
+/** `expand` (`18`, piece 4): grows the current fill's read area and resumes the fill from its frontier with a fresh budget. */
+export interface ExpandRequest {
+  type: "expand";
+  id: number;
+  dimension: string;
+  by: ExpandBy;
+  budget?: number;
+}
+
+/** One section of a shape: a 4,096-bit set (512 bytes, bit `x + 16·(z + 16·y)`, LSB first) or every position. */
+export interface MaskSection {
+  section: Vec3;
+  mask: Uint8Array | "full";
+}
+
+/**
+ * Frontier positions of one section: shape positions whose exploration stopped at the read area's
+ * edge or the budget, each with a face mask (bit 0 down, 1 up, 2 north, 3 south, 4 west, 5 east) of
+ * the sides whose neighbour wasn't explored.
+ */
+export interface FrontierSection {
+  section: Vec3;
+  /** Local indices `x + 16·(z + 16·y)`, ascending. */
+  index: number[];
+  faces: number[];
+}
+
+export const FILL_STOPS = ["complete", "edge", "budget"] as const;
+export type FillStop = (typeof FILL_STOPS)[number];
+
+/** The answer to `fill` and `expand`. */
+export interface FillResult {
+  type: "fill.result";
+  id: number;
+  dimension: string;
+  seed: Vec3;
+  /** Blocks in the whole shape. */
+  count: number;
+  /** The whole shape's bounding box; null when the seed doesn't match. */
+  box: WireBox | null;
+  /** `budget`: the step's budget ran out; `edge`: the shape reaches the read area's edge; `complete`: neither. */
+  stopped: FillStop;
+  /** An `expand`'s answer: `sections` lists only the sections that changed, each replacing what the MCP holds. */
+  delta?: true;
+  /** Chunks of the read area that aren't generated (never read, never filled into), ascending by cz, then cx. */
+  missing: [number, number][];
+  /** Ascending by sy, then sz, then sx. */
+  sections: MaskSection[];
+  /** The whole current frontier, ascending by sy, then sz, then sx. */
+  frontier: FrontierSection[];
+}
+
 export interface SnapshotRegion {
   box: WireBox;
   /** Palette index per position of the box, x fastest, then z, then y. */
@@ -230,6 +445,8 @@ export interface SnapshotResult {
   dimension: string;
   palette: string[];
   regions: SnapshotRegion[];
+  /** Select reads (feature `select`): chunks the regions touch that aren't generated (they read as air); absent when none. */
+  missing?: [number, number][];
 }
 
 export interface PatchBlock {
@@ -716,9 +933,44 @@ export function uiEnabled(mcp: Pick<ClientHello, "features"> | undefined, mod: M
 }
 
 /** Messages the MCP sends. */
-export type McpMessage = ClientHello | ErrorMessage | VolumesExtend | VolumesSet | HashesRequest | SnapshotRequest | SurfaceRequest | PatchMessage | RegistryRequest | UpgradeRequest | PromptResult | NoticeMessage | ChatMessage | UiMcpMessage;
+export type McpMessage =
+  | ClientHello
+  | ErrorMessage
+  | VolumesExtend
+  | VolumesSet
+  | HashesRequest
+  | SnapshotRequest
+  | SurfaceRequest
+  | MaskSnapshotRequest
+  | CoarseSnapshotRequest
+  | SearchRequest
+  | FillRequest
+  | ExpandRequest
+  | PatchMessage
+  | RegistryRequest
+  | UpgradeRequest
+  | PromptResult
+  | NoticeMessage
+  | ChatMessage
+  | UiMcpMessage;
 /** Messages the mod sends. */
-export type ModMessage = ModHello | ErrorMessage | VolumesMessage | HashesResult | SnapshotResult | SurfaceResult | PatchAck | DirtyMessage | PromptMessage | PromptClose | RegistryResult | UpgradeResult | UiRequest;
+export type ModMessage =
+  | ModHello
+  | ErrorMessage
+  | VolumesMessage
+  | HashesResult
+  | SnapshotResult
+  | SurfaceResult
+  | CoarseResult
+  | SearchResult
+  | FillResult
+  | PatchAck
+  | DirtyMessage
+  | PromptMessage
+  | PromptClose
+  | RegistryResult
+  | UpgradeResult
+  | UiRequest;
 
 export type Message = McpMessage | ModMessage;
 export type Sender = "mcp" | "mod";

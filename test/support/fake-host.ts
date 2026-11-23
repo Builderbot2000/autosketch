@@ -45,6 +45,9 @@ import {
 } from "../../src/world/protocol/messages.js";
 import { removePairing, writePairing } from "../../src/world/protocol/pairing.js";
 import { isCanonicalForm } from "../../src/world/protocol/state.js";
+import { boxVolume, maskRegions } from "../../src/world/protocol/body.js";
+import { MASK_MARGIN, SEARCH_STOP, SELECT_CHUNKS, type CoarseSnapshotRequest, type ExpandRequest, type FillRequest, type MaskSnapshotRequest, type SearchRequest } from "../../src/world/protocol/messages.js";
+import { coarseRegion, grantHasBox, grantHasChunk, missingIn, newSearch, WorldFill, type SearchWalk, type SelectGrant } from "./fake-select.js";
 
 /**
  * A fake in-game host (docs/design/13-live-world.md, W9): an in-memory world plus the mod's side
@@ -60,6 +63,11 @@ import { isCanonicalForm } from "../../src/world/protocol/state.js";
  * none and sends no `mode`, a version-2 host lacks `registry` and `upgrade`, and each answers later
  * requests as that version's mod would. Its registry report is `registryReport`; its data fixer is
  * the MCP's own rename table over states (NBT passes through), or `upgrade`.
+ *
+ * Select (`18`; feature `select`): a `select` prompt grants block reads within `selectChunks` of the
+ * player's chunk (`selectGrant`); `search`, `fill`, `expand` and the `mask` and `coarse` snapshots are
+ * answered from the in-memory world by `fake-select.ts` (the fill as `{connected}` does it; the search
+ * treats every non-empty section as a `maybeHas` yes). `missingChunks` are ungenerated there too.
  *
  * In-game UI (`ui`, `13`, *In-game UI*): the host stands for the mod's relay and every player's
  * client at once. It records each `ui.*` and `replay.*` message in `ui` (`uiFor` filters by player),
@@ -96,7 +104,11 @@ export interface FakeHostOptions {
   contextCap?: number;
   /** Scan sizing (`13`, B4): default radius, maximum radius, blocks below and above the feet, full-block cap. */
   scan?: { chunks?: number; chunksMax?: number; below?: number; above?: number; cap?: number };
-  /** Chunks `"cx,cz"` that aren't generated: surface snapshots list them as missing. */
+  /** `selectChunks` (`18`): the select grant's radius and the search radius cap; default 256. */
+  selectChunks?: number;
+  /** Block tags (`ns:path` → block ids) for `#tag` materials in search and fill; unknown tags match nothing. */
+  tags?: Record<string, string[]>;
+  /** Chunks `"cx,cz"` that aren't generated: surface snapshots, searches, fills and select reads list them as missing. */
   missingChunks?: Set<string>;
   /** False makes the host a misbehaving mod that sends modes the MCP's hello didn't list (to test the MCP-side gate). Default true. */
   enforceModes?: boolean;
@@ -162,6 +174,11 @@ export class FakeHost {
   mcpFeatures: readonly string[] = [];
   /** The scan grant of the last scan request, while it lasts (*Wire format*, `prompt`, `scan`). */
   scanGrant: (ScanGrant & { dimension: string }) | null = null;
+  /** The read grant of the last select request, while it lasts (`13`, *Read grants in select mode*). */
+  selectGrant: SelectGrant | null = null;
+  /** The select grant's search, resumable with `continue`, and its current fill. */
+  private searchWalk: SearchWalk | null = null;
+  private worldFill: WorldFill | null = null;
   /** Called before a patch is applied; may return a promise to hold it (later requests wait, as in the mod). */
   beforePatch?: (patch: PatchMessage) => void | Promise<void>;
   port = 0;
@@ -300,10 +317,17 @@ export class FakeHost {
     const modes = this.has("modes");
     const mode = opts.mode ?? "build";
     if (modes && this.opts.enforceModes !== false && !this.mcpModes.includes(mode)) return Promise.resolve({ type: "prompt.result", id, delivered: false, reason: "unsupported_mode", local: true });
+    if (mode === "select" && !this.has("select")) throw new Error("fake host: a mod without the select feature has no select subcommand");
     let scan: ScanGrant | undefined;
     if (modes && mode === "scan" && this.has("scan")) {
       scan = this.grant(ctx, opts.radius);
       this.scanGrant = { ...scan, dimension: ctx.dimension };
+      this.setSelectGrant(null);
+    }
+    if (modes && mode === "select") {
+      // One grant at a time: a select request replaces a scan grant, and the other way round.
+      this.scanGrant = null;
+      this.setSelectGrant({ dimension: ctx.dimension, centre: [Math.floor(ctx.position[0]) >> 4, Math.floor(ctx.position[2]) >> 4], radius: this.opts.selectChunks ?? SELECT_CHUNKS });
     }
     return new Promise((resolve) => {
       this.prompts.set(id, resolve);
@@ -453,6 +477,7 @@ export class FakeHost {
       if (this.socket === s) {
         this.socket = undefined;
         this.scanGrant = null; // a grant lasts until the connection closes
+        this.setSelectGrant(null);
       }
     });
     s.on("data", (chunk) => {
@@ -541,6 +566,107 @@ export class FakeHost {
     return { radius: r, ...(asked > max ? { clipped: true } : {}), columns, box: { min: [bx, y0, bz], max: [bx + side - 1, y1, bz + side - 1] } };
   }
 
+  private setSelectGrant(g: SelectGrant | null): void {
+    this.selectGrant = g;
+    this.searchWalk = null;
+    this.worldFill = null;
+  }
+
+  private get missingChunks(): ReadonlySet<string> {
+    return this.opts.missingChunks ?? new Set<string>();
+  }
+
+  private stateAt = (x: number, y: number, z: number): string => (this.missingChunks.has(`${x >> 4},${z >> 4}`) ? AIR : this.get([x, y, z]).state);
+
+  /** The checks every select request makes first: the feature (else, as a mod without it, `unknown_type`), the grant, the dimension. */
+  private selectCheck(m: { type: string; id: number; dimension: string }, s: Socket): SelectGrant | undefined {
+    if (!this.has("select")) {
+      this.send({ type: "error", id: m.id, code: "unknown_type", message: `unknown message type ${m.type}` }, s);
+      return undefined;
+    }
+    const g = this.selectGrant;
+    if (!g) {
+      this.send({ type: "error", id: m.id, code: "no_grant", message: "no select request is open: the player sends /autosketch select first" }, s);
+      return undefined;
+    }
+    if (m.dimension !== g.dimension) {
+      this.send({ type: "error", id: m.id, code: "wrong_dimension", message: `the select request is in ${g.dimension}` }, s);
+      return undefined;
+    }
+    return g;
+  }
+
+  /** `search` (`18`, piece 2): a new walk, or the grant's last walk continued. */
+  private search(m: SearchRequest, s: Socket): void {
+    const g = this.selectCheck(m, s);
+    if (!g) return;
+    if ("continue" in m) {
+      if (!this.searchWalk) return this.send({ type: "error", id: m.id, code: "bad_request", message: "no search to continue" }, s);
+    } else {
+      if (m.around && !grantHasChunk(g, m.around[0] >> 4, m.around[2] >> 4)) return this.send({ type: "error", id: m.id, code: "outside_volumes", message: "around lies outside the select grant" }, s);
+      this.searchWalk = newSearch(m, g, this.opts.selectChunks ?? SELECT_CHUNKS);
+    }
+    const walk = this.searchWalk;
+    const blocks: [Vec3, string][] = [...this.world].map(([k, c]) => [k.split(",").map(Number) as Vec3, c.state]);
+    walk.walk(blocks, this.missingChunks, m.stop ?? SEARCH_STOP, this.opts.tags ?? {});
+    this.send(walk.result(m.id, m.dimension), s);
+  }
+
+  /** `fill` (`18`, piece 3): replaces the grant's fill. */
+  private fill(m: FillRequest, s: Socket): void {
+    const g = this.selectCheck(m, s);
+    if (!g) return;
+    if (!grantHasChunk(g, m.seed[0] >> 4, m.seed[2] >> 4)) return this.send({ type: "error", id: m.id, code: "outside_volumes", message: "the seed lies outside the select grant" }, s);
+    const f = new WorldFill(m.seed, m.match, m.connectivity, g, this.missingChunks, m.area ?? 1, this.opts.tags ?? {});
+    this.worldFill = f;
+    f.run(this.stateAt, m.budget ?? this.opts.contextCap ?? 4_194_304);
+    this.send(f.result(m.id, m.dimension), s);
+  }
+
+  /** `expand` (`18`, piece 4): grows the fill's read area and resumes it; the answer lists the changed sections. */
+  private expand(m: ExpandRequest, s: Socket): void {
+    const g = this.selectCheck(m, s);
+    if (!g) return;
+    const f = this.worldFill;
+    if (!f) return this.send({ type: "error", id: m.id, code: "bad_request", message: "no fill to expand" }, s);
+    f.expand(m.by);
+    const added = f.run(this.stateAt, m.budget ?? this.opts.contextCap ?? 4_194_304);
+    this.send(f.result(m.id, m.dimension, added), s);
+  }
+
+  /** Whether a blocks read lies inside the select grant; over `contextCap` positions it is `too_large`. */
+  private selectRead(dimension: string, boxes: WireBox[], positions: number): ErrorCode | "grant" | undefined {
+    const g = this.selectGrant;
+    if (!g || g.dimension !== dimension || !boxes.every((b) => grantHasBox(g, b))) return undefined;
+    return positions > (this.opts.contextCap ?? 4_194_304) ? "too_large" : "grant";
+  }
+
+  private maskSnapshot(m: MaskSnapshotRequest, s: Socket): void {
+    const boxes = maskRegions(m.sections, m.margin ?? MASK_MARGIN);
+    const sel = this.selectRead(m.dimension, boxes, boxes.reduce((n, b) => n + boxVolume(b), 0));
+    if (sel === "too_large") return this.send({ type: "error", id: m.id, code: "too_large", message: "the read is over contextCap" }, s);
+    if (sel !== "grant") {
+      const err = this.checkRead(m.dimension, boxes, true);
+      if (err) return this.send({ type: "error", id: m.id, code: err, message: `can't serve a mask snapshot: ${err}` }, s);
+    }
+    this.snapshot({ type: "snapshot", id: m.id, dimension: m.dimension, boxes }, s, sel === "grant");
+  }
+
+  private coarseSnapshot(m: CoarseSnapshotRequest, s: Socket): void {
+    const palette: string[] = [];
+    const index = new Map<string, number>();
+    const regions = m.boxes.map((b) => coarseRegion(b, m.cell, this.stateAt, palette, index));
+    const aligned = regions.map((r) => r.box);
+    const sel = this.selectRead(m.dimension, aligned, regions.reduce((n, r) => n + r.states.length, 0));
+    if (sel === "too_large") return this.send({ type: "error", id: m.id, code: "too_large", message: "the read is over contextCap" }, s);
+    if (sel !== "grant") {
+      const err = this.checkRead(m.dimension, aligned, true);
+      if (err) return this.send({ type: "error", id: m.id, code: err, message: `can't serve a coarse snapshot: ${err}` }, s);
+    }
+    const missing = sel === "grant" ? missingIn(aligned, this.missingChunks) : [];
+    this.send({ type: "snapshot.result", id: m.id, dimension: m.dimension, kind: "coarse", cell: m.cell, palette, regions, ...(missing.length ? { missing } : {}) }, s);
+  }
+
   private send(m: ModMessage, s = this.socket): void {
     if (!s || s.destroyed) return;
     this.sent.push(m);
@@ -554,18 +680,32 @@ export class FakeHost {
 
   private async handle(m: McpMessage, s: Socket): Promise<void> {
     switch (m.type) {
+      case "search":
+        return this.search(m, s);
+      case "fill":
+        return this.fill(m, s);
+      case "expand":
+        return this.expand(m, s);
       case "snapshot":
-        if ("kind" in m) {
+        if ("kind" in m && (m.kind === "mask" || m.kind === "coarse")) {
+          // A mod without select decodes these as a blocks snapshot and refuses the kind.
+          if (!this.has("select")) return this.send({ type: "error", id: m.id, code: "bad_request", message: `not a blocks snapshot (kind ${m.kind})` }, s);
+          return m.kind === "mask" ? this.maskSnapshot(m, s) : this.coarseSnapshot(m, s);
+        }
+        if ("kind" in m && m.kind === "surface") {
           // A version-1 mod reads neither kind nor columns: to it this snapshot has no boxes or sections.
           if (!this.has("scan")) return this.send({ type: "error", id: m.id, code: "bad_request", message: "snapshot takes exactly one of boxes or sections" }, s);
           return this.surface(m, s);
         }
       // falls through
       case "hashes": {
-        const err = this.checkRead(m.dimension, "boxes" in m ? m.boxes : m.sections.map(sectionBox), m.type === "snapshot");
+        const boxes = "boxes" in m ? m.boxes : m.sections.map(sectionBox);
+        const sel = m.type === "snapshot" ? this.selectRead(m.dimension, boxes, boxes.reduce((n, b) => n + boxVolume(b), 0)) : undefined;
+        if (sel === "too_large") return this.send({ type: "error", id: m.id, code: "too_large", message: "the read is over contextCap" }, s);
+        const err = sel === "grant" ? undefined : this.checkRead(m.dimension, boxes, m.type === "snapshot");
         if (err) return this.send({ type: "error", id: m.id, code: err, message: `can't serve ${m.type}: ${err}` }, s);
         if (m.type === "hashes") return this.send({ type: "hashes.result", id: m.id, sections: sectionHashes(m.boxes, (x, y, z) => this.get([x, y, z]), this.volatile) }, s);
-        return this.snapshot(m, s);
+        return this.snapshot({ type: "snapshot", id: m.id, dimension: m.dimension, boxes }, s, sel === "grant");
       }
       case "volumes.set":
         if (!this.has("volumes.set")) return this.send({ type: "error", id: m.id, code: "unknown_type", message: "unknown message type volumes.set" }, s);
@@ -657,7 +797,9 @@ export class FakeHost {
   private surface(m: SurfaceRequest, s: Socket): void {
     const g = this.scanGrant;
     const a = m.columns;
-    const inGrant = !!g && g.dimension === m.dimension && a.min[0] >= g.columns.min[0] && a.min[1] >= g.columns.min[1] && a.max[0] <= g.columns.max[0] && a.max[1] <= g.columns.max[1];
+    const sg = this.selectGrant;
+    const inSelect = !!sg && sg.dimension === m.dimension && grantHasChunk(sg, a.min[0] >> 4, a.min[1] >> 4) && grantHasChunk(sg, a.max[0] >> 4, a.max[1] >> 4);
+    const inGrant = inSelect || (!!g && g.dimension === m.dimension && a.min[0] >= g.columns.min[0] && a.min[1] >= g.columns.min[1] && a.max[0] <= g.columns.max[0] && a.max[1] <= g.columns.max[1]);
     if (!inGrant) {
       const box: WireBox = { min: [a.min[0], 0, a.min[1]], max: [a.max[0], 0, a.max[1]] };
       const err = this.checkRead(m.dimension, [box], false);
@@ -711,8 +853,10 @@ export class FakeHost {
     return undefined;
   }
 
-  private snapshot(m: SnapshotRequest, s: Socket): void {
-    const boxes = "boxes" in m ? m.boxes : m.sections.map(sectionBox);
+  /** A blocks snapshot; under the select grant, ungenerated chunks read as air and are listed in `missing`. */
+  private snapshot(m: SnapshotRequest & { boxes: WireBox[] }, s: Socket, select = false): void {
+    const boxes = m.boxes;
+    const at = select ? (p: Vec3): WorldBlock => (this.missingChunks.has(`${p[0] >> 4},${p[2] >> 4}`) ? { pos: p, state: AIR } : this.get(p)) : (p: Vec3) => this.get(p);
     const palette: string[] = [];
     const index = new Map<string, number>();
     const regions = boxes.map((box) => {
@@ -722,7 +866,7 @@ export class FakeHost {
       for (let y = box.min[1]; y <= box.max[1]; y++)
         for (let z = box.min[2]; z <= box.max[2]; z++)
           for (let x = box.min[0]; x <= box.max[0]; x++) {
-            const b = this.get([x, y, z]);
+            const b = at([x, y, z]);
             let p = index.get(b.state);
             if (p === undefined) {
               index.set(b.state, (p = palette.length));
@@ -733,9 +877,11 @@ export class FakeHost {
           }
       return { box, states, blockEntities };
     });
+    const missing = select ? missingIn(boxes, this.missingChunks) : [];
+    const result = { type: "snapshot.result" as const, id: m.id, dimension: m.dimension, palette, regions, ...(missing.length ? { missing } : {}) };
     try {
-      s.write(encodeMessage({ type: "snapshot.result", id: m.id, dimension: m.dimension, palette, regions }));
-      this.sent.push({ type: "snapshot.result", id: m.id, dimension: m.dimension, palette, regions });
+      s.write(encodeMessage(result));
+      this.sent.push(result);
     } catch (e) {
       if (!(e instanceof ProtocolError)) throw e;
       this.send({ type: "error", id: m.id, code: "too_large", message: e.message }, s);
@@ -796,7 +942,7 @@ function containsBox(outer: WireBox, inner: WireBox): boolean {
 }
 
 const DIMENSIONS = new Set(["minecraft:overworld", "minecraft:the_nether", "minecraft:the_end"]);
-const KNOWN = new Set(["hello", "error", "volumes.extend", "volumes.set", "hashes", "snapshot", "patch", "registry", "upgrade", "prompt.result", "notice", "chat", ...UI_MCP_TYPES]);
+const KNOWN = new Set(["hello", "error", "volumes.extend", "volumes.set", "hashes", "snapshot", "search", "fill", "expand", "patch", "registry", "upgrade", "prompt.result", "notice", "chat", ...UI_MCP_TYPES]);
 
 /** The features each protocol version's mod lists (*Versions and features*). */
 const FEATURES_BY_VERSION: Record<number, string[] | undefined> = { 1: undefined, 2: ["modes", "scan", "volumes.set"], 3: [...MOD_FEATURES] };

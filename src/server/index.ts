@@ -159,6 +159,7 @@ async function main(): Promise<void> {
     request: () => inGame.heldRequest?.id ?? inGame.current?.id,
     context: () => worldView.context,
     dimension: () => link.volumes?.dimension,
+    view: () => worldView,
   });
   // The in-game UI (16): overlays, ghosts, replay and the player's requests, over the bridge.
   const ui = startUi({

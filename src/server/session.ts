@@ -142,7 +142,7 @@ export class Session {
   worldView?: WorldView;
   /**
    * The agent's select requests in the world (18, pieces 2 to 4 and 9): the current request's search
-   * state (and, later, the candidate). Set by the entry point beside `worldView`.
+   * state and its fill, the candidate. Set by the entry point beside `worldView`.
    */
   worldSelect?: WorldSelect;
   /**

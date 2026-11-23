@@ -3,7 +3,8 @@ import { Document, type WriteGuard } from "../document/document.js";
 import type { PaletteBook } from "../palette/pick.js";
 import { refusal } from "../scope/scopes.js";
 import type { BridgeConnection } from "./bridge.js";
-import { COARSE_CELLS, type CoarseCell, type CoarseResult, type GameContext, type SnapshotResult, type WireBox } from "./protocol/messages.js";
+import { maskRegions } from "./protocol/body.js";
+import { COARSE_CELLS, MASK_MARGIN, type CoarseCell, type CoarseResult, type GameContext, type SnapshotResult, type WireBox } from "./protocol/messages.js";
 
 /**
  * The world view (docs/design/18-select.md, piece 5): a read-only look at the world held **beside**
@@ -201,6 +202,33 @@ export class WorldView {
         return { boxes, blocks, solid, dimension, level: "full", ...(snap.missing?.length ? { missing: snap.missing } : {}) };
       } catch (e) {
         // The mod's own cap may be lower than the MCP's assumption: fall back to coarse.
+        if ((e as { refusal?: string }).refusal !== "too_large") throw e;
+      }
+    }
+    return this.readCoarse(st, dimension, boxes, blocks);
+  }
+
+  /**
+   * Reads a shape's sections plus `margin` blocks around them (`18`, piece 5; snapshot kind `mask`):
+   * what a fill or an expand reads into the view for its candidate (T2). The margin is measured from
+   * the sections' boxes (`13`, *Select*), so the regions are `maskRegions`, the same layout the mod
+   * answers with. Past `contextCap`, or answered `too_large`, the same regions are read coarse, as
+   * `read` does.
+   */
+  async readMask(sections: readonly Vec3[], margin: number = MASK_MARGIN): Promise<ViewRead> {
+    const st = this.fresh();
+    const dimension = this.dimensionFor(st);
+    if (!sections.length) throw new Error("no sections to read");
+    const boxes = maskRegions(sections, margin).map(fromWire);
+    const blocks = boxes.reduce((n, b) => n + boxVolume(b), 0);
+    if (blocks <= this.contextCap) {
+      try {
+        const snap = await this.opts.bridge.request({ type: "snapshot", dimension, kind: "mask", sections: [...sections], ...(margin !== MASK_MARGIN ? { margin } : {}) });
+        this.checkSame(st);
+        const solid = write(st.doc, snap);
+        for (const r of snap.regions) this.hold(st, { box: fromWire(r.box), level: "full" });
+        return { boxes, blocks, solid, dimension, level: "full", ...(snap.missing?.length ? { missing: snap.missing } : {}) };
+      } catch (e) {
         if ((e as { refusal?: string }).refusal !== "too_large") throw e;
       }
     }

@@ -15,6 +15,7 @@ Letters are local to this set. Agents work one step at a time and are never resu
 | T | [Search, fill, expand and confirm tools](T-select-tools.md) | 2, 3, 4, 9 (MCP) | 1, then 2 | MCP | W1; V1 (T2) |
 | P | [Select mode, choices and candidate outline](P-prompt-choices.md) | 1 (MCP), 7, 8 (MCP), 10 (agent guide) | 1, then 2 | MCP | W1 (P1), W2 (P2, P3), T2 (P3) |
 | R | [Scan removal](R-removal.md) | *Removal* | 3 | both | P1, C1, V2 |
+| S | [Strict tool arguments](S-strict-args.md) | follow-up from V1 (piece 5) | 3 | MCP | T, P, V merged |
 | Z | [Measure, end to end, close-out](Z-measure-e2e.md) | *Measure first*, *Testing* (end to end), open questions | 2, then 3 | both | M (Z1); all (Z2, Z3) |
 
 ```
@@ -100,10 +101,11 @@ As in the components set: **an agent lives for exactly one step, and is never re
 | C | C1 `/autosketch select [text]` and alias, mode `select` in prompts, choice-line click (after W1; the choice kind's click after W2 if not yet merged, else in C2) · C2 steady fill record and candidate outline near and far, pulses for proposed hits · C3 work and context volumes on the overlay, particles as the fallback |
 | T | T1 `world_search` with heat-map image, cluster text, `continue` · T2 `world_fill`, `world_expand`, candidate in the world view with its margin read (after V1) · T3 `world_volumes({from: "candidate", margin?})`, too-large handling |
 | P | P1 select mode in `modes.ts` and `prompt.ts`, the select event text, agent guide `library/knowledge/skills/select.md` (workflow and terrain) · P2 `world_reply({choices})` and the choice answer as text (after W2) · P3 candidate shell and outline faces sent through the UI feed, proposed hits pulsed (after W2, T2) |
+| S | S1 unknown tool arguments refused (mutating tools at least), `view:"world"` on a mutating tool refused |
 | R | R1 scan removed on both sides, protocol bump retiring `scan` and `prompt.scan`, `13`'s B4 rows pointing to `18` |
 | Z | Z1 *Measure first* on Craftoria, defaults and the radius answer recorded in `18` (after M) · Z2 end-to-end world test, two houses and a ruin · Z3 status, `HANDOFF.md` |
 
-**Waves.** Wave 0: W1, V1. Wave 1, from W1: M1–M3, C1, T1, P1, V2, W2. Wave 2: T2 (V1), T3, C2, C3, P2, P3, Z1 (M). Wave 3: R1, Z2, Z3.
+**Waves.** Wave 0: W1, V1. Wave 1, from W1: M1–M3, C1, T1, P1, V2, W2. Wave 2: T2 (V1), T3, C2, C3, P2, P3, Z1 (M). Wave 3: R1, S1, Z2, Z3.
 
 **Step prompt** (the whole prompt; add review notes or WIP instructions after it):
 

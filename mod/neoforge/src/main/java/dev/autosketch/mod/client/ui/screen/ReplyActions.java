@@ -15,7 +15,8 @@ import org.slf4j.Logger;
  * {@code /autosketch action <n>}, and the server half hands back the client action
  * {@code chat.action <kind> <args JSON>}, as replay's log lines do. This sends that {@code ui.request}:
  * {@code candidates.open} opens the {@link CandidatesScreen}, which sends it and shows its answer;
- * any other kind is sent as it is, with a refusal on the action bar. Nothing is sent unless
+ * any other kind is sent as it is, with a refusal on the action bar ({@code choices.pick}, a choice
+ * line, 18 piece 7, also says on the action bar that the answer went out). Nothing is sent unless
  * {@link LinkState} is connected. Client thread.
  */
 final class ReplyActions {
@@ -25,6 +26,12 @@ final class ReplyActions {
 
     /** The client action's name (the server half's {@code ReplyActionCommand.ACTION}). */
     static final String ACTION = "chat.action";
+
+    /** A choice line's kind (18, piece 7): {@code {id, index}}, answered {@code {request}} or {@code answered}. */
+    static final String CHOICE = "choices.pick";
+
+    /** The action bar once a choice reached the agent. */
+    static final String CHOICE_SENT = "Autosketch: answer sent to the agent";
 
     static void attach() {
         UiClient.onAction(ACTION, ReplyActions::run);
@@ -49,8 +56,11 @@ final class ReplyActions {
             mc.setScreen(new CandidatesScreen(null, args.get("id").getAsString()));
             return;
         }
+        boolean choice = kind.equals(CHOICE);
         Requests.send(kind, args, r -> {
-            if (!r.ok() && mc.player != null) mc.player.displayClientMessage(Component.literal("Autosketch: " + r.message()), true);
+            if (mc.player == null) return;
+            if (!r.ok()) mc.player.displayClientMessage(Component.literal("Autosketch: " + r.message()), true);
+            else if (choice) mc.player.displayClientMessage(Component.literal(CHOICE_SENT), true);
         });
     }
 }

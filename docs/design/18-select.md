@@ -59,7 +59,7 @@ The fix is to **search first** (by material, which nothing can hide), **grow the
 - **Nearest first, stopping early.** The mod walks the chunks in rings outward from the centre chunk, loaded ones directly and generated ones from disk without generating (as `SurfaceReads`), sliced per tick. Per section it asks `maybeHas`; on a yes it counts matching blocks in that section (reading only those sections). Matching chunks that touch form **clusters**. A cluster is **closed** once the rings have moved `gap` chunks (default 2) past its edge with no new match touching it; until then it may be only the near edge of a build. The walk stops when `stop` clusters are closed (default 1; the agent asks for more when the player's words suggest a far or particular one, "the biggest", "the one by the river"), or at the radius.
 - **Resumable.** A stopped search keeps its place: `world_search({continue: true})` walks on from the ring it stopped at, for the next clusters. The common case (the build is near the player) costs a few rings of loaded chunks; only a miss walks the whole radius.
 - **Answer**: per chunk, the count of each material; plus the sections with matches, the clusters (closed or still open at the stopping ring), and the ring the walk reached. The MCP renders it for the agent as a heat-map image (one cell per chunk, the player marked, north up) and a text list of the densest clusters with distances and bearings. Ungenerated chunks are listed as such.
-- **Grants**: a search grants reads (block snapshots, piece 5) inside the searched chunks for the rest of the request.
+- **Grants**: none of its own. In select mode the mod serves block snapshots (piece 5) anywhere within `selectChunks` of the player, capped per call by `contextCap` (*Decisions*), so terrain starter volumes need no search.
 
 ### 3. Fill (mod, wire, MCP tool)
 
@@ -161,6 +161,7 @@ Settled with the user 2026-11-22:
 - **No built-versus-generated split.**
 - **Work volume = bounding box, enforced; the shape guides.** A selection larger than the cap is allowed; the work volume isn't raised to fit, the agent works on a part or uses sandboxes.
 - **Search radius**: 256 chunks as default and cap for now.
+- **Reads in select mode** (2026-11-23): block snapshots anywhere within `selectChunks` of the player, capped per call by `contextCap`, so a starter volume for terrain needs no search; a search grants nothing further.
 - **Search nearest first and stop early**: rings outward from the player, stopping once enough clusters are closed, resumable for more, so 256 is only walked on a miss.
 - **Huge shapes drawn as a tinted shell** of their sections, using the overlay's existing through-blocks faces with a steady (non-fading) fill.
 - **In-world outlines for the candidate in the first version**, and the work and context particle outlines replaced by overlay lines visible at distance.

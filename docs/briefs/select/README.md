@@ -42,7 +42,7 @@ The owner lands the contract in its first merge, and the users code against it.
 | Mode `select` | W1 | C1, P1, R1 | Added to `RequestMode` and the mod's modes; read-only, volume-changing; `prompt` in mode `select` carries no grant. `scan` stays on the wire until R1 retires it in a protocol bump |
 | `search`, `fill`, `expand` requests | W1 (shapes), M (behaviour), T (callers) | M, T | `18` pieces 2–4: request ids, served in arrival order; answers carry per-chunk counts, sections, clusters (closed/open), reached ring and ungenerated chunks (search); mask per touched section (4096-bit set or "full"), bounding box, count, frontier faces (fill); expand by `"frontier"`, direction and chunk count, or box |
 | Snapshot `mask` and `coarse` | W1 (shape), M3 (mod), V2 (MCP) | V, T | `snapshot` gains sections-plus-margin by mask and a cell size 2 or 4 (most common non-air block per cell) |
-| Read grants in select mode | W1 records, M enforces | T, V | A search grants block snapshots inside its searched chunks for the rest of the request; see *Open point for the user* for reads before any search |
+| Read grants in select mode | W1 records, M enforces | T, V | A search grants block snapshots inside its searched chunks for the rest of the request; select mode reads anywhere within `selectChunks` of the player (*Read grants in select mode*) |
 | Fake host | W1, W2 | T, V, P | `test/support/fake-host.ts` answers `search`, `fill`, `expand` and the new snapshots from its in-memory world with the same algorithm (fill parity with `{connected}` in `src/ops/selection.ts`), so MCP silos never wait on the mod |
 | Choice kind | W2 (names, shapes), P2 (behaviour), C1 (click) | C, P | One `ui.request` kind for a clicked choice, carrying the request id and the choice index (or text); answered `answered` once taken. Choices go out as one `chat` message per line (`17`'s one-action rule) |
 | Steady fill record | W2 | C2, P3 | A `ui.state` record beside outlines and pulses: faces merged into rectangles, a colour, a constant alpha, a job or `candidate` id. Candidate edges near range as outline boxes per section mask boundary |
@@ -78,9 +78,9 @@ The owner lands the contract in its first merge, and the users code against it.
 - **Tick slicing everywhere in the mod.** Search, fill and expand never do more than their per-tick budget; nothing generates chunks.
 - **Interim defaults stay configurable** (`selectChunks` 256, `gap` 2, `stop` 1, margin 8, coarse cell sizes) until Z1 measures them.
 
-## Open point for the user
+## Read grants in select mode (settled 2026-11-23)
 
-`18` grants reads inside searched chunks, but terrain (piece 10) starts from a starter volume with no search, and `world_view_read` may target an area no search covered. The lead must settle with the user, before M1 and V1 build the grant, which reads select mode allows before or outside a search. Proposed default: in select mode, the mod serves block snapshots anywhere within `selectChunks` of the player, capped per call by `contextCap`, and a search extends nothing further.
+`18` grants reads inside searched chunks, but terrain (piece 10) starts from a starter volume with no search, and `world_view_read` may target an area no search covered. Settled with the user: **in select mode, the mod serves block snapshots anywhere within `selectChunks` of the player, capped per call by `contextCap`; a search extends nothing further.** W1 records it in `13` and `18`, M enforces it.
 
 ## How to run this set
 

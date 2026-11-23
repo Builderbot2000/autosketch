@@ -15,7 +15,7 @@ The server half of select: find materials without reading blocks, grow a shape t
 1. Ring walk outward from the centre chunk (player's, or `around`), loaded chunks directly, generated ones from disk as `SurfaceReads` does, ungenerated ones listed. Per section `maybeHas` against the resolved materials (ids, families, tags); on a yes, count the matches in that section only.
 2. Clusters of touching matching chunks; closed once the walk is `gap` rings past their edge with no new touching match; stop after `stop` closed clusters or at the radius. Resumable from the reached ring (`continue`), state kept per player request.
 3. Config `selectChunks` (default and cap 256) and the search defaults, in `AutosketchConfig` and `ConfigToml`, with a migration test.
-4. Reads granted inside the searched chunks for the rest of the request (plus whatever the user settles, README *Open point*).
+4. Reads in select mode: block snapshots anywhere within `selectChunks` of the player, capped per call by `contextCap` (README, *Read grants in select mode*).
 5. JUnit: `maybeHas` walk has no false negatives (a stale palette entry is a "maybe" that counts zero). GameTests: loaded and unloaded generated chunks, ungenerated listed, early stop, `continue`.
 
 **M2 fill and expand**

@@ -15,7 +15,7 @@ Freeze every protocol change `18` needs, so the MCP silos (T, V, P) and the mod 
 1. Mode `select` in `prompt` (no grant; context as for the other modes). `scan` and `prompt.scan` stay until R1.
 2. Requests `search {materials, radius?, around?, gap?, stop?, continue?}`, `fill {seed, match, connectivity?, budget?}`, `expand {by}`, with ids, answered in arrival order. Answers as `18` pieces 2–4 (*Cross-silo contracts* in the README lists the fields). Choose compact encodings: per-chunk counts as parallel arrays, masks as 512-byte bitsets per section in the body, frontier as faces grouped per section.
 3. `snapshot` gains `mask` (sections plus a margin) and `coarse` (cell size 2 or 4).
-4. Read grants in select mode as the user settles them (README, *Open point for the user*), recorded in `13`.
+4. Read grants in select mode as settled (README, *Read grants in select mode*): anywhere within `selectChunks` of the player, capped per call by `contextCap`; recorded in `13` and in `18` (*Decisions*).
 5. Golden vectors, the TS and Java codecs, and the fake host answering all of the above from its in-memory world. The fake host's fill uses the same algorithm as `{connected}` (`src/ops/selection.ts`) so parity tests are meaningful; its search treats every non-empty section as a `maybeHas` yes.
 6. `18`'s *Implementation status* table, one row per piece.
 

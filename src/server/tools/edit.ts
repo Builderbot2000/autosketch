@@ -6,6 +6,7 @@ import { checkSelectionName, freezeNodes, resolveSelection, summarize, type SelE
 import { formatEdit, formatSelection } from "../format.js";
 import { boxSchema, common, commonSchema, componentLine, editWith, env, patternSchema, regionOf, selSchema, text, vec3, type ToolDeps } from "./shared.js";
 import { editWithPreview, previewSchema } from "./perception.js";
+import { docFor, worldViewSchema } from "./world-view.js";
 
 /** Selections (05 L1). */
 export function registerSelectionTools({ tool, session }: ToolDeps): void {
@@ -18,8 +19,9 @@ export function registerSelectionTools({ tool, session }: ToolDeps): void {
         "name stores it for reuse as sel:\"<name>\" (stored as an expression: flood fills and filters follow later edits). name alone shows a stored selection; delete:true removes it; " +
         "no arguments lists stored selections. Every op's selection also becomes \"last\". " +
           "Measured picks ({\"enclosed\":1}, {\"interior\":\"all\"}, {\"top\":\"all\"}, {\"changed\":\"op:-1\"}) are geometry, not architectural labels; " +
-          "view_box/view_lasso pick from pixels of a render (store them with {\"freeze\":..}). Text, <150 tokens.",
+          "view_box/view_lasso pick from pixels of a render (store them with {\"freeze\":..}). view:\"world\" resolves and stores in the world view instead (world coordinates). Text, <150 tokens.",
       inputSchema: {
+        view: worldViewSchema,
         sel: selSchema.optional(),
         name: z.string().optional().describe("Store the selection under this name"),
         delete: z.boolean().optional(),
@@ -27,7 +29,7 @@ export function registerSelectionTools({ tool, session }: ToolDeps): void {
       readOnly: false,
     },
     (c, a) => {
-      const doc = session.require();
+      const doc = docFor(session, a.view, { allowEmpty: true });
       if (a.delete) {
         if (!a.name) throw new Error("delete needs name");
         if (!doc.selections.delete(a.name)) throw new Error(`no selection named "${a.name}"`);

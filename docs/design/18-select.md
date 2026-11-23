@@ -86,6 +86,7 @@ A read-only view of the world held **beside** the open document, not in place of
 - **Contents**: the blocks the agent has asked for. After a fill, the candidate's sections plus a margin (`margin`, default 8 blocks) are read automatically; `world_view_read({sel | box})` reads more (a starter volume, an area around a hit). A read is a block snapshot, capped per call by `contextCap`; the view keeps what it has read for the request.
 - **Coarse level**: for a shape over `contextCap`, the read is downsampled, one block per 2³ or 4³ cell, the cell's most common non-air block, so the whole shape can be seen at once. Reading a region again at full detail replaces the coarse blocks there. The render caption says which parts are coarse.
 - **Freshness**: a snapshot. Each expand re-reads what it adds, and confirming re-reads the final shape.
+- **As built (V1, 2026-11-23).** The view is an ordinary read-only `Document` whose local coordinates are world coordinates (its `origin` keeps store coordinates near the player, inside the voxel store's range), so the five tools work on it unchanged and its named selections live in its `selections`. Reasons: no second renderer or selection path, and positions the agent reads off the view are the positions the mod's requests take. Edits on it are refused by a write guard (`world_view_read_only`), which covers ops, scripts, undo and restore alike. It belongs to the in-game request that is held or open (`InGameRequests.heldRequest`, else the open stream) and empties itself when that changes or ends, rather than through a hook in the request code. `select({view:"world", name})` changes no document, so it needs no `scope` while sandboxes are open (the tool wrapper doesn't count a `view: "world"` call as mutating). Its render ids are `w1`, `w2`, … so `raycast` can tell a view render from a document render by the id alone (its existing `view` argument is the render id; `"world"` names the latest). `world_view_read({box | sel})` reads one box (a selection's bounding box, resolved in the view) with today's blocks `snapshot`, refused past `contextCap` (the mod's default, 4,194,304, since the MCP isn't told the mod's value) until V2's coarse level; the dimension is the request's prompt context, else the linked volumes'.
 
 ### 6. Isolated render with faded surroundings (MCP)
 
@@ -167,3 +168,9 @@ Settled with the user 2026-11-22:
 - **In-world outlines for the candidate in the first version**, and the work and context particle outlines replaced by overlay lines visible at distance.
 - **Connectivity**: the same fill as the magic wand (`{connected}`), 26 neighbours by default in the world.
 - **Defaults the agent may change**: the crosshair block as seed when there is no text; an 8-block margin for fade and context; re-read on expand and on confirm.
+
+## Implementation status
+
+| Piece | Status |
+|---|---|
+| 5. World view | V1 built (select set, silo V): `world/view.ts` (`WorldView` on `Session.worldView`, wired in `server/index.ts`), `view: "world"` on `render`, `view_slice`, `raycast`, `select`, `analyze` (`tools/perception.ts`, `tools/edit.ts`, `tools/world-view.ts`), `world_view_read({box \| sel})` by box. Tests: `test/unit/world/world-view.test.ts` (beside the linked document, with a sandbox open, edits refused, selections stored and reused, emptied on a new request, the cap). Coarse level: V2. |

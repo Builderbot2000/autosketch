@@ -13,6 +13,7 @@ import type { InstanceContext } from "../context.js";
 import type { Session } from "../session.js";
 import { perspectiveSchema, pointSchema, resolvePerspective, resolveTarget, targetSchema, type PerspectiveInput } from "./camera.js";
 import { bakerFor, box, boxSchema, editWith, image, selSchema, text, vec3, type Result, type ToolDeps } from "./shared.js";
+import { docFor, WORLD_RENDER_PREFIX, worldViewSchema } from "./world-view.js";
 
 /** Resolves a selection for a perception call without changing "last". */
 function maskOf(c: InstanceContext, doc: Document, expr: unknown): { mask: Mask; notes: string[] } {
@@ -91,8 +92,10 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
         "explode: {axis:\"x\"|\"y\"|\"z\", at:[layer,…], gap?:4} splits the build at those layers and moves each band gap blocks further (each at starts a band); raycast reports real positions. " +
         "highlight: any selection, tinted orange; {changed:\"op:-1\"|\"checkpoint:<name>\"} shows a diff ({since:..} still works). style: textured | flat (mean colours) | depth (darker = farther) | xray (translucent shell). " +
         "overlays: {components} labels components. Axis ticks label block coordinates; N marks north. " +
-        "The caption gives the render id for raycast and for view_box/view_lasso selections. Image + caption.",
+        "The caption gives the render id for raycast and for view_box/view_lasso selections. " +
+        'view:"world" draws the world view (world_view_read) instead of the document, in world coordinates (render ids w1, w2, …). Image + caption.',
       inputSchema: {
+        view: worldViewSchema,
         views: z.array(viewSchema).min(1).max(4).optional(),
         region: selSchema.optional().describe("Draw only this selection (a box {min,max} or any selection)"),
         cutaway: z.union([z.object({ maxY: z.number().int() }), z.object({ plane: z.enum(["x", "y", "z"]), at: z.number().int(), keep: z.enum(["west", "east", "down", "up", "north", "south"]) })]).optional(),
@@ -111,7 +114,7 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
       },
     },
     async (c, a) => {
-      const doc = session.require();
+      const doc = docFor(session, a.view);
       const notes: string[] = [];
       let region: Box | Mask | undefined;
       if (a.region !== undefined) {
@@ -163,6 +166,7 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
         ...(a.explode ? { explode: a.explode } : {}),
       });
       emitRender(session, r.views, r.width, r.height);
+      if (a.view === "world") notes.unshift(`the world view (${session.worldView?.dimension ?? "?"}, world coordinates, ${session.worldView?.reads.length ?? 0} reads); unread places are drawn as air`);
       return image(r.png, [r.caption, ...notes.map((n) => `note: ${n}`)].join("\n"));
     },
   );
@@ -174,8 +178,9 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
       description:
         "One layer of the build as a character grid with a legend: exact and cheap, the way to check a build. axis y = top-down plan at height at (north up); " +
         "axis z = elevation at that z looking north; axis x = elevation at that x looking east. Max 64×64; region limits the area. " +
-        "mode runs lists each row's blocks as runs instead (for sparse layers; up to 256×256). Text, ~0.1–1.5k tokens.",
+        "mode runs lists each row's blocks as runs instead (for sparse layers; up to 256×256). view:\"world\" slices the world view (world coordinates). Text, ~0.1–1.5k tokens.",
       inputSchema: {
+        view: worldViewSchema,
         axis: z.enum(["x", "y", "z"]),
         at: z.number().int(),
         region: boxSchema.optional().describe("Limit the slice to this box (its extent along axis is ignored)"),
@@ -183,7 +188,7 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
       },
     },
     (c, a) =>
-      text(viewSlice(session.require(), c.registry, { axis: a.axis, at: a.at, ...(a.region ? { region: box(a.region as PublicBox) } : {}), ...(a.mode ? { mode: a.mode } : {}) })),
+      text(viewSlice(docFor(session, a.view), c.registry, { axis: a.axis, at: a.at, ...(a.region ? { region: box(a.region as PublicBox) } : {}), ...(a.mode ? { mode: a.mode } : {}) })),
   );
 
   tool(
@@ -193,14 +198,15 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
       description:
         "Objective measurements of the build (or of one component / selection): bounds and block count; per layer the block count, x/z extent and share of it filled " +
         "(identical consecutive layers merged); materials by count; connected groups and any not reaching the bottom layer; enclosed air regions with volumes and boxes. " +
-        "It labels nothing (no storeys, walls, roofs or windows): read the numbers with your own architectural judgment. Text, ~200–400 tokens.",
+        "It labels nothing (no storeys, walls, roofs or windows): read the numbers with your own architectural judgment. view:\"world\" measures the world view. Text, ~200–400 tokens.",
       inputSchema: {
+        view: worldViewSchema,
         component: z.string().optional().describe("Measure only this component's box"),
         region: selSchema.optional().describe("Measure only this selection"),
       },
     },
     (c, a) => {
-      const doc = session.require();
+      const doc = docFor(session, a.view);
       if (a.component !== undefined && a.region !== undefined) throw new Error("give component or region, not both");
       let region: Box | Mask | undefined;
       if (a.component !== undefined) {
@@ -259,17 +265,19 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
       title: "Raycast",
       description:
         "Names the block under a pixel of a recent render (pixel coordinates in the whole returned image, contact sheets included): position, state and the face hit. " +
-        'view is the render id from its caption (e.g. "r3"; default: the latest render of this document). Text, <50 tokens.',
+        'view is the render id from its caption (e.g. "r3"; default: the latest render of this document); a world view render\'s id ("w2") or "world" (its latest) raycasts the world view. Text, <50 tokens.',
       inputSchema: {
         px: z.number().int().min(0),
         py: z.number().int().min(0),
-        view: z.string().optional().describe('Render id, e.g. "r3" (default: the latest render)'),
+        view: z.string().optional().describe('Render id, e.g. "r3" (default: the latest render); "w<n>" or "world" for the world view'),
       },
     },
     (_c, a) => {
-      const doc = session.require();
-      const rec = getRender(doc, a.view);
-      if (!rec) throw new Error(a.view ? `no recent render "${a.view}" (kept: ${renderIds(doc).join(", ") || "none"})` : "no render of this document yet; call render first");
+      const world = a.view === "world" || (a.view !== undefined && a.view.startsWith(WORLD_RENDER_PREFIX));
+      const doc = docFor(session, world ? "world" : undefined);
+      const id = a.view === "world" ? undefined : a.view;
+      const rec = getRender(doc, id);
+      if (!rec) throw new Error(id ? `no recent render "${id}" (kept: ${renderIds(doc).join(", ") || "none"})` : world ? 'no render of the world view yet; call render({view:"world"}) first' : "no render of this document yet; call render first");
       const hit = raycast(doc, rec, a.px, a.py);
       if (!hit) throw new Error(`pixel (${a.px},${a.py}) is outside render ${rec.id} (${rec.width}×${rec.height})`);
       const stale = rec.revision !== doc.revision ? " (the document changed since this render)" : "";

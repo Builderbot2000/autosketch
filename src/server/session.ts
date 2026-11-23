@@ -16,6 +16,7 @@ import { BASE, refusal, ScopeManager } from "../scope/scopes.js";
 import type { ScopeLimits } from "../scope/settings.js";
 import type { LinkOpenOptions, WorldLink } from "../world/link.js";
 import type { InGameReplies } from "../world/prompt.js";
+import type { WorldView } from "../world/view.js";
 import type { Registry } from "../assets/registry.js";
 import type { ImportUpgrade } from "../formats/index.js";
 import type { SchematicUpgrader } from "../formats/upgrade.js";
@@ -132,6 +133,12 @@ export class Session {
   saveFlash?: (box: PublicBox, doc: string) => void;
   /** Answers to in-game requests (13, *Prompting from the game*), for `world_reply`; set beside `world`. */
   inGame?: InGameReplies;
+  /**
+   * The world view (18, piece 5): the blocks read from the world for the current request, held
+   * beside the open document (never replacing it, and alongside open sandboxes). Tools address it
+   * with `view: "world"`; set by the entry point beside `world`.
+   */
+  worldView?: WorldView;
   /**
    * The session's component set (17, piece 1): the prefabs the player picked, kept by
    * `component_set`. Not tied to a document: it survives opening and closing documents and ends

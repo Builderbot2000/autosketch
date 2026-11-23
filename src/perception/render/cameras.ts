@@ -92,12 +92,21 @@ export interface RenderRecord {
 
 export const KEPT_RENDERS = 8;
 const logs = new WeakMap<Document, { next: number; list: RenderRecord[] }>();
+const prefixes = new WeakMap<Document, string>();
+
+/**
+ * Gives a document's render ids another letter than "r" (the world view's are "w1", "w2", …, `18`
+ * piece 5), so an id names which of the open document and the world view it was drawn from.
+ */
+export function setRenderIdPrefix(doc: Document, prefix: string): void {
+  prefixes.set(doc, prefix);
+}
 
 /** Stores a render's cameras and returns its id ("r1", "r2", …). */
 export function recordRender(doc: Document, rec: Omit<RenderRecord, "id">): string {
   let log = logs.get(doc);
   if (!log) logs.set(doc, (log = { next: 1, list: [] }));
-  const id = `r${log.next++}`;
+  const id = `${prefixes.get(doc) ?? "r"}${log.next++}`;
   log.list.push({ ...rec, id });
   if (log.list.length > KEPT_RENDERS) log.list.shift();
   return id;

@@ -78,8 +78,10 @@ export function createServer(ctx: Promise<InstanceContext> | undefined, opts: Se
         }
         try {
           const scope = scoped ? ((args as { scope?: string }).scope ?? undefined) : undefined;
-          const call = { tool: name, scope: scope ?? BASE, doc: scoped, mutating };
-          return await session.inScope(scope, mutating, () => session.runCall(call, () => run(c, args)));
+          // A call addressed to the world view (18, piece 5: `select` storing a selection there) changes no document.
+          const changes = mutating && (args as { view?: unknown }).view !== "world";
+          const call = { tool: name, scope: scope ?? BASE, doc: scoped, mutating: changes };
+          return await session.inScope(scope, changes, () => session.runCall(call, () => run(c, args)));
         } catch (e) {
           return noteError(fail((e as Error).message), e);
         }

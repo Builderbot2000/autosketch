@@ -37,6 +37,7 @@ import { bridgeUpgrader } from "../world/upgrade.js";
 import { promptSettings, WORLD_PROMPT_PLAYERS, worldSettings } from "../world/settings.js";
 import { CHANNEL_INSTRUCTIONS, CHANNEL_METHOD, InGameRequests } from "../world/prompt.js";
 import { autoSyncHook, syncLink } from "../world/sync.js";
+import { WorldView } from "../world/view.js";
 import { MCP_FEATURES } from "../world/protocol/messages.js";
 import { startUi } from "../ui/index.js";
 import type { LibraryHost as UiLibraryHost } from "../ui/library.js";
@@ -142,6 +143,14 @@ async function main(): Promise<void> {
     process.exit(2);
   }
   session.inGame = inGame;
+  // The world view (18, piece 5): beside the open document, per in-game request (held or open).
+  session.worldView = new WorldView({
+    bridge: link.bridge,
+    request: () => inGame.heldRequest?.id ?? inGame.current?.id,
+    dimension: () => link.volumes?.dimension,
+    dataVersion: () => link.bridge.hello?.game.dataVersion ?? 0,
+    palettes: () => book,
+  });
   // The in-game UI (16): overlays, ghosts, replay and the player's requests, over the bridge.
   const ui = startUi({
     bridge: link.bridge,

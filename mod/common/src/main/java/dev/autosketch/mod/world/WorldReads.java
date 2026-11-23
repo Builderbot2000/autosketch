@@ -108,9 +108,10 @@ public final class WorldReads {
         for (Box b : regions) total += b.volume();
         // Every position takes at least one byte of body.
         if (total > FrameCodec.MAX_FRAME) throw ProtocolException.refuse(ErrorCodes.TOO_LARGE, req.id(), total + " positions can't fit in one frame; ask for fewer boxes or sections");
-        ServerLevel granted = granted(req.dimension(), regions);
+        ServerLevel select = selectGranted(req.id(), req.dimension(), regions, total);
+        ServerLevel granted = select != null ? select : granted(req.dimension(), regions);
         ServerLevel level = granted != null ? granted : check(req.id(), req.dimension(), regions);
-        start(new Job(level, regions, sectionsOf(regions), ex, granted != null) {
+        start(new Job(level, regions, sectionsOf(regions), ex, granted != null, select != null) {
             @Override
             void finish() {
                 List<String> palette = new ArrayList<>();
@@ -152,9 +153,24 @@ public final class WorldReads {
                         }
                     out.add(new SnapshotRegion(r, states, bes));
                 }
-                send(new Messages.SnapshotResult(req.id(), req.dimension(), palette, out).encode());
+                send(new Messages.SnapshotResult(req.id(), req.dimension(), palette, out, missingList()).encode());
             }
         });
+    }
+
+    /**
+     * Select (18; 13, *Where the mod serves reads*): the select grant's level when every box lies
+     * inside the grant's square in its dimension, so the snapshot is served without volumes, never
+     * generating a chunk and listing the ungenerated ones; {@code too_large} there over
+     * {@code contextCap} positions. Else null.
+     */
+    private @Nullable ServerLevel selectGranted(long id, String dimension, List<Box> boxes, long positions) throws ProtocolException {
+        SelectGrants.Held h = SelectGrants.current();
+        if (h == null || !h.grant().in(dimension)) return null;
+        for (Box b : boxes) if (!h.grant().hasBox(b)) return null;
+        long cap = dev.autosketch.mod.AutosketchConfig.get().volumes.contextCap;
+        if (positions > cap) throw ProtocolException.refuse(ErrorCodes.TOO_LARGE, id, positions + " positions are over contextCap (" + cap + "); ask for less, or a coarse snapshot");
+        return levels.apply(h.grant().dimension());
     }
 
     /**
@@ -209,7 +225,10 @@ public final class WorldReads {
             try {
                 while (j.next < j.sections.size() && (first || System.nanoTime() < deadline)) {
                     long[] s = j.sections.get(j.next++);
-                    j.captured.put(key(s), capture(j.level, (int) s[0], (int) s[1], (int) s[2], j.boxes, j.noGenerate));
+                    SKey column = key((int) s[0], 0, (int) s[2]);
+                    Captured c = j.missing.contains(column) ? new Captured(null, Map.of()) : capture(j.level, (int) s[0], (int) s[1], (int) s[2], j.boxes, j.noGenerate);
+                    if (c.ungenerated()) j.missing.add(column);
+                    j.captured.put(key(s), c);
                     first = false;
                 }
             } catch (RuntimeException e) {
@@ -234,7 +253,7 @@ public final class WorldReads {
     static Captured capture(ServerLevel level, int sx, int sy, int sz, List<Box> boxes, boolean noGenerate) {
         if (sy < level.getMinSection() || sy >= level.getMaxSection()) return new Captured(null, Map.of());
         LevelChunk chunk = noGenerate ? SurfaceReads.existing(level, sx, sz, new int[1]) : level.getChunk(sx, sz);
-        if (chunk == null) return new Captured(null, Map.of());
+        if (chunk == null) return new Captured(null, Map.of(), true);
         PalettedContainer<BlockState> states = chunk.getSection(chunk.getSectionIndexFromSectionY(sy)).getStates().copy();
         Map<Long, CompoundTag> bes = new HashMap<>();
         for (BlockEntity be : chunk.getBlockEntities().values()) {
@@ -245,7 +264,12 @@ public final class WorldReads {
         return new Captured(states, bes);
     }
 
-    record Captured(@Nullable PalettedContainer<BlockState> states, Map<Long, CompoundTag> bes) {
+    /** {@code ungenerated}: the chunk was never fully generated (a no-generate read), so it reads as air. */
+    record Captured(@Nullable PalettedContainer<BlockState> states, Map<Long, CompoundTag> bes, boolean ungenerated) {
+        Captured(@Nullable PalettedContainer<BlockState> states, Map<Long, CompoundTag> bes) {
+            this(states, bes, false);
+        }
+
         BlockState state(int x, int y, int z) {
             return states == null ? Blocks.AIR.defaultBlockState() : states.get(x & 15, y & 15, z & 15);
         }
@@ -257,6 +281,10 @@ public final class WorldReads {
         final List<long[]> sections;
         final Exchange exchange;
         final boolean noGenerate;
+        /** A select-grant read (18): ungenerated chunks are listed in the answer. */
+        final boolean listMissing;
+        /** Chunk columns (sy 0) found ungenerated, read as air without asking again. */
+        final Set<SKey> missing = new HashSet<>();
         final Map<SKey, Captured> captured = new LinkedHashMap<>();
         int next, ticks;
         long serverNanos, offThreadStart;
@@ -266,11 +294,25 @@ public final class WorldReads {
         }
 
         Job(ServerLevel level, List<Box> boxes, List<long[]> sections, Exchange exchange, boolean noGenerate) {
+            this(level, boxes, sections, exchange, noGenerate, false);
+        }
+
+        Job(ServerLevel level, List<Box> boxes, List<long[]> sections, Exchange exchange, boolean noGenerate, boolean listMissing) {
+            this.listMissing = listMissing;
             this.level = level;
             this.boxes = boxes;
             this.sections = sections;
             this.exchange = exchange;
             this.noGenerate = noGenerate;
+        }
+
+        /** The ungenerated chunks, ascending by cz, then cx, for a select-grant read; else null. */
+        @Nullable List<Messages.ChunkXZ> missingList() {
+            if (!listMissing || missing.isEmpty()) return null;
+            List<Messages.ChunkXZ> out = new ArrayList<>();
+            for (SKey k : missing) out.add(new Messages.ChunkXZ(k.x(), k.z()));
+            out.sort((a, b) -> a.cz() != b.cz() ? Integer.compare(a.cz(), b.cz()) : Integer.compare(a.cx(), b.cx()));
+            return out;
         }
 
         /** Off-thread: build and send the reply from the copies. */

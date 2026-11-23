@@ -17,6 +17,7 @@ import type { ScopeLimits } from "../scope/settings.js";
 import type { LinkOpenOptions, WorldLink } from "../world/link.js";
 import type { InGameReplies } from "../world/prompt.js";
 import type { WorldView } from "../world/view.js";
+import type { WorldSelect } from "../world/select/select.js";
 import type { Registry } from "../assets/registry.js";
 import type { ImportUpgrade } from "../formats/index.js";
 import type { SchematicUpgrader } from "../formats/upgrade.js";
@@ -139,6 +140,11 @@ export class Session {
    * with `view: "world"`; set by the entry point beside `world`.
    */
   worldView?: WorldView;
+  /**
+   * The agent's select requests in the world (18, pieces 2 to 4 and 9): the current request's search
+   * state (and, later, the candidate). Set by the entry point beside `worldView`.
+   */
+  worldSelect?: WorldSelect;
   /**
    * The session's component set (17, piece 1): the prefabs the player picked, kept by
    * `component_set`. Not tied to a document: it survives opening and closing documents and ends

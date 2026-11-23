@@ -38,6 +38,7 @@ import { promptSettings, WORLD_PROMPT_PLAYERS, worldSettings } from "../world/se
 import { CHANNEL_INSTRUCTIONS, CHANNEL_METHOD, InGameRequests } from "../world/prompt.js";
 import { autoSyncHook, syncLink } from "../world/sync.js";
 import { WorldView } from "../world/view.js";
+import { WorldSelect } from "../world/select/select.js";
 import { MCP_FEATURES } from "../world/protocol/messages.js";
 import { startUi } from "../ui/index.js";
 import type { LibraryHost as UiLibraryHost } from "../ui/library.js";
@@ -150,6 +151,14 @@ async function main(): Promise<void> {
     dimension: () => link.volumes?.dimension,
     dataVersion: () => link.bridge.hello?.game.dataVersion ?? 0,
     palettes: () => book,
+  });
+  // Search, fill, expand and confirm in the world (18, pieces 2 to 4 and 9), per in-game request like the view.
+  const worldView = session.worldView;
+  session.worldSelect = new WorldSelect({
+    bridge: link.bridge,
+    request: () => inGame.heldRequest?.id ?? inGame.current?.id,
+    context: () => worldView.context,
+    dimension: () => link.volumes?.dimension,
   });
   // The in-game UI (16): overlays, ghosts, replay and the player's requests, over the bridge.
   const ui = startUi({

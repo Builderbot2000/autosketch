@@ -13,6 +13,7 @@ import { Session } from "../../../src/server/session.js";
 import { LiveLink } from "../../../src/world/live-link.js";
 import type { SnapshotRequest, SnapshotResult } from "../../../src/world/protocol/messages.js";
 import { autoSyncHook, syncLink } from "../../../src/world/sync.js";
+import { BridgeError } from "../../../src/world/bridge.js";
 import { WorldView, type WorldViewOptions } from "../../../src/world/view.js";
 import { FakeHost } from "../../support/fake-host.js";
 import { solidPng } from "../../helpers/fixtures.js";
@@ -43,7 +44,7 @@ afterEach(async () => {
   host = link = view = undefined;
 });
 
-async function setup() {
+async function setup(opts: { contextCap?: number } = {}) {
   host = await FakeHost.start({ volumes: { work: { min: [0, 60, 0], max: [15, 72, 15] } } });
   host.set([5, 63, 5], "minecraft:stone");
   host.set([6, 63, 5], "minecraft:andesite");
@@ -54,7 +55,7 @@ async function setup() {
   session.world = link;
   session.callHooks.push(autoSyncHook(() => session.world));
   let request: number | undefined;
-  view = new WorldView({ bridge: link.bridge, request: () => request, dimension: () => link!.volumes?.dimension });
+  view = new WorldView({ bridge: link.bridge, request: () => request, dimension: () => link!.volumes?.dimension, ...opts });
   session.worldView = view;
   const server = createServer(fixtureContext(host.instanceDir), { session });
   const [a, b] = InMemoryTransport.createLinkedPair();
@@ -159,6 +160,86 @@ describe("the world view (18, piece 5)", () => {
   });
 });
 
+describe("coarse, fade and surface reads (18, pieces 5, 6, 10)", () => {
+  it("reads over contextCap coarse, and a full read replaces the coarse cells there", async () => {
+    const { call, view } = await setup({ contextCap: 64 });
+    // 256 blocks: over the cap of 64, so one block per 2³ cell (32 cells).
+    const r = await call("world_view_read", { box: { min: [0, 60, 0], max: [7, 63, 7] } });
+    expect(texts(r)[0]).toBe(
+      "ok · world_view_read · 256 blocks over the per-read cap of 64, so read coarse: one block per 2³ cell (the cell's most common non-air block, drawn over the whole cell; 18 non-air cells) at (0,60,0)–(7,63,7) in minecraft:overworld. " +
+        "Positions already held at full detail were kept; read a smaller box there to replace coarse cells with full detail. " +
+        'The world view now holds 1 read (coarse) within (0,60,0)–(7,63,7), in world coordinates; look with view:"world" on render, view_slice, raycast, select and analyze. Nothing in it reaches the world.',
+    );
+    // Cells on the world grid, each drawn whole: the y=60 stone layer fills y 60–61; the stone at
+    // (5,63,5) fills the cell (4..5, 62..63, 4..5), the andesite at (6,63,5) the cell beside it.
+    const d = view.doc;
+    expect(d.getState(0, 61, 0)).toBe("minecraft:stone");
+    expect(d.getState(4, 62, 4)).toBe("minecraft:stone");
+    expect(d.getState(7, 63, 4)).toBe("minecraft:andesite");
+    expect(d.getState(2, 62, 2)).toBe("minecraft:air");
+    expect(view.isCoarse([4, 62, 4])).toBe(true);
+    let render = await call("render", { view: "world", views: ["top"], size: 128 });
+    expect(texts(render)[0]).toContain("coarse: (0,60,0)–(7,63,7) at 2³ cells: each cell is drawn whole");
+
+    // A full read of a smaller box replaces the coarse cells there, block for block.
+    await call("world_view_read", { box: { min: [4, 62, 4], max: [7, 63, 5] } });
+    expect(d.getState(4, 62, 4)).toBe("minecraft:air");
+    expect(d.getState(5, 63, 5)).toBe("minecraft:stone");
+    expect(d.getState(7, 63, 4)).toBe("minecraft:air");
+    expect(d.getState(6, 63, 5)).toBe("minecraft:andesite");
+    expect(d.getState(0, 61, 0)).toBe("minecraft:stone"); // still coarse outside it
+    expect(view.isCoarse([4, 62, 4])).toBe(false);
+    expect(view.isCoarse([0, 61, 0])).toBe(true);
+    render = await call("render", { view: "world", views: ["top"], size: 128 });
+    expect(texts(render)[0]).toContain("coarse: (0,60,0)–(7,63,7) at 2³ cells (partly replaced by full detail)");
+
+    // A coarse read never overwrites what is held at full detail.
+    await call("world_view_read", { box: { min: [0, 60, 0], max: [7, 63, 7] } });
+    expect(d.getState(4, 62, 4)).toBe("minecraft:air");
+    expect(d.getState(6, 63, 5)).toBe("minecraft:andesite");
+    expect(d.getState(7, 63, 4)).toBe("minecraft:air");
+  });
+
+  it("fades all but the candidate, and tints its left-out neighbours with the existing algebra", async () => {
+    const { call } = await setup();
+    await call("world_view_read", { box: { min: [0, 60, 0], max: [7, 66, 7] } });
+    expect((await call("select", { view: "world", sel: { min: [5, 63, 5], max: [5, 63, 5] }, name: "candidate" })).isError).toBeFalsy();
+    const r = await call("render", {
+      view: "world",
+      views: ["iso_se"],
+      size: 128,
+      region: { dilate: "candidate", by: 8 },
+      fade: "candidate",
+      // 18, piece 6: the solid blocks touching the candidate but not in it.
+      highlight: { filter: { subtract: [{ dilate: "candidate", by: 1 }, "candidate"] }, air: false },
+    });
+    expect(r.isError).toBeFalsy();
+    const caption = texts(r)[0]!;
+    expect(caption).toContain("faded: 65 blocks outside the fade selection drawn grey and translucent; 1 inside it drawn solid");
+    expect(caption).toContain("highlighted 1 position in orange");
+    // The highlighted neighbour is the andesite beside the candidate.
+    const q = await call("analyze", { view: "world", region: { filter: { subtract: [{ dilate: "candidate", by: 1 }, "candidate"] }, air: false } });
+    expect(texts(q)[0]).toMatch(/^box: \(6,63,5\)–\(6,63,5\)/);
+  });
+
+  it("reads a surface map for terrain: one block per column, within the box's y range", async () => {
+    const { call, view } = await setup();
+    const r = await call("world_view_read", { surface: { min: [0, 61, 0], max: [7, 70, 7] } });
+    expect(texts(r)[0]).toMatch(
+      /^ok · world_view_read · the surface of 64 columns at \(0,61,0\)–\(7,70,7\): 2 top blocks kept, one per column, 62 columns whose top lies outside the box's y range left out \(only the top block of each column is read; nothing below it\) in minecraft:overworld\. The world view now holds 1 read \(surface\)/,
+    );
+    expect(view.doc.getState(5, 63, 5)).toBe("minecraft:stone");
+    expect(view.doc.getState(6, 63, 5)).toBe("minecraft:andesite");
+    expect(view.doc.getState(0, 60, 0)).toBe("minecraft:air"); // under the box's y range
+    expect(view.has([5, 63, 5])).toBe(false); // a surface read doesn't hold whole columns
+
+    await call("world_view_read", { surface: { min: [0, 0, 0], max: [7, 70, 7] } });
+    expect(view.doc.getState(0, 60, 0)).toBe("minecraft:stone");
+    expect(view.doc.getState(5, 60, 5)).toBe("minecraft:air"); // below a column's top: not read
+    expect((await call("render", { view: "world", views: ["top"], size: 128 })).isError).toBeFalsy();
+  });
+});
+
 describe("WorldView", () => {
   const stub = (served: SnapshotRequest[]): WorldViewOptions["bridge"] => ({
     connected: true,
@@ -193,14 +274,38 @@ describe("WorldView", () => {
     expect(v.empty).toBe(true);
     expect(v.doc.getState(101, -9, -1999)).toBe("minecraft:air");
     expect(v.doc.selections.has("candidate")).toBe(false);
-    // Over the per-read cap: refused before anything is sent.
-    await expect(v.read({ boxes: [{ min: [0, 0, 0], max: [9, 9, 10] }] })).rejects.toMatchObject({ refusal: "world_view_too_large" });
+    // Over the per-read cap even at 4³ cells: refused before anything is sent.
+    await expect(v.read({ boxes: [{ min: [0, 0, 0], max: [63, 63, 67] }] })).rejects.toMatchObject({ refusal: "world_view_too_large" });
     expect(served).toHaveLength(1);
     // The new request's view reads as usual; no request at all is another view again.
     await v.read({ boxes: [{ min: [0, 0, 0], max: [0, 0, 0] }] });
     expect(v.reads).toHaveLength(1);
     request = undefined;
     expect(v.empty).toBe(true);
+  });
+});
+
+describe("WorldView coarse fallback", () => {
+  it("goes coarse when the mod answers too_large, and to 4³ cells when 2³ is too large too", async () => {
+    const sent: { kind?: string; cell?: number }[] = [];
+    const bridge: WorldViewOptions["bridge"] = {
+      connected: true,
+      on: () => () => {},
+      request: (async (m: { kind?: string; cell?: number; boxes: { min: [number, number, number]; max: [number, number, number] }[]; dimension: string }) => {
+        sent.push({ ...(m.kind ? { kind: m.kind } : {}), ...(m.cell ? { cell: m.cell } : {}) });
+        if (m.kind !== "coarse" || m.cell === 2) throw new BridgeError("too_large", "the read is over contextCap");
+        const box = { min: [0, 0, 0] as [number, number, number], max: [7, 3, 3] as [number, number, number] };
+        return { type: "snapshot.result", id: 1, dimension: m.dimension, kind: "coarse", cell: 4, palette: ["minecraft:air", "minecraft:stone"], regions: [{ box, states: Uint32Array.from([1, 0]) }] };
+      }) as never,
+    };
+    const v = new WorldView({ bridge, request: () => 1, dimension: () => "minecraft:overworld", contextCap: 1000 });
+    const r = await v.read({ boxes: [{ min: [1, 1, 1], max: [6, 2, 2] }] });
+    expect(sent).toEqual([{}, { kind: "coarse", cell: 2 }, { kind: "coarse", cell: 4 }]);
+    expect(r).toMatchObject({ level: "coarse", cell: 4, solid: 1, boxes: [{ min: [0, 0, 0], max: [8, 4, 4] }] });
+    expect(v.doc.getState(0, 0, 0)).toBe("minecraft:stone");
+    expect(v.doc.getState(3, 3, 3)).toBe("minecraft:stone");
+    expect(v.doc.getState(4, 0, 0)).toBe("minecraft:air");
+    expect(v.coarseParts()).toEqual([{ box: { min: [0, 0, 0], max: [8, 4, 4] }, cell: 4, partial: false }]);
   });
 });
 

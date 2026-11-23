@@ -164,7 +164,7 @@ describe("the probe (13, B4)", () => {
 
   it("lists scan in the hello by default, and arrives without a probe when the mod sends no grant", async () => {
     const { host, events, session } = await setup({ features: ["modes", "volumes.set"] });
-    expect(host.mcpModes).toEqual(["ask", "scan", "plan", "build"]);
+    expect(host.mcpModes).toEqual(["ask", "scan", "plan", "build", "select"]);
     await scan(host, events);
     expect(events[0]!.content).toContain("No probe: the mod sent no scan grant");
     expect(session.doc).toBeUndefined();

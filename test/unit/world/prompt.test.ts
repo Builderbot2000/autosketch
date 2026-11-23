@@ -17,8 +17,8 @@ import { Session } from "../../../src/server/session.js";
 import { LiveLink } from "../../../src/world/live-link.js";
 import { Document } from "../../../src/document/document.js";
 import { RequestModeRule } from "../../../src/world/modes.js";
-import { CHANNEL_INSTRUCTIONS, CHANNEL_METHOD, handoff, InGameRequests, promptAllowed } from "../../../src/world/prompt.js";
-import type { ChatMessage, PlayerRef, RequestMode, WireBox } from "../../../src/world/protocol/messages.js";
+import { CHANNEL_INSTRUCTIONS, CHANNEL_METHOD, handoff, InGameRequests, promptAllowed, selectText } from "../../../src/world/prompt.js";
+import type { ChatMessage, PlayerRef, PromptMessage, RequestMode, WireBox } from "../../../src/world/protocol/messages.js";
 import { autoSyncHook, syncLink } from "../../../src/world/sync.js";
 import { FakeHost } from "../../support/fake-host.js";
 import { solidPng } from "../../helpers/fixtures.js";
@@ -359,7 +359,7 @@ describe("request modes, enforced (13, B6)", () => {
     // A call refused by a hook before it ran (world_volumes in ask) unwinds the link's call count, so later results keep their world: line.
     expect(texts(await client.callTool({ name: "fill", arguments: FILL })).join("\n")).toContain("world: 8 placed"); // terminal work again
     // Nothing left to end.
-    expect(await host.playerDone(HOST)).toMatchObject({ text: "Autosketch: no ask, plan or scan request is open." });
+    expect(await host.playerDone(HOST)).toMatchObject({ text: "Autosketch: no ask, plan, scan or select request is open." });
   });
 
   it("/autosketch done ends an open read-only request before any reply, and closes its stream", async () => {
@@ -379,7 +379,7 @@ describe("request modes, enforced (13, B6)", () => {
     expect(inGame!.heldRequest?.id).toBe(1);
     await host.playerAsk(HOST, "build", {}, { mode: "build" });
     await host.waitFor(() => inGame!.current?.id === 2);
-    expect(await host.playerDone(HOST)).toMatchObject({ text: "Autosketch: no ask, plan or scan request is open." });
+    expect(await host.playerDone(HOST)).toMatchObject({ text: "Autosketch: no ask, plan, scan or select request is open." });
     expect(inGame!.current?.id).toBe(2); // the build request's stream stays open
     const r = await client.callTool({ name: "world_reply", arguments: { lines: ["Built."], done: true } });
     expect(texts(r)[0]).toBe("ok · world_reply · 1 line to Dev (request 2) · request closed");
@@ -441,12 +441,12 @@ describe("request mode rule (13, B6), unit", () => {
   const doc = () => new Document({ name: "t", front: "south", dataVersion: 3955, seed: 1, createdAt: "" });
   const req = (mode: RequestMode) => ({ id: 7, player: HOST, mode });
 
-  it("volume tools pass in scan and build only; scan refuses edits", () => {
+  it("volume tools pass in scan, select and build only; scan and select refuse edits", () => {
     let current: ReturnType<typeof req> | undefined = req("ask");
     const d = doc();
     const rule = new RequestModeRule(() => current, () => d);
     expect(() => rule.before({ tool: "world_volumes" })).toThrow(
-      "The open in-game ask request (request 7 from Dev) allows reading and looking only, so world_volumes can't change the volumes. Nothing was sent. To have the agent set them, the player sends /autosketch scan [radius] [text]. " +
+      "The open in-game ask request (request 7 from Dev) allows reading and looking only, so world_volumes can't change the volumes. Nothing was sent. To have the agent set them, the player sends /autosketch select [text]. " +
         "Answer with world_reply. Only the player can end this request, in game with /autosketch done or by sending a new request; if the user at the terminal wants this edit, tell them so.",
     );
     current = req("plan");
@@ -455,6 +455,9 @@ describe("request mode rule (13, B6), unit", () => {
     rule.before({ tool: "world_volumes" });
     rule.before({ tool: "fill" }); // the hook doesn't judge tools; the guard judges edits
     expect(() => d.edit("fill", "fill", (tx) => tx.set(0, 0, 0, "minecraft:stone"))).toThrow(/scan request \(request 7 from Dev\) allows looking and setting the volumes only, so fill can't edit/);
+    current = req("select");
+    rule.before({ tool: "world_volumes" });
+    expect(() => d.edit("fill", "fill", (tx) => tx.set(0, 0, 0, "minecraft:stone"))).toThrow(/select request \(request 7 from Dev\) allows finding, reading the world and setting the volumes only, so fill can't edit/);
     current = req("build");
     rule.before({ tool: "world_volumes" });
     expect(d.edit("fill", "fill", (tx) => tx.set(0, 0, 0, "minecraft:stone")).changed).toBe(1);
@@ -469,7 +472,7 @@ describe("request mode rule (13, B6), unit", () => {
       "The open in-game plan request (request 7 from Dev) allows looking and proposing only, in words only, so scope_fork can't draft in a sandbox or another document either. Nothing was changed. Describe the idea in world_reply; to have it built, the player sends /autosketch build <text>. " +
         "Answer with world_reply. Only the player can end this request, in game with /autosketch done or by sending a new request; if the user at the terminal wants this edit, tell them so.",
     );
-    for (const mode of ["ask", "plan", "scan"] as const) {
+    for (const mode of ["ask", "plan", "scan", "select"] as const) {
       current = req(mode);
       for (const tool of ["scope_fork", "doc_new", "doc_open"]) expect(() => rule.before({ tool })).toThrow(expect.objectContaining({ refusal: "request_mode" }) as never);
       expect(() => rule.before({ tool: "fill", scope: "job-1", mutating: true })).toThrow(expect.objectContaining({ refusal: "request_mode" }) as never);
@@ -497,6 +500,102 @@ describe("request mode rule (13, B6), unit", () => {
     expect(linked.editUnguarded("world_sync", "sync", (tx) => tx.set(0, 0, 0, "minecraft:stone")).changed).toBe(1);
     now = undefined; // unlinked: the old document is no longer the world's
     expect(linked.edit("fill", "fill", (tx) => tx.set(1, 0, 0, "minecraft:stone")).changed).toBe(1);
+  });
+});
+
+describe("select requests (18, piece 1)", () => {
+  // The golden vector's context (prompt-select.json): feet (-41, 68, 23), chunk (-3, 1).
+  const AT = { dimension: "minecraft:overworld", position: [-40.5, 68, 23.5] as Vec3, eye: [-40.5, 69.62, 23.5] as Vec3, yaw: -135, pitch: 5.5, facing: "north" as const };
+  const TARGET = { pos: [-31, 70, 14] as Vec3, state: "minecraft:mossy_stone_bricks", face: "south" as const };
+  const ALLOWS =
+    "Select mode: find what the player means in the world, agree on its extent with them, then set the volumes from it with world_volumes; reading the world (world_search, world_fill, world_expand, the world view) is allowed, edits and drafts (sandboxes, other documents) are refused while this request is open.";
+  const READS =
+    "Reads reach the chunks within 256 of the player's chunk (-3, 1) (256 is the default selectChunks; the mod's config may set less): world x -4144..4063, z -4080..4127, full height, at most contextCap blocks per read. They stay where they are if the player moves.";
+  const steps = (crosshair: boolean) =>
+    "Steps: 1. Find: world_search({materials}) with the block ids, families (family:<id>) or tags the words name, worked out with palette_sheet and similar:, never by asking the player for ids" +
+    (crosshair ? "; or start from the crosshair block" : "") +
+    ". 2. Propose: offer the likeliest clusters (nearest, densest) with world_reply({choices}). " +
+    '3. Grow: world_fill({seed, match}) from a block of the chosen hit, then world_expand({by:"frontier"}) while its frontier is open. ' +
+    '4. Look and trim: render({view:"world", region:{dilate:["candidate",8]}, fade:"candidate"}), then cut "candidate" with the selection algebra. ' +
+    '5. Confirm: ask "is this it?" with world_reply({choices}), then world_volumes({from:"candidate"}). ' +
+    "For terrain, read a starter volume with world_view_read and cut it instead of filling.";
+
+  it("is delivered without a link or any read: the words, the context in world coordinates, the read square and the steps; the mode is held", async () => {
+    const { host, events, session } = await setup({ auto: true });
+    expect(host.mcpModes).toContain("select");
+    expect(await host.playerAsk(HOST, "the mossy stone brick house", { ...AT, focus: { min: [-35, 68, 10], max: [-30, 70, 12] } }, { mode: "select" })).toEqual({ type: "prompt.result", id: 1, delivered: true });
+    await host.waitFor(() => events.length === 1);
+    expect(events[0]!.meta).toEqual({ request: "1", player: "Dev" });
+    expect(events[0]!.content).toBe(
+      'In-game select request from Dev: "the mossy stone brick house". ' + ALLOWS + " " +
+        "Standing at world (-41, 68, 23) in minecraft:overworld, facing north. Not looking at a block within reach. Focus box 6×3×3 at world (-35, 68, 10)–(-30, 70, 12). " +
+        READS + " " + steps(false) + " Answer the player with world_reply (request 1); pass done: true when finished.",
+    );
+    expect(link!.state).not.toBe("linked");
+    expect(session.doc!.meta.name).toBe("tower");
+    expect(host.received.filter((m) => m.type === "snapshot")).toHaveLength(0);
+    expect(inGame!.heldRequest).toEqual({ id: 1, player: HOST, mode: "select" });
+    expect(inGame!.current).toMatchObject({ id: 1, mode: "select", text: "the mossy stone brick house" });
+  });
+
+  it("with no words, starts from the crosshair block; with neither, asks the player", async () => {
+    const { host, events } = await setup({ auto: true });
+    await host.playerAsk(HOST, "", { ...AT, pitch: 20, target: TARGET }, { mode: "select" });
+    await host.waitFor(() => events.length === 1);
+    expect(events[0]!.content).toBe(
+      "In-game select request from Dev, with no words: start from the block under the crosshair. " + ALLOWS + " " +
+        "Standing at world (-41, 68, 23) in minecraft:overworld, facing north. Looking at minecraft:mossy_stone_bricks (south face) at world (-31, 70, 14). " +
+        READS + " " + steps(true) + " Answer the player with world_reply (request 1); pass done: true when finished.",
+    );
+    await host.playerAsk(HOST, "  ", AT, { mode: "select" });
+    await host.waitFor(() => events.length === 2);
+    expect(events[1]!.content.startsWith("In-game select request from Dev, with no words and no block under the crosshair: ask the player what they mean. " + ALLOWS)).toBe(true);
+    expect(inGame!.heldRequest).toMatchObject({ id: 2, mode: "select" });
+  });
+
+  it("ends with the component set's reminder line while the set has entries", async () => {
+    const { host, events, session } = await setup({ auto: true });
+    session.componentSet.add([{ prefab: "gate_small" }]);
+    await host.playerAsk(HOST, "the castle", AT, { mode: "select" });
+    await host.waitFor(() => events.length === 1);
+    const lines = events[0]!.content.split("\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatch(/^In-game select request from Dev: "the castle"\..*pass done: true when finished\.$/);
+    expect(lines[1]).toBe("set: gate_small");
+  });
+
+  it("says the select tools are refused when the mod doesn't serve select, instead of the read square and steps", () => {
+    const m: PromptMessage = { type: "prompt", id: 4, player: HOST, text: "this hill", context: AT, mode: "select" };
+    expect(selectText(m, { served: false })).toBe(
+      'In-game select request from Dev: "this hill". ' + ALLOWS + " Standing at world (-41, 68, 23) in minecraft:overworld, facing north. Not looking at a block within reach. " +
+        "The mod doesn't serve select reads (its hello doesn't list the select feature), so world_search, world_fill, world_expand and world_view_read are refused: tell the player to update the Autosketch mod. " +
+        "Answer the player with world_reply (request 4); pass done: true when finished.",
+    );
+    expect(selectText(m, { served: true })).toContain(READS);
+  });
+
+  it("refuses edits on a linked document and drafts, allows looking and world_volumes past the mode hook", async () => {
+    const { client, host, events, session } = await setup();
+    await host.playerAsk(HOST, "the tower", AT, { mode: "select" });
+    await host.waitFor(() => events.length === 1);
+    const seq = session.doc!.journal.headSeq;
+    const r = await client.callTool({ name: "fill", arguments: { box: { min: [1, 0, 1], max: [2, 1, 2] }, pattern: "stone" } });
+    expect(r.isError).toBe(true);
+    expect(texts(r)[0]).toBe(
+      "The open in-game select request (request 1 from Dev) allows finding, reading the world and setting the volumes only, so fill can't edit the linked document. Nothing was written. To have it built, the player sends /autosketch build <text>. " +
+        "Answer with world_reply. Only the player can end this request, in game with /autosketch done or by sending a new request; if the user at the terminal wants this edit, tell them so.",
+    );
+    expect(session.doc!.journal.headSeq).toBe(seq);
+    expect(host.patchLog).toHaveLength(0);
+    const fork = await client.callTool({ name: "doc_new", arguments: { name: "scratch" } });
+    expect(fork.isError).toBe(true);
+    expect(texts(fork)[0]).toMatch(/^The open in-game select request \(request 1 from Dev\) allows finding, reading the world and setting the volumes only, in words only, so doc_new can't draft/);
+    expect((await client.callTool({ name: "view_slice", arguments: { axis: "y", at: 0 } })).isError).toBeFalsy();
+    inGame!.modeRule.before({ tool: "world_volumes" }); // volume changes pass the mode rule
+    // /autosketch done ends it, after which edits pass again.
+    await host.playerDone(HOST);
+    await host.waitFor(() => inGame!.heldRequest === undefined);
+    expect((await client.callTool({ name: "fill", arguments: { box: { min: [1, 0, 1], max: [2, 1, 2] }, pattern: "stone" } })).isError).toBeFalsy();
   });
 });
 

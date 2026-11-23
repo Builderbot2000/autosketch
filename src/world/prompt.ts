@@ -7,7 +7,7 @@ import { refusal } from "../scope/scopes.js";
 import { ActivityStream, type OpenRequest } from "./chat-stream.js";
 import type { LinkVolumes, WorldLink } from "./link.js";
 import { MODE_ALLOWS, modeOf, READ_ONLY_MODES, RequestModeRule, type ModeRequest } from "./modes.js";
-import type { ChatAction, GameContext, ModHello, PlayerRef, PromptClose, PromptMessage, PromptRefusal, RequestMode, WireBox } from "./protocol/messages.js";
+import { SELECT_CHUNKS, type ChatAction, type GameContext, type ModHello, type PlayerRef, type PromptClose, type PromptMessage, type PromptRefusal, type RequestMode, type WireBox } from "./protocol/messages.js";
 import { loadProbe, probeText, type Probe } from "./probe.js";
 import { setVolumes, type ContextArg, type VolumesFrame } from "./set-volumes.js";
 import type { PromptSettings } from "./settings.js";
@@ -37,7 +37,10 @@ import type { PromptSettings } from "./settings.js";
  *    allows, then the handoff facts; then `prompt.result` delivered, and the request's chat stream
  *    opens. While it is open, its mode is enforced (`modes.ts`, `modeRule`).
  *
- * A read-only request (`ask`, `plan`, `scan`) holds its mode until the player lifts it: the mode is
+ * A `select` request (`18`, piece 1) needs no link either, like `scan`: it carries no grant and no
+ * probe, only the context, and the event says where the select-mode reads reach (`selectText`).
+ *
+ * A read-only request (`ask`, `plan`, `scan`, `select`) holds its mode until the player lifts it: the mode is
  * the player's permission over their world, so only the player ends it (settled with the user
  * 2026-11-16). The agent's `world_reply` with `done` answers the request and closes its activity
  * stream, but the mode stays in force until `/autosketch done` (`prompt.close`), the player's next
@@ -51,7 +54,7 @@ export const CHANNEL_CAPABILITY = "claude/channel";
 /** Appended to the server instructions when the channel is declared (Claude Code recommends saying what events mean and how to answer). */
 export const CHANNEL_INSTRUCTIONS =
   'In-game requests from the linked Minecraft world arrive as <channel source="autosketch" request="…" player="…">: the player\'s words, the work volume, and handles for what they point at ' +
-  '(selections "focus" and "target", camera "player"). The request names its mode (ask, plan, scan or build), and edits the mode doesn\'t allow are refused while it is open. Do the work on the linked document as usual, and answer the player with world_reply (done: true when finished); they only see what you send through it.';
+  '(selections "focus" and "target", camera "player"). The request names its mode (ask, plan, scan, select or build), and edits the mode doesn\'t allow are refused while it is open. Do the work on the linked document as usual, and answer the player with world_reply (done: true when finished); they only see what you send through it.';
 
 /** Answers to in-game requests, as the `world_reply` tool reaches them (through `Session.inGame`). */
 export interface InGameReplies {
@@ -184,7 +187,7 @@ export class InGameRequests implements InGameReplies {
       return tell("Autosketch: you aren't allowed to send requests (world.promptPlayers), so you can't end one either.");
     }
     const r = this.held;
-    if (!r) return tell("Autosketch: no ask, plan or scan request is open.");
+    if (!r) return tell("Autosketch: no ask, plan, scan or select request is open.");
     this.held = undefined;
     if (this.stream.current?.id === r.id) this.stream.closeRequest();
     this.opts.log?.(`in-game ${r.mode} request ${r.id} ended by ${m.player.name}`);
@@ -254,6 +257,7 @@ export class InGameRequests implements InGameReplies {
     if (!promptAllowed(m.player, this.opts.promptPlayers, this.link.bridge.hello)) return refuse("not_allowed");
     if (!this.link.bridge.modes.includes(m.mode ?? "build")) return refuse("unsupported_mode");
     if (m.mode === "scan") return this.onScan(m, refuse);
+    if (m.mode === "select") return this.onSelect(m, refuse);
     if (this.link.state !== "linked") await this.link.ensureLinked?.();
     const doc = this.link.doc, volumes = this.link.volumes;
     if (this.link.state !== "linked" || !doc || !volumes) return refuse("no_link");
@@ -269,6 +273,25 @@ export class InGameRequests implements InGameReplies {
     this.modeRule.attach(doc);
     this.link.bridge.send({ type: "prompt.result", id: m.id, delivered: true });
     this.open({ id: m.id, player: m.player, mode: modeOf(m), text: m.text });
+  }
+
+  /**
+   * A select request (`18`, piece 1): no link needed and no grant to load. The event names the
+   * player's words, the context in world coordinates (the world view's), where the select-mode
+   * reads reach, and the tools in order. A linked document gets the mode's write guard as usual.
+   */
+  private async onSelect(m: PromptMessage, refuse: (reason: PromptRefusal) => void): Promise<void> {
+    if (!this.opts.listening()) return refuse("no_listener");
+    const text = this.remind(selectText(m, { served: this.link.bridge.supports("select") }));
+    try {
+      await this.opts.notify(text, { request: String(m.id), player: m.player.name });
+    } catch (e) {
+      this.opts.log?.(`channel notification failed: ${(e as Error).message}`);
+      return refuse("no_listener");
+    }
+    if (this.link.state === "linked" && this.link.doc) this.modeRule.attach(this.link.doc);
+    this.link.bridge.send({ type: "prompt.result", id: m.id, delivered: true });
+    this.open({ id: m.id, player: m.player, mode: "select", text: m.text });
   }
 
   /**
@@ -312,6 +335,52 @@ function scanHandles(p: Probe, m: PromptMessage): string {
   else out.push("Not looking at a block within reach.");
   if (ctx.focus) out.push(doc.selections.has("focus") ? `Focus box ${size(ctx.focus)}, saved as "focus".` : "The focus box reaches outside the scanned columns, so not saved.");
   out.push(`Standing at ${pt(sub(ctx.position.map(Math.floor) as Vec3, p.origin))} facing ${ctx.facing}; your view is saved as camera "player".`);
+  return out.join(" ");
+}
+
+// -- the select event ----------------------------------------------------------------------------
+
+/**
+ * The select event's text (`18`, piece 1 and *The workflow*): the player's words, or the crosshair
+ * block as the starting point when there are none; the context in world coordinates (the world
+ * view's, so positions here are positions the select tools take); the read grant's square, fixed
+ * when the prompt arrived (`13`, *Where the mod serves reads*), stated with the default
+ * `selectChunks` since the MCP isn't told the mod's value; and the tools in workflow order. Without
+ * the mod's `select` feature the tools are refused, so the text says so instead (`13`, *Without a
+ * feature*). It names no skill: skills are found through `knowledge_list` (`07`).
+ */
+export function selectText(m: PromptMessage, opts: { served: boolean }): string {
+  const ctx = m.context;
+  const words = m.text.trim();
+  const out: string[] = [];
+  if (words) out.push(`In-game select request from ${m.player.name}: ${JSON.stringify(words)}.`);
+  else if (ctx.target) out.push(`In-game select request from ${m.player.name}, with no words: start from the block under the crosshair.`);
+  else out.push(`In-game select request from ${m.player.name}, with no words and no block under the crosshair: ask the player what they mean.`);
+  out.push(MODE_ALLOWS.select);
+  const feet = ctx.position.map(Math.floor) as Vec3;
+  out.push(`Standing at world ${pt(feet)} in ${ctx.dimension}, facing ${ctx.facing}.`);
+  out.push(ctx.target ? `Looking at ${ctx.target.state} (${ctx.target.face} face) at world ${pt(ctx.target.pos)}.` : "Not looking at a block within reach.");
+  if (ctx.focus) out.push(`Focus box ${size(ctx.focus)} at world ${pt(ctx.focus.min)}–${pt(ctx.focus.max)}.`);
+  if (!opts.served) {
+    out.push("The mod doesn't serve select reads (its hello doesn't list the select feature), so world_search, world_fill, world_expand and world_view_read are refused: tell the player to update the Autosketch mod.");
+  } else {
+    const r = SELECT_CHUNKS;
+    const cx = feet[0] >> 4, cz = feet[2] >> 4;
+    out.push(
+      `Reads reach the chunks within ${r} of the player's chunk (${cx}, ${cz}) (${r} is the default selectChunks; the mod's config may set less): ` +
+        `world x ${(cx - r) * 16}..${(cx + r) * 16 + 15}, z ${(cz - r) * 16}..${(cz + r) * 16 + 15}, full height, at most contextCap blocks per read. They stay where they are if the player moves.`,
+    );
+    out.push(
+      "Steps: 1. Find: world_search({materials}) with the block ids, families (family:<id>) or tags the words name, worked out with palette_sheet and similar:, never by asking the player for ids" +
+        (ctx.target ? "; or start from the crosshair block" : "") +
+        ". 2. Propose: offer the likeliest clusters (nearest, densest) with world_reply({choices}). " +
+        '3. Grow: world_fill({seed, match}) from a block of the chosen hit, then world_expand({by:"frontier"}) while its frontier is open. ' +
+        '4. Look and trim: render({view:"world", region:{dilate:["candidate",8]}, fade:"candidate"}), then cut "candidate" with the selection algebra. ' +
+        '5. Confirm: ask "is this it?" with world_reply({choices}), then world_volumes({from:"candidate"}). ' +
+        "For terrain, read a starter volume with world_view_read and cut it instead of filling.",
+    );
+  }
+  out.push(`Answer the player with world_reply (request ${m.id}); pass done: true when finished.`);
   return out.join(" ");
 }
 

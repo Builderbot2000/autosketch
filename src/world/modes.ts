@@ -11,15 +11,19 @@ import type { PlayerRef, RequestMode } from "./protocol/messages.js";
  *
  * - **Edits** are journal entries on the linked document: every `doc.edit`, `group`, undo, redo and
  *   restore step that runs its write guards, whatever tool or script makes it (`world_sync` entries
- *   bring the world in and run no guards). They are refused in `ask`, `plan` and `scan`. Only
+ *   bring the world in and run no guards). They are refused in `ask`, `plan`, `scan` and `select`. Only
  *   journal entries on the linked document reach the world, so this is exactly "nothing happens to
  *   the world". Saved selections, cameras, checkpoints, exports and the library are not edits on it.
  * - **Drafts** are refused too (settled with the user 2026-11-16: read-only requests are text only):
  *   forking a sandbox, opening or creating another document (`DRAFT_TOOLS`), and any mutating call
- *   addressed to an existing sandbox. So `ask`, `plan` and `scan` answer in words (and `scan` with
- *   volumes); nothing is built anywhere, not even in a scratch copy.
+ *   addressed to an existing sandbox. So `ask`, `plan`, `scan` and `select` answer in words (and
+ *   `scan` and `select` with volumes); nothing is built anywhere, not even in a scratch copy.
  * - **Volume changes** are the volume tools (`VOLUME_TOOLS`, B4's `world_volumes`): refused in `ask`
- *   and `plan`, allowed in `scan` and `build`.
+ *   and `plan`, allowed in `scan`, `select` and `build`.
+ *
+ * Select (docs/design/18-select.md, piece 1) reads the world through the world view and the select
+ * tools (`world_search`, `world_fill`, `world_expand`, `world_view_read`), none of which edits a
+ * document, so the rule needs nothing new for it: it is read-only and volume-changing, as scan is.
  *
  * The rule holds while the read-only request is open (`InGameRequests.heldRequest`): from delivery
  * until the player ends it in game (`/autosketch done`, the mod's `prompt.close`), the next
@@ -44,7 +48,8 @@ export const MODE_ALLOWS: Record<RequestMode, string> = {
   plan: "Plan mode: look, then propose what you would build in words, in a world_reply; edits, drafts (sandboxes, other documents) and volume changes are refused while this request is open.",
   scan: "Scan mode: look around and set the volumes with world_volumes; edits and drafts (sandboxes, other documents) are refused while this request is open.",
   build: "Build mode: you may edit the linked document.",
-  select: "Select mode: find what the player means, agree on its extent with them, and set the volumes with world_volumes; edits and drafts (sandboxes, other documents) are refused while this request is open.",
+  select:
+    "Select mode: find what the player means in the world, agree on its extent with them, then set the volumes from it with world_volumes; reading the world (world_search, world_fill, world_expand, the world view) is allowed, edits and drafts (sandboxes, other documents) are refused while this request is open.",
 };
 
 /** What a mode allows, as the refusal names it. */
@@ -53,7 +58,7 @@ const ALLOWS: Record<RequestMode, string> = {
   plan: "looking and proposing only",
   scan: "looking and setting the volumes only",
   build: "everything",
-  select: "looking and setting the volumes only",
+  select: "finding, reading the world and setting the volumes only",
 };
 
 /** An open request as the mode rule sees it. */
@@ -78,7 +83,7 @@ export function requestModeRefusal(r: ModeRequest, attempt: { edit: string } | {
       ? `, so ${attempt.edit} can't edit the linked document. Nothing was written. To have it built, the player sends /autosketch build <text>.`
       : "draft" in attempt
         ? `, in words only, so ${attempt.draft} can't draft in a sandbox or another document either. Nothing was changed. Describe the idea in world_reply; to have it built, the player sends /autosketch build <text>.`
-        : `, so ${attempt.volumes} can't change the volumes. Nothing was sent. To have the agent set them, the player sends /autosketch scan [radius] [text].`;
+        : `, so ${attempt.volumes} can't change the volumes. Nothing was sent. To have the agent set them, the player sends /autosketch select [text].`;
   const close = " Answer with world_reply. Only the player can end this request, in game with /autosketch done or by sending a new request; if the user at the terminal wants this edit, tell them so.";
   return refusal("request_mode", head + what + close);
 }

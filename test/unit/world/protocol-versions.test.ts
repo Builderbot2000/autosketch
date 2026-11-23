@@ -291,7 +291,7 @@ describe("bridge and fake host, protocol 2 (N−1)", () => {
     const { host, bridge, hello } = await pair({ protocol: 2, volumes: { work: WORK } });
     expect(hello.protocol).toBe(2);
     expect(hello.features).toEqual(["modes", "scan", "volumes.set"]);
-    expect(host.received[0]).toMatchObject({ type: "hello", protocol: 2, modes: ["ask", "scan", "plan", "build"] });
+    expect(host.received[0]).toMatchObject({ type: "hello", protocol: 2, modes: ["ask", "scan", "plan", "build", "select"] });
     host.set([1, 64, 1], "minecraft:stone");
     const snap = await bridge.request({ type: "snapshot", dimension: OW, boxes: [{ min: [1, 64, 1], max: [1, 64, 1] }] });
     expect(snap.palette).toEqual(["minecraft:stone"]);
@@ -343,8 +343,8 @@ describe("bridge and fake host, protocol 3", () => {
   it("pairs in protocol 3 and sees every feature the hello lists", async () => {
     const { host, bridge, hello } = await pair({ volumes: { work: WORK } });
     expect(hello).toMatchObject({ protocol: PROTOCOL_VERSION, features: ["modes", "scan", "volumes.set", "registry", "upgrade", "ui", "select"] });
-    expect(host.received[0]).toMatchObject({ type: "hello", protocol: 3, modes: ["ask", "scan", "plan", "build"] });
-    expect(host.mcpModes).toEqual(["ask", "scan", "plan", "build"]);
+    expect(host.received[0]).toMatchObject({ type: "hello", protocol: 3, modes: ["ask", "scan", "plan", "build", "select"] });
+    expect(host.mcpModes).toEqual(["ask", "scan", "plan", "build", "select"]);
     for (const f of MOD_FEATURES) expect(bridge.supports(f)).toBe(true);
     bridge.close();
     expect(bridge.supports("scan")).toBe(false); // nothing while disconnected

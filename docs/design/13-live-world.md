@@ -361,7 +361,7 @@ Every header has `type` first. "MCP → mod" and "mod → MCP" say who sends it.
 | `token` | string | From the pairing file |
 | `client` | `{name, version}` | `{"name":"autosketch","version":"1.0.0"}` |
 | `volatile` | object | The volatile-key list (*Hashing*). May be `{}` |
-| `modes` | string[] | Protocol 2. The request modes the MCP enforces, from `ask`, `scan`, `plan`, `build` (B6), and `select` (`18`, feature `select`). The mod sends no other mode. Absent means `["build"]`. This MCP lists the first four by default, and `select` once it handles select requests (`18`, piece 1). Sent to a version-1 mod too, which ignores it |
+| `modes` | string[] | Protocol 2. The request modes the MCP enforces, from `ask`, `scan`, `plan`, `build` (B6), and `select` (`18`, feature `select`). The mod sends no other mode. Absent means `["build"]`. This MCP lists all five by default (`select` since `18`'s step P1, which handles select requests). Sent to a version-1 mod too, which ignores it |
 | `features` | string[] | Added within protocol 3 (*Versions and features*). The optional capabilities the MCP has: `prompt.close`, `ui`. The mod uses no other MCP addition. Absent means none. Sent to a version-2 mod too, which ignores it |
 
 **`hello`**, mod → MCP

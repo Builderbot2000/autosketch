@@ -2,6 +2,7 @@ import type { Registry } from "../../assets/registry.js";
 import { canonicalState, parseState } from "../../core/blockstate.js";
 import type { PaletteIndex } from "../../palette/index.js";
 import type { Family } from "../../palette/families.js";
+import { MATCH_SOLID } from "../protocol/messages.js";
 
 /**
  * Materials for the select requests (docs/design/18-select.md, pieces 2 and 3; `13`, *Select*,
@@ -49,10 +50,11 @@ export function familyMembers(f: Family): string[] {
 
 /**
  * Resolves a material list for `search` (and later `fill`): block ids (any state), canonical states,
- * `family:<id>` (the family of that block, every member id), and tags `#ns:path`. Throws one error
+ * `family:<id>` (the family of that block, every member id), and tags `#ns:path`; with `solid`, a
+ * fill's `"solid"` (every non-air block) passes through as is. Throws one error
  * naming every material it can't resolve.
  */
-export function resolveMaterials(list: readonly string[], lookup: MaterialLookup): ResolvedMaterials {
+export function resolveMaterials(list: readonly string[], lookup: MaterialLookup, opts: { solid?: boolean } = {}): ResolvedMaterials {
   if (!list.length) throw new Error("materials is empty: give block ids, family:<id> or #tags");
   const { registry, index } = lookup;
   const bad: string[] = [];
@@ -64,7 +66,7 @@ export function resolveMaterials(list: readonly string[], lookup: MaterialLookup
     const given = raw.trim();
     let entries: string[] | undefined;
     try {
-      entries = resolveOne(given, registry, index);
+      entries = given === MATCH_SOLID && opts.solid ? [MATCH_SOLID] : resolveOne(given, registry, index);
     } catch (e) {
       bad.push((e as Error).message);
       continue;
@@ -80,7 +82,7 @@ export function resolveMaterials(list: readonly string[], lookup: MaterialLookup
     }
     groups.push(g);
   }
-  if (bad.length) throw new Error(`${bad.join("; ")}. Look materials up with palette_sheet (sheet "family:<id>", "similar:<id>", "filter:text:<word>") or block_info; nothing was searched`);
+  if (bad.length) throw new Error(`${bad.join("; ")}. Look materials up with palette_sheet (sheet "family:<id>", "similar:<id>", "filter:text:<word>") or block_info; nothing was ${opts.solid ? "filled" : "searched"}`);
   return { groups, wire, groupOf };
 }
 

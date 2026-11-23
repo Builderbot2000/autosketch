@@ -1,10 +1,11 @@
 import { z } from "zod";
+import { fromPublic, toPublic, type PublicBox } from "../../core/region.js";
 import { refusal } from "../../scope/scopes.js";
-import { image, vec3, type ToolDeps } from "./shared.js";
+import { boxSchema, image, text, vec3, type ToolDeps } from "./shared.js";
 
 /**
  * The agent's select tools in the world (docs/design/18-select.md, pieces 2 to 4 and 9):
- * `world_search` (T1). A thin adapter: the logic is `world/select/`, reached only through
+ * `world_search` (T1), `world_fill` and `world_expand` (T2). A thin adapter: the logic is `world/select/`, reached only through
  * `session.worldSelect` (ARCHITECTURE.md, *Dependency rules*).
  */
 export function registerWorldSelectTools({ tool, session }: ToolDeps): void {
@@ -34,6 +35,60 @@ export function registerWorldSelectTools({ tool, session }: ToolDeps): void {
       if (!sel) throw refusal("world_disconnected", "The live world link isn't available in this server.");
       const r = await sel.search(a, { registry: c.registry, index: c.palette });
       return image(r.map.png, r.text);
+    },
+  );
+
+  tool(
+    "world_fill",
+    {
+      title: "Fill a candidate shape in the world",
+      description:
+        "During an in-game select request, grows a shape from seed (a world position) through matching blocks, as the {connected} pick does, but in the mod, so it reaches unloaded chunks and never ships blocks it doesn't need. " +
+        'match: "block" (the seed\'s block, any state), "family" (every variant and shape of the seed\'s material), or materials as world_search takes them (ids, "family:<id>", "#tags", "solid"). ' +
+        "connectivity 6, 18 or 26 (default 26, so diagonal walls and stairs stay whole); budget: most blocks this step adds (default: the mod's contextCap); area: chunks around the seed's chunk the fill may read (default 1). " +
+        'The result replaces the last fill and is the named selection "candidate" in the world view; its sections plus margin blocks (default 8) are read into the view, so render({view:"world"}) and the selection algebra work on it at once. ' +
+        "The text gives box, count, sections, and whether the shape is cut off (a non-empty frontier: world_expand continues). Text, ~200 tokens.",
+      inputSchema: {
+        seed: vec3.describe("World position of a block of the shape"),
+        match: z.union([z.enum(["block", "family"]), z.array(z.string().min(1)).min(1).max(64)]).describe('"block", "family", or materials (ids, "family:<id>", "#tags", "solid")'),
+        connectivity: z.union([z.literal(6), z.literal(18), z.literal(26)]).optional().describe("Neighbours that connect: 6 faces, 18 with edges, 26 with corners (default 26)"),
+        budget: z.number().int().min(1).optional().describe("Most blocks this step adds (default: the mod's contextCap)"),
+        area: z.number().int().min(0).max(64).optional().describe("Chunks around the seed's chunk in the initial read area (default 1)"),
+        margin: z.number().int().min(0).max(16).optional().describe("Blocks around the candidate's sections read into the world view (default 8)"),
+      },
+      doc: false,
+    },
+    async (c, a) => {
+      const sel = session.worldSelect;
+      if (!sel) throw refusal("world_disconnected", "The live world link isn't available in this server.");
+      const r = await sel.fill(a, { registry: c.registry, index: c.palette });
+      return text(r.text);
+    },
+  );
+
+  tool(
+    "world_expand",
+    {
+      title: "Expand the candidate's fill",
+      description:
+        "Grows the last world_fill's read area and resumes the fill from its frontier with a fresh budget, so a large build grows in rounds and you can stop as soon as the shape is clearly right. " +
+        'by: "frontier" (the chunks the cut-off faces reach), {direction:"north|south|west|east", chunks}, or {box} (the chunks a world box touches). ' +
+        'The changed sections update "candidate" in the world view and are re-read there with their margin (default 8). Text, ~200 tokens.',
+      inputSchema: {
+        by: z
+          .union([z.literal("frontier"), z.object({ direction: z.enum(["north", "south", "west", "east"]), chunks: z.number().int().min(1).max(64) }), z.object({ box: boxSchema })])
+          .describe('"frontier", {direction, chunks} or {box}'),
+        budget: z.number().int().min(1).optional().describe("Most blocks this step adds (default: the mod's contextCap)"),
+        margin: z.number().int().min(0).max(16).optional().describe("Blocks around the changed sections read into the world view (default 8)"),
+      },
+      doc: false,
+    },
+    async (_c, a) => {
+      const sel = session.worldSelect;
+      if (!sel) throw refusal("world_disconnected", "The live world link isn't available in this server.");
+      const by = typeof a.by === "object" && "box" in a.by ? { box: toPublic(fromPublic(a.by.box as PublicBox)) } : a.by;
+      const r = await sel.expand({ ...a, by });
+      return text(r.text);
     },
   );
 }

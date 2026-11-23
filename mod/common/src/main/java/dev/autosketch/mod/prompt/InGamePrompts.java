@@ -193,8 +193,43 @@ public final class InGamePrompts {
     }
 
     /**
+     * What a select request's grant does as the prompt goes out (13, *Where the mod serves reads*,
+     * "Read grants in select mode"): given the prompt's dimension and the block of its
+     * {@code context.position}, it grants the square within {@code selectChunks} of that chunk,
+     * replacing any grant, a scan grant included. The world module installs the real grant
+     * ({@link #setSelectGrant}); until it does, a select prompt still ends the scan grant, since one
+     * grant is in force at a time.
+     */
+    public interface SelectGrant {
+        void grant(ResourceKey<Level> dimension, BlockPos position);
+    }
+
+    private static volatile SelectGrant selectGrant = (dimension, position) -> ScanGrants.clear();
+
+    /** Installs the select grant hook (the world module, tests); returns the previous one. */
+    public static SelectGrant setSelectGrant(SelectGrant g) {
+        SelectGrant prev = selectGrant;
+        selectGrant = g;
+        return prev;
+    }
+
+    /**
+     * {@code /autosketch select [text]} (18, piece 1): a {@code select} request, read-only like
+     * {@code scan} (the MCP refuses edits and drafts), carrying the usual game context and no grant
+     * field. The select grant is fixed at the prompt's position as the request goes out, and only then
+     * ({@link SelectGrant}); a request refused here (no link, an MCP whose hello lacks {@code select})
+     * grants nothing. Empty text means the crosshair block is the starting point.
+     */
+    public static int select(ServerPlayer player, String text, Bridge bridge) {
+        return request(player, "select", text, bridge, () -> {
+            selectGrant.grant(player.level().dimension(), BlockPos.containing(player.position()));
+            return null;
+        });
+    }
+
+    /**
      * {@code /autosketch done} (13, B6): ends the open read-only request ({@code ask}, {@code plan},
-     * {@code scan}). Only the player lifts a read-only mode, so this is the in-game way to end one
+     * {@code scan}, {@code select}). Only the player lifts a read-only mode, so this is the in-game way to end one
      * without sending a new request. Sends {@code prompt.close}, which the MCP answers with a notice on
      * the player's action bar (it owns the request state, so it says whether one was open). Without a
      * connection the player hears {@code no_link}; an MCP whose hello doesn't list
@@ -273,7 +308,7 @@ public final class InGamePrompts {
         Messages.ChatAction action = chat.action();
         long actionId = action == null ? 0 : remember(action);
         List<Component> plain = format(chat.lines(), reply, -1, 0);
-        List<Component> withAction = action == null ? plain : format(chat.lines(), reply, action.line(), actionId);
+        List<Component> withAction = action == null ? plain : format(chat.lines(), reply, action.line(), actionId, actionHover(action.kind()));
         int reached = 0;
         for (ServerPlayer p : server.getPlayerList().getPlayers()) {
             if (!p.hasPermissions(CommandExtension.OP_LEVEL)) continue;
@@ -332,6 +367,14 @@ public final class InGamePrompts {
     /** The hover text of a clickable line. */
     public static final String ACTION_HOVER = "Click to open";
 
+    /** The hover text of a choice line ({@code choices.pick}, 18, piece 7): the click answers the agent. */
+    public static final String CHOICE_HOVER = "Click to answer with this";
+
+    /** The hover text for a line whose action is {@code kind}. */
+    public static String actionHover(String kind) {
+        return kind.equals("choices.pick") ? CHOICE_HOVER : ACTION_HOVER;
+    }
+
     /** Activity dimmed and italic; replies prominent, with the agent named. Long lines wrapped. */
     public static List<Component> format(List<String> lines, boolean reply) {
         return format(lines, reply, -1, 0);
@@ -339,6 +382,11 @@ public final class InGamePrompts {
 
     /** As {@link #format(List, boolean)}; every piece of line {@code clickLine} runs action {@code actionId} when clicked. */
     static List<Component> format(List<String> lines, boolean reply, int clickLine, long actionId) {
+        return format(lines, reply, clickLine, actionId, ACTION_HOVER);
+    }
+
+    /** As above, with the clickable line's hover text. */
+    static List<Component> format(List<String> lines, boolean reply, int clickLine, long actionId, String hover) {
         List<Component> out = new ArrayList<>();
         for (int i = 0; i < lines.size(); i++)
             for (String piece : ChatRules.wrap(lines.get(i), ChatRules.WRAP)) {
@@ -349,7 +397,7 @@ public final class InGamePrompts {
                         String command = actionCommand(actionId);
                         text = Component.literal(piece).withStyle(s -> s.withColor(ChatFormatting.AQUA).withUnderlined(true)
                                 .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, command))
-                                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal(ACTION_HOVER))));
+                                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal(hover))));
                     }
                     c = Component.literal("Agent: ").withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD).append(text);
                 } else c = Component.literal("· " + piece).withStyle(ChatFormatting.DARK_GRAY, ChatFormatting.ITALIC);

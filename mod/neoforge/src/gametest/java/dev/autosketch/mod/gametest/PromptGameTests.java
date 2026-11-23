@@ -319,6 +319,108 @@ public final class PromptGameTests {
     }
 
     /**
+     * 18, piece 1: {@code /autosketch select [text]} sends a {@code select} request with the game
+     * context and no grant field; the select grant is fixed at the prompt's dimension and position as
+     * it goes out (ending a scan grant), and an MCP whose hello lacks {@code select} gets nothing and
+     * grants nothing.
+     */
+    @GameTest(template = "empty")
+    public static void selectSendsItsModeWithoutAGrantAndIsRefusedWhenUnlisted(GameTestHelper helper) {
+        ServerPlayer player = helper.makeMockServerPlayerInLevel();
+        Recorder out = new Recorder();
+        List<String> granted = new ArrayList<>();
+        var prevGrant = InGamePrompts.setSelectGrant((dim, pos) -> granted.add(dim.location() + " " + pos.toShortString()));
+        try {
+            RecordingBridge noSelect = new RecordingBridge(true, List.of("ask", "scan", "plan", "build"));
+            with(noSelect, fixed(null), out, () -> run(player, "autosketch select the mossy house"));
+            helper.assertTrue(noSelect.sent.isEmpty(), "a select request to an MCP whose hello lacks select sends nothing");
+            helper.assertTrue(out.barOf(player).getLast().contains("doesn't accept select requests"), "unsupported_mode on the action bar: " + out.barOf(player));
+            helper.assertTrue(granted.isEmpty(), "and grants nothing");
+
+            RecordingBridge offline = new RecordingBridge(false);
+            with(offline, fixed(null), out, () -> run(player, "autosketch select"));
+            helper.assertTrue(offline.sent.isEmpty() && granted.isEmpty(), "no link: nothing sent, nothing granted");
+
+            RecordingBridge all = new RecordingBridge(true, List.of("ask", "scan", "plan", "build", "select"));
+            with(all, fixed(null), out, () -> {
+                run(player, "autosketch select");
+                run(player, "autosketch select the mossy house up the hill");
+            });
+            helper.assertTrue(all.sent.size() == 2, "two select requests sent: " + all.sent.size());
+            var bare = Messages.Prompt.decode(all.sent.get(0));
+            var texted = Messages.Prompt.decode(all.sent.get(1));
+            helper.assertTrue(bare.mode().equals("select") && bare.text().isEmpty() && bare.scan() == null, "mode select, no text, no grant: " + bare);
+            helper.assertTrue(texted.mode().equals("select") && texted.text().equals("the mossy house up the hill") && texted.scan() == null, "the text: " + texted.text());
+            helper.assertTrue(!all.sent.get(0).header().has("scan"), "no grant field on the wire: " + all.sent.get(0).header());
+            JsonObject ctx = all.sent.get(0).header().getAsJsonObject("context");
+            helper.assertTrue(ctx.has("position") && ctx.has("yaw") && ctx.has("facing") && ctx.has("dimension"), "the usual game context: " + ctx);
+            String want = helper.getLevel().dimension().location() + " " + BlockPos.containing(player.position()).toShortString();
+            helper.assertTrue(granted.equals(List.of(want, want)), "each request fixes the grant at the prompt's position: " + granted);
+            helper.assertTrue(out.barOf(player).getLast().contains("asking the agent"), "asking on the action bar: " + out.barOf(player));
+        } catch (dev.autosketch.mod.protocol.ProtocolException e) {
+            throw new RuntimeException(e);
+        } finally {
+            InGamePrompts.setSelectGrant(prevGrant);
+        }
+
+        // Until the world module installs the select grant, a select prompt still ends a scan grant (one grant at a time).
+        dev.autosketch.mod.world.ScanGrants.set(helper.getLevel().dimension(), new Messages.ScanGrant(1, false, new dev.autosketch.mod.protocol.Area(0, 0, 31, 31), new Box(0, 60, 0, 31, 70, 31)));
+        with(new RecordingBridge(true, List.of("scan", "select")), fixed(null), out, () -> run(player, "autosketch select"));
+        helper.assertTrue(dev.autosketch.mod.world.ScanGrants.current() == null, "a select prompt ends the scan grant");
+        leave(player);
+        helper.succeed();
+    }
+
+    /**
+     * 18, piece 7: a choice is its own reply message whose one line is clickable ({@code choices.pick},
+     * one action per {@code chat}); the click runs {@code /autosketch action <n>}, which hands the
+     * client {@code choices.pick} with the question's id and the choice's index. A client without the
+     * client half sees the same numbered line as plain text.
+     */
+    @GameTest(template = "empty")
+    public static void choiceLinesAreClickableOnePerMessage(GameTestHelper helper) {
+        MinecraftServer server = helper.getLevel().getServer();
+        ServerPlayer modded = helper.makeMockServerPlayerInLevel();
+        ServerPlayer vanilla = helper.makeMockServerPlayerInLevel();
+        for (ServerPlayer p : List.of(modded, vanilla)) server.getPlayerList().getOps().add(new ServerOpListEntry(p.getGameProfile(), 2, false));
+        InGamePrompts.setLogMode(vanilla, LogMode.ALL);
+        Recorder out = new Recorder();
+        List<String> choices = List.of("[1] mossy stone brick house, 40 blocks north-east", "[2] the ruin by the river");
+        var prev = InGamePrompts.setClickable(p -> p == modded);
+        try {
+            with(new RecordingBridge(true), fixed(null), out, () -> {
+                chat(server, 21L, modded.getUUID(), "reply", "Which one do you mean?");
+                for (int i = 0; i < choices.size(); i++) {
+                    JsonObject args = new JsonObject();
+                    args.addProperty("id", "q1");
+                    args.addProperty("index", i);
+                    InGamePrompts.onChat(new Messages.Chat(21L, modded.getUUID(), Messages.Chat.REPLY, List.of(choices.get(i)), new Messages.ChatAction(0, "choices.pick", args)), server);
+                }
+                chat(server, 21L, modded.getUUID(), "reply", "or type your own answer");
+            });
+        } finally {
+            InGamePrompts.setClickable(prev);
+        }
+        List<String> want = List.of("Agent: Which one do you mean?", "Agent: " + choices.get(0), "Agent: " + choices.get(1), "Agent: or type your own answer");
+        helper.assertTrue(out.chatOf(modded).equals(want) && out.chatOf(vanilla).equals(want), "same text for both: " + out.chatOf(modded) + " / " + out.chatOf(vanilla));
+        List<Component> m = out.components.get(modded.getUUID()), v = out.components.get(vanilla.getUUID());
+        helper.assertTrue(click(m.get(0)) == null && click(m.get(3)) == null, "the question and the free-text line aren't clickable");
+        for (int i = 0; i < choices.size(); i++) {
+            String command = click(m.get(i + 1));
+            helper.assertTrue(command != null && command.startsWith("/autosketch action "), "choice " + i + " runs /autosketch action <n>: " + command);
+            helper.assertTrue(InGamePrompts.CHOICE_HOVER.equals(hover(m.get(i + 1))), "a choice's hover says the click answers: " + hover(m.get(i + 1)));
+            var action = InGamePrompts.action(Long.parseLong(command.substring("/autosketch action ".length())));
+            helper.assertTrue(action != null && action.kind().equals("choices.pick") && action.args().get("index").getAsInt() == i, "the number names the choice: " + action);
+            String client = dev.autosketch.mod.ui.ReplyActionCommand.clientAction(action);
+            helper.assertTrue(client.equals("chat.action choices.pick {\"id\":\"q1\",\"index\":" + i + "}"), "the client action: " + client);
+            helper.assertTrue(click(v.get(i + 1)) == null, "a client without the client half gets plain text");
+        }
+        helper.assertTrue(InGamePrompts.actionHover("candidates.open").equals(InGamePrompts.ACTION_HOVER), "other actions keep their hover");
+        leave(modded, vanilla);
+        helper.succeed();
+    }
+
+    /**
      * B6: {@code /autosketch done} (and {@code /<alias> done}) sends {@code prompt.close} only to an MCP
      * whose hello lists {@code prompt.close}; an older MCP is refused on the action bar with nothing
      * sent, and with no connection the player hears no_link. The MCP's answer is a notice to that
@@ -365,7 +467,7 @@ public final class PromptGameTests {
         PromptModule.alias(dispatcher, "zz");
         var root = dispatcher.getRoot().getChild("zz");
         helper.assertTrue(root != null, "the alias is registered");
-        for (String m : List.of("ask", "scan", "plan", "build")) helper.assertTrue(root.getChild(m) != null, "/zz " + m);
+        for (String m : List.of("ask", "scan", "select", "plan", "build")) helper.assertTrue(root.getChild(m) != null, "/zz " + m);
         PromptModule.alias(dispatcher, "Bad Name");
         helper.assertTrue(dispatcher.getRoot().getChild("Bad Name") == null, "a malformed alias is skipped");
         helper.succeed();
@@ -443,6 +545,18 @@ public final class PromptGameTests {
         String[] found = {null};
         c.visit((style, text) -> {
             if (style.getClickEvent() != null) found[0] = style.getClickEvent().getValue();
+            return java.util.Optional.empty();
+        }, net.minecraft.network.chat.Style.EMPTY);
+        return found[0];
+    }
+
+    /** The hover text anywhere in a chat line, or null. */
+    private static @Nullable String hover(Component c) {
+        String[] found = {null};
+        c.visit((style, text) -> {
+            var h = style.getHoverEvent();
+            if (h != null && h.getValue(net.minecraft.network.chat.HoverEvent.Action.SHOW_TEXT) != null)
+                found[0] = h.getValue(net.minecraft.network.chat.HoverEvent.Action.SHOW_TEXT).getString();
             return java.util.Optional.empty();
         }, net.minecraft.network.chat.Style.EMPTY);
         return found[0];

@@ -25,7 +25,7 @@ import org.slf4j.Logger;
  * Registers in-game requests (13, *Prompting from the game*, M13) through the skeleton's hooks:
  * {@code /autosketch ask|plan|build <text>} (B6: the subcommand names the request's mode; the
  * configured alias is a short root for them), {@code /autosketch done} (B6: the player ends the open
- * read-only request), {@code /autosketch focus clear},
+ * read-only request), {@code /autosketch select [text]} (18, piece 1), {@code /autosketch focus clear},
  * {@code /autosketch log off|mine|all}, the wand's {@code focus} mode, and the handlers for
  * {@code prompt.result} and {@code chat}. Each loader's setup event calls {@link #setup} (on
  * NeoForge, {@code PromptEvents}).
@@ -96,19 +96,24 @@ public final class PromptModule {
         alias(r.dispatcher(), AutosketchConfig.get().prompts.askAlias.trim());
     }
 
-    /** The request modes with a plain {@code <text>} subcommand; {@code scan} has its own (B4). */
+    /** The request modes with a plain {@code <text>} subcommand; {@code scan} (B4) and {@code select} (18) have their own. */
     static final List<String> TEXT_MODES = List.of("ask", "plan", "build");
 
     /**
      * Adds the request subcommands under {@code root} ({@code /autosketch}, or the alias), including
      * {@code scan [radius] [text]} (B4: radius in chunks; a number first is the radius, anything else
-     * the text) and {@code done} (B6: ends the open read-only request).
+     * the text), {@code select [text]} (18, piece 1: the text is optional, none means the crosshair
+     * block) and {@code done} (B6: ends the open read-only request).
      */
     static void requests(LiteralArgumentBuilder<CommandSourceStack> root) {
         root.then(Commands.literal("done").executes(ctx -> InGamePrompts.done(ctx.getSource().getPlayerOrException(), Autosketch.bridge())));
         for (String mode : TEXT_MODES)
             root.then(Commands.literal(mode).then(Commands.argument("text", StringArgumentType.greedyString())
                     .executes(ctx -> InGamePrompts.request(ctx.getSource().getPlayerOrException(), mode, StringArgumentType.getString(ctx, "text"), Autosketch.bridge()))));
+        root.then(Commands.literal("select")
+                .executes(ctx -> InGamePrompts.select(ctx.getSource().getPlayerOrException(), "", Autosketch.bridge()))
+                .then(Commands.argument("text", StringArgumentType.greedyString())
+                        .executes(ctx -> InGamePrompts.select(ctx.getSource().getPlayerOrException(), StringArgumentType.getString(ctx, "text"), Autosketch.bridge()))));
         root.then(Commands.literal("scan")
                 .executes(ctx -> InGamePrompts.scan(ctx.getSource().getPlayerOrException(), -1, "", Autosketch.bridge()))
                 .then(Commands.argument("radius", IntegerArgumentType.integer(0))

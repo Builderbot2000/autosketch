@@ -39,18 +39,23 @@ export function registerWorldViewTools({ tool, session }: ToolDeps): void {
       description:
         "Reads full blocks from the live world into the world view, a read-only look at the world held beside the open document (it never replaces it). " +
         'box is in world coordinates; sel is resolved in the world view (e.g. {"dilate":"candidate","by":8}) and its bounding box is read. ' +
-        'One read is capped at the mod\'s contextCap (4,194,304 blocks by default). A later read of the same place replaces it; the view empties when the in-game request ends. ' +
-        'Then look with view:"world" on render, view_slice, raycast, select and analyze; edits there are refused. Text, <80 tokens.',
+        "One read is capped at the mod's contextCap (4,194,304 blocks by default); a larger one is read coarse, one block per 2³ or 4³ cell (the cell's most common block, drawn over the whole cell), " +
+        "and the render caption names the coarse parts; reading a smaller box there again replaces them with full detail. " +
+        "surface (a box, for terrain) reads only the topmost block of each column, kept where it lies within the box's y range. " +
+        "A later read of the same place replaces it; the view empties when the in-game request ends. " +
+        'Then look with view:"world" on render, view_slice, raycast, select and analyze; edits there are refused. Text, <150 tokens.',
       inputSchema: {
         box: boxSchema.optional().describe("World box to read (inclusive)"),
         sel: selSchema.optional().describe("A selection in the world view; its bounding box is read"),
+        surface: boxSchema.optional().describe("World box: read the topmost block of each of its columns (a surface map, for terrain)"),
       },
       doc: false,
     },
     async (c, a) => {
       const v = session.worldView;
       if (!v) throw refusal("world_disconnected", "The world view isn't available in this server (no live world link).");
-      if ((a.box === undefined) === (a.sel === undefined)) throw new Error("give box or sel (one of them)");
+      if ([a.box, a.sel, a.surface].filter((x) => x !== undefined).length !== 1) throw new Error("give one of box, sel or surface");
+      if (a.surface) return text(v.describe(await v.readSurface(a.surface as PublicBox)));
       let box: PublicBox;
       if (a.box) box = a.box as PublicBox;
       else {

@@ -90,6 +90,7 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
         "{cubemap:[x,y,z]} six labelled 90° faces from one point, 3×2 (~520 tokens at 768×512: a whole room at a glance); " +
         "{turntable: target, steps?:8, pitch?:30} a ring of orthographic views around a target (target as for perspective; a selection sets the zoom), 4 per row (~400 tokens for 8 at 768×384). " +
         "explode: {axis:\"x\"|\"y\"|\"z\", at:[layer,…], gap?:4} splits the build at those layers and moves each band gap blocks further (each at starts a band); raycast reports real positions. " +
+        "fade: a selection drawn solid while everything else drawn is grey and translucent (the sandbox ghost style), e.g. region:{\"dilate\":\"candidate\",\"by\":8}, fade:\"candidate\" shows a selection among its faded surroundings. " +
         "highlight: any selection, tinted orange; {changed:\"op:-1\"|\"checkpoint:<name>\"} shows a diff ({since:..} still works). style: textured | flat (mean colours) | depth (darker = farther) | xray (translucent shell). " +
         "overlays: {components} labels components. Axis ticks label block coordinates; N marks north. " +
         "The caption gives the render id for raycast and for view_box/view_lasso selections. " +
@@ -104,6 +105,7 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
         style: z.enum(["textured", "flat", "depth", "xray"]).optional(),
         overlays: z.object({ components: z.boolean().optional() }).optional(),
         context: z.enum(["ghost", "normal", "hide"]).optional().describe("In a scoped job's sandbox: how the read-only context is drawn (default ghost: grey, translucent)"),
+        fade: selSchema.optional().describe("Draw everything outside this selection grey and translucent (e.g. region {dilate:\"candidate\",by:8}, fade \"candidate\")"),
         near: z.number().positive().optional().describe("Near clip: blocks nearer than this many blocks are not drawn"),
         section: selSchema.optional().describe("Section box: draw only this selection (composes with region)"),
         peel: z.number().int().min(1).max(8).optional().describe("Depth peeling: draw the n-th surface along each ray (1 = normal; 2 = directly behind the front)"),
@@ -140,6 +142,14 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
           highlight = r.mask;
         }
       }
+      let fade: Mask | undefined;
+      if (a.fade !== undefined) {
+        const r = maskOf(c, doc, a.fade);
+        notes.push(...r.notes);
+        if (r.mask.isEmpty()) notes.push("the fade selection is empty, so everything is drawn faded");
+        fade = r.mask;
+      }
+      const coarse = a.view === "world" ? (session.worldView?.coarseParts() ?? []) : [];
       const views = a.views?.map((v): View => {
         if (typeof v === "object" && "turntable" in v) {
           const t = resolveTarget(c, doc, v.turntable);
@@ -160,6 +170,8 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
         ...(a.style ? { style: a.style } : {}),
         ...(a.overlays ? { overlays: a.overlays } : {}),
         ...(a.context ? { context: a.context } : {}),
+        ...(fade ? { fade } : {}),
+        ...(coarse.length ? { coarse } : {}),
         ...(a.near ? { near: a.near } : {}),
         ...(section ? { section } : {}),
         ...(a.peel ? { peel: a.peel } : {}),

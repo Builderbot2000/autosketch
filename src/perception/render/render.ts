@@ -79,6 +79,17 @@ export interface RenderOptions {
    */
   context?: ContextMode;
   /**
+   * Faded surroundings (18, piece 6): everything outside this mask is drawn in the ghost style
+   * (desaturated and translucent, never hiding the faces of blocks inside it), so a selection
+   * shows solid among its surroundings. Works on any document, the world view included.
+   */
+  fade?: Mask;
+  /**
+   * Parts drawn at coarse level (the world view's coarse reads, 18 piece 5): named in the caption
+   * where they meet the drawn box. `partial`: some of it has since been read at full detail.
+   */
+  coarse?: { box: Box; cell: number; partial?: boolean }[];
+  /**
    * Near clip (06, *Cameras*): blocks whose centre is nearer than this many blocks are not drawn
    * and hide nothing, so cut faces draw closed. Perspective: measured from the eye along the view;
    * orthographic: from the front of the drawn box.
@@ -114,7 +125,7 @@ export interface RenderResult {
 export const DEFAULT_VIEWS: ViewName[] = ["iso_se", "iso_nw", "front", "top"];
 /** Per-block flags. */
 export const HIGHLIGHT = 1;
-/** A sandbox's read-only context volume (11): drawn ghosted. */
+/** Drawn ghosted: a sandbox's read-only context volume (11), or outside `fade` (18, piece 6). */
 export const CONTEXT = 2;
 
 const SS = 2; // supersampling factor
@@ -145,12 +156,14 @@ interface Scene {
   fallbackIds: Set<string>;
   /** Highlighted positions that are air inside the clip (outlined). */
   airHighlights: Vec3[];
-  /** Ghosted context positions: they never hide the faces of editable blocks. */
-  ghost?: Mask;
+  /** Ghosted positions (context, or outside `fade`): they never hide the faces of other blocks. */
+  ghostAt?: (x: number, y: number, z: number) => boolean;
   /** Exploded view: the split, and the unexploded clip, mask and box (cameras.ts maps rays back through it). */
   explode?: { spec: Explode; clip: Box; mask?: Mask; box: Box };
   /** Context blocks drawn. */
   contextBlocks: number;
+  /** Blocks drawn faded (outside `fade`, not counted as context). */
+  fadedBlocks: number;
 }
 
 interface Label {
@@ -303,6 +316,8 @@ export async function renderDocument(doc: Document, baker: BlockBaker, opts: Ren
       (peel > 1 ? ` · peel ${peel}: the ${ordinal(peel)} surface along each ray (every block face toward the camera counts)` : ""),
     opts.highlight ? `highlighted ${highlighted.toLocaleString("en-US")} position${highlighted === 1 ? "" : "s"} in orange${main.airHighlights.length ? ` (${main.airHighlights.length} now air, outlined)` : ""}` : "",
     main.contextBlocks ? `${main.contextBlocks.toLocaleString("en-US")} read-only context blocks${opts.context === "normal" ? " drawn normally" : " ghosted (grey, translucent)"}` : "",
+    opts.fade ? `faded: ${main.fadedBlocks.toLocaleString("en-US")} block${main.fadedBlocks === 1 ? "" : "s"} outside the fade selection drawn grey and translucent; ${(n - main.fadedBlocks - main.contextBlocks).toLocaleString("en-US")} inside it drawn solid` : "",
+    coarseText(opts.coarse, main.explode?.box ?? main.box),
     doc.context && opts.context === "hide" ? "context hidden" : "",
     views.every((v) => isPerspective(v) || (typeof v === "object" && "cubemap" in v))
       ? "Perspective views carry no ticks: the caption gives eye, target and fov."
@@ -312,6 +327,17 @@ export async function renderDocument(doc: Document, baker: BlockBaker, opts: Ren
     fallback.size ? `no model for ${[...fallback].slice(0, 5).join(", ")}${fallback.size > 5 ? " …" : ""} (drawn as magenta checker)` : "",
   ].filter(Boolean);
   return { png: out.encodePng(), width: out.width, height: out.height, caption: caption.join("\n"), ...(id ? { id } : {}), views: cams };
+}
+
+/** The caption line naming the coarse parts that meet the drawn box (18, piece 5). */
+function coarseText(parts: RenderOptions["coarse"], drawn: Box): string {
+  const hit = (parts ?? []).filter((p) => !isEmptyBox(intersectBox(p.box, drawn)));
+  if (!hit.length) return "";
+  const list = hit.slice(0, 4).map((p) => `${formatBox(p.box)} at ${p.cell}³ cells${p.partial ? " (partly replaced by full detail)" : ""}`);
+  return (
+    `coarse: ${list.join(", ")}${hit.length > 4 ? ` and ${hit.length - 4} more` : ""}: each cell is drawn whole as its most common non-air block, so edges and openings there are approximate; ` +
+    "everything else is full detail"
+  );
 }
 
 /** Context blocks: desaturated toward a light grey (11, ghosted context). */
@@ -388,22 +414,26 @@ async function buildScene(doc: Document, baker: BlockBaker, opts: RenderOptions,
   const ctxMode = opts.context ?? "ghost";
   const context = doc.context && !doc.context.isEmpty() ? doc.context : undefined;
   const hidden = ctxMode === "hide" ? context : undefined;
+  const ghostContext = context && ctxMode === "ghost" ? context : undefined;
+  const fade = opts.fade;
   const inClip = (x: number, y: number, z: number) =>
     x >= clip.min[0] && x < clip.max[0] && y >= clip.min[1] && y < clip.max[1] && z >= clip.min[2] && z < clip.max[2] && (!mask || mask.has(x, y, z)) && !hidden?.has(x, y, z);
 
   const xs: number[] = [], ys: number[] = [], zs: number[] = [], ids: number[] = [], flags: number[] = [];
-  let contextBlocks = 0;
+  let contextBlocks = 0, fadedBlocks = 0;
   doc.voxels.forEachInBox(doc.boxToStore(clip), (sx, sy, sz, id) => {
     const [x, y, z] = doc.toLocal(sx, sy, sz);
     if (mask && !mask.has(x, y, z)) return;
     const inContext = context?.has(x, y, z) ?? false;
     if (inContext && hidden) return;
     if (inContext) contextBlocks++;
+    const faded = !!fade && !fade.has(x, y, z);
+    if (faded && !inContext) fadedBlocks++;
     xs.push(x);
     ys.push(y);
     zs.push(z);
     ids.push(id);
-    flags.push((opts.highlight?.has(x, y, z) ? HIGHLIGHT : 0) | (inContext && ctxMode === "ghost" ? CONTEXT : 0));
+    flags.push((opts.highlight?.has(x, y, z) ? HIGHLIGHT : 0) | ((inContext && ctxMode === "ghost") || faded ? CONTEXT : 0));
   });
   if (!xs.length) return undefined;
   const airHighlights: Vec3[] = [];
@@ -441,8 +471,9 @@ async function buildScene(doc: Document, baker: BlockBaker, opts: RenderOptions,
     ...(mask ? { mask } : {}),
     fallbackIds,
     airHighlights,
-    ...(context && ctxMode === "ghost" ? { ghost: context } : {}),
+    ...(ghostContext || fade ? { ghostAt: (x: number, y: number, z: number) => !!ghostContext?.has(x, y, z) || (!!fade && !fade.has(x, y, z)) } : {}),
     contextBlocks,
+    fadedBlocks,
     occluderAt: (x, y, z) => {
       if (!inClip(x, y, z)) return undefined;
       const [sx, sy, sz] = doc.toStore(x, y, z);
@@ -489,18 +520,20 @@ function explodeScene(s: Scene, e: Explode): Scene {
     for (let a = 0; a < 3; a++) (box.min[a] = Math.min(box.min[a]!, p[a]!)), (box.max[a] = Math.max(box.max[a]!, p[a]! + 1));
   }
   const lo = explodeAt(e, ...s.clip.min), hi = explodeAt(e, s.clip.max[0] - 1, s.clip.max[1] - 1, s.clip.max[2] - 1);
-  let ghost: Mask | undefined;
-  if (s.ghost) {
-    ghost = new Mask();
-    s.ghost.forEach((x, y, z) => ghost!.add(...explodeAt(e, x, y, z)));
-  }
-  const { mask: _mask, ghost: _ghost, ...rest } = s;
+  const g = s.ghostAt;
+  const ghostAt = g
+    ? (x: number, y: number, z: number) => {
+        const q = unexplode(e, x, y, z);
+        return !!q && g(...q);
+      }
+    : undefined;
+  const { mask: _mask, ghostAt: _ghost, ...rest } = s;
   return {
     ...rest,
     xs, ys, zs, box,
     clip: { min: lo, max: [hi[0] + 1, hi[1] + 1, hi[2] + 1] },
     airHighlights: s.airHighlights.map((p) => explodeAt(e, ...p)),
-    ...(ghost ? { ghost } : {}),
+    ...(ghostAt ? { ghostAt } : {}),
     occluderAt: (x, y, z) => {
       const q = unexplode(e, x, y, z);
       return q && s.occluderAt(...q);
@@ -654,8 +687,8 @@ function drawBlocks(
       if (q.cull && !noCull) {
         const d = DIR[q.cull];
         const nb = cut && !kept(cut, x + d[0], y + d[1], z + d[2]) ? undefined : s.occluderAt(x + d[0], y + d[1], z + d[2]);
-        // A ghosted context block never hides an editable block's face (11).
-        const seeThrough = s.ghost && !(flags & CONTEXT) && s.ghost.has(x + d[0], y + d[1], z + d[2]);
+        // A ghosted block (context, 11, or faded, 18) never hides a solid block's face.
+        const seeThrough = s.ghostAt && !(flags & CONTEXT) && s.ghostAt(x + d[0], y + d[1], z + d[2]);
         // Hidden by an opaque neighbour, or between two blocks of the same translucent kind (glass, water).
         if (nb && !seeThrough && (nb.occludes.has(OPPOSITE[q.cull]) || (nb === blk && blk.translucent))) continue;
       }

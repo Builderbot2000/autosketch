@@ -40,7 +40,7 @@ z↓   0123456789012345
 
 ### Renders (images)
 
-`render({ views, region?, cutaway?, highlight?, size?, style?, context? })`
+`render({ views, region?, cutaway?, highlight?, size?, style?, context?, fade?, view? })`
 
 - **Views:** `iso_ne|iso_nw|iso_se|iso_sw` (3/4 isometric), `front|back|left|right|top` (orthographic elevations, resolved via `front`, `01`), `component:<id>` (auto-framed), or a custom camera `{ yaw, pitch, distance, target }`.
 - **Multi-view contact sheet:** `views: ["iso_ne","iso_sw","front","top"]` renders one image as a 2×2 grid. This is cheaper than four calls and makes comparison easier.
@@ -48,6 +48,8 @@ z↓   0123456789012345
 - **Subregions:** `region` takes any selection (`05`). Only blocks inside it are drawn, and only they hide faces, so a cut through solid material draws as a closed surface. The camera frames the region tightly, and axis ticks show the region's own coordinates. This was verified for boxes on 2026-11-07 (a cube cut from a 40×12×40 solid). Masks work the same way: the tool layer resolves the selection and the renderer takes the mask.
 - **Highlight:** a selection or the last op's diff drawn as a tint or outline.
 - **Context volume** (in a sandbox, `11`): `context: "ghost"` (default, desaturated and translucent) | `"normal"` | `"hide"`, so read-only surroundings are never mistaken for editable blocks.
+- **Fade** (`18`, piece 6): `fade: <selection>` draws everything outside the selection in the same ghost style, on any document or the world view, so `region: {dilate:"candidate", by:8}, fade: "candidate"` shows a selection solid among its faded surroundings. Faded blocks never hide the faces of solid ones.
+- **World view** (`18`, piece 5): `view: "world"` draws the world view; parts read at coarse level are named in the caption.
 - **Overlays:** axis ticks every 4/8/16 blocks (adaptive), a compass, and component labels (optional).
 - **Styles:** `textured` (default, real models and textures from `02`), `flat` (mean colours, faster and clearer for structure), `depth` (shaded by distance, for reading 3D form), `xray` (translucent shell).
 - The renderer is a pure-JS software rasterizer: baked models → triangles → z-buffer → PNG via `pngjs`. Back-face and occlusion culling at block level.
@@ -131,7 +133,7 @@ Each tool's description carries its cost hint.
 | `analyze` | Done (`perception/analyze.ts`): measurements only, see *Structural measurements*. Checked against three fixture buildings in `test/helpers/buildings.ts`. The earlier architectural labelling (footprint, walls, storeys, openings, roof type, rooms, issues, proposed components) was removed on 2026-11-07. |
 | `diff` | Done (`perception/diff.ts`): `checkpoint:<name>` (or a bare name) and `op:-n`, in either journal direction; counts by family (added, removed, replaced, state-only changes) and up to 5 clustered regions. `render: true` adds before/after 384² images of the changed area, the before image from a read-only snapshot. |
 | Morphological and render-seeded selections | Done: `enclosed`, `interior`, `heightmap`, `changed` (`perception/morphology.ts`, measured geometry with no labels) and `view_box`/`view_lasso` with `depth: visible\|through` (`perception/render/pick.ts`, using the stored cameras). `face`, `storey`, `roof`, `openings` were removed with architectural labelling; `room` is now `enclosed`. `ops/selection.ts` calls into them read-only; see `05`, *Implementation status*, for the JSON forms. `render` `highlight` takes `{changed}` like any selection; `{since}` still works. |
-| World view (`view: "world"`) | Done (select set, V1): `render`, `view_slice`, `raycast` (render ids `w<n>`, or `"world"` for the latest), `select` and `analyze` address the world view through `tools/world-view.ts` (`docFor`); the view itself is `world/view.ts` (`18`, piece 5). A render of it adds a caption note naming the dimension and the read count. `fade` and the coarse caption follow in V2. |
+| World view (`view: "world"`) | Done (select set, V1): `render`, `view_slice`, `raycast` (render ids `w<n>`, or `"world"` for the latest), `select` and `analyze` address the world view through `tools/world-view.ts` (`docFor`); the view itself is `world/view.ts` (`18`, piece 5). A render of it adds a caption note naming the dimension and the read count. V2: `render({fade})` on any document (the ghost flag covers context and everything outside `fade`; the caption counts faded and solid blocks), and a caption line naming the world view's coarse parts that meet the drawn box (`RenderOptions.coarse`). |
 | Events | `render`, `diff` with `render: true` and op previews emit `render.produced` (`source: "tool"`, view labels joined by commas, image size) through the session's event sink (`12`). |
 
 ## Open questions

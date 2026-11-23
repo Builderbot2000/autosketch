@@ -7,6 +7,7 @@ import type { UiFeed } from "./feed.js";
 import type { WorldFrame } from "./frame.js";
 import { DOC_GHOST, type GhostRegions } from "./ghosts.js";
 import type { CandidateRequests } from "./candidates.js";
+import type { ChoiceRequests } from "./choices.js";
 import type { LibraryRequests } from "./library.js";
 import type { UiPlayers } from "./players.js";
 import { loadReplayLog, ReplaySession, type ReplayLog } from "./replay-frames.js";
@@ -29,6 +30,8 @@ export interface RequestsHost {
   readonly library: LibraryRequests;
   /** The candidates lists (`17`, piece 3); without them the `candidates.*` kinds answer `bad_request`. */
   readonly candidates?: CandidateRequests;
+  /** The questions asked with choices (`18`, piece 7); without them `choices.pick` answers `bad_request`. */
+  readonly choices?: ChoiceRequests;
   readonly workspace: string;
   /** The live session: its id (the folder name of its logs) and the open document's name. */
   live(): { session: string; doc: string | undefined };
@@ -162,9 +165,10 @@ export class UiRequests {
         return { result: await lib.writeProcedure(a) };
       case "library.write.knowledge":
         return { result: await lib.writeKnowledge(a) };
-      // `18` piece 7: name and shape frozen in `13` (*Request kinds*); P2 serves it.
+      // `18` piece 7: name and shape frozen in `13` (*Request kinds*); handler in `choices.ts`.
       case "choices.pick":
-        throw new UiRequestError("bad_request", `This Autosketch doesn't serve ${kind} yet.`);
+        if (!this.host.choices) throw new UiRequestError("bad_request", `This Autosketch doesn't serve ${kind}.`);
+        return this.host.choices.pick(a, ref);
     }
   }
 

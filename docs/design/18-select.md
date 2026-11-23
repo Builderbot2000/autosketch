@@ -165,7 +165,7 @@ The select set's briefs are `docs/briefs/select/`; each silo updates its own row
 | 2. Material search | M (M1), T (T1) | Wire and fake host built (W1); mod and tool not started |
 | 3. Fill | M (M2), T (T2) | Wire and fake host built (W1); mod and tool not started |
 | 4. Expand | M (M2), T (T2) | Wire and fake host built (W1); mod and tool not started |
-| 5. World view (with snapshot `mask` and `coarse`) | V (V1, V2), M (M3) | Wire and fake host built (W1); view and mod reads not started |
+| 5. World view (with snapshot `mask` and `coarse`) | V (V1, V2), M (M3) | Wire and fake host built (W1). V1 built (select set, silo V): `world/view.ts` (`WorldView` on `Session.worldView`, wired in `server/index.ts`), `view: "world"` on `render`, `view_slice`, `raycast`, `select`, `analyze` (`tools/perception.ts`, `tools/edit.ts`, `tools/world-view.ts`), `world_view_read({box \ |
 | 6. Isolated render with faded surroundings | V (V2) | Not started |
 | 7. Choices in chat | W (W2), P (P2), C (C1) | Not started |
 | 8. Outlines in the world | W (W2), C (C2, C3), P (P3) | Not started |
@@ -198,9 +198,3 @@ Settled with the user 2026-11-22:
 - **In-world outlines for the candidate in the first version**, and the work and context particle outlines replaced by overlay lines visible at distance.
 - **Connectivity**: the same fill as the magic wand (`{connected}`), 26 neighbours by default in the world.
 - **Defaults the agent may change**: the crosshair block as seed when there is no text; an 8-block margin for fade and context; re-read on expand and on confirm.
-
-## Implementation status
-
-| Piece | Status |
-|---|---|
-| 5. World view | V1 built (select set, silo V): `world/view.ts` (`WorldView` on `Session.worldView`, wired in `server/index.ts`), `view: "world"` on `render`, `view_slice`, `raycast`, `select`, `analyze` (`tools/perception.ts`, `tools/edit.ts`, `tools/world-view.ts`), `world_view_read({box \| sel})` by box. Tests: `test/unit/world/world-view.test.ts` (beside the linked document, with a sandbox open, edits refused, selections stored and reused, emptied on a new request, the cap). Coarse level: V2. |

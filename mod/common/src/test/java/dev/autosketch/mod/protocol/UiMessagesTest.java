@@ -112,6 +112,47 @@ class UiMessagesTest {
         assertEquals(UiMessages.SAVE_FLASH_COLOUR, f.flashes().get(0).colour());
     }
 
+    /** 18, pieces 7 and 8: the choice kind, the steady fill record and proposed hits' flashes. */
+    @Test
+    void choicesAndFills() throws Exception {
+        assertTrue(UiMessages.REQUEST_KINDS.contains("choices.pick"));
+        Messages.Chat chat = Messages.Chat.decode(FrameCodec.decode(Golden.bin("chat-reply-choice")));
+        assertEquals("choices.pick", chat.action().kind());
+        assertEquals(0, chat.action().args().get("index").getAsInt());
+        UiMessages.UiRequest pick = UiMessages.UiRequest.decode(FrameCodec.decode(Golden.bin("ui-request-choices-pick")));
+        assertEquals("q1", pick.args().get("id").getAsString());
+        assertEquals("answered", UiMessages.UiResult.decode(FrameCodec.decode(Golden.bin("ui-result-choices-answered"))).error());
+
+        UiMessages.UiState s = UiMessages.UiState.decode(FrameCodec.decode(Golden.bin("ui-state-fill")));
+        UiMessages.Fill f = s.fills().get(0);
+        assertEquals(UiMessages.CANDIDATE_FILL, f.id());
+        assertEquals(64, f.alpha());
+        assertEquals(0xe84de0, f.colour());
+        assertEquals(6, f.faces().size());
+        assertEquals(12, f.edges().size());
+        assertEquals(List.of(-230, -220), List.of(f.edges().get(8)[2], f.edges().get(8)[5]));
+        assertEquals(List.of("candidate"), UiMessages.UiState.decode(FrameCodec.decode(Golden.bin("ui-state-fill-removed"))).fillsRemoved());
+        assertTrue(UiMessages.UiState.decode(FrameCodec.decode(Golden.bin("ui-state-full"))).fills().isEmpty());
+        assertEquals(UiMessages.CANDIDATE_FILL, UiMessages.UiFlash.decode(FrameCodec.decode(Golden.bin("ui-flash-hits"))).flashes().get(0).job());
+
+        Edit[] bad = {
+            h -> fill(h).addProperty("alpha", 0),
+            h -> fill(h).addProperty("alpha", 256),
+            h -> fill(h).getAsJsonArray("faces").set(0, Json.parse("[128,64,-240,129,80,-208]")),
+            h -> fill(h).getAsJsonArray("faces").set(0, Json.parse("[128,64,-240,128,64,-208]")),
+            h -> fill(h).getAsJsonArray("edges").set(0, Json.parse("[140,64,-230,152,65,-230]")),
+            h -> fill(h).getAsJsonArray("edges").set(0, Json.parse("[152,64,-230,140,64,-230]")),
+            h -> fill(h).getAsJsonArray("edges").set(0, Json.parse("[140,64,-230,152,64]")),
+            h -> fill(h).remove("edges"),
+        };
+        for (Edit e : bad) assertThrows(ProtocolException.class, () -> UiMessages.UiState.decode(edit("ui-state-fill", e)));
+        assertThrows(ProtocolException.class, () -> UiMessages.UiState.decode(edit("ui-state-full-fill", h -> h.add("fillsRemoved", Json.parse("[\"candidate\"]")))));
+    }
+
+    private static JsonObject fill(JsonObject h) {
+        return h.getAsJsonArray("fills").get(0).getAsJsonObject();
+    }
+
     private interface Edit {
         void apply(JsonObject h);
     }

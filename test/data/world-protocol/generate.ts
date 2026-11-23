@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { decodeFrame, encodeMessage, splitFrame } from "../../../src/world/protocol/codec.js";
 import { encodePreviewBody, maskRegions } from "../../../src/world/protocol/body.js";
 import { canonicalNbt, DEFAULT_VOLATILE, nbtHash, sectionHash } from "../../../src/world/protocol/hash.js";
-import { MCP_FEATURES, UI_PART_BYTES, type Message, type PatchBlock, type Sender, type UiGhost, type UiJob, type VolatileList, type WireBox } from "../../../src/world/protocol/messages.js";
+import { MCP_FEATURES, UI_PART_BYTES, type Message, type PatchBlock, type Sender, type UiFill, type UiGhost, type UiJob, type VolatileList, type WireBox } from "../../../src/world/protocol/messages.js";
 import { bytesToHex } from "../../../src/world/protocol/bytes.js";
 import { parseSnbt, toSnbt as snbtOf } from "../../../src/world/protocol/snbt.js";
 import { sidecarOf } from "./sidecar.js";
@@ -1056,6 +1056,95 @@ vector("snapshot-result-missing", "mod", "A select-mode blocks read across an un
 });
 vector("error-no-grant", "mod", "A search, fill or expand while no select request's grant is in force; the connection stays open", { type: "error", id: 62, code: "no_grant", message: "no select request is open: the player sends /autosketch select first" });
 vector("error-too-large", "mod", "A select-mode read over contextCap in one call; the MCP asks again for less or coarser", { type: "error", id: 63, code: "too_large", message: "the read covers 5242880 positions, more than contextCap 4194304" });
+
+// ── select in the UI (`18` pieces 7 and 8; feature ui) ─────────────────────────────────────────
+{
+  const players = [UUID_KEV];
+  const PINK = "#e84de0";
+  // The candidate: a house filling x 140…151, y 64…75, z -230…-221, in sections x 8…9, y 4, z -15…-14.
+  const candidate: UiFill = {
+    id: "candidate",
+    colour: PINK,
+    alpha: 64,
+    dimension: OW,
+    // The shell of the four sections, one merged rectangle per side.
+    faces: [
+      [128, 64, -240, 128, 80, -208],
+      [160, 64, -240, 160, 80, -208],
+      [128, 64, -240, 160, 64, -208],
+      [128, 80, -240, 160, 80, -208],
+      [128, 64, -240, 160, 80, -240],
+      [128, 64, -208, 160, 80, -208],
+    ],
+    // The mask's boundary edges, merged into segments across sections.
+    edges: [
+      [140, 64, -230, 152, 64, -230], [140, 76, -230, 152, 76, -230], [140, 64, -220, 152, 64, -220], [140, 76, -220, 152, 76, -220],
+      [140, 64, -230, 140, 76, -230], [152, 64, -230, 152, 76, -230], [140, 64, -220, 140, 76, -220], [152, 64, -220, 152, 76, -220],
+      [140, 64, -230, 140, 64, -220], [152, 64, -230, 152, 64, -220], [140, 76, -230, 140, 76, -220], [152, 76, -230, 152, 76, -220],
+    ],
+  };
+  vector("chat-reply-choice", "mcp", "One choice of a question, as its own reply message (one action per chat): clicking it makes the client send choices.pick with the question's id and the choice's index", {
+    type: "chat",
+    request: 21,
+    player: UUID_KEV,
+    kind: "reply",
+    lines: ["[1] mossy stone brick house, 40 blocks north-east"],
+    action: { line: 0, kind: "choices.pick", args: { id: "q1", index: 0 } },
+  });
+  vector("ui-request-choices-pick", "mod", "The player clicked the second choice of question q1", {
+    type: "ui.request",
+    request: 30,
+    player: { name: "Kev", uuid: UUID_KEV },
+    kind: "choices.pick",
+    args: { id: "q1", index: 1 },
+  });
+  vector("ui-result-choices-pick", "mcp", "The choice went to the agent as the player's answer on in-game request 21", {
+    type: "ui.result",
+    request: 30,
+    player: UUID_KEV,
+    ok: true,
+    result: { request: 21 },
+  });
+  vector("ui-result-choices-answered", "mcp", "A second click on question q1 after a choice was taken", {
+    type: "ui.result",
+    request: 31,
+    player: UUID_KEV,
+    ok: false,
+    error: "answered",
+    message: "You already answered this question.",
+  });
+  vector("ui-state-fill", "mcp", "Changes: the select candidate appears as a steady fill, the shell of its four sections and the boundary edges of its mask", {
+    type: "ui.state",
+    players,
+    seq: 5,
+    full: false,
+    fills: [candidate],
+  });
+  vector("ui-state-full-fill", "mcp", "A full state during a select request: no jobs, the candidate's fill", {
+    type: "ui.state",
+    players,
+    seq: 5,
+    full: true,
+    jobs: [],
+    request: { id: 21, mode: "select", text: "the mossy stone brick house" },
+    tokens: null,
+    refusal: null,
+    fills: [candidate],
+  });
+  vector("ui-state-fill-removed", "mcp", "Changes: the candidate's fill ended (the request closed)", {
+    type: "ui.state",
+    players,
+    seq: 6,
+    full: false,
+    request: null,
+    fillsRemoved: ["candidate"],
+  });
+  vector("ui-flash-hits", "mcp", "Proposed hits pulsed as they are offered as choices: one flash record with job candidate, a box per cluster", {
+    type: "ui.flash",
+    players,
+    flashes: [{ job: "candidate", colour: PINK, dimension: OW, boxes: [{ min: [128, 60, -240], max: [159, 90, -209] }, { min: [-48, 55, -32], max: [-17, 80, -1] }] }],
+  });
+}
 
 // ── hashing ────────────────────────────────────────────────────────────────────────────────────
 /** The starting default list the hash vectors were cut with; pinned so the frozen hash vectors don't follow later growth of `DEFAULT_VOLATILE`. */

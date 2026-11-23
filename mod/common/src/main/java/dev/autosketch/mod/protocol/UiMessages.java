@@ -42,7 +42,21 @@ public final class UiMessages {
             "library.thumbnail", "library.preview", "library.rename", "library.duplicate", "library.delete", "library.trash", "library.restore", "library.hide",
             "library.copy", "library.empty_trash", "logs.list", "replay.open", "replay.seek", "replay.close", "ghost.anchor", "ghost.clear",
             "candidates.open", "candidates.ghost", "candidates.ghost.clear", "candidates.submit",
-            "library.write.prefab", "library.write.palette", "library.write.procedure", "library.write.knowledge");
+            "library.write.prefab", "library.write.palette", "library.write.procedure", "library.write.knowledge",
+            "choices.pick");
+
+    /**
+     * Most choices one question offers (18, piece 7): a player without the client half answers by
+     * typing one digit. A {@code choices.pick} carries the question's {@code id} and the choice's
+     * 0-based {@code index}.
+     */
+    public static final int CHOICES_MAX = 9;
+
+    /** The fill id of the select candidate (18, piece 8), also the {@code job} of proposed hits' flash records. */
+    public static final String CANDIDATE_FILL = "candidate";
+
+    /** Most faces plus edges one fill record carries. */
+    public static final int FILL_SPANS = 16_384;
 
     /**
      * The library editors' write kinds (17, piece 6), one per entry kind. Each carries the
@@ -159,6 +173,81 @@ public final class UiMessages {
         }
     }
 
+    /**
+     * A steady fill (13, *In-game UI*, Fill; 18, piece 8): {@code faces} drawn through blocks at a
+     * constant {@code alpha} (1 to 255), {@code edges} drawn as lines. Each span is
+     * {@code [x1, y1, z1, x2, y2, z2]} in world corner coordinates, min ≤ max: a face is flat on
+     * exactly one axis, an edge on exactly two.
+     */
+    public record Fill(String id, int colour, int alpha, String dimension, List<int[]> faces, List<int[]> edges) {
+        public JsonObject toJson() {
+            JsonObject o = new JsonObject();
+            o.addProperty("id", id);
+            o.addProperty("colour", UiMessages.colour(colour));
+            o.addProperty("alpha", alpha);
+            o.addProperty("dimension", dimension);
+            o.add("faces", spans(faces));
+            o.add("edges", spans(edges));
+            return o;
+        }
+
+        public static Fill fromJson(JsonElement e) throws ProtocolException {
+            JsonObject o = obj(e, "a fill");
+            int alpha = Json.reqInt(o, "alpha", null);
+            if (alpha < 1 || alpha > 255) throw ProtocolException.badRequest(null, "a fill's alpha must be 1 to 255");
+            List<int[]> faces = readSpans(o, "faces", 1), edges = readSpans(o, "edges", 2);
+            if (faces.size() + edges.size() > FILL_SPANS) throw ProtocolException.badRequest(null, "a fill carries at most " + FILL_SPANS + " faces and edges");
+            return new Fill(Json.reqString(o, "id", null), parseColour(Json.reqString(o, "colour", null)), alpha, Json.reqString(o, "dimension", null), faces, edges);
+        }
+
+        /** By value: the spans are arrays, compared element by element. */
+        @Override
+        public boolean equals(Object o) {
+            return o instanceof Fill f && id.equals(f.id) && colour == f.colour && alpha == f.alpha && dimension.equals(f.dimension)
+                    && java.util.Arrays.deepEquals(faces.toArray(), f.faces.toArray()) && java.util.Arrays.deepEquals(edges.toArray(), f.edges.toArray());
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(id, colour, alpha, dimension, java.util.Arrays.deepHashCode(faces.toArray()), java.util.Arrays.deepHashCode(edges.toArray()));
+        }
+
+        @Override
+        public String toString() {
+            return "Fill[id=" + id + ", colour=" + UiMessages.colour(colour) + ", alpha=" + alpha + ", dimension=" + dimension + ", faces=" + toJson().get("faces")
+                    + ", edges=" + toJson().get("edges") + "]";
+        }
+
+        private static JsonArray spans(List<int[]> spans) {
+            JsonArray a = new JsonArray(spans.size());
+            for (int[] s : spans) {
+                JsonArray v = new JsonArray(6);
+                for (int n : s) v.add(n);
+                a.add(v);
+            }
+            return a;
+        }
+
+        /** Spans with exactly {@code flat} axes where min = max (1: faces, 2: edges). */
+        private static List<int[]> readSpans(JsonObject o, String key, int flat) throws ProtocolException {
+            JsonArray a = Json.reqArray(o, key, null);
+            List<int[]> out = new ArrayList<>(a.size());
+            for (JsonElement e : a) {
+                if (!e.isJsonArray() || e.getAsJsonArray().size() != 6) throw ProtocolException.badRequest(null, "\"" + key + "\" holds [x1, y1, z1, x2, y2, z2]");
+                int[] s = new int[6];
+                for (int i = 0; i < 6; i++) s[i] = Json.asInt(e.getAsJsonArray().get(i), key, null);
+                int equal = 0;
+                for (int i = 0; i < 3; i++) {
+                    if (s[i] > s[i + 3]) throw ProtocolException.badRequest(null, "\"" + key + "\": min must not exceed max");
+                    if (s[i] == s[i + 3]) equal++;
+                }
+                if (equal != flat) throw ProtocolException.badRequest(null, flat == 1 ? "a face is flat on exactly one axis" : "an edge runs along exactly one axis");
+                out.add(s);
+            }
+            return List.copyOf(out);
+        }
+    }
+
     private static JsonArray jobs(List<Job> jobs) {
         JsonArray a = new JsonArray();
         for (Job j : jobs) a.add(j.toJson());
@@ -197,10 +286,17 @@ public final class UiMessages {
      * {@code ui.state}. Full: {@code jobs} and the three optional fields are all given (an empty
      * {@link Optional} means none). Changes: {@code jobs} holds the added or changed jobs whole
      * (replace by id), {@code removed} the ended ones, and each optional field is null when unchanged,
-     * empty when cleared.
+     * empty when cleared. {@code fills} (18, piece 8) as {@code jobs}, except that a full state with
+     * none omits the key; {@code fillsRemoved} as {@code removed}.
      */
     public record UiState(List<UUID> players, long seq, boolean full, List<Job> jobs, List<String> removed, @Nullable Optional<RequestInfo> request,
-            @Nullable Optional<Tokens> tokens, @Nullable Optional<Refusal> refusal) {
+            @Nullable Optional<Tokens> tokens, @Nullable Optional<Refusal> refusal, List<Fill> fills, List<String> fillsRemoved) {
+        /** A state without fills, as before 18. */
+        public UiState(List<UUID> players, long seq, boolean full, List<Job> jobs, List<String> removed, @Nullable Optional<RequestInfo> request,
+                @Nullable Optional<Tokens> tokens, @Nullable Optional<Refusal> refusal) {
+            this(players, seq, full, jobs, removed, request, tokens, refusal, List.of(), List.of());
+        }
+
         public Frame encode() {
             JsonObject h = Json.header("ui.state");
             h.add("players", writePlayers(players));
@@ -230,6 +326,12 @@ public final class UiMessages {
                 o.addProperty("text", r.text());
                 return (JsonElement) o;
             }).orElse(com.google.gson.JsonNull.INSTANCE));
+            if (!fills.isEmpty()) {
+                JsonArray a = new JsonArray(fills.size());
+                for (Fill fl : fills) a.add(fl.toJson());
+                h.add("fills", a);
+            }
+            if (!full && !fillsRemoved.isEmpty()) h.add("fillsRemoved", Json.strings(fillsRemoved));
             return new Frame(h);
         }
 
@@ -250,7 +352,11 @@ public final class UiMessages {
             Optional<Tokens> tokens = field(h, "tokens", full, o -> new Tokens(Json.reqLong(o, "input", null), Json.reqLong(o, "output", null),
                     Json.reqLong(o, "cacheRead", null), Json.reqLong(o, "cacheCreation", null), o.has("cost") ? o.get("cost").getAsDouble() : null));
             Optional<Refusal> refusal = field(h, "refusal", full, o -> new Refusal(Json.reqString(o, "code", null), Json.reqString(o, "text", null)));
-            return new UiState(players, seq, full, jobs, removed, request, tokens, refusal);
+            List<Fill> fills = new ArrayList<>();
+            if (h.has("fills")) for (JsonElement e : Json.reqArray(h, "fills", null)) fills.add(Fill.fromJson(e));
+            if (full && h.has("fillsRemoved")) throw ProtocolException.badRequest(null, "a full ui.state removes no fills");
+            List<String> fillsRemoved = h.has("fillsRemoved") ? strings(h, "fillsRemoved") : List.of();
+            return new UiState(players, seq, full, jobs, removed, request, tokens, refusal, List.copyOf(fills), fillsRemoved);
         }
     }
 

@@ -1,0 +1,16 @@
+{
+  "description": "Changes: the candidate's fill ended (the request closed)",
+  "sender": "mcp",
+  "header": {
+    "type": "ui.state",
+    "players": [
+      "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+    ],
+    "seq": 6,
+    "full": false,
+    "request": null,
+    "fillsRemoved": [
+      "candidate"
+    ]
+  }
+}

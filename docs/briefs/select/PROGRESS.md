@@ -11,5 +11,7 @@ The lead's log, one line per step (*How to run this set* in the README). Read th
 | P1 | sl-p1 | merged | 095d4bd | no link needed for select (like scan); event in world coords, read square from default selectChunks 256 (hello lacks the mod's value); without mod feature `select` the event says to update the mod; event never names the skill; DEFAULT_MODES lists select; skill regenerated into packaging. For T3: `world_volumes({from:"candidate"})` must work in select with no link (setVolumes' `world_no_document` refusal in prompt.ts still says scan/probe); R1 rewords that refusal |
 | V2 | sl-v2 | merged | af53156 | coarse automatic in world_view_read (2³, then 4³, then refused); coarse cell's block written over the whole cell (Z1 checks 4³ cost); full read replaces coarse, never the reverse; RenderOptions.fade works on any doc; 18's syntax fixed ({dilate:a, by:n}, {filter:a, air:false}); surface read keeps tops within the box's y range. Repaired piece 5 row the lead's merge cut at an escaped pipe. Silo V complete |
 | M1 | sl-m1 | started | | |
-| W2 | sl-w2 | started | | C1 held until W2 merges (choice click, fewer parallel mod builds) |
+| W2 | sl-w2 | merged | e5100b5 | `choices.pick {id, index}` answered `{request}` or `answered`; CHOICES_MAX 9 (one digit on vanilla); `ui.state` `fills`/`fillsRemoved`, Fill = faces + edges as spans, ≤16,384 spans (edges dropped first); near outline = mask boundary edges; hits = `ui.flash` job `candidate`; volume outlines mod server→client on relay op 4, particles kept for others (C3). Placeholder `choices.pick` → bad_request in src/ui/requests.ts + pinning test in candidates.test.ts: P2 replaces both. Silo W complete |
 | T2 | sl-t2 | started | | |
+| C1 | sl-c1 | started | | |
+| P2 | sl-p2 | started | | |

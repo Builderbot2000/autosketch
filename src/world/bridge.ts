@@ -171,7 +171,7 @@ const RESPONSE = {
 const DOWN = "world_disconnected";
 const OUTDATED = "world_mod_outdated";
 /** Modes listed when the options name none: a mode is listed only once the MCP enforces it. */
-const DEFAULT_MODES: readonly RequestMode[] = ["ask", "scan", "plan", "build"];
+const DEFAULT_MODES: readonly RequestMode[] = ["ask", "scan", "plan", "build", "select"];
 
 export class Bridge implements BridgeConnection {
   hello: ModHello | undefined;

@@ -48,6 +48,7 @@ The fix is to **search first** (by material, which nothing can hide), **grow the
 ### 1. Command and mode (mod, MCP)
 
 - `/autosketch select [text]` and `/<alias> select [text]`, mode `select`, read-only (refused edits and drafts, as `scan`). The prompt carries the usual context (position, look, crosshair block, dimension) and **no grant**: what the agent may read is the search area (piece 2), set per request.
+- **Select event** (as built, P1, 2026-11-23). A select prompt needs no linked document (like `scan`): the event opens with the player's words (or, with none, the crosshair block as the starting point, or a request to ask the player when there is no block either), the mode line, then the context **in world coordinates** (feet, dimension, facing, the crosshair block and the focus box), since the world view and the select tools take world positions. It states the read square (`13`, *Where the mod serves reads*) as chunk and world bounds computed with the default `selectChunks` 256, saying the mod's config may set less: the mod doesn't tell the MCP its value, and a smaller config only shrinks the square. Then the five steps with their tools, terrain's starter volume, and the usual `world_reply` line. Without the mod's `select` feature it says the select tools are refused and to update the mod, instead of the square and the steps (`13`, *Versions and features*). It names no skill: the server never names skills (`07`); the agent finds `skills/select` through `knowledge_list`. No `focus`, `target` or `player` camera is saved on a linked document, since a select request isn't about the linked volumes. The volume-change refusal in `ask` and `plan` now points the player to `/autosketch select [text]`.
 - `/autosketch scan`, mode `scan`, the scan grant, the probe document and the config keys `scanChunks`, `scanChunksMax`, `scanBelow`, `scanAbove`, `scanCap` are removed (*Removal*).
 
 ### 2. Material search (mod, wire, MCP tool)
@@ -161,7 +162,7 @@ The select set's briefs are `docs/briefs/select/`; each silo updates its own row
 |---|---|---|
 | *Wire*: mode `select`; `search`, `fill`, `expand`; snapshot `mask` and `coarse`; the select-mode read grant | W (W1) | Built, wire only. Schemas in `13`, *Select*; codecs in `src/world/protocol/` and `mod/…/protocol/SelectMessages.java`; golden vectors in `test/data/world-protocol/` (and `mask-regions.json`); the fake host answers all of it (`test/support/fake-select.ts`), its fill with `{connected}`'s algorithm (parity tested at 6, 18 and 26). The bridge refuses the requests unsent (`world_mod_outdated`) without the mod feature `select` |
 | *Wire*: choice kind, steady fill record, volume lines | W (W2) | Not started |
-| 1. Command and mode | C (C1), P (P1) | Wire built (W1: mode `select` on both sides, `select` read-only and volume-changing in `src/world/modes.ts` with placeholder lines); command and agent text not started |
+| 1. Command and mode | C (C1), P (P1) | Wire built (W1). MCP built (P1): `select` read-only and volume-changing in `src/world/modes.ts` with its own mode line and refusal wording; the bridge's hello lists `select` by default (`DEFAULT_MODES`); `InGameRequests.onSelect` and `selectText` in `src/world/prompt.ts` deliver a select prompt without a link, a probe or any read (*Select event*, below), hold the mode, attach the write guard to a linked document, and end the text with the component set's reminder line. Tests in `test/unit/world/prompt.test.ts` (exact event text with words, crosshair only, neither, with the reminder, without the mod's `select` feature; edits and drafts refused, `world_volumes` passing the mode rule, `/autosketch done` ending it). Command (C1) not started |
 | 2. Material search | M (M1), T (T1) | Wire and fake host built (W1); mod and tool not started |
 | 3. Fill | M (M2), T (T2) | Wire and fake host built (W1); mod and tool not started |
 | 4. Expand | M (M2), T (T2) | Wire and fake host built (W1); mod and tool not started |
@@ -170,7 +171,7 @@ The select set's briefs are `docs/briefs/select/`; each silo updates its own row
 | 7. Choices in chat | W (W2), P (P2), C (C1) | Not started |
 | 8. Outlines in the world | W (W2), C (C2, C3), P (P3) | Not started |
 | 9. Confirming | T (T3) | Not started |
-| 10. Terrain | V (V2), P (P1) | Wire built (W1: surface snapshots inside the select grant); not started otherwise |
+| 10. Terrain | V (V2), P (P1) | Wire built (W1: surface snapshots inside the select grant). Agent guide built (P1): the starter skill `skills/select` (`library/knowledge/skills/select.md`, also generated into the Claude Code plugin's skills): the workflow, terrain from a starter volume, multiple-choice asking, never asking for ids; advisory, found through `knowledge_list` like the other skills. Surface read (V2) not started |
 | *Removal* | R (R1) | Not started |
 | *Measure first* | Z (Z1) | Not started |
 | *Testing*, end to end | Z (Z2) | Not started |

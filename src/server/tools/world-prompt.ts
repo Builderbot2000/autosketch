@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { choiceLine, MAX_CHOICES } from "../../core/choices.js";
 import { MAX_CANDIDATES, type CandidateItem } from "../../library/candidates.js";
 import { libraryFor } from "./library-context.js";
 import { fail, text, type ToolDeps } from "./shared.js";
@@ -11,6 +12,12 @@ import { fail, text, type ToolDeps } from "./shared.js";
  * `candidates` (`17`, piece 3) offers prefabs: the list is stored on the session under an id and
  * one line is appended to the reply, clickable (it opens the candidates screen) when the mod has the
  * in-game UI, else listing the cells as plain text.
+ *
+ * `choices` (`18`, piece 7) asks a multiple-choice question: stored on the session under an id
+ * (`core/choices.ts`), each choice sent as its own `chat` reply carrying the `choices.pick` action
+ * (one action per message, `17`), then a plain *"or type your own answer"* line. Without the in-game
+ * UI, the choices go as numbered plain lines in the reply, answered by typing the number. Either way
+ * the answer reaches the agent as text, like picks.
  */
 export function registerWorldPromptTools({ tool, session }: ToolDeps): void {
   tool(
@@ -20,7 +27,8 @@ export function registerWorldPromptTools({ tool, session }: ToolDeps): void {
       description:
         "Answers an in-game request in the Minecraft chat (the player sees nothing else you write). One chat line per entry. " +
         "done:true marks it answered and closes its stream of activity lines; an ask, plan or scan request's mode stays in force until the player ends it in game. request defaults to the open request. " +
-        `candidates (≤${MAX_CANDIDATES} library prefabs) adds a clickable [Show candidates] line opening an in-game picker; cells default to the last prefab_sheet's, and the player's picks come back as text. Text, <50 tokens.`,
+        `candidates (≤${MAX_CANDIDATES} library prefabs) adds a clickable [Show candidates] line opening an in-game picker; cells default to the last prefab_sheet's, and the player's picks come back as text. ` +
+        `choices (≤${MAX_CHOICES}) asks a multiple-choice question after the lines: one clickable line per choice (numbered lines the player answers by typing the number on a client without the UI), plus "or type your own answer"; the chosen choice's text comes back as the player's answer. Text, <50 tokens.`,
       inputSchema: {
         lines: z.array(z.string().min(1).max(1000)).min(1).max(20).describe("Chat lines, one per entry"),
         done: z.boolean().optional().describe("The request is answered: close its stream (a read-only mode stays until the player ends it)"),
@@ -31,6 +39,7 @@ export function registerWorldPromptTools({ tool, session }: ToolDeps): void {
           .max(MAX_CANDIDATES)
           .optional()
           .describe("Prefabs to offer the player in the candidates screen"),
+        choices: z.array(z.string().min(1).max(200)).min(1).max(MAX_CHOICES).optional().describe("Answers the player can click, in order (shown as [1] …, [2] …)"),
       },
       doc: false,
     },
@@ -49,12 +58,25 @@ export function registerWorldPromptTools({ tool, session }: ToolDeps): void {
       // Without the in-game UI the line can't open anything, so it lists the cells instead.
       const clickable = !!list && g.clickable;
       const lines = list ? [...a.lines, candidatesLine(list.entries, clickable)] : a.lines;
-      const opts = { ...(a.done ? { done: true } : {}), ...(a.request !== undefined ? { request: a.request } : {}) };
-      const { request, open, held } = g.reply(lines, clickable ? { ...opts, action: { line: a.lines.length, kind: "candidates.open", args: { id: list!.id } } } : opts);
-      if (list) {
-        list.request = request?.id ?? null;
-        list.question = request?.text ?? "";
-        if (request?.mode) list.mode = request.mode;
+      const question = a.choices ? session.choices.add({ request: null, question: a.lines.join(" "), choices: a.choices }) : undefined;
+      // Choices: one message per clickable line (one action per chat message); else numbered lines in this one.
+      const split = !!question && g.clickable;
+      const first = question && !split ? [...lines, ...a.choices!.map((c, i) => choiceLine(i, c)), plainChoicesLine(g.current?.mode ?? "select")] : lines;
+      const opts = { ...(a.done && !split ? { done: true } : {}), ...(a.request !== undefined ? { request: a.request } : {}) };
+      const { request, open, held } = g.reply(first, clickable ? { ...opts, action: { line: a.lines.length, kind: "candidates.open", args: { id: list!.id } } } : opts);
+      let answered = { open, held };
+      if (split) {
+        // The rest go to the request the first message reached (or, like it, to none).
+        const to = request ? { request: request.id } : a.request !== undefined ? { request: a.request } : {};
+        a.choices!.forEach((c, index) => g.reply([choiceLine(index, c)], { ...to, action: { line: 0, kind: "choices.pick", args: { id: question!.id, index } } }));
+        const last = g.reply([CLICK_CHOICES_LINE], { ...to, ...(a.done ? { done: true } : {}) });
+        answered = { open: last.open, held: last.held };
+      }
+      for (const stored of [list, question]) {
+        if (!stored) continue;
+        stored.request = request?.id ?? null;
+        if (stored === list) stored.question = request?.text ?? "";
+        if (request?.mode) stored.mode = request.mode;
       }
       const n = `${a.lines.length} line${a.lines.length === 1 ? "" : "s"}`;
       const to = request
@@ -62,11 +84,22 @@ export function registerWorldPromptTools({ tool, session }: ToolDeps): void {
         : a.request !== undefined
           ? `for request ${a.request} (unknown: shown to players with log "all")`
           : 'to players with log "all" (no open request)';
+      const asked = question ? ` · choices ${question.id}: ${a.choices!.length}${split ? " clickable lines" : " numbered plain lines (the mod has no in-game UI; the player types the number)"}; the answer comes back as an event` : "";
       const offered = list ? ` · candidates ${list.id}: ${list.entries.map((e) => `${e.cell} ${e.prefab}`).join(", ")}${clickable ? " (clickable line added)" : " (listed as plain text: the mod has no in-game UI)"}` : "";
-      const closed = !a.done || !open ? "" : held ? ` · request answered; its ${held} mode stays in force until the player ends it in game (/autosketch done) or sends a new request` : " · request closed";
-      return text(`ok · world_reply · ${n} ${to}${offered}${closed}`);
+      const closed = !a.done || !answered.open ? "" : answered.held ? ` · request answered; its ${answered.held} mode stays in force until the player ends it in game (/autosketch done) or sends a new request` : " · request closed";
+      return text(`ok · world_reply · ${n} ${to}${offered}${asked}${closed}`);
     },
   );
+}
+
+/** The line after clickable choices (`18`, piece 7): free text stays open. */
+const CLICK_CHOICES_LINE = "or type your own answer";
+/**
+ * The line after numbered plain choices, for a client without the UI: the number is typed as a
+ * request (`world/prompt.ts` takes a one-digit request as the choice), in the open request's mode.
+ */
+function plainChoicesLine(mode: string): string {
+  return `Answer with the number (/autosketch ${mode} 2), or type your own answer.`;
 }
 
 /** The line appended for a candidates list: a link to the screen, or the cells as text. */

@@ -1,4 +1,5 @@
 import type { PublicBox, Vec3 } from "../core/region.js";
+import { choiceText, typedChoice, type Choices } from "../core/choices.js";
 import type { EventListener } from "../core/fanout.js";
 import { lookTarget, removeCamera, saveCamera } from "../document/cameras.js";
 import type { Document } from "../document/document.js";
@@ -98,6 +99,8 @@ export interface InGameRequestsOptions extends PromptSettings {
   autoLink?: boolean;
   /** The session's component set (`Session.componentSet`): its reminder line ends each request's event text while it has entries (`17`, piece 1, *Reminders*). */
   componentSet?: { remind(text: string): string };
+  /** The session's questions asked with choices (`Session.choices`, `18` piece 7): a typed number answers the open one. */
+  choices?: Pick<Choices, "openOn">;
   log?: (msg: string) => void;
 }
 
@@ -231,6 +234,7 @@ export class InGameRequests implements InGameReplies {
    * ids come from the mod's prompt counter, so the MCP has none of its own to give it (decided Q3).
    * A list that went to no request (`request` null) is answered with an event naming no request,
    * and nothing opens. Throws, opening nothing, when no agent session can receive the event.
+   * A clicked choice (`18`, piece 7, `ui/choices.ts`) is delivered the same way.
    */
   async candidatesAnswer(a: { request: number | null; mode?: RequestMode; player: PlayerRef; question: string; text: string }): Promise<void> {
     if (!this.opts.listening()) throw new Error("no agent session is listening for in-game requests");
@@ -240,7 +244,7 @@ export class InGameRequests implements InGameReplies {
     if (id === null || open) return;
     if (this.link.state === "linked" && this.link.doc) this.modeRule.attach(this.link.doc);
     this.open({ id, player: a.player, mode: a.mode ?? "build", text: a.question });
-    this.opts.log?.(`in-game ${a.mode ?? "build"} request ${id} reopened by ${a.player.name}'s candidates answer`);
+    this.opts.log?.(`in-game ${a.mode ?? "build"} request ${id} reopened by ${a.player.name}'s answer`);
   }
 
   /** A request event's text with the component set's reminder line appended while the set has entries (`17`, piece 1). */
@@ -256,6 +260,7 @@ export class InGameRequests implements InGameReplies {
     };
     if (!promptAllowed(m.player, this.opts.promptPlayers, this.link.bridge.hello)) return refuse("not_allowed");
     if (!this.link.bridge.modes.includes(m.mode ?? "build")) return refuse("unsupported_mode");
+    if (await this.onTypedChoice(m, refuse)) return;
     if (m.mode === "scan") return this.onScan(m, refuse);
     if (m.mode === "select") return this.onSelect(m, refuse);
     if (this.link.state !== "linked") await this.link.ensureLinked?.();
@@ -273,6 +278,37 @@ export class InGameRequests implements InGameReplies {
     this.modeRule.attach(doc);
     this.link.bridge.send({ type: "prompt.result", id: m.id, delivered: true });
     this.open({ id: m.id, player: m.player, mode: modeOf(m), text: m.text });
+  }
+
+  /**
+   * A typed number answering a question (`18`, piece 7): a player without the client half can't
+   * click a choice line, so a request whose whole text is one digit, while the open (or held)
+   * request has an unanswered question with that many choices, is that choice, not a new request.
+   * The choice's text goes to the agent on the question's request, as a click would send it; the
+   * prompt is delivered, opens nothing and leaves the held mode as it was. True when it was one.
+   */
+  private async onTypedChoice(m: PromptMessage, refuse: (reason: PromptRefusal) => void): Promise<boolean> {
+    const n = typedChoice(m.text);
+    if (n === undefined || !this.opts.choices) return false;
+    const open = [this.stream.current?.id, this.held?.id].filter((id): id is number => id !== undefined);
+    const q = open.map((id) => this.opts.choices!.openOn(id)).find((q) => q !== undefined);
+    if (!q || n > q.choices.length) return false;
+    if (!this.opts.listening()) {
+      refuse("no_listener");
+      return true;
+    }
+    q.answered = true;
+    try {
+      await this.opts.notify(this.remind(choiceText(m.player.name, q, n - 1)), { request: String(q.request), player: m.player.name });
+    } catch (e) {
+      q.answered = false;
+      this.opts.log?.(`channel notification failed: ${(e as Error).message}`);
+      refuse("no_listener");
+      return true;
+    }
+    this.link.bridge.send({ type: "prompt.result", id: m.id, delivered: true });
+    this.opts.log?.(`in-game request ${m.id} from ${m.player.name} taken as choice ${n} of ${q.id} (request ${q.request})`);
+    return true;
   }
 
   /**

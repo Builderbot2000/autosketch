@@ -137,6 +137,7 @@ async function main(): Promise<void> {
       palettes: () => book,
       autoLink,
       componentSet: session.componentSet,
+      choices: session.choices,
       log,
     });
   } catch (e) {
@@ -173,6 +174,7 @@ async function main(): Promise<void> {
     promptPlayers: () => settings.get(WORLD_PROMPT_PLAYERS),
     library: uiLibraryHost(session),
     candidates: session.candidates,
+    choices: session.choices,
     stateOverrides: candidateStateOverrides(session),
     baseDoc: () => session.doc,
     scopes: session.scopes,

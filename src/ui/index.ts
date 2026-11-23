@@ -3,6 +3,7 @@ import type { LoggedEvent } from "../core/events.js";
 import type { Settings } from "../core/settings.js";
 import type { StateOverride } from "../core/rotate.js";
 import type { Candidates } from "../library/candidates.js";
+import type { Choices } from "../core/choices.js";
 import { Library } from "../library/index.js";
 import { loadPrefab, type LoadedPrefab, type Prefab } from "../library/prefabs.js";
 import type { Document } from "../document/document.js";
@@ -14,6 +15,7 @@ import type { UiRequestInfo } from "../world/protocol/messages.js";
 import { UiFeed } from "./feed.js";
 import type { WorldFrame } from "./frame.js";
 import { CandidateRequests, type CandidatesHost } from "./candidates.js";
+import { ChoiceRequests } from "./choices.js";
 import { GhostRegions } from "./ghosts.js";
 import { LibraryRequests, type LibraryHost } from "./library.js";
 import { UiPlayers } from "./players.js";
@@ -47,6 +49,8 @@ export interface UiOptions {
   library: LibraryHost;
   /** The session's candidates lists (`17`, piece 3), which `candidates.*` requests read. */
   candidates?: Pick<Candidates, "get">;
+  /** The session's questions asked with choices (`18`, piece 7), which `choices.pick` answers. */
+  choices?: Pick<Choices, "get">;
   /** Plugin block-state overrides for turning blocks (`09`), so a rotated candidate ghost matches `stamp`. */
   stateOverrides?(): readonly StateOverride[];
   baseDoc(): Document | undefined;
@@ -92,7 +96,7 @@ export function startUi(o: UiOptions): UiCore {
     const g = o.inGame?.();
     return g?.current?.id === id || g?.heldRequest?.id === id;
   };
-  // `candidates.submit`'s text goes to the agent through the in-game requests (`17`, piece 5).
+  // `candidates.submit`'s and `choices.pick`'s text goes to the agent through the in-game requests (`17`, piece 5; `18`, piece 7).
   const answer: NonNullable<CandidatesHost["answer"]> = async (a) => {
     const g = o.inGame?.();
     if (!g?.candidatesAnswer) throw new Error("in-game requests aren't served here");
@@ -119,7 +123,8 @@ export function startUi(o: UiOptions): UiCore {
     ghosts,
     settings,
     library: new LibraryRequests(o.library, settings),
-    ...(o.candidates ? { candidates: new CandidateRequests({ lists: o.candidates, openRequest, ghosts, answer,  load: (id) => loadCandidate(o.library, id), registry: () => o.library.registry?.(), ...(o.stateOverrides ? { stateOverrides: o.stateOverrides } : {}) }) } : {}),
+    ...(o.choices ? { choices: new ChoiceRequests({ questions: o.choices, answer }) } : {}),
+    ...(o.candidates ? { candidates: new CandidateRequests({ lists: o.candidates, openRequest, ghosts, answer, load: (id) => loadCandidate(o.library, id), registry: () => o.library.registry?.(), ...(o.stateOverrides ? { stateOverrides: o.stateOverrides } : {}) }) } : {}),
     workspace: o.workspace,
     live: () => ({ session: o.sessionId, doc: o.baseDoc()?.meta.name }),
     linked: () => o.linkFrame() !== undefined,

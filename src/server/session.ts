@@ -3,6 +3,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { access, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { Choices } from "../core/choices.js";
 import { NO_EVENTS, type EventSink } from "../core/events.js";
 import { EventFanout, type EventListener } from "../core/fanout.js";
 import { toPublic, type PublicBox, type Vec3 } from "../core/region.js";
@@ -156,6 +157,11 @@ export class Session {
    * which the in-game UI's `candidates.*` requests read. Session-long, in memory only.
    */
   readonly candidates = new Candidates();
+  /**
+   * The questions asked with `world_reply({choices})` (18, piece 7), which the in-game UI's
+   * `choices.pick` and a typed number answer. Session-long, in memory only.
+   */
+  readonly choices = new Choices();
   /** Hooks around each tool call, in order (see `CallHook`). */
   readonly callHooks: CallHook[] = [];
   /** The scope the current tool call addresses ("base" outside any call). */

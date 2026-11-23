@@ -78,10 +78,19 @@ public final class SurfaceReads {
         tick();
     }
 
-    /** {@code wrong_dimension}, {@code no_volumes}, {@code outside_volumes}; the scan grant first. */
+    /** {@code wrong_dimension}, {@code no_volumes}, {@code outside_volumes}; the select grant ({@code too_large}), then the scan grant, first. */
     private ServerLevel check(Messages.SurfaceRequest req) throws ProtocolException {
         long id = req.id();
         Area a = req.columns();
+        // Select (18; 13, *Where the mod serves reads*): inside the select grant's square, capped by contextCap.
+        SelectGrants.Held sg = SelectGrants.current();
+        if (sg != null && sg.grant().in(req.dimension()) && sg.grant().hasColumns(a)) {
+            long cap = dev.autosketch.mod.AutosketchConfig.get().volumes.contextCap;
+            if (a.columns() > cap) throw ProtocolException.refuse(ErrorCodes.TOO_LARGE, id, a.columns() + " columns are over contextCap (" + cap + "); ask for a smaller area");
+            ServerLevel level = levels.apply(sg.grant().dimension());
+            if (level == null) throw ProtocolException.refuse(PatchApplier.INTERNAL, id, "the dimension " + req.dimension() + " isn't loaded");
+            return level;
+        }
         ScanGrants.Held g = ScanGrants.current();
         if (g != null && g.dimension().location().toString().equals(req.dimension()) && g.grant().columns().contains(a)) {
             ServerLevel level = levels.apply(g.dimension());

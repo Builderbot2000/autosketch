@@ -124,6 +124,26 @@ class ConfigMigrationTest {
         assertEquals("lit\\eral", c.prompts.askAlias);
     }
 
+    /** A file from before select (18) gains the [select] section with its defaults; values clamp to their ranges. */
+    @Test
+    void selectKeysJoinAnOlderFile(@TempDir Path dir) throws Exception {
+        AutosketchConfig.Serializer s = new AutosketchConfig.Serializer(dir);
+        Files.writeString(dir.resolve("autosketch.toml"), "[volumes]\n\tcontextCap = 1000\n", StandardCharsets.UTF_8);
+        AutosketchConfig c = s.deserialize();
+        assertEquals(1000L, c.volumes.contextCap);
+        assertEquals(256, c.select.selectChunks);
+        assertEquals(2, c.select.searchGap);
+        assertEquals(1, c.select.searchStop);
+        s.serialize(c);
+        String text = Files.readString(dir.resolve("autosketch.toml"));
+        assertTrue(text.contains("[select]\n") && text.contains("\tselectChunks = 256\n") && text.contains("\tsearchGap = 2\n") && text.contains("\tsearchStop = 1\n"), text);
+
+        AutosketchConfig d = AutosketchConfig.read("[select]\nselectChunks = 1000\nsearchGap = 0\nsearchStop = 3\n");
+        assertEquals(256, d.select.selectChunks, "256 is the cap");
+        assertEquals(1, d.select.searchGap);
+        assertEquals(3, d.select.searchStop);
+    }
+
     @Test
     void writtenFileRoundTripsStrings() {
         AutosketchConfig c = new AutosketchConfig();

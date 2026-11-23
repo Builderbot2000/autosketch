@@ -26,7 +26,9 @@ public final class ScanGrants {
         return current;
     }
 
+    /** Sets the grant; a scan grant ends a select grant (one grant at a time, 13). */
     public static void set(ResourceKey<Level> dimension, Messages.ScanGrant grant) {
+        SelectGrants.clear();
         current = new Held(dimension, grant);
     }
 

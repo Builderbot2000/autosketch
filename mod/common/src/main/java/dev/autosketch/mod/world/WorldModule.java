@@ -7,8 +7,10 @@ import dev.autosketch.mod.api.BridgeSession;
 import dev.autosketch.mod.api.Exchange;
 import dev.autosketch.mod.api.Inbound;
 import dev.autosketch.mod.platform.Platform;
+import dev.autosketch.mod.prompt.InGamePrompts;
 import dev.autosketch.mod.protocol.Messages;
 import dev.autosketch.mod.protocol.ProtocolException;
+import dev.autosketch.mod.protocol.SelectMessages;
 import java.util.Locale;
 import java.util.function.Function;
 import net.minecraft.Util;
@@ -20,7 +22,7 @@ import org.jetbrains.annotations.Nullable;
 
 /**
  * Silo O's registration (13, M5–M9): the {@code patch}, {@code hashes} and {@code snapshot}
- * handlers, the patch status for {@code /autosketch status}, and the server-tick hooks that drive the
+ * handlers (and select's {@code search}, 18), the patch status for {@code /autosketch status}, and the server-tick hooks that drive the
  * patch budget, the sliced reads and the change tracker. Registers through {@link AutosketchSetup},
  * so no other package's files change; each loader's events call {@link #setup} and the tick hooks
  * (on NeoForge, {@code WorldEvents}).
@@ -33,6 +35,14 @@ public final class WorldModule {
 
     private static volatile @Nullable Services services;
     private static volatile @Nullable SurfaceReads surface;
+    private static volatile @Nullable MaterialSearch search;
+
+    /** The material search (18, piece 2), for GameTests. */
+    public static MaterialSearch search() {
+        MaterialSearch s = search;
+        if (s == null) throw new IllegalStateException("the world module isn't set up yet");
+        return s;
+    }
 
     /** Surface snapshots (B4), for GameTests. */
     public static SurfaceReads surface() {
@@ -56,6 +66,8 @@ public final class WorldModule {
     }
 
     public static void setup(AutosketchSetup e) {
+        // A select prompt fixes its read grant as it goes out (18, piece 1; C1's hook).
+        InGamePrompts.setSelectGrant(SelectGrants::forPrompt);
         Function<ResourceKey<Level>, @Nullable ServerLevel> levels = key -> {
             MinecraftServer server = Platform.get().currentServer();
             return server == null ? null : server.getLevel(key);
@@ -70,11 +82,14 @@ public final class WorldModule {
                 frame -> Autosketch.bridge().send(frame));
         services = new Services(patches, reads, tracker);
         surface = new SurfaceReads(Autosketch.link(), levels, Util.backgroundExecutor());
-        // The scan grant lasts until the next scan request, the connection closing or the server stopping (B4).
+        MaterialSearch materials = new MaterialSearch(levels, Util.backgroundExecutor());
+        search = materials;
+        // The scan and select grants last until the next request replaces them, the connection closing or the server stopping (B4; 18).
         Autosketch.bridge().addListener(new dev.autosketch.mod.api.Bridge.Listener() {
             @Override
             public void disconnected(BridgeSession session) {
                 ScanGrants.clear();
+                SelectGrants.clear();
             }
         });
 
@@ -84,6 +99,9 @@ public final class WorldModule {
             if (Messages.snapshotKind(msg.frame()).equals("surface")) surface.surface(Messages.SurfaceRequest.decode(msg.frame()), ex);
             else reads.snapshot(Messages.SnapshotRequest.decode(msg.frame()), ex);
         });
+        // Select (18): served once a select request's grant is in force. The mod lists the feature
+        // `select` in its hello only when fill, expand and the mask and coarse snapshots are served too (M3).
+        e.messages().register("search", (msg, ex) -> materials.search(SelectMessages.SearchRequest.decode(msg.frame()), ex));
         e.patchStatus(patches);
     }
 
@@ -94,6 +112,7 @@ public final class WorldModule {
         s.patches().tick();
         s.reads().tick();
         if (surface != null) surface.tick();
+        if (search != null) search.tick();
     }
 
     /** End of a server tick. */
@@ -104,6 +123,7 @@ public final class WorldModule {
     /** After the server stopped. */
     public static void serverStopped() {
         ScanGrants.clear();
+        SelectGrants.clear();
         services().tracker().refresh();
     }
 

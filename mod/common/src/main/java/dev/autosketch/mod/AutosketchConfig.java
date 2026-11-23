@@ -80,6 +80,10 @@ public final class AutosketchConfig implements ConfigData {
     @ConfigEntry.Gui.TransitiveObject
     public Discovery discovery = new Discovery();
 
+    @ConfigEntry.Category("select")
+    @ConfigEntry.Gui.TransitiveObject
+    public Select select = new Select();
+
     public static final class Bridge {
         @ConfigEntry.Gui.Tooltip(count = 2)
         public int port = 0;
@@ -147,6 +151,19 @@ public final class AutosketchConfig implements ConfigData {
         public int scanAbove = 64;
         @ConfigEntry.Gui.Tooltip
         public long scanCap = 4_194_304L;
+    }
+
+    /**
+     * {@code /autosketch select} (18): the read grant's radius, which also caps a search's, and the
+     * search's defaults. Interim values until 18's *Measure first*.
+     */
+    public static final class Select {
+        @ConfigEntry.Gui.Tooltip(count = 2)
+        public int selectChunks = 256;
+        @ConfigEntry.Gui.Tooltip
+        public int searchGap = 2;
+        @ConfigEntry.Gui.Tooltip
+        public int searchStop = 1;
     }
 
     // ── keys: file layout, comments, ranges ───────────────────────────────────────────────────
@@ -225,7 +242,14 @@ public final class AutosketchConfig implements ConfigData {
             new Key("scan", "scanCap", List.of("Most blocks the full-block part of a scan may cover; its width shrinks to fit (default: the context cap)."),
                     "1 ~ " + (1L << 40), c -> c.scan.scanCap, (c, v) -> {
                         if (v instanceof Long l) c.scan.scanCap = Math.max(1L, Math.min(1L << 40, l));
-                    }));
+                    }),
+            intKey("select", "selectChunks", 0, 256, c -> c.select.selectChunks, (c, v) -> c.select.selectChunks = v,
+                    "How far a select request lets the agent read, in chunks around the player's chunk when the request is sent (256: 513x513 chunks),",
+                    "and the largest search radius; a larger search is clipped. Interim default (18, *Measure first*)."),
+            intKey("select", "searchGap", 1, 64, c -> c.select.searchGap, (c, v) -> c.select.searchGap = v,
+                    "Rings of chunks a search walks past a cluster of matches with no new match touching it before the cluster counts as closed."),
+            intKey("select", "searchStop", 1, 1024, c -> c.select.searchStop, (c, v) -> c.select.searchStop = v,
+                    "Closed clusters after which a search stops (it can be continued for more)."));
 
 
     static boolean validTracker(String s) {

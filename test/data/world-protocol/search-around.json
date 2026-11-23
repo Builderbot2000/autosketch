@@ -1,0 +1,14 @@
+{
+  "description": "A search for a tag and one exact state around a world position, with the mod's default radius, gap and stop",
+  "sender": "mcp",
+  "header": {
+    "type": "search",
+    "id": 51,
+    "dimension": "minecraft:overworld",
+    "materials": [
+      "#minecraft:logs",
+      "minecraft:oak_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]"
+    ],
+    "around": [-200, 64, 512]
+  }
+}

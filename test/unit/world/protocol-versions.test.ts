@@ -70,21 +70,45 @@ describe("protocol 2 golden vectors (N−1)", () => {
 
   roundTrips(V2);
 
-  it("carry none of protocol 3's additions, and protocol 3 changed only the hellos and the mismatch example (and gained prompt.close, ui and 17's candidates, editor writes and save flash, feature-gated additions)", () => {
+  it("carry none of protocol 3's additions, and protocol 3 changed only the hellos and the mismatch example (and gained prompt.close, ui and 17's candidates, editor writes and save flash, and 18's select, feature-gated additions)", () => {
     const v2 = (n: string) => splitFrame(new Uint8Array(readFileSync(join(V2, `${n}.bin`))).subarray(4)).header;
     expect(v2("hello-mcp")).toMatchObject({ protocol: 2 });
     expect(v2("hello-mod-singleplayer").features).toEqual(["modes", "scan", "volumes.set"]);
     expect(changedFrames(V2, DIR)).toEqual(["error-protocol-mismatch", "hello-mcp", "hello-mcp-build-only", "hello-mod-dedicated", "hello-mod-singleplayer"]);
     expect(addedFrames(V2, DIR)).toEqual([
       "chat-reply-action",
+      "error-no-grant",
+      "error-too-large",
+      "expand-box",
+      "expand-direction",
+      "expand-frontier",
+      "fill",
+      "fill-defaults",
+      "fill-result",
+      "fill-result-delta",
+      "fill-result-empty",
+      "hello-mcp-select",
+      "hello-mod-select",
       "notice-prompt-closed",
       "prompt-close",
+      "prompt-select",
+      "prompt-select-crosshair",
       "registry",
       "registry-have",
       "registry-result",
       "registry-result-unchanged",
       "replay-frame-delta",
       "replay-frame-keyframe",
+      "search",
+      "search-around",
+      "search-continue",
+      "search-result",
+      "search-result-empty",
+      "snapshot-coarse",
+      "snapshot-mask",
+      "snapshot-mask-default",
+      "snapshot-result-coarse",
+      "snapshot-result-missing",
       "ui-flash",
       "ui-flash-save",
       "ui-ghost-clear",
@@ -318,7 +342,7 @@ describe("bridge and fake host, protocol 2 (N−1)", () => {
 describe("bridge and fake host, protocol 3", () => {
   it("pairs in protocol 3 and sees every feature the hello lists", async () => {
     const { host, bridge, hello } = await pair({ volumes: { work: WORK } });
-    expect(hello).toMatchObject({ protocol: PROTOCOL_VERSION, features: ["modes", "scan", "volumes.set", "registry", "upgrade", "ui"] });
+    expect(hello).toMatchObject({ protocol: PROTOCOL_VERSION, features: ["modes", "scan", "volumes.set", "registry", "upgrade", "ui", "select"] });
     expect(host.received[0]).toMatchObject({ type: "hello", protocol: 3, modes: ["ask", "scan", "plan", "build"] });
     expect(host.mcpModes).toEqual(["ask", "scan", "plan", "build"]);
     for (const f of MOD_FEATURES) expect(bridge.supports(f)).toBe(true);

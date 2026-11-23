@@ -58,7 +58,7 @@ class GoldenVectorsTest {
     @Test
     void everyMessageKindHasAVector() {
         List<String> names = Golden.frameNames();
-        assertTrue(names.size() >= 95, "found " + names.size() + " vectors in " + Golden.dir());
+        assertTrue(names.size() >= 119, "found " + names.size() + " vectors in " + Golden.dir());
         assertTrue(Golden.frameNames("v2/").size() >= 48, "the frozen version-2 vectors");
         assertTrue(Golden.frameNames("v1/").size() >= 36, "the frozen version-1 vectors");
     }
@@ -112,8 +112,9 @@ class GoldenVectorsTest {
             case "hashes" -> HashesRequest.decode(f);
             case "hashes.result" -> HashesResult.decode(f);
             case "volumes.set" -> VolumesSet.decode(f);
-            case "snapshot" -> Messages.snapshotKind(f).equals("surface") ? SurfaceRequest.decode(f) : SnapshotRequest.decode(f);
-            case "snapshot.result" -> "surface".equals(Json.optString(f.header(), "kind", null)) ? SurfaceResult.decode(f) : SnapshotResult.decode(f);
+            case "snapshot" -> SelectMessages.handles(f) ? SelectMessages.decode(f) : Messages.snapshotKind(f).equals("surface") ? SurfaceRequest.decode(f) : SnapshotRequest.decode(f);
+            case "snapshot.result" -> SelectMessages.handles(f) ? SelectMessages.decode(f) : "surface".equals(Json.optString(f.header(), "kind", null)) ? SurfaceResult.decode(f) : SnapshotResult.decode(f);
+            case "search", "search.result", "fill", "fill.result", "expand" -> SelectMessages.decode(f);
             case "prompt" -> Prompt.decode(f);
             case "prompt.result" -> PromptResult.decode(f);
             case "prompt.close" -> PromptClose.decode(f);
@@ -164,6 +165,14 @@ class GoldenVectorsTest {
             case UiMessages.ReplayFrame x -> x.encode();
             case UiMessages.UiRequest x -> x.encode();
             case UiMessages.UiResult x -> x.encode();
+            case SelectMessages.SearchRequest x -> x.encode();
+            case SelectMessages.SearchResult x -> x.encode();
+            case SelectMessages.FillRequest x -> x.encode();
+            case SelectMessages.ExpandRequest x -> x.encode();
+            case SelectMessages.FillResult x -> x.encode();
+            case SelectMessages.MaskSnapshotRequest x -> x.encode();
+            case SelectMessages.CoarseSnapshotRequest x -> x.encode();
+            case SelectMessages.CoarseResult x -> x.encode();
             default -> throw new IllegalArgumentException(m.toString());
         };
     }
@@ -178,7 +187,9 @@ class GoldenVectorsTest {
                     h.has("force"), side.has("generated") ? largePatch() : patchBlocks(body));
             case "patch.ack" -> new PatchAck(h.get("id").getAsLong(), h.get("applied").getAsInt(), h.get("overwritten").getAsInt(), ackLists(body));
             case "dirty" -> h.get("everything").getAsBoolean() ? Dirty.all() : new Dirty(false, worldBlocks(body.getAsJsonArray("blocks")));
-            case "snapshot.result" -> h.has("kind") ? surfaceResult(h, body) : snapshotResult(h, body);
+            case "snapshot.result" -> !h.has("kind") ? snapshotResult(h, body) : h.get("kind").getAsString().equals("coarse") ? coarseResult(h, body) : surfaceResult(h, body);
+            case "search.result" -> searchResult(h, body);
+            case "fill.result" -> fillResult(h, body);
             case "registry.result" -> new RegistryResult(h.get("id").getAsLong(), Long.parseUnsignedLong(h.get("hash").getAsString(), 16), h.get("dataVersion").getAsInt(),
                     body == null ? null : java.util.Base64.getDecoder().decode(body.get("bytes").getAsString()));
             case "upgrade" -> new UpgradeRequest(h.get("id").getAsLong(), h.get("from").getAsInt(), upgradeData(h, body));
@@ -316,7 +327,70 @@ class GoldenVectorsTest {
             for (JsonElement e : r.getAsJsonArray("blockEntities")) bes.add(new BlockEntityNbt(Golden.pos(e.getAsJsonObject().get("pos")), nbt(e.getAsJsonObject())));
             regions.add(new SnapshotRegion(boxes.get(i), states, bes));
         }
-        return new SnapshotResult(h.get("id").getAsLong(), h.get("dimension").getAsString(), palette, regions);
+        List<ChunkXZ> missing = null;
+        if (h.has("missing")) {
+            missing = new ArrayList<>();
+            for (JsonElement e : h.getAsJsonArray("missing")) missing.add(new ChunkXZ(e.getAsJsonArray().get(0).getAsInt(), e.getAsJsonArray().get(1).getAsInt()));
+        }
+        return new SnapshotResult(h.get("id").getAsLong(), h.get("dimension").getAsString(), palette, regions, missing);
+    }
+
+    private static List<ChunkXZ> chunkList(JsonElement a) {
+        List<ChunkXZ> out = new ArrayList<>();
+        for (JsonElement e : a.getAsJsonArray()) out.add(new ChunkXZ(e.getAsJsonArray().get(0).getAsInt(), e.getAsJsonArray().get(1).getAsInt()));
+        return out;
+    }
+
+    /** A coarse result from its sidecar: the header with the body's palette and per-cell states. */
+    private static SelectMessages.CoarseResult coarseResult(JsonObject h, JsonObject body) throws ProtocolException {
+        List<Box> boxes = Json.reqBoxes(h, "regions", null);
+        List<SelectMessages.CoarseRegion> regions = new ArrayList<>();
+        for (int i = 0; i < boxes.size(); i++) regions.add(new SelectMessages.CoarseRegion(boxes.get(i), ints(body.getAsJsonArray("regions").get(i).getAsJsonObject().get("states"))));
+        return new SelectMessages.CoarseResult(h.get("id").getAsLong(), h.get("dimension").getAsString(), h.get("cell").getAsInt(), strings(body.get("palette")), regions,
+                h.has("missing") ? chunkList(h.get("missing")) : null);
+    }
+
+    /** A search result from its sidecar: the header's fields with the body's chunks and missing chunks. */
+    private static SelectMessages.SearchResult searchResult(JsonObject h, JsonObject body) throws ProtocolException {
+        JsonObject c = h.deepCopy();
+        c.addProperty("chunks", 0);
+        c.addProperty("missing", 0);
+        SelectMessages.SearchResult head = SelectMessages.SearchResult.decode(new Frame(c));
+        List<SelectMessages.SearchChunk> chunks = new ArrayList<>();
+        for (JsonElement e : body.getAsJsonArray("chunks")) {
+            JsonObject o = e.getAsJsonObject();
+            int[] at = ints(o.get("chunk"));
+            int[] counts = ints(o.get("counts"));
+            long[] lc = new long[counts.length];
+            for (int i = 0; i < counts.length; i++) lc[i] = counts[i];
+            chunks.add(new SelectMessages.SearchChunk(at[0], at[1], lc, o.get("cluster").getAsInt(), ints(o.get("sections"))));
+        }
+        return new SelectMessages.SearchResult(head.id(), head.dimension(), head.materials(), head.centreX(), head.centreZ(), head.radius(), head.clipped(), head.reached(),
+                head.minSection(), head.clusters(), chunks, chunkList(body.get("missing")));
+    }
+
+    /** A fill result from its sidecar: the header's fields with the body's sections (hex bitsets) and frontier. */
+    private static SelectMessages.FillResult fillResult(JsonObject h, JsonObject body) throws ProtocolException {
+        JsonObject c = h.deepCopy();
+        c.add("origin", Json.vec(0, 0, 0));
+        c.add("size", Json.vec(0, 0, 0));
+        c.addProperty("sections", 0);
+        c.addProperty("frontier", 0);
+        SelectMessages.FillResult head = SelectMessages.FillResult.decode(new Frame(c));
+        List<SelectMessages.MaskSection> sections = new ArrayList<>();
+        for (JsonElement e : body.getAsJsonArray("sections")) {
+            JsonObject o = e.getAsJsonObject();
+            int[] s = ints(o.get("section"));
+            String mask = o.get("mask").getAsString();
+            sections.add(new SelectMessages.MaskSection(s[0], s[1], s[2], mask.equals("full") ? null : java.util.HexFormat.of().parseHex(mask)));
+        }
+        List<SelectMessages.FrontierSection> frontier = new ArrayList<>();
+        for (JsonElement e : body.getAsJsonArray("frontier")) {
+            JsonObject o = e.getAsJsonObject();
+            int[] s = ints(o.get("section"));
+            frontier.add(new SelectMessages.FrontierSection(s[0], s[1], s[2], ints(o.get("index")), ints(o.get("faces"))));
+        }
+        return new SelectMessages.FillResult(head.id(), head.dimension(), head.seed(), head.count(), head.box(), head.stopped(), head.delta(), head.missing(), sections, frontier);
     }
 
     private static SurfaceResult surfaceResult(JsonObject h, JsonObject body) throws ProtocolException {
@@ -343,7 +417,8 @@ class GoldenVectorsTest {
 
     private static void assertSameContent(Object expected, Object actual) {
         // ui messages holding arrays (ghost sections, replay regions, result bodies): compare what they encode to.
-        if (expected instanceof UiMessages.UiGhost || expected instanceof UiMessages.ReplayFrame || expected instanceof UiMessages.UiResult) {
+        if (expected instanceof UiMessages.UiGhost || expected instanceof UiMessages.ReplayFrame || expected instanceof UiMessages.UiResult
+                || expected instanceof SelectMessages.SearchResult || expected instanceof SelectMessages.FillResult || expected instanceof SelectMessages.CoarseResult) {
             assertEquals(expected.getClass(), actual.getClass());
             assertArrayEquals(FrameCodec.encode(encodeTyped(expected)), FrameCodec.encode(encodeTyped(actual)), "decoded content matches the sidecar");
             return;
@@ -374,6 +449,7 @@ class GoldenVectorsTest {
         }
         if (expected instanceof SnapshotResult e && actual instanceof SnapshotResult a) {
             assertEquals(e.id(), a.id());
+            assertEquals(e.missing(), a.missing());
             assertEquals(e.dimension(), a.dimension());
             assertEquals(e.palette(), a.palette(), "palette in first-use order");
             assertEquals(e.regions().size(), a.regions().size());

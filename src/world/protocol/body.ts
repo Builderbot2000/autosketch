@@ -1,7 +1,7 @@
 import type { Compound } from "prismarine-nbt";
 import type { Vec3 } from "../../core/region.js";
 import { ByteReader, ByteWriter, bytesToHex, hexToBytes } from "./bytes.js";
-import type { PatchAck, PatchBlock, RejectReason, SnapshotRegion, SnapshotResult, SurfaceLayer, SurfaceResult, UpgradeData, WireArea, WireBox, WorldBlock } from "./messages.js";
+import type { CoarseRegion, FillResult, FrontierSection, MaskSection, PatchAck, PatchBlock, RejectReason, SearchChunk, SearchResult, SnapshotRegion, SnapshotResult, SurfaceLayer, SurfaceResult, UpgradeData, WireArea, WireBox, WorldBlock } from "./messages.js";
 import { REJECT_REASONS } from "./messages.js";
 import { readNbt, writeNbt } from "./nbt.js";
 
@@ -552,4 +552,230 @@ export function encodePreviewBody(palette: readonly string[], size: Vec3, states
 export function decodePreviewBody(body: Uint8Array, size: Vec3): { palette: string[]; states: Uint32Array } {
   const { palette, regions } = decodeStatesBody(body, [{ min: [0, 0, 0], max: [size[0] - 1, size[1] - 1, size[2] - 1] }], "library.preview");
   return { palette, states: regions[0]!.states };
+}
+
+// ── select (`18`; feature `select`) ────────────────────────────────────────────────────────────
+
+/** The chunk grid of a search answer: the square of `radius` chunks around `centre`, as a flat grid (x fastest, then z). */
+export function searchGrid(centre: [number, number], radius: number): Grid {
+  return { origin: [centre[0] - radius, 0, centre[1] - radius], size: [2 * radius + 1, 1, 2 * radius + 1] };
+}
+
+const chunkItems = (list: readonly [number, number][]) => list.map((c) => ({ pos: [c[0], 0, c[1]] as Vec3 }));
+
+function writeChunkList(w: ByteWriter, g: Grid, list: readonly [number, number][], what: string): void {
+  const { idx, perm } = sortedIndices(g, chunkItems(list), what);
+  for (let i = 0; i < perm.length; i++) if (perm[i] !== i) throw new Error(`${what}: chunks must be ascending by cz, then cx`);
+  writeGaps(w, idx, perm);
+}
+
+function readChunkList(r: ByteReader, g: Grid, n: number, what: string): [number, number][] {
+  const idx = readGaps(r, n, gridVolume(g), what);
+  return Array.from(idx, (i) => {
+    const p = posAt(g, i);
+    return [p[0], p[2]] as [number, number];
+  });
+}
+
+/**
+ * `search.result` body: positions(C) of the matching chunks over the search grid; per chunk, in that
+ * order, M varint counts (one per material), its varint cluster index, a varint section count S and S
+ * section offsets (sy − minSection) gap-coded ascending; then positions(U) of the missing chunks.
+ */
+export function encodeSearchBody(m: Pick<SearchResult, "centre" | "radius" | "materials" | "minSection" | "clusters" | "chunks" | "missing">): Uint8Array {
+  const g = searchGrid(m.centre, m.radius);
+  const w = new ByteWriter(Math.max(1024, m.chunks.length * (m.materials.length + 6) + m.missing.length * 2));
+  writeChunkList(w, g, m.chunks.map((c) => c.chunk), "search chunks");
+  for (const c of m.chunks) {
+    if (c.counts.length !== m.materials.length) throw new Error(`search chunk ${c.chunk.join(",")}: ${c.counts.length} counts for ${m.materials.length} materials`);
+    for (const n of c.counts) w.varint(n);
+    if (c.cluster >= m.clusters.length) throw new Error(`search chunk ${c.chunk.join(",")}: cluster ${c.cluster} of ${m.clusters.length}`);
+    w.varint(c.cluster);
+    w.varint(c.sections.length);
+    let prev = -1;
+    for (const sy of c.sections) {
+      const off = sy - m.minSection;
+      if (off <= prev) throw new Error(`search chunk ${c.chunk.join(",")}: sections must be unique, ascending and at or above minSection`);
+      w.varint(off - prev - 1);
+      prev = off;
+    }
+  }
+  writeChunkList(w, g, m.missing, "search missing");
+  return w.finish();
+}
+
+export function decodeSearchBody(body: Uint8Array, h: { centre: [number, number]; radius: number; materials: number; minSection: number; clusters: number; chunks: number; missing: number }): Pick<SearchResult, "chunks" | "missing"> {
+  const r = new ByteReader(body);
+  const g = searchGrid(h.centre, h.radius);
+  const where = readChunkList(r, g, h.chunks, "search chunks");
+  const chunks: SearchChunk[] = where.map((chunk) => {
+    const counts = Array.from({ length: h.materials }, () => r.varint());
+    const cluster = r.varint();
+    if (cluster >= h.clusters) throw new Error(`search: cluster ${cluster} outside ${h.clusters} clusters`);
+    const s = r.varint();
+    if (s > r.remaining) throw new Error(`search: ${s} sections can't fit`);
+    const sections: number[] = [];
+    let prev = -1;
+    for (let i = 0; i < s; i++) {
+      prev = prev + r.varint() + 1;
+      sections.push(h.minSection + prev);
+    }
+    return { chunk, counts, cluster, sections };
+  });
+  const missing = readChunkList(r, g, h.missing, "search missing");
+  done(r, "search");
+  return { chunks, missing };
+}
+
+/** Bytes in one section's bitset. */
+export const MASK_BYTES = 512;
+
+/** Tight section grid over the sections and frontier sections of a fill result (all zero when both are empty). */
+export function fillGrid(m: Pick<FillResult, "sections" | "frontier">): Grid {
+  return gridOf(
+    m.sections.map((s) => ({ pos: s.section })),
+    m.frontier.map((s) => ({ pos: s.section })),
+  );
+}
+
+function checkAscending(items: readonly { section: Vec3 }[], g: Grid, what: string): { idx: Float64Array; perm: Uint32Array } {
+  const sorted = sortedIndices(g, items.map((s) => ({ pos: s.section })), what);
+  for (let i = 0; i < sorted.perm.length; i++) if (sorted.perm[i] !== i) throw new Error(`${what}: sections must be ascending by sy, then sz, then sx`);
+  return sorted;
+}
+
+/**
+ * `fill.result` body over the header's section grid: positions(S) of the shape's sections, then per
+ * section a varint kind (0: every position; 1: a 512-byte bitset follows, neither empty nor full);
+ * then positions(F) of the frontier sections, and per frontier section a varint count n, n local
+ * indices gap-coded ascending and n face-mask bytes.
+ */
+export function encodeFillBody(m: Pick<FillResult, "sections" | "frontier">): Encoded {
+  const g = fillGrid(m);
+  const w = new ByteWriter(1024 + m.sections.length * (MASK_BYTES + 4));
+  const s = checkAscending(m.sections, g, "fill sections");
+  writeGaps(w, s.idx, s.perm);
+  for (const sec of m.sections) {
+    if (sec.mask === "full") {
+      w.varint(0);
+      continue;
+    }
+    if (sec.mask.length !== MASK_BYTES) throw new Error(`fill section ${sec.section.join(",")}: a mask is ${MASK_BYTES} bytes, got ${sec.mask.length}`);
+    const ones = sec.mask.every((b) => b === 0xff), zeros = sec.mask.every((b) => b === 0);
+    if (ones || zeros) throw new Error(`fill section ${sec.section.join(",")}: a ${ones ? "full mask is sent as full" : "section with no positions isn't listed"}`);
+    w.varint(1);
+    w.bytes(sec.mask);
+  }
+  const f = checkAscending(m.frontier, g, "fill frontier");
+  writeGaps(w, f.idx, f.perm);
+  for (const sec of m.frontier) {
+    if (!sec.index.length || sec.index.length !== sec.faces.length) throw new Error(`frontier section ${sec.section.join(",")}: needs as many faces as positions, at least one`);
+    w.varint(sec.index.length);
+    let prev = -1;
+    for (const i of sec.index) {
+      if (!Number.isInteger(i) || i <= prev || i > 4095) throw new Error(`frontier section ${sec.section.join(",")}: indices must be unique, ascending, 0 to 4095`);
+      w.varint(i - prev - 1);
+      prev = i;
+    }
+    for (const fc of sec.faces) {
+      if (!Number.isInteger(fc) || fc < 1 || fc > 63) throw new Error(`frontier section ${sec.section.join(",")}: a face mask is 1 to 63`);
+      w.u8(fc);
+    }
+  }
+  return { grid: g, body: w.finish() };
+}
+
+export function decodeFillBody(body: Uint8Array, g: Grid, counts: { sections: number; frontier: number }): Pick<FillResult, "sections" | "frontier"> {
+  const r = new ByteReader(body);
+  const vol = gridVolume(g);
+  const sections: MaskSection[] = Array.from(readGaps(r, counts.sections, vol, "fill sections"), (i) => {
+    const section = posAt(g, i);
+    const kind = r.varint();
+    if (kind === 0) return { section, mask: "full" as const };
+    if (kind !== 1) throw new Error(`fill section ${section.join(",")}: kind ${kind} is neither 0 (full) nor 1 (bitset)`);
+    const mask = r.bytes(MASK_BYTES).slice();
+    if (mask.every((b) => b === 0xff) || mask.every((b) => b === 0)) throw new Error(`fill section ${section.join(",")}: a bitset is neither empty nor full`);
+    return { section, mask };
+  });
+  const frontier: FrontierSection[] = Array.from(readGaps(r, counts.frontier, vol, "fill frontier"), (i) => {
+    const section = posAt(g, i);
+    const n = r.varint();
+    if (n < 1 || n > 4096) throw new Error(`frontier section ${section.join(",")}: ${n} positions`);
+    const index = Array.from(readGaps(r, n, 4096, "frontier positions"));
+    const faces = Array.from({ length: n }, () => {
+      const fc = r.u8();
+      if (fc < 1 || fc > 63) throw new Error(`frontier section ${section.join(",")}: face mask ${fc} is not 1 to 63`);
+      return fc;
+    });
+    return { section, index, faces };
+  });
+  done(r, "fill");
+  return { sections, frontier };
+}
+
+/** A box grown outward to whole cells of the world grid. */
+export function alignBox(b: WireBox, cell: number): WireBox {
+  const lo = (v: number) => Math.floor(v / cell) * cell;
+  return { min: [lo(b.min[0]), lo(b.min[1]), lo(b.min[2])], max: [lo(b.max[0]) + cell - 1, lo(b.max[1]) + cell - 1, lo(b.max[2]) + cell - 1] };
+}
+
+/** The cell-grid box of an aligned world box (cell coordinates = world coordinates / cell). */
+function cellBox(b: WireBox, cell: number): WireBox {
+  for (let a = 0; a < 3; a++)
+    if (b.min[a]! % cell !== 0 || (b.max[a]! + 1) % cell !== 0) throw new Error(`coarse region ${JSON.stringify(b)} isn't aligned to cells of ${cell}`);
+  return { min: [b.min[0] / cell, b.min[1] / cell, b.min[2] / cell], max: [(b.max[0] + 1) / cell - 1, (b.max[1] + 1) / cell - 1, (b.max[2] + 1) / cell - 1] };
+}
+
+/** Coarse body: `snapshot.result`'s layout over each region's cell grid, nbtList empty. */
+export function encodeCoarseBody(palette: readonly string[], regions: readonly CoarseRegion[], cell: number): Uint8Array {
+  return encodeStatesBody(
+    palette,
+    regions.map((r) => ({ box: cellBox(r.box, cell), states: r.states })),
+  );
+}
+
+export function decodeCoarseBody(body: Uint8Array, boxes: readonly WireBox[], cell: number): { palette: string[]; regions: CoarseRegion[] } {
+  const { palette, regions } = decodeStatesBody(
+    body,
+    boxes.map((b) => cellBox(b, cell)),
+    "coarse snapshot",
+  );
+  return { palette, regions: regions.map((r, i) => ({ box: boxes[i]!, states: r.states })) };
+}
+
+/**
+ * The regions a `snapshot` kind `mask` is answered with (`13`, *Message schemas*): each listed
+ * section's 16³ box in request order, then, ascending by sy, sz, sx, for each unlisted section within
+ * `margin` of a listed one, the bounding box of its positions within `margin` (Chebyshev) of the
+ * listed sections' boxes. With margin 0, the listed sections only.
+ */
+export function maskRegions(sections: readonly Vec3[], margin: number): WireBox[] {
+  const listed = new Set(sections.map((s) => s.join(",")));
+  const out = sections.map(sectionBox);
+  if (margin <= 0) return out;
+  const extra = new Map<string, WireBox>();
+  for (const s of sections) {
+    const grown: WireBox = { min: [s[0] * 16 - margin, s[1] * 16 - margin, s[2] * 16 - margin], max: [s[0] * 16 + 15 + margin, s[1] * 16 + 15 + margin, s[2] * 16 + 15 + margin] };
+    for (let dy = -1; dy <= 1; dy++)
+      for (let dz = -1; dz <= 1; dz++)
+        for (let dx = -1; dx <= 1; dx++) {
+          const n: Vec3 = [s[0] + dx, s[1] + dy, s[2] + dz];
+          const k = n.join(",");
+          if (listed.has(k)) continue;
+          const nb = sectionBox(n);
+          const part: WireBox = {
+            min: [Math.max(nb.min[0], grown.min[0]), Math.max(nb.min[1], grown.min[1]), Math.max(nb.min[2], grown.min[2])],
+            max: [Math.min(nb.max[0], grown.max[0]), Math.min(nb.max[1], grown.max[1]), Math.min(nb.max[2], grown.max[2])],
+          };
+          const prev = extra.get(k);
+          extra.set(
+            k,
+            prev
+              ? { min: [Math.min(prev.min[0], part.min[0]), Math.min(prev.min[1], part.min[1]), Math.min(prev.min[2], part.min[2])], max: [Math.max(prev.max[0], part.max[0]), Math.max(prev.max[1], part.max[1]), Math.max(prev.max[2], part.max[2])] }
+              : part,
+          );
+        }
+  }
+  const order = [...extra.keys()].map((k) => k.split(",").map(Number) as Vec3).sort((a, b) => a[1] - b[1] || a[2] - b[2] || a[0] - b[0]);
+  return [...out, ...order.map((n) => extra.get(n.join(","))!)];
 }

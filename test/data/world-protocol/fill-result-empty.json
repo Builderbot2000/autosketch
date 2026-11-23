@@ -1,0 +1,22 @@
+{
+  "description": "Fill answer when the seed doesn't match: no shape, no box",
+  "sender": "mod",
+  "header": {
+    "type": "fill.result",
+    "id": 54,
+    "dimension": "minecraft:overworld",
+    "seed": [-31, 70, 14],
+    "count": 0,
+    "box": null,
+    "stopped": "complete",
+    "missing": [],
+    "origin": [0, 0, 0],
+    "size": [0, 0, 0],
+    "sections": 0,
+    "frontier": 0
+  },
+  "body": {
+    "sections": [],
+    "frontier": []
+  }
+}

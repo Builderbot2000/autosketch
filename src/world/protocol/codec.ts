@@ -6,6 +6,12 @@ import {
   decodeSnapshotBody,
   decodeSurfaceBody,
   decodeUpgradeBody,
+  decodeCoarseBody,
+  decodeFillBody,
+  decodeSearchBody,
+  encodeCoarseBody,
+  encodeFillBody,
+  encodeSearchBody,
   encodeAckBody,
   encodeDirtyBody,
   encodePatchBody,
@@ -18,7 +24,10 @@ import {
   type Grid,
 } from "./body.js";
 import {
+  COARSE_CELLS,
   ERROR_CODES,
+  FILL_STOPS,
+  MATCH_SOLID,
   MAX_FRAME,
   MAX_HEADER,
   PROMPT_REFUSALS,
@@ -27,6 +36,8 @@ import {
   UI_ERRORS,
   UI_MCP_TYPES,
   type ChatMessage,
+  type ExpandBy,
+  type SearchCluster,
   type UiFlash,
   type UiJob,
   type UiState,
@@ -107,10 +118,17 @@ function split(m: Message): { header: Record<string, unknown>; body: Uint8Array 
     case "hashes.result":
       return { header: { type: m.type, id: m.id, sections: m.sections.map((s) => [s.section[0], s.section[1], s.section[2], s.hash]) }, body: none };
     case "snapshot":
-      if ("kind" in m) return { header: { type: m.type, id: m.id, dimension: m.dimension, kind: m.kind, columns: area(m.columns), ...(m.ceiling !== undefined ? { ceiling: m.ceiling } : {}) }, body: none };
+      if ("kind" in m && m.kind === "surface") return { header: { type: m.type, id: m.id, dimension: m.dimension, kind: m.kind, columns: area(m.columns), ...(m.ceiling !== undefined ? { ceiling: m.ceiling } : {}) }, body: none };
+      if ("kind" in m && m.kind === "mask") return { header: { type: m.type, id: m.id, dimension: m.dimension, kind: m.kind, sections: m.sections.map((s) => [s[0], s[1], s[2]]), ...(m.margin !== undefined ? { margin: m.margin } : {}) }, body: none };
+      if ("kind" in m && m.kind === "coarse") return { header: { type: m.type, id: m.id, dimension: m.dimension, kind: m.kind, cell: m.cell, boxes: m.boxes.map(box) }, body: none };
       if ("boxes" in m) return { header: { type: m.type, id: m.id, dimension: m.dimension, boxes: m.boxes.map(box) }, body: none };
       return { header: { type: m.type, id: m.id, dimension: m.dimension, sections: m.sections.map((s) => [s[0], s[1], s[2]]) }, body: none };
     case "snapshot.result":
+      if ("kind" in m && m.kind === "coarse")
+        return {
+          header: { type: m.type, id: m.id, dimension: m.dimension, kind: m.kind, cell: m.cell, regions: m.regions.map((r) => box(r.box)), ...(m.missing?.length ? { missing: chunkList(m.missing) } : {}) },
+          body: encodeCoarseBody(m.palette, m.regions, m.cell),
+        };
       if ("kind" in m) {
         if ((m.ceiling === undefined) !== (m.ceilings === undefined)) throw new ProtocolError("surface result: ceilings must be given exactly when ceiling is");
         return {
@@ -118,7 +136,80 @@ function split(m: Message): { header: Record<string, unknown>; body: Uint8Array 
           body: encodeSurfaceBody(m),
         };
       }
-      return { header: { type: m.type, id: m.id, dimension: m.dimension, regions: m.regions.map((r) => box(r.box)) }, body: encodeSnapshotBody(m.palette, m.regions) };
+      return {
+        header: { type: m.type, id: m.id, dimension: m.dimension, regions: m.regions.map((r) => box(r.box)), ...(m.missing?.length ? { missing: chunkList(m.missing) } : {}) },
+        body: encodeSnapshotBody(m.palette, m.regions),
+      };
+    case "search":
+      if ("continue" in m) return { header: { type: m.type, id: m.id, dimension: m.dimension, continue: true, ...(m.stop !== undefined ? { stop: m.stop } : {}) }, body: none };
+      return {
+        header: {
+          type: m.type,
+          id: m.id,
+          dimension: m.dimension,
+          materials: [...m.materials],
+          ...(m.radius !== undefined ? { radius: m.radius } : {}),
+          ...(m.around ? { around: [...m.around] } : {}),
+          ...(m.gap !== undefined ? { gap: m.gap } : {}),
+          ...(m.stop !== undefined ? { stop: m.stop } : {}),
+        },
+        body: none,
+      };
+    case "search.result":
+      return {
+        header: {
+          type: m.type,
+          id: m.id,
+          dimension: m.dimension,
+          materials: [...m.materials],
+          centre: [m.centre[0], m.centre[1]],
+          radius: m.radius,
+          ...(m.clipped ? { clipped: true } : {}),
+          reached: m.reached,
+          minSection: m.minSection,
+          clusters: m.clusters.map((c) => ({ min: [c.min[0], c.min[1]], max: [c.max[0], c.max[1]], chunks: c.chunks, blocks: c.blocks, closed: c.closed })),
+          chunks: m.chunks.length,
+          missing: m.missing.length,
+        },
+        body: encodeSearchBody(m),
+      };
+    case "fill":
+      return {
+        header: {
+          type: m.type,
+          id: m.id,
+          dimension: m.dimension,
+          seed: [...m.seed],
+          match: [...m.match],
+          ...(m.connectivity !== undefined ? { connectivity: m.connectivity } : {}),
+          ...(m.budget !== undefined ? { budget: m.budget } : {}),
+          ...(m.area !== undefined ? { area: m.area } : {}),
+        },
+        body: none,
+      };
+    case "expand":
+      return { header: { type: m.type, id: m.id, dimension: m.dimension, by: expandBy(m.by), ...(m.budget !== undefined ? { budget: m.budget } : {}) }, body: none };
+    case "fill.result": {
+      if ((m.box === null) !== (m.count === 0)) throw new ProtocolError("fill.result: box is null exactly when count is 0");
+      const e = encodeFillBody(m);
+      return {
+        header: {
+          type: m.type,
+          id: m.id,
+          dimension: m.dimension,
+          seed: [...m.seed],
+          count: m.count,
+          box: m.box && box(m.box),
+          stopped: m.stopped,
+          ...(m.delta ? { delta: true } : {}),
+          missing: chunkList(m.missing),
+          ...grid(e.grid),
+          sections: m.sections.length,
+          frontier: m.frontier.length,
+        },
+        body: e.body,
+      };
+    }
     case "patch": {
       const e = encodePatchBody(m.blocks);
       return { header: { type: m.type, id: m.id, link: m.link, dimension: m.dimension, ...(m.force ? { force: true } : {}), ...grid(e.grid), count: m.blocks.length }, body: e.body };
@@ -214,6 +305,16 @@ function split(m: Message): { header: Record<string, unknown>; body: Uint8Array 
   }
 }
 
+function chunkList(list: readonly [number, number][]): [number, number][] {
+  return list.map((c) => [c[0], c[1]]);
+}
+
+function expandBy(b: ExpandBy): ExpandBy {
+  if (b === "frontier") return b;
+  if ("box" in b) return { box: box(b.box) };
+  return { direction: b.direction, chunks: b.chunks };
+}
+
 function uiJob(j: UiJob): UiJob {
   return { id: j.id, colour: j.colour, brief: j.brief, dimension: j.dimension, work: box(j.work), context: j.context.map(box) };
 }
@@ -300,9 +401,9 @@ export function decodeFrame(frame: Uint8Array, sender: Sender): Message {
   return decodeMessage(frame.subarray(4), sender);
 }
 
-const MCP_TYPES = new Set(["hello", "error", "volumes.extend", "volumes.set", "hashes", "snapshot", "patch", "registry", "upgrade", "prompt.result", "notice", "chat", ...UI_MCP_TYPES]);
-const MOD_TYPES = new Set(["hello", "error", "volumes", "hashes.result", "snapshot.result", "patch.ack", "dirty", "prompt", "prompt.close", "registry.result", "upgrade.result", "ui.request"]);
-const BODY_TYPES = new Set(["snapshot.result", "patch", "patch.ack", "dirty", "registry.result", "upgrade", "upgrade.result", "ui.ghost", "replay.frame", "ui.result"]);
+const MCP_TYPES = new Set(["hello", "error", "volumes.extend", "volumes.set", "hashes", "snapshot", "search", "fill", "expand", "patch", "registry", "upgrade", "prompt.result", "notice", "chat", ...UI_MCP_TYPES]);
+const MOD_TYPES = new Set(["hello", "error", "volumes", "hashes.result", "snapshot.result", "search.result", "fill.result", "patch.ack", "dirty", "prompt", "prompt.close", "registry.result", "upgrade.result", "ui.request"]);
+const BODY_TYPES = new Set(["snapshot.result", "search.result", "fill.result", "patch", "patch.ack", "dirty", "registry.result", "upgrade", "upgrade.result", "ui.ghost", "replay.frame", "ui.result"]);
 
 function decode(type: string, v: Fields, body: Uint8Array, sender: Sender): Message {
   if (!(sender === "mcp" ? MCP_TYPES : MOD_TYPES).has(type)) throw new ProtocolError(`unknown message type "${type}" from the ${sender === "mcp" ? "MCP" : "mod"}`);
@@ -357,7 +458,23 @@ function decode(type: string, v: Fields, body: Uint8Array, sender: Sender): Mess
       };
     case "snapshot": {
       const id = v.id("id"), dimension = v.str("dimension");
-      const kind = v.has("kind") ? v.oneOf("kind", ["blocks", "surface"]) : "blocks";
+      const kind = v.has("kind") ? v.oneOf("kind", ["blocks", "surface", "mask", "coarse"]) : "blocks";
+      if (kind === "mask") {
+        if (v.has("boxes") || v.has("columns") || v.has("ceiling") || v.has("cell")) throw new ProtocolError("a mask snapshot takes sections and margin only");
+        const sections = v.arr("sections").map((_, i) => v.vec3At("sections", i));
+        if (!sections.length) throw new ProtocolError("sections must not be empty");
+        if (new Set(sections.map((s) => s.join(","))).size !== sections.length) throw new ProtocolError("sections must be unique");
+        const margin = v.has("margin") ? v.int("margin") : undefined;
+        if (margin !== undefined && margin > 16) throw new ProtocolError("margin must be 0 to 16");
+        return { type, id, dimension, kind, sections, ...(margin !== undefined ? { margin } : {}) };
+      }
+      if (kind === "coarse") {
+        if (v.has("sections") || v.has("columns") || v.has("ceiling") || v.has("margin")) throw new ProtocolError("a coarse snapshot takes cell and boxes only");
+        const cell = v.int("cell");
+        if (!(COARSE_CELLS as readonly number[]).includes(cell)) throw new ProtocolError(`cell must be one of ${COARSE_CELLS.join(", ")}`);
+        return { type, id, dimension, kind, cell: cell as 2 | 4, boxes: v.boxes("boxes") };
+      }
+      if (v.has("margin") || v.has("cell")) throw new ProtocolError("margin and cell belong to mask and coarse snapshots");
       if (kind === "surface") {
         if (v.has("boxes") || v.has("sections")) throw new ProtocolError("a surface snapshot takes columns, not boxes or sections");
         return { type, id, dimension, kind, columns: v.area("columns"), ...(v.has("ceiling") ? { ceiling: v.y("ceiling") } : {}) };
@@ -368,7 +485,15 @@ function decode(type: string, v: Fields, body: Uint8Array, sender: Sender): Mess
       return { type, id, dimension, sections: v.arr("sections").map((_, i) => v.vec3At("sections", i)) };
     }
     case "snapshot.result": {
-      const kind = v.has("kind") ? v.oneOf("kind", ["blocks", "surface"]) : "blocks";
+      const kind = v.has("kind") ? v.oneOf("kind", ["blocks", "surface", "coarse"]) : "blocks";
+      const missing = v.has("missing") && kind !== "surface" ? { missing: v.chunks("missing") } : {};
+      if (missing.missing && !missing.missing.length) throw new ProtocolError("missing is omitted when empty");
+      if (kind === "coarse") {
+        const id = v.id("id"), dimension = v.str("dimension"), cell = v.int("cell");
+        if (!(COARSE_CELLS as readonly number[]).includes(cell)) throw new ProtocolError(`cell must be one of ${COARSE_CELLS.join(", ")}`);
+        const regions = v.boxes("regions", true);
+        return { type, id, dimension, kind, cell: cell as 2 | 4, ...decodeCoarseBody(body, regions, cell), ...missing };
+      }
       if (kind === "surface") {
         const id = v.id("id"), dimension = v.str("dimension"), columns = v.area("columns"), minY = v.y("minY");
         const ceiling = v.has("ceiling") ? v.y("ceiling") : undefined;
@@ -379,7 +504,82 @@ function decode(type: string, v: Fields, body: Uint8Array, sender: Sender): Mess
         return { type, id, dimension, kind, columns, minY, ...(ceiling !== undefined ? { ceiling } : {}), missing, ...decodeSurfaceBody(body, columns, ceiling !== undefined) };
       }
       const regions = v.boxes("regions", true);
-      return { type, id: v.id("id"), dimension: v.str("dimension"), ...decodeSnapshotBody(body, regions) };
+      return { type, id: v.id("id"), dimension: v.str("dimension"), ...decodeSnapshotBody(body, regions), ...missing };
+    }
+    case "search": {
+      const id = v.id("id"), dimension = v.str("dimension");
+      const stop = v.has("stop") ? { stop: v.positive("stop") } : {};
+      if (v.has("continue")) {
+        if (v.raw("continue") !== true) throw new ProtocolError("continue is true or omitted");
+        if (["materials", "radius", "around", "gap"].some((k) => v.has(k))) throw new ProtocolError("a continuing search takes only stop");
+        return { type, id, dimension, continue: true, ...stop };
+      }
+      return {
+        type,
+        id,
+        dimension,
+        materials: v.materials("materials", false),
+        ...(v.has("radius") ? { radius: v.int("radius") } : {}),
+        ...(v.has("around") ? { around: v.vec3("around") } : {}),
+        ...(v.has("gap") ? { gap: v.positive("gap") } : {}),
+        ...stop,
+      };
+    }
+    case "search.result": {
+      const id = v.id("id"), dimension = v.str("dimension"), materials = v.materials("materials", false);
+      const centre = v.pair("centre"), radius = v.int("radius");
+      const clipped = v.has("clipped") ? v.raw("clipped") : undefined;
+      if (clipped !== undefined && clipped !== true) throw new ProtocolError("clipped is true or omitted");
+      const reached = v.int("reached");
+      if (reached > radius) throw new ProtocolError(`reached ${reached} is past the radius ${radius}`);
+      const minSection = v.y("minSection");
+      const clusters: SearchCluster[] = v.arr("clusters").map((_, i) => {
+        const c = v.objAt("clusters", i);
+        const min = c.pair("min"), max = c.pair("max");
+        if (min[0] > max[0] || min[1] > max[1]) throw new ProtocolError(`clusters[${i}]: min must not exceed max`);
+        return { min, max, chunks: c.positive("chunks"), blocks: c.int("blocks"), closed: c.bool("closed") };
+      });
+      const body2 = decodeSearchBody(body, { centre, radius, materials: materials.length, minSection, clusters: clusters.length, chunks: v.int("chunks"), missing: v.int("missing") });
+      return { type, id, dimension, materials, centre, radius, ...(clipped ? { clipped: true as const } : {}), reached, minSection, clusters, ...body2 };
+    }
+    case "fill": {
+      const id = v.id("id"), dimension = v.str("dimension"), seed = v.vec3("seed"), match = v.materials("match", true);
+      const connectivity = v.has("connectivity") ? v.int("connectivity") : undefined;
+      if (connectivity !== undefined && ![6, 18, 26].includes(connectivity)) throw new ProtocolError("connectivity must be 6, 18 or 26");
+      return {
+        type,
+        id,
+        dimension,
+        seed,
+        match,
+        ...(connectivity !== undefined ? { connectivity: connectivity as 6 | 18 | 26 } : {}),
+        ...(v.has("budget") ? { budget: v.positive("budget") } : {}),
+        ...(v.has("area") ? { area: v.int("area") } : {}),
+      };
+    }
+    case "expand": {
+      const id = v.id("id"), dimension = v.str("dimension");
+      let by: ExpandBy;
+      if (v.raw("by") === "frontier") by = "frontier";
+      else {
+        const b = v.obj("by");
+        if (b.has("box")) {
+          if (b.has("direction") || b.has("chunks")) throw new ProtocolError("by takes a box, or a direction and chunks");
+          by = { box: b.box("box") };
+        } else by = { direction: b.oneOf("direction", ["north", "south", "west", "east"]), chunks: b.positive("chunks") };
+      }
+      return { type, id, dimension, by, ...(v.has("budget") ? { budget: v.positive("budget") } : {}) };
+    }
+    case "fill.result": {
+      const id = v.id("id"), dimension = v.str("dimension"), seed = v.vec3("seed"), count = v.int("count");
+      const box = v.nullable("box") ? v.box("box") : null;
+      if ((box === null) !== (count === 0)) throw new ProtocolError("box is null exactly when count is 0");
+      const stopped = v.oneOf("stopped", FILL_STOPS);
+      const delta = v.has("delta") ? v.raw("delta") : undefined;
+      if (delta !== undefined && delta !== true) throw new ProtocolError("delta is true or omitted");
+      const missing = v.chunks("missing");
+      const lists = decodeFillBody(body, v.grid(), { sections: v.int("sections"), frontier: v.int("frontier") });
+      return { type, id, dimension, seed, count, box, stopped, ...(delta ? { delta: true as const } : {}), missing, ...lists };
     }
     case "patch": {
       const id = v.id("id"), link = v.int("link"), dimension = v.str("dimension");
@@ -685,6 +885,42 @@ class Fields {
     return { min: [min[0], min[1]], max: [max[0], max[1]] };
   }
 
+  /** An integer ≥ 1. */
+  positive(k: string): number {
+    const v = this.int(k);
+    if (v < 1) this.fail(k, "an integer ≥ 1");
+    return v;
+  }
+
+  /** A pair of integers, `[cx, cz]`. */
+  pair(k: string): [number, number] {
+    const v = this.o[k];
+    if (!Array.isArray(v) || v.length !== 2 || !v.every(Number.isSafeInteger)) this.fail(k, "[a, b] integers");
+    return [v[0], v[1]];
+  }
+
+  /** Chunks `[cx, cz]`, unique and ascending by cz, then cx. */
+  chunks(k: string): [number, number][] {
+    const list = this.arr(k).map((c, i) => {
+      if (!Array.isArray(c) || c.length !== 2 || !c.every(Number.isSafeInteger)) throw new ProtocolError(`${this.name(k)}[${i}] must be [cx, cz] integers`);
+      return [c[0], c[1]] as [number, number];
+    });
+    for (let i = 1; i < list.length; i++) {
+      const a = list[i - 1]!, b = list[i]!;
+      if ((a[1] - b[1] || a[0] - b[0]) >= 0) throw new ProtocolError(`${this.name(k)} must be unique and ascending by cz, then cx`);
+    }
+    return list;
+  }
+
+  /** A non-empty material list (`18`): block ids, canonical states, tags `#ns:path`, and with `solid` allowed, `solid`. */
+  materials(k: string, solid: boolean): string[] {
+    const list = this.strings(k);
+    if (!list.length) this.fail(k, "a non-empty list of materials");
+    for (const m of list) if (!(solid && m === MATCH_SOLID) && !MATERIAL.test(m)) throw new ProtocolError(`${this.name(k)}: "${m}" is not a block id, a state or a #tag${solid ? ` (or "${MATCH_SOLID}")` : ""}`);
+    if (new Set(list).size !== list.length) throw new ProtocolError(`${this.name(k)} must be unique`);
+    return list;
+  }
+
   /** A `players` list: non-empty, lowercase hyphenated UUIDs (*In-game UI*). */
   players(): string[] {
     const list = this.strings("players");
@@ -755,6 +991,9 @@ class Fields {
     return { origin, size: [v[0], v[1], v[2]] };
   }
 }
+
+/** A block id or canonical state (`ns:path`, `ns:path[k=v,…]`), or a tag `#ns:path`. */
+const MATERIAL = /^(#[a-z0-9_.-]+:[a-z0-9_./-]+|[a-z0-9_.-]+:[a-z0-9_./-]+(\[[a-z0-9_]+=[a-z0-9_]+(,[a-z0-9_]+=[a-z0-9_]+)*\])?)$/;
 
 function isVec3(v: unknown): v is Vec3 {
   return Array.isArray(v) && v.length === 3 && v.every((n) => Number.isSafeInteger(n));

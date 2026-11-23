@@ -11,9 +11,9 @@ import { deflateSync, gzipSync } from "node:zlib";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { decodeFrame, encodeMessage, splitFrame } from "../../../src/world/protocol/codec.js";
-import { encodePreviewBody } from "../../../src/world/protocol/body.js";
+import { encodePreviewBody, maskRegions } from "../../../src/world/protocol/body.js";
 import { canonicalNbt, DEFAULT_VOLATILE, nbtHash, sectionHash } from "../../../src/world/protocol/hash.js";
-import { MCP_FEATURES, MOD_FEATURES, REQUEST_MODES, UI_PART_BYTES, type Message, type PatchBlock, type Sender, type UiGhost, type UiJob, type VolatileList, type WireBox } from "../../../src/world/protocol/messages.js";
+import { MCP_FEATURES, UI_PART_BYTES, type Message, type PatchBlock, type Sender, type UiGhost, type UiJob, type VolatileList, type WireBox } from "../../../src/world/protocol/messages.js";
 import { bytesToHex } from "../../../src/world/protocol/bytes.js";
 import { parseSnbt, toSnbt as snbtOf } from "../../../src/world/protocol/snbt.js";
 import { sidecarOf } from "./sidecar.js";
@@ -49,6 +49,13 @@ function vector(name: string, sender: Sender, description: string, m: Message, e
 
 mkdirSync(dir, { recursive: true });
 
+/**
+ * The modes and mod features as they stood before `select` (`18`) was added within version 3: the
+ * existing hello vectors stay frozen with them, and the `*-select` vectors list the additions.
+ */
+const MODES_V3 = ["ask", "scan", "plan", "build"] as const;
+const MOD_FEATURES_V3 = ["modes", "scan", "volumes.set", "registry", "upgrade", "ui"] as const;
+
 // ── handshake and control ──────────────────────────────────────────────────────────────────────
 vector("hello-mcp", "mcp", "MCP hello: protocol, pairing token, client, volatile-key list (the built-in default plus one plugin entry and one state-only type), every request mode, and every MCP feature (prompt.close: the mod may send /autosketch done)", {
   type: "hello",
@@ -56,7 +63,7 @@ vector("hello-mcp", "mcp", "MCP hello: protocol, pairing token, client, volatile
   token: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
   client: { name: "autosketch", version: "1.0.0" },
   volatile: { ...DEFAULT_VOLATILE, "create:mechanical_press": ["Speed", "Network/Stress"], "create:belt": "state_only" },
-  modes: [...REQUEST_MODES],
+  modes: [...MODES_V3],
   features: [...MCP_FEATURES],
 });
 vector("hello-mcp-build-only", "mcp", "MCP hello listing only the build mode and no features: the mod refuses ask, scan and plan requests itself (unsupported_mode), and /autosketch done (the MCP needs updating)", {
@@ -74,7 +81,7 @@ vector("hello-mod-singleplayer", "mod", "Mod hello from the integrated server of
   game: { version: "1.21.1", dataVersion: 3955, loader: "neoforge", loaderVersion: "21.1.249" },
   singleplayer: true,
   host: { name: "Kev", uuid: UUID_KEV },
-  features: [...MOD_FEATURES],
+  features: [...MOD_FEATURES_V3],
 });
 vector("hello-mod-dedicated", "mod", "Mod hello from a dedicated server (no host player), listing only some features", {
   type: "hello",
@@ -852,6 +859,204 @@ function tinyPng(): Uint8Array {
   return new Uint8Array(Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]));
 }
 
+
+// ── select (`18`; mod feature select, added within protocol 3) ─────────────────────────────────
+vector("hello-mcp-select", "mcp", "MCP hello listing the select mode as well: the mod may send /autosketch select requests", {
+  type: "hello",
+  protocol: 3,
+  token: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+  client: { name: "autosketch", version: "1.2.0" },
+  volatile: {},
+  modes: [...MODES_V3, "select"],
+  features: [...MCP_FEATURES],
+});
+vector("hello-mod-select", "mod", "Mod hello listing every feature, select included: it serves search, fill, expand, mask and coarse snapshots, and select-mode reads", {
+  type: "hello",
+  protocol: 3,
+  mod: { version: "0.2.0" },
+  game: { version: "1.21.1", dataVersion: 3955, loader: "neoforge", loaderVersion: "21.1.249" },
+  singleplayer: true,
+  host: { name: "Kev", uuid: UUID_KEV },
+  features: [...MOD_FEATURES_V3, "select"],
+});
+vector("prompt-select", "mod", "A select request (/autosketch select the mossy stone brick house), looking at a block of it: no grant; reads are served within selectChunks of this position", {
+  type: "prompt",
+  id: 4,
+  player: { name: "Kev", uuid: UUID_KEV },
+  text: "the mossy stone brick house",
+  context: { dimension: OW, position: [-40.5, 68, 23.5], eye: [-40.5, 69.62, 23.5], yaw: -135, pitch: 5.5, facing: "north" },
+  mode: "select",
+});
+vector("prompt-select-crosshair", "mod", "A select request with no text: the block under the crosshair is the starting point", {
+  type: "prompt",
+  id: 5,
+  player: { name: "Kev", uuid: UUID_KEV },
+  text: "",
+  context: { dimension: OW, position: [-40.5, 68, 23.5], eye: [-40.5, 69.62, 23.5], yaw: -135, pitch: 20, facing: "north", target: { pos: [-31, 70, 14], state: "minecraft:mossy_stone_bricks", face: "south" } },
+  mode: "select",
+});
+const BRICKS = ["minecraft:stone_bricks", "minecraft:mossy_stone_bricks", "minecraft:cracked_stone_bricks", "minecraft:chiseled_stone_bricks"];
+vector("search", "mcp", "A material search for the stone brick family around the player, asking past the cap (clipped to selectChunks), stopping at two closed clusters", {
+  type: "search",
+  id: 50,
+  dimension: OW,
+  materials: BRICKS,
+  radius: 300,
+  gap: 2,
+  stop: 2,
+});
+vector("search-around", "mcp", "A search for a tag and one exact state around a world position, with the mod's default radius, gap and stop", {
+  type: "search",
+  id: 51,
+  dimension: OW,
+  materials: ["#minecraft:logs", "minecraft:oak_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]"],
+  around: [-200, 64, 512],
+});
+vector("search-continue", "mcp", "Walk on from where the last search stopped, for one more closed cluster", { type: "search", id: 52, dimension: OW, continue: true, stop: 1 });
+vector("search-result", "mod", "Search answer after ring 6 of 256 (clipped): a closed cluster of three chunks near the player, an open one at ring 6, and two ungenerated chunks", {
+  type: "search.result",
+  id: 50,
+  dimension: OW,
+  materials: BRICKS,
+  centre: [-3, 1],
+  radius: 256,
+  clipped: true,
+  reached: 6,
+  minSection: -4,
+  clusters: [
+    { min: [-1, 2], max: [0, 3], chunks: 3, blocks: 1214, closed: true },
+    { min: [3, -5], max: [3, -4], chunks: 2, blocks: 75, closed: false },
+  ],
+  chunks: [
+    { chunk: [3, -5], counts: [40, 0, 9, 0], cluster: 1, sections: [3] },
+    { chunk: [3, -4], counts: [20, 6, 0, 0], cluster: 1, sections: [3, 4] },
+    { chunk: [-1, 2], counts: [380, 212, 40, 4], cluster: 0, sections: [4, 5] },
+    { chunk: [0, 2], counts: [301, 98, 17, 0], cluster: 0, sections: [4, 5, 6] },
+    { chunk: [0, 3], counts: [120, 30, 2, 0], cluster: 0, sections: [4] },
+  ],
+  missing: [[-9, -2], [-9, -1]],
+});
+vector("search-result-empty", "mod", "Search answer when the whole radius was walked without a match (reached equals radius)", {
+  type: "search.result",
+  id: 51,
+  dimension: OW,
+  materials: ["#minecraft:logs", "minecraft:oak_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]"],
+  centre: [-13, 32],
+  radius: 2,
+  reached: 2,
+  minSection: -4,
+  clusters: [],
+  chunks: [],
+  missing: [],
+});
+vector("fill", "mcp", "Fill from a block of the chosen cluster through the brick family, every option given", {
+  type: "fill",
+  id: 53,
+  dimension: OW,
+  seed: [-12, 70, 37],
+  match: BRICKS,
+  connectivity: 26,
+  budget: 2000000,
+  area: 2,
+});
+vector("fill-defaults", "mcp", "Fill through every non-air block (terrain-agnostic), the mod's default connectivity (26), budget and area", { type: "fill", id: 54, dimension: OW, seed: [-31, 70, 14], match: ["solid"] });
+vector("expand-frontier", "mcp", "Grow the read area by the chunks the frontier reaches and resume the fill", { type: "expand", id: 55, dimension: OW, by: "frontier" });
+vector("expand-direction", "mcp", "Grow the read area four chunks west, with a smaller budget for this step", { type: "expand", id: 56, dimension: OW, by: { direction: "west", chunks: 4 }, budget: 500000 });
+vector("expand-box", "mcp", "Grow the read area by the chunks a box touches", { type: "expand", id: 57, dimension: OW, by: { box: { min: [-64, -64, 0], max: [-17, 120, 63] } } });
+{
+  const bits = new Uint8Array(512);
+  bits[0] = 0x0f; // x 0..3, y 0, z 0 of the section
+  vector("fill-result", "mod", "Fill answer: one full section and one partial (a bitset of four blocks), cut off at the read area's west edge (the frontier), one ungenerated chunk in the area", {
+    type: "fill.result",
+    id: 53,
+    dimension: OW,
+    seed: [-12, 70, 37],
+    count: 4100,
+    box: { min: [-16, 64, 32], max: [3, 79, 47] },
+    stopped: "edge",
+    missing: [[-2, 3]],
+    sections: [
+      { section: [-1, 4, 2], mask: "full" },
+      { section: [0, 4, 2], mask: bits },
+    ],
+    frontier: [{ section: [-1, 4, 2], index: [0, 16, 256], faces: [16, 16, 17] }],
+  });
+  const grown = new Uint8Array(512);
+  grown[0] = 0xff;
+  grown[2] = 0x01; // x 0..7 and x 0 of z 1
+  vector("fill-result-delta", "mod", "An expand's answer: only the changed section, the budget ran out (the frontier is inside the read area), nothing missing", {
+    type: "fill.result",
+    id: 55,
+    dimension: OW,
+    seed: [-12, 70, 37],
+    count: 4105,
+    box: { min: [-16, 64, 32], max: [7, 79, 47] },
+    stopped: "budget",
+    delta: true,
+    missing: [],
+    sections: [{ section: [0, 4, 2], mask: grown }],
+    frontier: [{ section: [0, 4, 2], index: [7, 16], faces: [32, 8] }],
+  });
+}
+vector("fill-result-empty", "mod", "Fill answer when the seed doesn't match: no shape, no box", {
+  type: "fill.result",
+  id: 54,
+  dimension: OW,
+  seed: [-31, 70, 14],
+  count: 0,
+  box: null,
+  stopped: "complete",
+  missing: [],
+  sections: [],
+  frontier: [],
+});
+vector("snapshot-mask", "mcp", "The candidate's sections plus a 6-block margin (answered by a blocks snapshot.result laid out by the mask rule)", {
+  type: "snapshot",
+  id: 58,
+  dimension: OW,
+  kind: "mask",
+  sections: [[-1, 4, 2], [0, 4, 2]],
+  margin: 6,
+});
+vector("snapshot-mask-default", "mcp", "A mask snapshot with the default margin (8)", { type: "snapshot", id: 59, dimension: OW, kind: "mask", sections: [[0, 4, 2]] });
+vector("snapshot-coarse", "mcp", "A coarse snapshot at 4³ cells: two boxes, grown outward to whole cells by the mod", {
+  type: "snapshot",
+  id: 60,
+  dimension: OW,
+  kind: "coarse",
+  cell: 4,
+  boxes: [
+    { min: [-7, 64, 33], max: [-1, 70, 38] },
+    { min: [17, 65, 33], max: [18, 66, 34] },
+  ],
+});
+vector("snapshot-result-coarse", "mod", "Coarse answer: the aligned regions, one state per 4³ cell (the most common non-air block, air when all air); the second region lies in an ungenerated chunk", {
+  type: "snapshot.result",
+  id: 60,
+  dimension: OW,
+  kind: "coarse",
+  cell: 4,
+  palette: ["minecraft:stone_bricks", "minecraft:mossy_stone_bricks", AIR],
+  regions: [
+    { box: { min: [-8, 64, 32], max: [-1, 71, 39] }, states: Uint32Array.of(0, 1, 0, 0, 2, 1, 2, 2) },
+    { box: { min: [16, 64, 32], max: [19, 67, 35] }, states: Uint32Array.of(2) },
+  ],
+  missing: [[1, 2]],
+});
+vector("snapshot-result-missing", "mod", "A select-mode blocks read across an ungenerated chunk: its positions read as air and the chunk is listed", {
+  type: "snapshot.result",
+  id: 61,
+  dimension: OW,
+  palette: ["minecraft:stone", "minecraft:mossy_stone_bricks", AIR],
+  regions: [
+    { box: { min: [-2, 64, 32], max: [-1, 64, 32] }, states: Uint32Array.of(0, 1), blockEntities: [] },
+    { box: { min: [16, 64, 32], max: [16, 64, 33] }, states: Uint32Array.of(2, 2), blockEntities: [] },
+  ],
+  missing: [[1, 2]],
+});
+vector("error-no-grant", "mod", "A search, fill or expand while no select request's grant is in force; the connection stays open", { type: "error", id: 62, code: "no_grant", message: "no select request is open: the player sends /autosketch select first" });
+vector("error-too-large", "mod", "A select-mode read over contextCap in one call; the MCP asks again for less or coarser", { type: "error", id: 63, code: "too_large", message: "the read covers 5242880 positions, more than contextCap 4194304" });
+
 // ── hashing ────────────────────────────────────────────────────────────────────────────────────
 /** The starting default list the hash vectors were cut with; pinned so the frozen hash vectors don't follow later growth of `DEFAULT_VOLATILE`. */
 const STARTING_VOLATILE: VolatileList = Object.fromEntries(["minecraft:furnace", "minecraft:blast_furnace", "minecraft:smoker", "minecraft:hopper", "minecraft:brewing_stand"].map((k) => [k, DEFAULT_VOLATILE[k]!]));
@@ -936,4 +1141,11 @@ const sectionOut = sectionCases.map((c) => {
   return { ...c, hash: hash ?? null };
 });
 writeFileSync(join(dir, "hash-sections.json"), pretty({ description: "Section hash vectors. Positions not in `blocks` hold `fill`; only positions inside at least one box are hashed.", cases: sectionOut }));
+// The mask snapshot's region layout (`snapshot` kind `mask`): both sides lay the answer out the same way.
+const maskCases: { description: string; sections: [number, number, number][]; margin: number }[] = [
+  { description: "One section, margin 0: the section alone", sections: [[0, 4, 0]], margin: 0 },
+  { description: "One section, margin 8: the section, then 26 pieces of its neighbours", sections: [[0, 4, 0]], margin: 8 },
+  { description: "Three sections, negative coordinates, margin 3: shared neighbours take the bounding box of both reaches, listed sections are never margin pieces", sections: [[-1, -4, -1], [0, -4, -1], [0, -3, -1]], margin: 3 },
+];
+writeFileSync(join(dir, "mask-regions.json"), pretty({ description: "Region layout of a mask snapshot's answer: listed sections in request order, then margin pieces ascending by sy, sz, sx.", cases: maskCases.map((c) => ({ ...c, regions: maskRegions(c.sections, c.margin) })) }));
 console.log("golden vectors written to", dir);

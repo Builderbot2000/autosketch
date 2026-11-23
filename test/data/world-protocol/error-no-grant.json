@@ -1,0 +1,10 @@
+{
+  "description": "A search, fill or expand while no select request's grant is in force; the connection stays open",
+  "sender": "mod",
+  "header": {
+    "type": "error",
+    "id": 62,
+    "code": "no_grant",
+    "message": "no select request is open: the player sends /autosketch select first"
+  }
+}

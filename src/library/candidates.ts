@@ -31,7 +31,7 @@ export interface CandidateList {
   /** That request's text ("" without one). */
   question: string;
   /** That request's mode, when it had one other than `build` (piece 5: picks reopen a closed request in it). */
-  mode?: "ask" | "plan" | "scan" | "build";
+  mode?: "ask" | "plan" | "scan" | "build" | "select";
   entries: CandidateItem[];
   /** Set by a submit (piece 5): later opens answer `answered`. */
   answered: boolean;

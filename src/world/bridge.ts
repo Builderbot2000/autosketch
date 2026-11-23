@@ -7,7 +7,15 @@ import {
   PROTOCOL_VERSION,
   SUPPORTED_PROTOCOLS,
   type ChatMessage,
+  type CoarseResult,
+  type CoarseSnapshotRequest,
   type ErrorMessage,
+  type ExpandRequest,
+  type FillRequest,
+  type FillResult,
+  type MaskSnapshotRequest,
+  type SearchRequest,
+  type SearchResult,
   type HashesRequest,
   type HashesResult,
   type McpFeature,
@@ -94,6 +102,15 @@ export interface BridgeConnection {
   request(m: Req<RegistryRequest>): Promise<RegistryResult>;
   /** The game's data fixer over a schematic's data (`14`). Needs the `upgrade` feature. */
   request(m: Req<UpgradeRequest>): Promise<UpgradeResult>;
+  /** A material search (`18`, piece 2). Needs the `select` feature. */
+  request(m: Req<SearchRequest>): Promise<SearchResult>;
+  /** A fill, or an expand that resumes it (`18`, pieces 3 and 4). Needs the `select` feature. */
+  request(m: Req<FillRequest>): Promise<FillResult>;
+  request(m: Req<ExpandRequest>): Promise<FillResult>;
+  /** A shape's sections plus a margin (`18`, piece 5), answered as a blocks snapshot. Needs the `select` feature. */
+  request(m: Req<MaskSnapshotRequest>): Promise<SnapshotResult>;
+  /** One block per 2³ or 4³ cell (`18`, piece 5). Needs the `select` feature. */
+  request(m: Req<CoarseSnapshotRequest>): Promise<CoarseResult>;
   /**
    * Fire-and-forget messages; dropped while disconnected. `ui.*` and `replay.*` messages are also
    * dropped unless both hellos list `ui` (`13`, *In-game UI*).
@@ -146,6 +163,9 @@ const RESPONSE = {
   "volumes.set": "volumes",
   registry: "registry.result",
   upgrade: "upgrade.result",
+  search: "search.result",
+  fill: "fill.result",
+  expand: "fill.result",
 } as const satisfies Record<string, ModType>;
 
 const DOWN = "world_disconnected";
@@ -237,10 +257,16 @@ export class Bridge implements BridgeConnection {
   request(m: Req<VolumesSet>): Promise<VolumesMessage>;
   request(m: Req<RegistryRequest>): Promise<RegistryResult>;
   request(m: Req<UpgradeRequest>): Promise<UpgradeResult>;
-  request(m: Req<HashesRequest | SurfaceRequest | SnapshotRequest | PatchMessage | VolumesExtend | VolumesSet | RegistryRequest | UpgradeRequest>): Promise<ModMessage> {
+  request(m: Req<SearchRequest>): Promise<SearchResult>;
+  request(m: Req<FillRequest>): Promise<FillResult>;
+  request(m: Req<ExpandRequest>): Promise<FillResult>;
+  request(m: Req<MaskSnapshotRequest>): Promise<SnapshotResult>;
+  request(m: Req<CoarseSnapshotRequest>): Promise<CoarseResult>;
+  request(
+    m: Req<HashesRequest | SurfaceRequest | SnapshotRequest | MaskSnapshotRequest | CoarseSnapshotRequest | SearchRequest | FillRequest | ExpandRequest | PatchMessage | VolumesExtend | VolumesSet | RegistryRequest | UpgradeRequest>,
+  ): Promise<ModMessage> {
     if (!this.connected) return Promise.reject(new BridgeError(DOWN, "The game isn't connected (the world link is down); nothing was sent."));
-    const needs: ModFeature | undefined =
-      m.type === "volumes.set" ? "volumes.set" : m.type === "snapshot" && "kind" in m ? "scan" : m.type === "registry" ? "registry" : m.type === "upgrade" ? "upgrade" : undefined;
+    const needs = featureFor(m);
     if (needs && !this.supports(needs)) return Promise.reject(new BridgeError(OUTDATED, outdated(this.hello!, needs)));
     const id = this.nextId++;
     const expect: ModType = RESPONSE[m.type];
@@ -462,7 +488,26 @@ const FEATURE_NAMES: Record<ModFeature, string> = {
   registry: "the registry report",
   upgrade: "upgrading schematics through the game's data fixer",
   ui: "the in-game UI",
+  select: "selecting in the world (search, fill, expand, mask and coarse snapshots)",
 };
+
+/** The mod feature a request needs (*Versions and features*), if any. */
+function featureFor(m: { type: McpMessage["type"]; kind?: string }): ModFeature | undefined {
+  switch (m.type) {
+    case "volumes.set":
+    case "registry":
+    case "upgrade":
+      return m.type;
+    case "search":
+    case "fill":
+    case "expand":
+      return "select";
+    case "snapshot":
+      return m.kind === "surface" ? "scan" : m.kind === "mask" || m.kind === "coarse" ? "select" : undefined;
+    default:
+      return undefined;
+  }
+}
 
 function outdated(hello: ModHello, f: ModFeature): string {
   return `The Autosketch mod ${hello.mod.version} doesn't support ${FEATURE_NAMES[f]} (its hello doesn't list "${f}"): the Autosketch mod is older; update the Autosketch mod.`;

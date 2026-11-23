@@ -1,0 +1,15 @@
+{
+  "description": "Grow the read area by the chunks a box touches",
+  "sender": "mcp",
+  "header": {
+    "type": "expand",
+    "id": 57,
+    "dimension": "minecraft:overworld",
+    "by": {
+      "box": {
+        "min": [-64, -64, 0],
+        "max": [-17, 120, 63]
+      }
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "description": "Fill from a block of the chosen cluster through the brick family, every option given",
+  "sender": "mcp",
+  "header": {
+    "type": "fill",
+    "id": 53,
+    "dimension": "minecraft:overworld",
+    "seed": [-12, 70, 37],
+    "match": [
+      "minecraft:stone_bricks",
+      "minecraft:mossy_stone_bricks",
+      "minecraft:cracked_stone_bricks",
+      "minecraft:chiseled_stone_bricks"
+    ],
+    "connectivity": 26,
+    "budget": 2000000,
+    "area": 2
+  }
+}

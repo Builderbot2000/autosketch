@@ -1,0 +1,15 @@
+{
+  "description": "The candidate's sections plus a 6-block margin (answered by a blocks snapshot.result laid out by the mask rule)",
+  "sender": "mcp",
+  "header": {
+    "type": "snapshot",
+    "id": 58,
+    "dimension": "minecraft:overworld",
+    "kind": "mask",
+    "sections": [
+      [-1, 4, 2],
+      [0, 4, 2]
+    ],
+    "margin": 6
+  }
+}

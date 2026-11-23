@@ -127,7 +127,15 @@ Material fills leak through terrain (stone, dirt and grass connect to everything
 
 ## Wire
 
-New requests (MCP → mod, with ids, served in arrival order as `13`'s other requests): `search`, `fill`, `expand`, and `snapshot` gaining `mask` (sections plus margin) and `coarse` (cell size). Their answers carry the shapes above. Mode `select` in `prompt`; `prompt.scan` gone. Golden vectors for each. Exact schemas go in `13`'s *Message schemas* when built.
+New requests (MCP → mod, with ids, served in arrival order as `13`'s other requests): `search`, `fill`, `expand`, and `snapshot` gaining `mask` (sections plus margin) and `coarse` (cell size). Their answers carry the shapes above. Mode `select` in `prompt`; `prompt.scan` gone (R1). Golden vectors for each. The exact schemas are in `13`, *Message schemas*, *Select* (mod feature `select`, added within protocol 3), and the read grant in `13`, *Where the mod serves reads*.
+
+Details fixed with the wire (step W1, 2026-11-23), each the simplest reading of the pieces above:
+
+- **Materials on the wire** are block ids (any state), canonical states, block tags `#ns:path`, and for a fill `solid`. The MCP resolves words and families into them; the mod knows no families.
+- **The search** walks rings in index order and counts each block once, under the first material it matches. Clusters are chunks touching by an edge or a corner; a cluster is closed once the walk has completed `gap` rings past its farthest ring. Every answer, a continuation's too, covers the whole walk so far, so the MCP replaces rather than merges.
+- **The fill's read area** is a set of whole chunk columns, held by the mod with the grant: a `fill` starts it at the chunks within `area` (default 1) of the seed's chunk and replaces the previous fill; `expand` grows it (by the frontier's chunks, a direction, or a box) and resumes from the frontier with a fresh budget, answering with the changed sections only. The budget counts the seed. An ungenerated chunk stops the fill like non-matching blocks and is listed, since expanding can't read it.
+- **The mask snapshot's margin** is measured from the sections' boxes, not the shape's blocks, so the request carries no mask, and it is answered as an ordinary blocks snapshot whose regions follow one layout rule on both sides. **Coarse cells** sit on the world's grid (boxes grown outward to multiples of the cell), so a region read twice lines up; ties go to the state met first in the cell.
+- **`no_grant`**, a new error code, refuses `search`, `fill` and `expand` while no select request's grant is in force.
 
 ## Measure first
 
@@ -144,6 +152,28 @@ On the Craftoria test server, before fixing defaults:
 - Unit (MCP): heat-map image and cluster text, world view beside an open document and with sandboxes open, `fade`, coarse replacement by full detail, choices as lines and as text.
 - Client suite: candidate outline near and far, volumes drawn without particles, choice clicks.
 - End to end (world tier): "select the mossy stone brick house" on a test world with two candidate houses and a ruin, through to confirmed volumes.
+
+## Implementation status
+
+The select set's briefs are `docs/briefs/select/`; each silo updates its own rows.
+
+| Piece | Silo | Status |
+|---|---|---|
+| *Wire*: mode `select`; `search`, `fill`, `expand`; snapshot `mask` and `coarse`; the select-mode read grant | W (W1) | Built, wire only. Schemas in `13`, *Select*; codecs in `src/world/protocol/` and `mod/…/protocol/SelectMessages.java`; golden vectors in `test/data/world-protocol/` (and `mask-regions.json`); the fake host answers all of it (`test/support/fake-select.ts`), its fill with `{connected}`'s algorithm (parity tested at 6, 18 and 26). The bridge refuses the requests unsent (`world_mod_outdated`) without the mod feature `select` |
+| *Wire*: choice kind, steady fill record, volume lines | W (W2) | Not started |
+| 1. Command and mode | C (C1), P (P1) | Wire built (W1: mode `select` on both sides, `select` read-only and volume-changing in `src/world/modes.ts` with placeholder lines); command and agent text not started |
+| 2. Material search | M (M1), T (T1) | Wire and fake host built (W1); mod and tool not started |
+| 3. Fill | M (M2), T (T2) | Wire and fake host built (W1); mod and tool not started |
+| 4. Expand | M (M2), T (T2) | Wire and fake host built (W1); mod and tool not started |
+| 5. World view (with snapshot `mask` and `coarse`) | V (V1, V2), M (M3) | Wire and fake host built (W1); view and mod reads not started |
+| 6. Isolated render with faded surroundings | V (V2) | Not started |
+| 7. Choices in chat | W (W2), P (P2), C (C1) | Not started |
+| 8. Outlines in the world | W (W2), C (C2, C3), P (P3) | Not started |
+| 9. Confirming | T (T3) | Not started |
+| 10. Terrain | V (V2), P (P1) | Wire built (W1: surface snapshots inside the select grant); not started otherwise |
+| *Removal* | R (R1) | Not started |
+| *Measure first* | Z (Z1) | Not started |
+| *Testing*, end to end | Z (Z2) | Not started |
 
 ## Open questions
 
@@ -162,7 +192,7 @@ Settled with the user 2026-11-22:
 - **No built-versus-generated split.**
 - **Work volume = bounding box, enforced; the shape guides.** A selection larger than the cap is allowed; the work volume isn't raised to fit, the agent works on a part or uses sandboxes.
 - **Search radius**: 256 chunks as default and cap for now.
-- **Reads in select mode** (2026-11-23): block snapshots anywhere within `selectChunks` of the player, capped per call by `contextCap`, so a starter volume for terrain needs no search; a search grants nothing further.
+- **Reads in select mode** (2026-11-23): block snapshots anywhere within `selectChunks` of the player, capped per call by `contextCap`, so a starter volume for terrain needs no search; a search grants nothing further. Recorded in `13` (*Where the mod serves reads*), where "the player" is the chunk of the select prompt's position, fixed when the prompt arrives (step W1): the MCP then knows the bounds from the prompt alone, and the player walking toward the build doesn't move what was granted. Surface snapshots are served there too (piece 10).
 - **Search nearest first and stop early**: rings outward from the player, stopping once enough clusters are closed, resumable for more, so 256 is only walked on a miss.
 - **Huge shapes drawn as a tinted shell** of their sections, using the overlay's existing through-blocks faces with a steady (non-fading) fill.
 - **In-world outlines for the candidate in the first version**, and the work and context particle outlines replaced by overlay lines visible at distance.

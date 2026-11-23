@@ -1,0 +1,25 @@
+{
+  "description": "MCP hello listing the select mode as well: the mod may send /autosketch select requests",
+  "sender": "mcp",
+  "header": {
+    "type": "hello",
+    "protocol": 3,
+    "token": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    "client": {
+      "name": "autosketch",
+      "version": "1.2.0"
+    },
+    "volatile": {},
+    "modes": [
+      "ask",
+      "scan",
+      "plan",
+      "build",
+      "select"
+    ],
+    "features": [
+      "prompt.close",
+      "ui"
+    ]
+  }
+}

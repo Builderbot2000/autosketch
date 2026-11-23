@@ -30,13 +30,19 @@ public final class Messages {
     /** The one protocol version the mod speaks (13, *Versions and features*). */
     public static final int PROTOCOL_VERSION = 3;
 
-    /** Request modes (13, B6), named by the player's subcommand. */
-    public static final List<String> REQUEST_MODES = List.of("ask", "scan", "plan", "build");
+    /** Request modes (13, B6), named by the player's subcommand; {@code select} (18, piece 1) needs feature {@code select}. */
+    public static final List<String> REQUEST_MODES = List.of("ask", "scan", "plan", "build", "select");
 
     /** Optional mod capabilities a mod hello lists in {@code features} (13, *Versions and features*). */
     public static final String FEATURE_MODES = "modes", FEATURE_SCAN = "scan", FEATURE_VOLUMES_SET = "volumes.set";
     /** Protocol 3 features (14, *Version-specific data lives in the mod*). */
     public static final String FEATURE_REGISTRY = "registry", FEATURE_UPGRADE = "upgrade";
+    /**
+     * Added within protocol 3 (18): the mod serves {@code search}, {@code fill}, {@code expand}, the
+     * {@code mask} and {@code coarse} snapshots and select-mode reads, and sends mode {@code select}
+     * ({@link SelectMessages}). A mod lists it only once it serves all of them.
+     */
+    public static final String FEATURE_SELECT = "select";
     /**
      * Optional MCP capabilities an MCP hello lists in {@code features}, mirroring the mod's list: the
      * mod uses an addition only when the MCP lists it. {@code prompt.close}: the MCP handles
@@ -388,13 +394,22 @@ public final class Messages {
         }
     }
 
-    /** {@code snapshot.result}, mod → MCP. Each region's states index {@code palette}. */
-    public record SnapshotResult(long id, String dimension, List<String> palette, List<SnapshotRegion> regions) {
+    /**
+     * {@code snapshot.result}, mod → MCP. Each region's states index {@code palette}. {@code missing}
+     * (select reads, 18): the chunks the regions touch that aren't generated, ascending by cz, then cx;
+     * null or empty is omitted.
+     */
+    public record SnapshotResult(long id, String dimension, List<String> palette, List<SnapshotRegion> regions, @Nullable List<ChunkXZ> missing) {
+        public SnapshotResult(long id, String dimension, List<String> palette, List<SnapshotRegion> regions) {
+            this(id, dimension, palette, regions, null);
+        }
+
         public Frame encode() {
             JsonObject h = Json.header("snapshot.result");
             h.addProperty("id", id);
             h.addProperty("dimension", dimension);
             h.add("regions", Json.boxes(regions.stream().map(SnapshotRegion::box).toList()));
+            if (missing != null && !missing.isEmpty()) h.add("missing", chunks(missing));
             return new Frame(h, Bodies.encodeSnapshot(palette, regions));
         }
 
@@ -402,9 +417,39 @@ public final class Messages {
             expectType(f, "snapshot.result");
             long id = reqId(f);
             List<Box> boxes = Json.reqBoxes(f.header(), "regions", id);
+            List<ChunkXZ> missing = f.header().has("missing") ? readChunks(f.header(), "missing", id) : null;
+            if (missing != null && missing.isEmpty()) throw ProtocolException.badRequest(id, "missing is omitted when empty");
             Bodies.SnapshotBody body = Bodies.decodeSnapshot(f.body(), boxes);
-            return new SnapshotResult(id, Json.reqString(f.header(), "dimension", id), body.palette(), body.regions());
+            return new SnapshotResult(id, Json.reqString(f.header(), "dimension", id), body.palette(), body.regions(), missing);
         }
+    }
+
+    /** Chunks as {@code [[cx,cz],…]}. */
+    public static JsonArray chunks(List<ChunkXZ> list) {
+        JsonArray m = new JsonArray(list.size());
+        for (ChunkXZ c : list) {
+            JsonArray e = new JsonArray(2);
+            e.add(c.cx());
+            e.add(c.cz());
+            m.add(e);
+        }
+        return m;
+    }
+
+    /** Chunks {@code [[cx,cz],…]}, unique and ascending by cz, then cx. */
+    public static List<ChunkXZ> readChunks(JsonObject h, String key, @Nullable Long id) throws ProtocolException {
+        List<ChunkXZ> out = new ArrayList<>();
+        for (JsonElement e : Json.reqArray(h, key, id)) {
+            int[] c = Area.pair(e, key, id);
+            ChunkXZ next = new ChunkXZ(c[0], c[1]);
+            if (!out.isEmpty()) {
+                ChunkXZ prev = out.get(out.size() - 1);
+                if (prev.cz() > next.cz() || (prev.cz() == next.cz() && prev.cx() >= next.cx()))
+                    throw ProtocolException.badRequest(id, key + " must be unique and ascending by cz, then cx");
+            }
+            out.add(next);
+        }
+        return List.copyOf(out);
     }
 
     /** The snapshot kind a {@code snapshot} request asks for: {@code blocks} (the default) or {@code surface} (protocol 2). */

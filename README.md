@@ -51,7 +51,7 @@ claude --dangerously-load-development-channels server:autosketch
 
 Installed as the plugin, the server is named by the plugin instead: `claude --dangerously-load-development-channels plugin:autosketch@autosketch`.
 
-The server connects to the game on its own once it is running, and links as soon as you mark a work volume with `/autosketch wand` (turn this off with `--set world.autoLink=false`, then the agent links with `doc_open({world: true})`). (`--channels server:autosketch` is the form for an approved channel.) This works only in interactive sessions. Without it, the world link still works, and in-game requests are dropped silently by Claude Code. The server can't detect that, so the player is told "delivered".
+The server connects to the game on its own once it is running, and links as soon as you mark a work volume with the wand (hold a blaze rod, left-click one corner and right-click the other) (turn this off with `--set world.autoLink=false`, then the agent links with `doc_open({world: true})`). (`--channels server:autosketch` is the form for an approved channel.) This works only in interactive sessions. Without it, the world link still works, and in-game requests are dropped silently by Claude Code. The server can't detect that, so the player is told "delivered".
 
 **Who may ask.** A request turns into a prompt to an agent that can run commands on your machine, so the MCP checks every request against an allowlist before anything reaches the session. In singleplayer the host is always allowed. Anyone else, and everyone on a dedicated server, has to be listed by UUID (safer) or name: `--set world.promptPlayers=<uuid>,<name>`. Op level 2 is required in the game as well. Other settings: `world.promptIdleMs` (a request's chat stream closes after this long with no tool calls, default 5 minutes) and `world.activityMs` (at most one activity chat message per interval, default 2 s). In the game, `/autosketch log off|mine|all` picks what each player sees.
 
@@ -81,6 +81,23 @@ npm install
 npm test                                        # unit + golden tests
 AUTOSKETCH_INSTANCE=/path/to/instance npm run test:local   # against a real instance
 ```
+
+### In-game test (internal, dev only)
+
+`scripts/ingame-setup.sh` sets up a hands-on test in the real game client. Run it from the repo root in the VS Code integrated terminal (WSL):
+
+```
+bash scripts/ingame-setup.sh            # all three steps below, in order
+bash scripts/ingame-setup.sh prep       # check WSL mirrored networking, build the MCP and the mod jar,
+                                        #   replace autosketch-*.jar in the instance's mods/ folder
+bash scripts/ingame-setup.sh wait       # wait until a world is open and the mod's bridge is up
+bash scripts/ingame-setup.sh launch     # start Claude Code on the autosketch development channel
+```
+
+- The instance defaults to the Craftoria CurseForge instance. Set `AUTOSKETCH_INSTANCE` to use a different one.
+- Close Minecraft before `prep` when the jar has changed: Windows locks loaded jars, and the script stops instead of half-installing. During `wait`, start the game and open a world (Creative, cheats on).
+- Inside a Claude Code session, the `/ingame-setup` skill runs `prep` and `wait`. Launch the channel session from the terminal yourself.
+- The in-client checklists are in `docs/briefs/world/test-setup.md` (section 3) and `docs/briefs/components/HANDOFF.md` (*Checks still to run*).
 
 ## License
 

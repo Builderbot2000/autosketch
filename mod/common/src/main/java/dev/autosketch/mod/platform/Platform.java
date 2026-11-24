@@ -46,6 +46,20 @@ public interface Platform {
     /** Sends the link status to the player's client half (16, *Mod side*), when it has one; nothing otherwise. */
     default void sendLinkStatus(ServerPlayer player, dev.autosketch.mod.link.LinkStatus status) {}
 
+    /**
+     * Whether the player's client registered the UI channel {@code autosketch:ui} (it runs the client
+     * half's overlays, 16). False on a loader without one.
+     */
+    default boolean hasUiChannel(ServerPlayer player) {
+        return false;
+    }
+
+    /**
+     * Sends the player's volume outlines to their client half (13, *Relay to the client*, op
+     * {@code 4}): {@code json} is {@code VolumeOutlines} JSON. Nothing when the client lacks the channel.
+     */
+    default void sendVolumeOutlines(ServerPlayer player, String json) {}
+
     /** The installed platform. */
     static Platform get() {
         Platform p = Holder.platform;

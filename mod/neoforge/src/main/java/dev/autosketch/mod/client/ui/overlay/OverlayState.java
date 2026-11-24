@@ -1,5 +1,6 @@
 package dev.autosketch.mod.client.ui.overlay;
 
+import dev.autosketch.mod.feedback.VolumeOutlines;
 import dev.autosketch.mod.protocol.UiMessages;
 import dev.autosketch.mod.protocol.UiMessages.Fill;
 import dev.autosketch.mod.protocol.UiMessages.Flash;
@@ -19,7 +20,8 @@ import org.jetbrains.annotations.Nullable;
 /**
  * The client's copy of the overlay and HUD state (13, *In-game UI*, {@code ui.state} and
  * {@code ui.flash}; 16, *Overlays in the world*, *HUD*), exactly as the MCP sent it: a map from job
- * id to the job's whole record, the steady fills by id (18, piece 8: the select candidate), the open
+ * id to the job's whole record, the steady fills by id (18, piece 8: the select candidate), the player's own volume outlines from the
+ * server half (op 4, replaced whole), the open
  * request, token totals and last refusal, and the flashes still pulsing. Nothing is derived here: a full state replaces everything, a change puts or removes
  * whole jobs (and fills) by id and replaces the fields it carries (no field-level merge, 13's
  * <em>Why replace-by-key per job</em>).
@@ -68,6 +70,7 @@ public final class OverlayState {
     private @Nullable Tokens tokens;
     private @Nullable Refusal refusal;
     private final List<ActiveFlash> flashes = new ArrayList<>();
+    private VolumeOutlines volumes = VolumeOutlines.none("");
 
     /** The held state's {@code seq}; 0 before the first full state (and after {@link #clear}). */
     public long seq() {
@@ -94,6 +97,16 @@ public final class OverlayState {
 
     public @Nullable Refusal refusal() {
         return refusal;
+    }
+
+    /** The player's own volume outlines as the server half last sent them (13, *Relay to the client*, op 4). */
+    public VolumeOutlines volumes() {
+        return volumes;
+    }
+
+    /** Replaces the volume outlines (each op-4 packet is whole). */
+    public void volumes(VolumeOutlines v) {
+        volumes = v;
     }
 
     /**
@@ -148,5 +161,6 @@ public final class OverlayState {
         tokens = null;
         refusal = null;
         flashes.clear();
+        volumes = VolumeOutlines.none("");
     }
 }

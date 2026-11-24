@@ -1,5 +1,6 @@
 package dev.autosketch.mod.client.ui.overlay;
 
+import dev.autosketch.mod.feedback.VolumeOutlines;
 import dev.autosketch.mod.protocol.Box;
 import dev.autosketch.mod.protocol.UiMessages.Fill;
 import dev.autosketch.mod.protocol.UiMessages.Job;
@@ -13,12 +14,19 @@ import java.util.List;
  * straight copy of what the MCP sent: a job's work volume as a solid box and each context box as a
  * dashed one, in the job's colour; the brief as a label; each flash box as a pulse (a proposed hit's,
  * job {@code candidate}, pulses {@link OverlayState#HIT_PULSES} times); each steady fill (18, piece 8)
- * as its edges when the camera is near it, else as its faces. The client only chooses between the
+ * as its edges when the camera is near it, else as its faces; the player's own work and context
+ * volumes (and the wand's other modes' boxes) as the server half sent them (18, piece 8, op 4). The client only chooses between the
  * two drawings the MCP sent; it computes no shape (16, client half thin).
  */
-public record DrawList(List<Outline> outlines, List<Label> labels, List<Pulse> pulses, List<Steady> fills) {
+public record DrawList(List<Outline> outlines, List<Label> labels, List<Pulse> pulses, List<Steady> fills, List<Volume> volumes) {
     /** A line box: a job's work volume (solid) or one of its context boxes (dashed). */
     public record Outline(String job, Box box, int colour, boolean dashed) {}
+
+    /**
+     * One of the player's own volumes (13, *Relay to the client*, op 4): a box of wand mode
+     * {@code mode} (its index in the server's mode order) in that mode's colour, drawn as wide lines.
+     */
+    public record Volume(int mode, Box box, int colour) {}
 
     /** A camera-facing label: a job's brief, above the top centre of its work volume. */
     public record Label(String job, String text, double x, double y, double z, int colour) {}
@@ -47,11 +55,12 @@ public record DrawList(List<Outline> outlines, List<Label> labels, List<Pulse> p
      */
     public static final double NEAR = 64;
 
-    public static final DrawList EMPTY = new DrawList(List.of(), List.of(), List.of(), List.of());
+    public static final DrawList EMPTY = new DrawList(List.of(), List.of(), List.of(), List.of(), List.of());
 
     /**
-     * The draw list. Nothing while the link isn't {@code connected} (16, *Mod side*); job volumes and
-     * steady fills only when {@code volumes} is on, flashes (proposed hits too) only when
+     * The draw list. Nothing while the link isn't {@code connected} (16, *Mod side*); the player's own
+     * volumes (op 4) whenever the server half sends them, since the wand and {@code /autosketch show}
+     * already decide when they show; job volumes and steady fills only when {@code volumes} is on, flashes (proposed hits too) only when
      * {@code flashes} is on; only records in {@code dimension} (13, <em>Other dimensions</em>).
      * {@code cx, cy, cz}: the camera, which picks each fill's near or far drawing.
      */
@@ -61,6 +70,13 @@ public record DrawList(List<Outline> outlines, List<Label> labels, List<Pulse> p
         List<Label> labels = new ArrayList<>();
         List<Pulse> pulses = new ArrayList<>();
         List<Steady> fills = new ArrayList<>();
+        List<Volume> own = new ArrayList<>();
+        VolumeOutlines vo = state.volumes();
+        if (vo.dimension().equals(dimension))
+            for (int i = 0; i < vo.outlines().size(); i++) {
+                VolumeOutlines.Entry e = vo.outlines().get(i);
+                for (Box b : e.boxes()) own.add(new Volume(i, b, e.colour()));
+            }
         if (volumes) {
             for (Job j : state.jobs()) {
                 if (!j.dimension().equals(dimension)) continue;
@@ -83,7 +99,7 @@ public record DrawList(List<Outline> outlines, List<Label> labels, List<Pulse> p
                 for (Box b : a.flash().boxes()) pulses.add(new Pulse(a.flash().job(), b, a.flash().colour(), strength));
             }
         }
-        return new DrawList(List.copyOf(outlines), List.copyOf(labels), List.copyOf(pulses), List.copyOf(fills));
+        return new DrawList(List.copyOf(outlines), List.copyOf(labels), List.copyOf(pulses), List.copyOf(fills), List.copyOf(own));
     }
 
     /** Distance from the camera to the box around all of a fill's spans (0 inside it). */
@@ -100,6 +116,6 @@ public record DrawList(List<Outline> outlines, List<Label> labels, List<Pulse> p
     }
 
     public boolean isEmpty() {
-        return outlines.isEmpty() && labels.isEmpty() && pulses.isEmpty() && fills.isEmpty();
+        return outlines.isEmpty() && labels.isEmpty() && pulses.isEmpty() && fills.isEmpty() && volumes.isEmpty();
     }
 }

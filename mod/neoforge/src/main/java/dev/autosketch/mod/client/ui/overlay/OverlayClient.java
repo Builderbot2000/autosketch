@@ -8,6 +8,8 @@ import dev.autosketch.mod.client.ui.LinkState;
 import dev.autosketch.mod.client.ui.UiClient;
 import dev.autosketch.mod.client.ui.UiToggles;
 import dev.autosketch.mod.client.ui.hud.HudOverlay;
+import dev.autosketch.mod.feedback.VolumeOutlines;
+import dev.autosketch.mod.protocol.ProtocolException;
 import dev.autosketch.mod.protocol.UiMessages.UiFlash;
 import dev.autosketch.mod.protocol.UiMessages.UiState;
 import net.minecraft.Util;
@@ -22,7 +24,7 @@ import org.slf4j.Logger;
 
 /**
  * Silo O's client entry (16, *Overlays in the world*, *HUD*): registers the {@code ui.state} and
- * {@code ui.flash} handlers on {@link UiClient}, the toggle keys' actions on {@link AutosketchKeys},
+ * {@code ui.flash} handlers and the volume outlines' (op 4, 18 piece 8) on {@link UiClient}, the toggle keys' actions on {@link AutosketchKeys},
  * the world overlay's render listener and the HUD layer. A second client entry point of the mod (as
  * the client test driver is), so {@code AutosketchClient} stays C's.
  *
@@ -42,6 +44,13 @@ public final class OverlayClient {
     public OverlayClient(IEventBus modBus) {
         UiClient.register("ui.state", (f, m) -> onState((UiState) m));
         UiClient.register("ui.flash", (f, m) -> STATE.flash((UiFlash) m, Util.getMillis()));
+        UiClient.onOutlines(json -> {
+            try {
+                STATE.volumes(VolumeOutlines.parse(json));
+            } catch (ProtocolException e) {
+                LOG.warn("Autosketch UI: dropped malformed volume outlines: {}", e.getMessage());
+            }
+        });
         LinkState.addListener(s -> {
             if (s != LinkState.State.CONNECTED) {
                 STATE.clear();

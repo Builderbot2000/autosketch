@@ -23,10 +23,13 @@ import net.minecraft.resources.ResourceLocation;
  *       something a server command hands to the client half ({@code replay.list},
  *       {@code replay.open <log>}, {@code replay.close}, ...). Actions are mod-internal: both halves
  *       ship in one jar, so they are not versioned.
+ *   <li>{@link #OUTLINES} (server to client): {@code data} is the player's volume outlines in UTF-8
+ *       JSON ({@code feedback.VolumeOutlines}; 18, piece 8), sent whole whenever what
+ *       {@code Feedback} would draw changes. Mod-internal like the actions.
  * </ul>
  */
 public record UiPayload(byte op, long id, int part, int parts, byte[] data) implements CustomPacketPayload {
-    public static final byte FRAME = 0, REQUEST = 1, LINK = 2, CLIENT_ACTION = 3;
+    public static final byte FRAME = 0, REQUEST = 1, LINK = 2, CLIENT_ACTION = 3, OUTLINES = 4;
 
     /** Requests from the client stay small; vanilla limits serverbound custom payloads to 32 KiB. */
     public static final int MAX_REQUEST_BYTES = 30_000;
@@ -49,6 +52,11 @@ public record UiPayload(byte op, long id, int part, int parts, byte[] data) impl
     /** A client action: {@code <action> <args…>}, for the client half's action registry. */
     public static UiPayload action(String text) {
         return new UiPayload(CLIENT_ACTION, 0, 0, 0, text.getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** The player's volume outlines: {@code VolumeOutlines} JSON. */
+    public static UiPayload outlines(String json) {
+        return new UiPayload(OUTLINES, 0, 0, 0, json.getBytes(StandardCharsets.UTF_8));
     }
 
     /** A client's request: its header JSON. */

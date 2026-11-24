@@ -21,7 +21,8 @@ import org.joml.Matrix4f;
  * once faint and through blocks (no depth test, so a job behind a wall is still seen), once at full
  * strength where they're in view; labels as camera-facing text, also through blocks. A steady fill
  * (18, piece 8) draws its faces through blocks as pulses do but at its constant alpha, and its edges
- * as outlines are drawn, both exactly as sent. Version
+ * as outlines are drawn, both exactly as sent. The player's own volumes (op 4) draw as job outlines do,
+ * with wider lines and no fog, so they read from far off. Version
  * sensitive: render types, {@code RenderLevelStageEvent} and {@code Font.drawInBatch} are where a port
  * to another Minecraft version looks first (1.21 changed vertex building to {@code addVertex}/
  * {@code setColor}/{@code setNormal}).
@@ -35,6 +36,8 @@ public final class OverlayRenderer {
     static final float XRAY_ALPHA = 0.35f;
     /** Strongest alpha of a pulse's faces. */
     static final float PULSE_ALPHA = 0.45f;
+    /** Width in pixels of the player's own volume lines (job lines are 2.5): a constant width on screen, so a far box still reads. */
+    static final double VOLUME_WIDTH = 4.0;
 
     /**
      * The render types. A subclass of {@link RenderType} only to reach its protected state shards;
@@ -77,6 +80,57 @@ public final class OverlayRenderer {
                         .setCullState(NO_CULL)
                         .createCompositeState(false));
 
+        private static float savedFogStart;
+
+        /**
+         * Fog off for the player's own volume lines, so a box past the fog (a small render distance)
+         * still shows: the lines shader fades by distance, unlike the fills' position-colour quads.
+         */
+        private static void fogOff() {
+            savedFogStart = RenderSystem.getShaderFogStart();
+            RenderSystem.setShaderFogStart(Float.MAX_VALUE);
+        }
+
+        private static void fogBack() {
+            RenderSystem.setShaderFogStart(savedFogStart);
+        }
+
+        static final TexturingStateShard FOG_OFF = new TexturingStateShard("autosketch_fog_off", Types::fogOff, Types::fogBack);
+
+        static final TexturingStateShard DEPTH_AND_FOG_OFF = new TexturingStateShard("autosketch_depth_fog_off", () -> {
+            RenderSystem.disableDepthTest();
+            fogOff();
+        }, () -> {
+            fogBack();
+            RenderSystem.enableDepthTest();
+        });
+
+        /** The player's own volumes (18, piece 8): wider, to be seen from far off, as the particles they replace weren't. */
+        static final RenderType WIDE_LINES = create("autosketch_overlay_wide_lines", DefaultVertexFormat.POSITION_COLOR_NORMAL, VertexFormat.Mode.LINES, 1536, false, false,
+                CompositeState.builder()
+                        .setShaderState(RENDERTYPE_LINES_SHADER)
+                        .setLineState(new LineStateShard(OptionalDouble.of(VOLUME_WIDTH)))
+                        .setLayeringState(VIEW_OFFSET_Z_LAYERING)
+                        .setTransparencyState(TRANSLUCENT_TRANSPARENCY)
+                        .setOutputState(ITEM_ENTITY_TARGET)
+                        .setWriteMaskState(COLOR_WRITE)
+                        .setTexturingState(FOG_OFF)
+                        .setCullState(NO_CULL)
+                        .createCompositeState(false));
+
+        static final RenderType WIDE_XRAY_LINES = create("autosketch_overlay_wide_xray_lines", DefaultVertexFormat.POSITION_COLOR_NORMAL, VertexFormat.Mode.LINES, 1536, false, false,
+                CompositeState.builder()
+                        .setShaderState(RENDERTYPE_LINES_SHADER)
+                        .setLineState(new LineStateShard(OptionalDouble.of(VOLUME_WIDTH - 1)))
+                        .setLayeringState(VIEW_OFFSET_Z_LAYERING)
+                        .setTransparencyState(TRANSLUCENT_TRANSPARENCY)
+                        .setOutputState(ITEM_ENTITY_TARGET)
+                        .setWriteMaskState(COLOR_WRITE)
+                        .setDepthTestState(NO_DEPTH_TEST)
+                        .setTexturingState(DEPTH_AND_FOG_OFF)
+                        .setCullState(NO_CULL)
+                        .createCompositeState(false));
+
         static final RenderType XRAY_QUADS = create("autosketch_overlay_xray_quads", DefaultVertexFormat.POSITION_COLOR, VertexFormat.Mode.QUADS, 1536, false, true,
                 CompositeState.builder()
                         .setShaderState(POSITION_COLOR_SHADER)
@@ -110,6 +164,12 @@ public final class OverlayRenderer {
             for (DrawList.Pulse p : list.pulses()) edges(lines, m, p.box(), 0.015, p.colour(), alpha * p.strength(), false);
             for (DrawList.Steady f : list.fills())
                 for (int[] e : f.edges()) line(lines, m, e[0], e[1], e[2], e[3], e[4], e[5], f.colour(), alpha);
+            buffers.endBatch(type);
+        }
+        for (int pass = 0; pass < 2 && !list.volumes().isEmpty(); pass++) {
+            RenderType type = pass == 0 ? Types.WIDE_XRAY_LINES : Types.WIDE_LINES;
+            VertexConsumer lines = buffers.getBuffer(type);
+            for (DrawList.Volume v : list.volumes()) edges(lines, m, v.box(), 0.01, v.colour(), pass == 0 ? XRAY_ALPHA : 1f, false);
             buffers.endBatch(type);
         }
 

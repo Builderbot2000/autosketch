@@ -47,6 +47,7 @@ public final class UiClient {
     private static final Map<String, List<Handler>> handlers = new ConcurrentHashMap<>();
     private static final Map<String, Integer> counts = new ConcurrentHashMap<>();
     private static final Map<String, Consumer<String>> actions = new ConcurrentHashMap<>();
+    private static volatile Consumer<String> outlines = t -> {};
     private static final Map<Long, Consumer<UiResult>> waiting = new ConcurrentHashMap<>();
     private static long nextRequest;
     private static long partsId = -1;
@@ -75,6 +76,11 @@ public final class UiClient {
         actions.put(name, handler);
     }
 
+    /** Sets the handler for the player's volume outlines ({@link UiPayload#OUTLINES}: their JSON), on the client thread. */
+    public static void onOutlines(Consumer<String> handler) {
+        outlines = handler;
+    }
+
     /** How many messages of a type arrived since the client started (for tests). */
     public static int received(String type) {
         return counts.getOrDefault(type, 0);
@@ -101,6 +107,7 @@ public final class UiClient {
             case UiPayload.LINK -> LinkState.set(LinkState.State.fromWire(p.text()));
             case UiPayload.FRAME -> part(p);
             case UiPayload.CLIENT_ACTION -> action(p.text());
+            case UiPayload.OUTLINES -> outlines.accept(p.text());
             default -> LOG.debug("Autosketch UI: ignoring packet op {}", p.op());
         }
     }

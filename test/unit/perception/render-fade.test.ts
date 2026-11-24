@@ -69,7 +69,7 @@ describe("render fade (18, piece 6)", () => {
       ],
     });
     expect(r.caption).toContain(
-      "coarse: (0,0,0)–(3,3,3) at 2³ cells (partly replaced by full detail): each cell is drawn whole as its most common non-air block, so edges and openings there are approximate; everything else is full detail",
+      "coarse: (0,0,0)–(3,3,3) at 2³ cells (partly replaced by full detail): each cell is drawn whole, as one cube of its most common non-air block, so edges and openings there are approximate; everything else is full detail",
     );
     expect(r.caption).not.toContain("(100,0,0)");
   });

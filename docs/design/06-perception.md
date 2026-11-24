@@ -49,7 +49,7 @@ z↓   0123456789012345
 - **Highlight:** a selection or the last op's diff drawn as a tint or outline.
 - **Context volume** (in a sandbox, `11`): `context: "ghost"` (default, desaturated and translucent) | `"normal"` | `"hide"`, so read-only surroundings are never mistaken for editable blocks.
 - **Fade** (`18`, piece 6): `fade: <selection>` draws everything outside the selection in the same ghost style, on any document or the world view, so `region: {dilate:"candidate", by:8}, fade: "candidate"` shows a selection solid among its faded surroundings. Faded blocks never hide the faces of solid ones.
-- **World view** (`18`, piece 5): `view: "world"` draws the world view; parts read at coarse level are named in the caption.
+- **World view** (`18`, piece 5): `view: "world"` draws the world view; parts read at coarse level are named in the caption, and each of their cells still whole is drawn as one cube the cell's size (`18`, *Measured*).
 - **Overlays:** axis ticks every 4/8/16 blocks (adaptive), a compass, and component labels (optional).
 - **Styles:** `textured` (default, real models and textures from `02`), `flat` (mean colours, faster and clearer for structure), `depth` (shaded by distance, for reading 3D form), `xray` (translucent shell).
 - The renderer is a pure-JS software rasterizer: baked models → triangles → z-buffer → PNG via `pngjs`. Back-face and occlusion culling at block level.

@@ -6,10 +6,12 @@ import { formatBox, intersectBox, isEmptyBox, type Box, type Vec3 } from "../../
 import type { Facing } from "../../document/document.js";
 import type { Document } from "../../document/document.js";
 import { DEFAULT_FOV, getCamera } from "../../document/cameras.js";
+import { indexInSection } from "../../document/voxels.js";
 import type { BakedBlock, BakedQuad, BlockBaker } from "./bake.js";
 import { bandOf, explodeAt, kept, recordRender, unexplode, type Cut, type Explode, type ViewCamera } from "./cameras.js";
 import { basis, NEAR, Raster, type Camera, type V3 } from "./raster.js";
 import type { Face } from "../../assets/models.js";
+import { cellIn, coarseCells, type CoarseInput } from "./coarse.js";
 
 /**
  * render (docs/design/06-perception.md): textured orthographic views of the document with axis
@@ -86,9 +88,11 @@ export interface RenderOptions {
   fade?: Mask;
   /**
    * Parts drawn at coarse level (the world view's coarse reads, 18 piece 5): named in the caption
-   * where they meet the drawn box. `partial`: some of it has since been read at full detail.
+   * where they meet the drawn box. `partial`: some of it has since been read at full detail. A cell
+   * still whole is drawn as one cube of the cell's size (18, *Measured*), not block by block;
+   * `except` are other reads' boxes that meet the part, where its cells are drawn per block.
    */
-  coarse?: { box: Box; cell: number; partial?: boolean }[];
+  coarse?: (CoarseInput & { partial?: boolean })[];
   /**
    * Near clip (06, *Cameras*): blocks whose centre is nearer than this many blocks are not drawn
    * and hide nothing, so cut faces draw closed. Perspective: measured from the eye along the view;
@@ -146,6 +150,12 @@ interface Scene {
   zs: Int32Array;
   baked: BakedBlock[];
   flags: Uint8Array;
+  /** Edge of each entry's cube: 1 for a block, the cell's edge for a coarse cell drawn whole. */
+  sizes: Uint8Array;
+  /** Coarse cells drawn whole. */
+  cells: number;
+  /** Edge of the whole coarse cell drawn at a position, or 0 (culling against a cell). */
+  cellAt?: (x: number, y: number, z: number) => number;
   /** Tight local box of drawn blocks (half-open). */
   box: Box;
   /** The clip: what may be drawn. */
@@ -304,19 +314,19 @@ export async function renderDocument(doc: Document, baker: BlockBaker, opts: Ren
   }
 
   const main = sceneList.find((s) => s)!;
-  const n = main.baked.length;
+  const n = main.baked.length - main.cells;
   const fallback = new Set(sceneList.flatMap((s) => (s ? [...s.fallbackIds] : [])));
-  const highlighted = opts.highlight ? main.flags.reduce((k, f) => k + (f & HIGHLIGHT ? 1 : 0), 0) + main.airHighlights.length : 0;
+  const highlighted = opts.highlight ? main.flags.reduce((k, f, i) => k + (f & HIGHLIGHT ? main.sizes[i]! ** 3 : 0), 0) + main.airHighlights.length : 0;
   const id = opts.thumbnail ? undefined : recordRender(doc, { revision: doc.revision, width: out.width, height: out.height, views: cams });
   const caption = [
     `render ${out.width}×${out.height} · ${notes.join(" · ")}${id ? ` · id ${id}` : ""}`,
-    `drew ${n.toLocaleString("en-US")} blocks in ${formatBox(main.explode?.box ?? main.box)}${main.mask || main.explode?.mask ? " (selection)" : ""}${cutawayText(opts.cutaway)}${style !== "textured" ? ` · style ${style}` : ""} · front=${doc.meta.front}` +
+    `drew ${n.toLocaleString("en-US")} blocks${main.cells ? ` and ${main.cells.toLocaleString("en-US")} coarse cells (one cube each)` : ""} in ${formatBox(main.explode?.box ?? main.box)}${main.mask || main.explode?.mask ? " (selection)" : ""}${cutawayText(opts.cutaway)}${style !== "textured" ? ` · style ${style}` : ""} · front=${doc.meta.front}` +
       (opts.section ? ` · section ${opts.section instanceof Mask ? `selection in ${formatBox(opts.section.bbox() ?? { min: [0, 0, 0], max: [0, 0, 0] })}` : formatBox(opts.section)}` : "") +
       (opts.near ? ` · near clip ${opts.near} (blocks nearer are not drawn)` : "") +
       (peel > 1 ? ` · peel ${peel}: the ${ordinal(peel)} surface along each ray (every block face toward the camera counts)` : ""),
     opts.highlight ? `highlighted ${highlighted.toLocaleString("en-US")} position${highlighted === 1 ? "" : "s"} in orange${main.airHighlights.length ? ` (${main.airHighlights.length} now air, outlined)` : ""}` : "",
     main.contextBlocks ? `${main.contextBlocks.toLocaleString("en-US")} read-only context blocks${opts.context === "normal" ? " drawn normally" : " ghosted (grey, translucent)"}` : "",
-    opts.fade ? `faded: ${main.fadedBlocks.toLocaleString("en-US")} block${main.fadedBlocks === 1 ? "" : "s"} outside the fade selection drawn grey and translucent; ${(n - main.fadedBlocks - main.contextBlocks).toLocaleString("en-US")} inside it drawn solid` : "",
+    opts.fade ? `faded: ${main.fadedBlocks.toLocaleString("en-US")} block${main.fadedBlocks === 1 ? "" : "s"} outside the fade selection drawn grey and translucent; ${(main.sizes.reduce((k, c) => k + c ** 3, 0) - main.fadedBlocks - main.contextBlocks).toLocaleString("en-US")} inside it drawn solid` : "",
     coarseText(opts.coarse, main.explode?.box ?? main.box),
     doc.context && opts.context === "hide" ? "context hidden" : "",
     views.every((v) => isPerspective(v) || (typeof v === "object" && "cubemap" in v))
@@ -335,7 +345,7 @@ function coarseText(parts: RenderOptions["coarse"], drawn: Box): string {
   if (!hit.length) return "";
   const list = hit.slice(0, 4).map((p) => `${formatBox(p.box)} at ${p.cell}³ cells${p.partial ? " (partly replaced by full detail)" : ""}`);
   return (
-    `coarse: ${list.join(", ")}${hit.length > 4 ? ` and ${hit.length - 4} more` : ""}: each cell is drawn whole as its most common non-air block, so edges and openings there are approximate; ` +
+    `coarse: ${list.join(", ")}${hit.length > 4 ? ` and ${hit.length - 4} more` : ""}: each cell is drawn whole, as one cube of its most common non-air block, so edges and openings there are approximate; ` +
     "everything else is full detail"
   );
 }
@@ -421,8 +431,10 @@ async function buildScene(doc: Document, baker: BlockBaker, opts: RenderOptions,
 
   const xs: number[] = [], ys: number[] = [], zs: number[] = [], ids: number[] = [], flags: number[] = [];
   let contextBlocks = 0, fadedBlocks = 0;
-  doc.voxels.forEachInBox(doc.boxToStore(clip), (sx, sy, sz, id) => {
-    const [x, y, z] = doc.toLocal(sx, sy, sz);
+  // Coarse cells still whole are drawn as one cube each (18, *Measured*); not in a sandbox or an
+  // exploded view, where a cell could straddle the context or a split.
+  const cells = opts.coarse?.length && !context && !opts.explode ? wholeCells(doc, opts, clip, mask) : undefined;
+  eachVoxel(doc, clip, cells, (x, y, z, id) => {
     if (mask && !mask.has(x, y, z)) return;
     const inContext = context?.has(x, y, z) ?? false;
     if (inContext && hidden) return;
@@ -435,6 +447,15 @@ async function buildScene(doc: Document, baker: BlockBaker, opts: RenderOptions,
     ids.push(id);
     flags.push((opts.highlight?.has(x, y, z) ? HIGHLIGHT : 0) | ((inContext && ctxMode === "ghost") || faded ? CONTEXT : 0));
   });
+  const sizes = new Array<number>(xs.length).fill(1);
+  if (cells) {
+    const cb = cells.cubes;
+    for (let i = 0; i < cb.x.length; i++) {
+      const c = cb.size[i]!;
+      if (cb.flags[i]! & CONTEXT) fadedBlocks += c ** 3;
+      xs.push(cb.x[i]!), ys.push(cb.y[i]!), zs.push(cb.z[i]!), ids.push(cb.id[i]!), flags.push(cb.flags[i]!), sizes.push(c);
+    }
+  }
   if (!xs.length) return undefined;
   const airHighlights: Vec3[] = [];
   opts.highlight?.forEach((x, y, z) => {
@@ -449,14 +470,15 @@ async function buildScene(doc: Document, baker: BlockBaker, opts: RenderOptions,
   const box: Box = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
   for (let i = 0; i < xs.length; i++) {
     box.min = [Math.min(box.min[0], xs[i]!), Math.min(box.min[1], ys[i]!), Math.min(box.min[2], zs[i]!)];
-    box.max = [Math.max(box.max[0], xs[i]! + 1), Math.max(box.max[1], ys[i]! + 1), Math.max(box.max[2], zs[i]! + 1)];
+    const k = sizes[i]!;
+    box.max = [Math.max(box.max[0], xs[i]! + k), Math.max(box.max[1], ys[i]! + k), Math.max(box.max[2], zs[i]! + k)];
   }
   const baked = ids.map((id) => bakedById.get(id)!);
   // Blocks drawn from their NBT (09: a framed block with its camo) bake per position.
   if (doc.blockEntities.size && baker.hasRenderHooks)
     await Promise.all(
       xs.map(async (x, i) => {
-        const nbt = doc.getBlockEntity(x, ys[i]!, zs[i]!);
+        const nbt = sizes[i] === 1 ? doc.getBlockEntity(x, ys[i]!, zs[i]!) : undefined;
         if (nbt) baked[i] = await baker.bakeAt([x, ys[i]!, zs[i]!], doc.states.get(ids[i]!), nbt);
       }),
     );
@@ -466,6 +488,9 @@ async function buildScene(doc: Document, baker: BlockBaker, opts: RenderOptions,
     zs: Int32Array.from(zs),
     baked,
     flags: Uint8Array.from(flags),
+    sizes: Uint8Array.from(sizes),
+    cells: cells?.cubes.x.length ?? 0,
+    ...(cells ? { cellAt: cells.sizeAt } : {}),
     box,
     clip,
     ...(mask ? { mask } : {}),
@@ -482,6 +507,50 @@ async function buildScene(doc: Document, baker: BlockBaker, opts: RenderOptions,
     },
   };
   return opts.explode ? explodeScene(scene, explodeSpec(opts.explode)) : scene;
+}
+
+/**
+ * Visits the non-air blocks inside `clip` (local, half-open) as `forEachInBox` does, skipping the
+ * positions inside whole coarse cells (drawn as cubes): a section they cover entirely isn't walked.
+ */
+function eachVoxel(doc: Document, clip: Box, cells: ReturnType<typeof coarseCells>, fn: (x: number, y: number, z: number, id: number) => void): void {
+  if (!cells) {
+    doc.voxels.forEachInBox(doc.boxToStore(clip), (sx, sy, sz, id) => fn(...doc.toLocal(sx, sy, sz), id));
+    return;
+  }
+  const [ox, oy, oz] = doc.origin;
+  for (const s of doc.voxels.allSections()) {
+    // The section's part of the clip, in local coordinates.
+    const lo: Vec3 = [s.sx * 16 - ox, s.sy * 16 - oy, s.sz * 16 - oz];
+    const part = intersectBox(clip, { min: lo, max: [lo[0] + 16, lo[1] + 16, lo[2] + 16] });
+    if (isEmptyBox(part) || cells.covers(part)) continue;
+    for (let y = part.min[1]; y < part.max[1]; y++)
+      for (let z = part.min[2]; z < part.max[2]; z++)
+        for (let x = part.min[0]; x < part.max[0]; x++) {
+          const id = s.ids[indexInSection(x + ox, y + oy, z + oz)]!;
+          if (id && !cells.sizeAt(x, y, z)) fn(x, y, z, id);
+        }
+  }
+}
+
+/**
+ * The coarse cells drawn whole: inside the clip, not met by another read, and inside or outside
+ * the region mask, the highlight and the fade as a whole (else drawn per block).
+ */
+function wholeCells(doc: Document, opts: RenderOptions, clip: Box, mask: Mask | undefined) {
+  const bbOf = (m: Mask | undefined) => (m ? { m, bb: m.bbox() } : undefined);
+  const region = bbOf(mask), hl = bbOf(opts.highlight), fade = bbOf(opts.fade);
+  return coarseCells(
+    opts.coarse!, clip,
+    (x, y, z) => doc.voxels.get(...doc.toStore(x, y, z)),
+    (x, y, z, c) => {
+      if (region && cellIn(region.m, region.bb, x, y, z, c) !== 1) return undefined;
+      const h = hl ? cellIn(hl.m, hl.bb, x, y, z, c) : 0;
+      const f = fade ? cellIn(fade.m, fade.bb, x, y, z, c) : 1;
+      if (h < 0 || f < 0) return undefined;
+      return (h ? HIGHLIGHT : 0) | (fade && !f ? CONTEXT : 0);
+    },
+  );
 }
 
 /** A camera's points moved with the band they lie in (block units: the band of the block a point is in). */
@@ -630,7 +699,7 @@ function drawView(
     if (!thumbnail && kind !== "elevation") drawGrid(r, s.box, scale);
     drawBlocks(
       s, style, (c, cy2, cz) => (c * b.forward[0] + cy2 * b.forward[1] + cz * b.forward[2] - dmin) / dspan, (q) => facesAway(q, fwd), depthOf,
-      (q, x, y, z, look) => drawQuad(r, q, x, y, z, look), cut, co.peel > 1,
+      (q, x, y, z, look, k) => drawQuad(r, q, x, y, z, look, k), cut, co.peel > 1,
     );
   });
 
@@ -649,16 +718,16 @@ function drawView(
 
 /** How a quad looks in a style, given its flags; `depthT` maps a world point to 0 (near) .. 1 (far) for the depth style. */
 function lookFor(style: RenderStyle, depthT: (x: number, y: number, z: number) => number) {
-  return (flags: number, q: BakedQuad, x: number, y: number, z: number): Look => {
+  return (flags: number, q: BakedQuad, x: number, y: number, z: number, k = 1): Look => {
     const hl = flags & HIGHLIGHT ? HL : undefined;
     if (flags & CONTEXT) return { flat: ghostColour(q.tex.mean), ...(hl ? { overlay: hl } : {}), mode: "blend", alpha: 0.3 };
     if (style === "xray") return hl ? { flat: q.tex.mean, overlay: hl, mode: "opaque", alpha: 1 } : { flat: q.tex.mean, mode: "blend", alpha: 0.28 };
     if (style === "depth") {
-      const c = (q.pos[0]! + q.pos[6]!) / 2 + x, cy2 = (q.pos[1]! + q.pos[7]!) / 2 + y, cz = (q.pos[2]! + q.pos[8]!) / 2 + z;
+      const c = ((q.pos[0]! + q.pos[6]!) / 2) * k + x, cy2 = ((q.pos[1]! + q.pos[7]!) / 2) * k + y, cz = ((q.pos[2]! + q.pos[8]!) / 2) * k + z;
       const t = depthT(c, cy2, cz);
-      const k = 1 - 0.7 * Math.min(1, Math.max(0, t));
+      const dk = 1 - 0.7 * Math.min(1, Math.max(0, t));
       const m = q.tex.mean;
-      return { flat: [m[0] * k, m[1] * k, m[2] * k], ...(hl ? { overlay: hl } : {}), mode: "opaque", alpha: 1 };
+      return { flat: [m[0] * dk, m[1] * dk, m[2] * dk], ...(hl ? { overlay: hl } : {}), mode: "opaque", alpha: 1 };
     }
     return { ...(style === "flat" ? { flat: q.tex.mean } : {}), ...(hl ? { overlay: hl } : {}), mode: q.tex.translucent && style === "textured" ? "blend" : "opaque", alpha: 1 };
   };
@@ -667,18 +736,28 @@ function lookFor(style: RenderStyle, depthT: (x: number, y: number, z: number) =
 /**
  * Draws the scene's blocks: culls faces against neighbours (block-level occlusion) and faces turned
  * away from the camera (`away`), draws opaque quads, then blended quads sorted far to near by
- * `depthOf` (a world point's distance along the view).
+ * `depthOf` (a world point's distance along the view). A coarse cell drawn whole is its block's
+ * model scaled to the cell (`k`), and one of its faces is hidden only when every position across it
+ * hides it (one check when the neighbour is a whole cell of the same size).
  */
 function drawBlocks(
-  s: Scene, style: RenderStyle, depthT: (x: number, y: number, z: number) => number, away: (q: BakedQuad, x: number, y: number, z: number) => boolean,
-  depthOf: (x: number, y: number, z: number) => number, draw: (q: BakedQuad, x: number, y: number, z: number, look: Look) => void, cut?: Cut, noCull = false,
+  s: Scene, style: RenderStyle, depthT: (x: number, y: number, z: number) => number, away: (q: BakedQuad, x: number, y: number, z: number, k: number) => boolean,
+  depthOf: (x: number, y: number, z: number) => number, draw: (q: BakedQuad, x: number, y: number, z: number, look: Look, k: number) => void, cut?: Cut, noCull = false,
 ): void {
   const lookOf = lookFor(style, depthT);
   // Opaque pass, collecting blended quads for a sorted second pass.
-  const blended: { q: BakedQuad; x: number; y: number; z: number; d: number; look: Look }[] = [];
+  const blended: { q: BakedQuad; x: number; y: number; z: number; k: number; d: number; look: Look }[] = [];
+  /** Whether the block or cell at (x,y,z) has its `face` hidden by the neighbour at (nx,ny,nz). */
+  const hiddenBy = (blk: BakedBlock, flags: number, face: Face, nx: number, ny: number, nz: number): boolean => {
+    const nb = cut && !kept(cut, nx, ny, nz) ? undefined : s.occluderAt(nx, ny, nz);
+    // A ghosted block (context, 11, or faded, 18) never hides a solid block's face.
+    const seeThrough = s.ghostAt && !(flags & CONTEXT) && s.ghostAt(nx, ny, nz);
+    // Hidden by an opaque neighbour, or between two blocks of the same translucent kind (glass, water).
+    return !!nb && !seeThrough && (nb.occludes.has(OPPOSITE[face]) || (nb === blk && blk.translucent));
+  };
   for (let i = 0; i < s.baked.length; i++) {
     const blk = s.baked[i]!;
-    const x = s.xs[i]!, y = s.ys[i]!, z = s.zs[i]!;
+    const x = s.xs[i]!, y = s.ys[i]!, z = s.zs[i]!, k = s.sizes[i]!;
     // Near clip: dropped blocks are not drawn and hide nothing (cut faces draw closed).
     if (cut && !kept(cut, x, y, z)) continue;
     const flags = s.flags[i]!;
@@ -686,25 +765,45 @@ function drawBlocks(
       // Depth peeling counts faces against neighbours too (peel 2 = directly behind a façade).
       if (q.cull && !noCull) {
         const d = DIR[q.cull];
-        const nb = cut && !kept(cut, x + d[0], y + d[1], z + d[2]) ? undefined : s.occluderAt(x + d[0], y + d[1], z + d[2]);
-        // A ghosted block (context, 11, or faded, 18) never hides a solid block's face.
-        const seeThrough = s.ghostAt && !(flags & CONTEXT) && s.ghostAt(x + d[0], y + d[1], z + d[2]);
-        // Hidden by an opaque neighbour, or between two blocks of the same translucent kind (glass, water).
-        if (nb && !seeThrough && (nb.occludes.has(OPPOSITE[q.cull]) || (nb === blk && blk.translucent))) continue;
+        if (k === 1) {
+          if (hiddenBy(blk, flags, q.cull, x + d[0], y + d[1], z + d[2])) continue;
+        } else if (cellFaceHidden(s, blk, flags, q.cull, x, y, z, k, hiddenBy)) continue;
       }
-      const look = lookOf(flags, q, x, y, z);
+      const look = lookOf(flags, q, x, y, z, k);
       // X-ray shows the far side of the shell through the near side.
-      if (!(style === "xray" && look.mode === "blend") && away(q, x, y, z)) continue;
+      if (!(style === "xray" && look.mode === "blend") && away(q, x, y, z, k)) continue;
       if (look.mode === "blend") {
-        const c = (q.pos[0]! + q.pos[6]!) / 2 + x, cy2 = (q.pos[1]! + q.pos[7]!) / 2 + y, cz = (q.pos[2]! + q.pos[8]!) / 2 + z;
-        blended.push({ q, x, y, z, d: depthOf(c, cy2, cz), look });
+        const c = ((q.pos[0]! + q.pos[6]!) / 2) * k + x, cy2 = ((q.pos[1]! + q.pos[7]!) / 2) * k + y, cz = ((q.pos[2]! + q.pos[8]!) / 2) * k + z;
+        blended.push({ q, x, y, z, k, d: depthOf(c, cy2, cz), look });
         continue;
       }
-      draw(q, x, y, z, look);
+      draw(q, x, y, z, look, k);
     }
   }
   blended.sort((a, c) => c.d - a.d);
-  for (const e of blended) draw(e.q, e.x, e.y, e.z, e.look);
+  for (const e of blended) draw(e.q, e.x, e.y, e.z, e.look, e.k);
+}
+
+/** Whether a whole coarse cell's face (low corner x,y,z, edge k) is hidden by every position across it. */
+function cellFaceHidden(
+  s: Scene, blk: BakedBlock, flags: number, face: Face, x: number, y: number, z: number, k: number,
+  hiddenBy: (blk: BakedBlock, flags: number, face: Face, nx: number, ny: number, nz: number) => boolean,
+): boolean {
+  const d = DIR[face];
+  const a = d[0] ? 0 : d[1] ? 1 : 2;
+  const lo: V3 = [x, y, z];
+  lo[a] = d[a]! > 0 ? lo[a]! + k : lo[a]! - 1;
+  // The neighbour is one whole cell of the same size: it is uniform, so one position decides.
+  if (s.cellAt && s.cellAt(lo[0], lo[1], lo[2]) === k) return hiddenBy(blk, flags, face, lo[0], lo[1], lo[2]);
+  const [u, v] = [0, 1, 2].filter((b) => b !== a) as [number, number];
+  const p: V3 = [...lo];
+  for (let i = 0; i < k; i++)
+    for (let j = 0; j < k; j++) {
+      p[u] = lo[u]! + i;
+      p[v] = lo[v]! + j;
+      if (!hiddenBy(blk, flags, face, p[0], p[1], p[2])) return false;
+    }
+  return true;
 }
 
 const CUBE_EDGES: [V3, V3][] = [
@@ -722,9 +821,9 @@ function facesAway(q: BakedQuad, fwd: V3): boolean {
   return nx * fwd[0] + ny * fwd[1] + nz * fwd[2] > 1e-6;
 }
 
-function drawQuad(r: Raster, q: BakedQuad, x: number, y: number, z: number, look: Look): void {
+function drawQuad(r: Raster, q: BakedQuad, x: number, y: number, z: number, look: Look, k = 1): void {
   const p = q.pos;
-  const P = [0, 1, 2, 3].map((i) => r.project(p[i * 3]! + x, p[i * 3 + 1]! + y, p[i * 3 + 2]! + z));
+  const P = [0, 1, 2, 3].map((i) => r.project(p[i * 3]! * k + x, p[i * 3 + 1]! * k + y, p[i * 3 + 2]! * k + z));
   const uv = q.uv;
   r.triangle(P[0]!, P[1]!, P[2]!, [uv[0]!, uv[1]!, uv[2]!, uv[3]!, uv[4]!, uv[5]!], q.tex.img, q.tint, q.shade, look.mode, look.flat, look.overlay, look.alpha);
   r.triangle(P[0]!, P[2]!, P[3]!, [uv[0]!, uv[1]!, uv[4]!, uv[5]!, uv[6]!, uv[7]!], q.tex.img, q.tint, q.shade, look.mode, look.flat, look.overlay, look.alpha);
@@ -797,8 +896,8 @@ function drawPerspective(
     r.fillBackground(BG_TOP, BG_BOTTOM);
     drawGrid(r, s.box, focal / SS / Math.max(1, depthOf(...t)));
     drawBlocks(
-      s, style, (x, y, z) => (depthOf(x, y, z) - dmin) / dspan, (q, x, y, z) => facesAwayFrom(q, x, y, z, eye), depthOf,
-      (q, x, y, z, look) => drawQuadClipped(r, q, x, y, z, look), cut, co.peel > 1,
+      s, style, (x, y, z) => (depthOf(x, y, z) - dmin) / dspan, (q, x, y, z, k) => facesAwayFrom(q, x, y, z, eye, k), depthOf,
+      (q, x, y, z, look, k) => drawQuadClipped(r, q, x, y, z, look, k), cut, co.peel > 1,
     );
   });
   const lw = Math.max(1, Math.round(SS / 2));
@@ -809,12 +908,12 @@ function drawPerspective(
 }
 
 /** True when a quad (at block x,y,z) turns its outward face away from the eye. */
-function facesAwayFrom(q: BakedQuad, x: number, y: number, z: number, eye: V3): boolean {
+function facesAwayFrom(q: BakedQuad, x: number, y: number, z: number, eye: V3, k = 1): boolean {
   const p = q.pos;
   const ax = p[3]! - p[0]!, ay = p[4]! - p[1]!, az = p[5]! - p[2]!;
   const bx = p[9]! - p[0]!, by = p[10]! - p[1]!, bz = p[11]! - p[2]!;
   const nx = -(ay * bz - az * by), ny = -(az * bx - ax * bz), nz = -(ax * by - ay * bx);
-  return nx * (p[0]! + x - eye[0]) + ny * (p[1]! + y - eye[1]) + nz * (p[2]! + z - eye[2]) > 1e-9;
+  return nx * (p[0]! * k + x - eye[0]) + ny * (p[1]! * k + y - eye[1]) + nz * (p[2]! * k + z - eye[2]) > 1e-9;
 }
 
 /**
@@ -822,9 +921,9 @@ function facesAwayFrom(q: BakedQuad, x: number, y: number, z: number, eye: V3): 
  * texture coordinates interpolated along the cut edges), so an eye inside a room or right against
  * a wall never sees inverted or smeared geometry.
  */
-function drawQuadClipped(r: Raster, q: BakedQuad, x: number, y: number, z: number, look: Look): void {
+function drawQuadClipped(r: Raster, q: BakedQuad, x: number, y: number, z: number, look: Look, k = 1): void {
   const p = q.pos, uv = q.uv;
-  const V = [0, 1, 2, 3].map((i) => r.viewSpace(p[i * 3]! + x, p[i * 3 + 1]! + y, p[i * 3 + 2]! + z));
+  const V = [0, 1, 2, 3].map((i) => r.viewSpace(p[i * 3]! * k + x, p[i * 3 + 1]! * k + y, p[i * 3 + 2]! * k + z));
   let inside = 0;
   for (const v of V) if (v[2] >= NEAR) inside++;
   if (inside === 0) return;

@@ -4,7 +4,7 @@
  * a JSON report. Needs a running server (test/e2e/world/server.sh) and the env of harness.ts.
  *
  *   npx tsx test/e2e/world/measure.ts throughput|snapshot|tracker|surface [--runs 5]
- *   npx tsx test/e2e/world/measure.ts select-search|select-fill|select-coarse|select-blocks [--at x z] [--gen n]
+ *   npx tsx test/e2e/world/measure.ts select-search|select-fill|select-coarse|select-blocks|select-surface [--at x z] [--gen n]
  *
  * The select-* runs are 18's *Measure first* (step Z1), on a normally generated world (see below).
  */
@@ -434,8 +434,8 @@ async function selectCoarse(r: Rcon, m: Mcp): Promise<void> {
 }
 
 /**
- * Blocks snapshots inside the select grant (M3's open item): an unloaded chunk is loaded on the
- * server thread (SurfaceReads.existing). Cold and loaded, the longest tick and the mean per tick.
+ * Blocks snapshots inside the select grant (M3's open item, M4): cold (unloaded chunks read from disk
+ * off-thread since M4) and loaded, the longest tick and the mean per tick.
  */
 async function selectBlocks(r: Rcon, m: Mcp): Promise<void> {
   await grant(r, 256);
@@ -455,6 +455,42 @@ async function selectBlocks(r: Rcon, m: Mcp): Promise<void> {
   await r.command("forceload remove all");
 }
 
+/**
+ * Surface snapshots inside the select grant (18, piece 10; M5): squares centred on the grant's centre,
+ * cold (unloaded chunks read from disk, off-thread since M5), the generated square also with a
+ * ceiling, and loaded up to 16 × 16 chunks (forceload's limit). The spawn chunks stay loaded, so a
+ * cold read counts some chunks as live (`live` in the cost).
+ */
+async function selectSurface(r: Rcon, m: Mcp): Promise<void> {
+  await grant(r, 256);
+  const c = [AT[0] >> 4, AT[1] >> 4];
+  const square = (n: number) => {
+    const lo = [c[0]! - Math.floor(n / 2), c[1]! - Math.floor(n / 2)];
+    return { min: [lo[0]! * 16, lo[1]! * 16] as [number, number], max: [(lo[0]! + n) * 16 - 1, (lo[1]! + n) * 16 - 1] as [number, number] };
+  };
+  const cases: [string, number, "cold" | "loaded", number | undefined][] = [
+    ["4x4", 4, "cold", undefined],
+    ["4x4", 4, "loaded", undefined],
+    ["16x16", 16, "cold", undefined],
+    ["16x16", 16, "loaded", undefined],
+    [`${2 * GEN + 1}x${2 * GEN + 1}`, 2 * GEN + 1, "cold", undefined],
+    [`${2 * GEN + 1}x${2 * GEN + 1}`, 2 * GEN + 1, "cold", 0],
+    ["64x64", 64, "cold", undefined],
+  ];
+  for (const [name, n, state, ceiling] of cases) {
+    const columns = square(n);
+    if (state === "cold") await cold(r, 30_000);
+    else await r.command(`forceload add ${columns.min[0]} ${columns.min[1]} ${columns.max[0]} ${columns.max[1]}`), await sleep(5000);
+    const idle = await mspt(r);
+    const t = performance.now();
+    const s = await m.link.bridge.request({ type: "snapshot", kind: "surface", dimension: OW, columns, ...(ceiling !== undefined ? { ceiling } : {}) });
+    const wall = Math.round(performance.now() - t);
+    const k = cost((await last(r)).surface);
+    log(`surface_${name}_${state}${ceiling !== undefined ? "_ceiling" : ""}`, { wall_ms: wall, missing: s.missing.length, ...k, mspt_idle: idle, mspt_last100_after: await mspt(r) });
+  }
+  await r.command("forceload remove all");
+}
+
 const r = await rcon();
 const m = await startMcp({ ackWaitMs: 0 });
 try {
@@ -466,6 +502,7 @@ try {
   else if (what === "select-fill") await selectFill(r, m);
   else if (what === "select-coarse") await selectCoarse(r, m);
   else if (what === "select-blocks") await selectBlocks(r, m);
+  else if (what === "select-surface") await selectSurface(r, m);
   process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
 } catch (e) {
   process.stderr.write(`failed: ${(e as Error).stack}\n${JSON.stringify(out)}\n`);

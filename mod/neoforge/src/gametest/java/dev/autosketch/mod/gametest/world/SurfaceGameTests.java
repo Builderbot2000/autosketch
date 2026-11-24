@@ -16,7 +16,15 @@ import dev.autosketch.mod.protocol.ProtocolException;
 import dev.autosketch.mod.world.States;
 import dev.autosketch.mod.world.SurfaceReads;
 import dev.autosketch.mod.world.WorldModule;
+import dev.autosketch.mod.gametest.world.FillGameTests.Steps;
+import dev.autosketch.mod.world.SelectGrants;
+import dev.autosketch.mod.world.WorldReads;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestAssertException;
@@ -29,9 +37,10 @@ import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 import org.slf4j.Logger;
 
 /**
- * Surface snapshots inside the volumes and {@code volumes.set} (13, B4), mod side. Surface reads
- * inside the select grant are {@link SelectGameTests}'; the scan grant was removed with
- * {@code /autosketch scan} (18, *Removal*).
+ * Surface snapshots inside the volumes and {@code volumes.set} (13, B4), mod side, and a surface
+ * snapshot inside the select grant over an unloaded chunk, read from disk (18, piece 10; M5). The grant's
+ * refusals are {@link SelectGameTests}'; the scan grant was removed with {@code /autosketch scan}
+ * (18, *Removal*).
  */
 @GameTestHolder(Autosketch.MOD_ID)
 @PrefixGameTestTemplate(false)
@@ -118,6 +127,117 @@ public final class SurfaceGameTests {
                 unlink();
             }
         });
+    }
+
+    /**
+     * A surface snapshot inside the select grant reads an unloaded chunk from disk (18, piece 10; M5):
+     * chunk B saved and unloaded, with honey on top of one column and, in the next, stone under planks
+     * a section higher; C east of it never generated. Read cold without and with a ceiling, sliced a
+     * chunk per tick: B decoded from its saved tag and still unloaded, the tops and the ceiling right, C
+     * listed. B's saved tag without its heightmap gives the same tops (the load primes it from the
+     * blocks). Then B is loaded and both are asked again: the same answers, column for column.
+     */
+    @GameTest(template = "empty", batch = "y_select_surface_disk", timeoutTicks = 2400)
+    public static void grantSurfaceReadsUnloadedChunksFromDisk(GameTestHelper h) {
+        ServerLevel level = h.getLevel();
+        unlink();
+        int[] f = SelectGameTests.farChunk();
+        int bx = f[0], cz = f[1];
+        level.getChunk(bx, cz);
+        int z0 = cz << 4, b0 = bx << 4, y = 290, ceiling = 295;
+        BlockPos honey = new BlockPos(b0 + 1, y, z0 + 1), stone = new BlockPos(b0 + 2, y, z0 + 1), planks = new BlockPos(b0 + 2, y + 20, z0 + 1);
+        WorldTestKit.put(level, honey, SelectGameTests.HONEY, null);
+        WorldTestKit.put(level, stone, "minecraft:stone", null);
+        WorldTestKit.put(level, planks, "minecraft:oak_planks", null);
+        level.getChunkSource().save(true);
+        long slice = WorldReads.sliceNanos;
+        Runnable cleanup = () -> {
+            WorldReads.sliceNanos = slice;
+            SelectGrants.clear();
+        };
+        // Four rows of B's columns and four columns into C.
+        Area area = new Area(b0, z0, b0 + 19, z0 + 3);
+        int minY = level.getMinBuildHeight();
+        List<List<String>> cold = new ArrayList<>();
+        Steps steps = new Steps()
+                .then(() -> {
+                    SelectGrants.set(level.dimension(), new BlockPos(b0, y, z0), 8);
+                    WorldReads.sliceNanos = 1;
+                    return surface(new Messages.SurfaceRequest(WorldTestKit.nextId(), dim(h), area, null));
+                }, ex -> {
+                    LOG.info("Autosketch surface snapshot timing (cold, sliced: a saved and an ungenerated chunk): {}", SurfaceReads.lastRead);
+                    SurfaceReads.Stats st = SurfaceReads.lastRead;
+                    FillGameTests.check(st != null && st.chunks() == 2 && st.live() == 0 && st.disk() == 1 && st.loaded() == 0 && st.missing() == 1 && st.ticks() >= 2,
+                            "B from disk, C missing, a chunk per tick: " + st);
+                    FillGameTests.check(level.getChunkSource().getChunkNow(bx, cz) == null && level.getChunkSource().getChunkNow(bx + 1, cz) == null, "B not loaded, C not generated");
+                    Messages.SurfaceResult r = result(ex);
+                    FillGameTests.check(r.missing().equals(List.of(new Messages.ChunkXZ(bx + 1, cz))), "C is listed: " + r.missing());
+                    int ih = 1 + 20 * 1, is = 2 + 20 * 1, ic = 17 + 20 * 1;
+                    FillGameTests.check(r.surface().heights()[ih] == y - minY + 1 && r.palette().get(r.surface().states()[ih]).equals(SelectGameTests.HONEY), "the honey tops its column");
+                    FillGameTests.check(r.surface().heights()[is] == y + 20 - minY + 1 && r.palette().get(r.surface().states()[is]).equals("minecraft:oak_planks"), "the planks top theirs");
+                    FillGameTests.check(r.surface().heights()[ic] == 0, "C's columns read as none");
+                    cold.add(flat(r));
+                })
+                .then(() -> surface(new Messages.SurfaceRequest(WorldTestKit.nextId(), dim(h), area, ceiling)), ex -> {
+                    LOG.info("Autosketch surface snapshot timing (cold, with a ceiling): {}", SurfaceReads.lastRead);
+                    SurfaceReads.Stats st = SurfaceReads.lastRead;
+                    FillGameTests.check(st != null && st.disk() == 1 && st.loaded() == 0, "B from disk: " + st);
+                    FillGameTests.check(level.getChunkSource().getChunkNow(bx, cz) == null, "B still not loaded");
+                    Messages.SurfaceResult r = result(ex);
+                    int ih = 1 + 20 * 1, is = 2 + 20 * 1;
+                    FillGameTests.check(r.ceilings() != null && r.ceilings().heights()[is] == y + 20 - minY + 1 && r.palette().get(r.ceilings().states()[is]).equals("minecraft:oak_planks"),
+                            "the planks are the stone column's ceiling above y " + ceiling);
+                    FillGameTests.check(r.ceilings().heights()[ih] == 0, "the honey column has none above y " + ceiling);
+                    cold.add(flat(r));
+                    // Without its heightmap, B's saved tag gives the same tops (the load primes them from the blocks).
+                    Optional<CompoundTag> tag = level.getChunkSource().chunkMap.read(new ChunkPos(bx, cz)).join();
+                    FillGameTests.check(tag.isPresent() && tag.get().getCompound("Heightmaps").contains("WORLD_SURFACE"), "B's saved tag has its heightmap");
+                    SurfaceReads.ChunkSurface with = SurfaceReads.decodeSurface(tag, area, bx, cz, minY, level.getHeight(), ceiling);
+                    CompoundTag bare = tag.get().copy();
+                    bare.remove("Heightmaps");
+                    SurfaceReads.ChunkSurface without = SurfaceReads.decodeSurface(Optional.of(bare), area, bx, cz, minY, level.getHeight(), ceiling);
+                    FillGameTests.check(Arrays.equals(with.tops(), without.tops()) && Arrays.equals(with.topStates(), without.topStates()) && Arrays.equals(with.ceils(), without.ceils())
+                            && Arrays.equals(with.ceilStates(), without.ceilStates()), "the tops without the saved heightmap are the heightmap's");
+                })
+                .then(() -> {
+                    WorldReads.sliceNanos = slice;
+                    level.getChunk(bx, cz);
+                    return surface(new Messages.SurfaceRequest(WorldTestKit.nextId(), dim(h), area, null));
+                }, ex -> {
+                    LOG.info("Autosketch surface snapshot timing (B loaded): {}", SurfaceReads.lastRead);
+                    SurfaceReads.Stats st = SurfaceReads.lastRead;
+                    FillGameTests.check(st != null && st.live() == 1 && st.disk() == 0 && st.missing() == 1, "B loaded, C missing: " + st);
+                    List<String> warm = flat(result(ex));
+                    FillGameTests.check(warm.equals(cold.get(0)), "the loaded read answers as the cold one: " + MaskCoarseGameTests.firstDifference(cold.get(0), warm));
+                })
+                .then(() -> {
+                    level.getChunk(bx, cz);
+                    return surface(new Messages.SurfaceRequest(WorldTestKit.nextId(), dim(h), area, ceiling));
+                }, ex -> {
+                    List<String> warm = flat(result(ex));
+                    FillGameTests.check(warm.equals(cold.get(1)), "the loaded read with a ceiling answers as the cold one: " + MaskCoarseGameTests.firstDifference(cold.get(1), warm));
+                });
+        h.startSequence()
+                .thenWaitUntil(() -> {
+                    if (level.getChunkSource().getChunkNow(bx, cz) != null) throw new GameTestAssertException("waiting for chunk B to unload");
+                })
+                .thenExecute(() -> steps.run(h, cleanup));
+    }
+
+    /** A surface answer as lines: each column's top and ceiling by name, then the missing chunks. */
+    static List<String> flat(Messages.SurfaceResult r) {
+        List<String> out = new ArrayList<>();
+        for (int i = 0; i < r.surface().heights().length; i++) {
+            int t = r.surface().heights()[i];
+            String line = i + " " + t + " " + (t == 0 ? "-" : r.palette().get(r.surface().states()[i]));
+            if (r.ceilings() != null) {
+                int c = r.ceilings().heights()[i];
+                line += " " + c + " " + (c == 0 ? "-" : r.palette().get(r.ceilings().states()[i]));
+            }
+            out.add(line);
+        }
+        out.add("missing " + r.missing());
+        return out;
     }
 
     @GameTest(template = "empty", batch = "y_volumes_set")

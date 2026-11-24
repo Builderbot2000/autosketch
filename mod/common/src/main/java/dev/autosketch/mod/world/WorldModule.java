@@ -22,7 +22,7 @@ import org.jetbrains.annotations.Nullable;
 
 /**
  * Silo O's registration (13, M5–M9): the {@code patch}, {@code hashes} and {@code snapshot}
- * handlers (and select's {@code search}, {@code fill} and {@code expand}, 18), the patch status for {@code /autosketch status}, and the server-tick hooks that drive the
+ * handlers (and select's {@code search}, {@code fill}, {@code expand} and the {@code mask} and {@code coarse} snapshots, 18), the patch status for {@code /autosketch status}, and the server-tick hooks that drive the
  * patch budget, the sliced reads and the change tracker. Registers through {@link AutosketchSetup},
  * so no other package's files change; each loader's events call {@link #setup} and the tick hooks
  * (on NeoForge, {@code WorldEvents}).
@@ -37,6 +37,14 @@ public final class WorldModule {
     private static volatile @Nullable SurfaceReads surface;
     private static volatile @Nullable MaterialSearch search;
     private static volatile @Nullable WorldFill fills;
+    private static volatile @Nullable CoarseReads coarse;
+
+    /** Coarse snapshots (18, piece 5), for GameTests. */
+    public static CoarseReads coarse() {
+        CoarseReads c = coarse;
+        if (c == null) throw new IllegalStateException("the world module isn't set up yet");
+        return c;
+    }
 
     /** Fill and expand (18, pieces 3 and 4), for GameTests. */
     public static WorldFill fills() {
@@ -94,6 +102,8 @@ public final class WorldModule {
         search = materials;
         WorldFill fill = new WorldFill(levels, Util.backgroundExecutor());
         fills = fill;
+        CoarseReads cells = new CoarseReads(reads, levels, Util.backgroundExecutor());
+        coarse = cells;
         // The scan and select grants last until the next request replaces them, the connection closing or the server stopping (B4; 18).
         Autosketch.bridge().addListener(new dev.autosketch.mod.api.Bridge.Listener() {
             @Override
@@ -106,11 +116,16 @@ public final class WorldModule {
         e.messages().register("patch", (msg, ex) -> handlePatch(msg, ex));
         e.messages().register("hashes", (msg, ex) -> reads.hashes(Messages.HashesRequest.decode(msg.frame()), ex, keysOf(msg)));
         e.messages().register("snapshot", (msg, ex) -> {
-            if (Messages.snapshotKind(msg.frame()).equals("surface")) surface.surface(Messages.SurfaceRequest.decode(msg.frame()), ex);
-            else reads.snapshot(Messages.SnapshotRequest.decode(msg.frame()), ex);
+            switch (Messages.snapshotKind(msg.frame())) {
+                case "surface" -> surface.surface(Messages.SurfaceRequest.decode(msg.frame()), ex);
+                case "mask" -> reads.mask(SelectMessages.MaskSnapshotRequest.decode(msg.frame()), ex);
+                case "coarse" -> cells.coarse(SelectMessages.CoarseSnapshotRequest.decode(msg.frame()), ex);
+                default -> reads.snapshot(Messages.SnapshotRequest.decode(msg.frame()), ex);
+            }
         });
-        // Select (18): served once a select request's grant is in force. The mod lists the feature
-        // `select` in its hello only when fill, expand and the mask and coarse snapshots are served too (M3).
+        // Select (18): served once a select request's grant is in force. With search, fill, expand and
+        // the mask and coarse snapshots all registered, the hello lists the feature `select` (M3;
+        // AutosketchCore#features keys it on the `fill` handler).
         e.messages().register("search", (msg, ex) -> materials.search(SelectMessages.SearchRequest.decode(msg.frame()), ex));
         e.messages().register("fill", (msg, ex) -> fill.fill(SelectMessages.FillRequest.decode(msg.frame()), ex));
         e.messages().register("expand", (msg, ex) -> fill.expand(SelectMessages.ExpandRequest.decode(msg.frame()), ex));
@@ -126,6 +141,7 @@ public final class WorldModule {
         if (surface != null) surface.tick();
         if (search != null) search.tick();
         if (fills != null) fills.tick();
+        if (coarse != null) coarse.tick();
     }
 
     /** End of a server tick. */

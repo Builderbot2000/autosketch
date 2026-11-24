@@ -129,6 +129,8 @@ public final class WorldModule {
         e.messages().register("fill", (msg, ex) -> fill.fill(SelectMessages.FillRequest.decode(msg.frame()), ex));
         e.messages().register("expand", (msg, ex) -> fill.expand(SelectMessages.ExpandRequest.decode(msg.frame()), ex));
         e.patchStatus(patches);
+        // Headless seams for the world tier and 18's Measure first (a grant without a player, costs).
+        e.commands(MeasureCommands::register);
     }
 
     /** Start of a server tick: the tracker's volumes, then the patch budget and the sliced reads. */

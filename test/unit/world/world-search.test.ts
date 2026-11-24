@@ -231,6 +231,16 @@ describe("world_search against the fake host (18, piece 2)", () => {
     expect(session.worldSelect!.lastSearch!.clusters).toHaveLength(2);
   });
 
+  it("walks 64 chunks when no radius is given (18, *Measured*), and says a larger radius walks farther", async () => {
+    const { host, call } = await setup({ selectChunks: 256 });
+    const r = await call("world_search", { materials: [MOSSY] });
+    expect(r.isError).toBeFalsy();
+    expect(host.received.filter((m) => m.type === "search")).toMatchObject([{ materials: [MOSSY], radius: 64 }]);
+    const t = (r.content as { text?: string }[])[1]!.text!.split("\n");
+    expect(t[0]).toMatch(/rings 0–64 of 64 walked/);
+    expect(t).toContain("The walk covered the whole radius (64 chunks; a larger radius, up to the mod's selectChunks (256 by default), walks farther, slower on a miss).");
+  });
+
   it("refuses unknown materials before sending, and continue without a search or with materials", async () => {
     const { host, call } = await setup();
     const r = await call("world_search", { materials: ["stone_brickz"] });

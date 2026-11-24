@@ -18,12 +18,12 @@ export function registerWorldSelectTools({ tool, session }: ToolDeps): void {
         "counting the blocks of the given materials per chunk (covered or underground builds included), and stops once a cluster of matching chunks is closed (no match within 2 rings past it). " +
         'materials: block ids ("mossy_stone_bricks"), canonical states, "family:<id>" (every variant and shape of that material, e.g. "family:stone_bricks" for mossy, cracked, chiseled, stairs, slabs, walls) or "#tags"; ' +
         "turn the player's words into these with palette_sheet / block_info, never ask the player for ids. " +
-        "radius: chunks (default and cap: the mod's selectChunks, 256); around: a world position to centre on instead of the player; stop: closed clusters to stop at (default 1). " +
+        "radius: chunks (default 64, about 13 s when nothing matches; up to the mod's selectChunks, 256, which takes minutes on a miss); around: a world position to centre on instead of the player; stop: closed clusters to stop at (default 1). " +
         "continue:true walks on from where the last search stopped, for the next clusters. " +
         "Returns a heat map (one cell per chunk, north up, the player ringed, clusters numbered) and a list of clusters with distance, bearing, y range and counts. Image ≤480 px plus text, ~600–1,000 tokens.",
       inputSchema: {
         materials: z.array(z.string().min(1)).min(1).max(64).optional().describe('Block ids, canonical states, "family:<id>" or "#ns:tag"'),
-        radius: z.number().int().min(0).max(1024).optional().describe("Chunks around the centre; default and cap: selectChunks"),
+        radius: z.number().int().min(0).max(1024).optional().describe("Chunks around the centre; default 64, cap: selectChunks (256)"),
         around: vec3.optional().describe("World position whose chunk is the centre; default: the player's"),
         stop: z.number().int().min(1).max(64).optional().describe("Stop once this many more clusters are closed (default 1)"),
         continue: z.boolean().optional().describe("Walk on from where the last search stopped (give no materials, radius or around)"),

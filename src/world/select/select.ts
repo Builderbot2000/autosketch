@@ -97,6 +97,13 @@ interface FillState {
   result: FillResult;
 }
 
+/**
+ * The radius a new search walks when the agent gives none, in chunks (`18`, *Measured*: a miss over
+ * 64 chunks took 13 s on Craftoria, over 256 about 200 s, at no tick cost either way). The mod's
+ * `selectChunks` (256) stays the cap: the agent asks for more when the player's words point far.
+ */
+export const SEARCH_RADIUS = 64;
+
 export interface SearchArgs {
   /** Block ids, canonical states, `family:<id>` or `#tags`, as the agent gives them. */
   materials?: string[];
@@ -166,7 +173,7 @@ export class WorldSelect {
         type: "search",
         dimension,
         materials: m.wire,
-        ...(a.radius !== undefined ? { radius: a.radius } : {}),
+        radius: a.radius ?? SEARCH_RADIUS,
         ...(a.around ? { around: a.around } : {}),
         ...(a.stop !== undefined ? { stop: a.stop } : {}),
       };

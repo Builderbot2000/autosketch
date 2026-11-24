@@ -80,6 +80,8 @@ neoForge {
             sourceSet = sourceSets.gametest
             gameDirectory = rootProject.file('run/gametest')
             systemProperty 'neoforge.enabledGameTestNamespaces', "${project.mod_id},${project.mod_id}_smoke"
+            // The fill parity fixture shared with the TypeScript side (18, piece 3; FillGameTests).
+            systemProperty 'autosketch.fillParity', rootProject.file('../test/data/select/fill-parity.json').absolutePath
         }
         // The per-target smoke test alone (14, *Tests across versions*): the server starts with the
         // mod, the pointer file is written, and the bridge pairs (SmokeGameTests).

@@ -240,6 +240,144 @@ public final class MaskCoarseGameTests {
                 .thenExecute(() -> steps.run(h, cleanup));
     }
 
+    /** A snapshot answer as comparable text: each region's box and states by name, the block entities with their NBT, the missing chunks. */
+    static List<String> flat(TestExchange ex) {
+        if (ex.errorCode != null) throw new GameTestAssertException("refused: " + ex.errorCode);
+        Messages.SnapshotResult r;
+        try {
+            r = Messages.SnapshotResult.decode(ex.reply);
+        } catch (ProtocolException e) {
+            throw new GameTestAssertException("undecodable snapshot: " + e.getMessage());
+        }
+        List<String> out = new ArrayList<>();
+        for (SnapshotRegion g : r.regions()) {
+            out.add("region " + g.box());
+            StringBuilder b = new StringBuilder();
+            for (int st : g.states()) b.append(r.palette().get(st)).append(' ');
+            out.add(b.toString());
+            List<String> bes = new ArrayList<>();
+            for (var be : g.blockEntities()) bes.add(be.pos().toShortString() + " " + be.nbt());
+            bes.sort(null);
+            out.addAll(bes);
+        }
+        out.add("missing " + r.missing());
+        return out;
+    }
+
+    /**
+     * Blocks and mask snapshots inside the grant read an unloaded chunk from disk (18, piece 5; M4):
+     * chunk B saved and unloaded, holding honey, a chest with items and a sign in one section and kelp
+     * in the next; C east of it never generated; A five chunks east loaded (forced), with honey and a
+     * chest. A blocks snapshot over B's two sections, C and part of A, sliced a column per tick, then a
+     * mask snapshot of B's section with margin 2: B read from its saved tag and still unloaded, its
+     * block entities' NBT read, C air and listed, A read loaded. Then B is loaded and both are asked
+     * again: the answers are the same, block for block and NBT for NBT.
+     */
+    @GameTest(template = "empty", batch = "y_select_blocks_disk", timeoutTicks = 2400)
+    public static void grantSnapshotsReadUnloadedChunksFromDisk(GameTestHelper h) {
+        ServerLevel level = h.getLevel();
+        unlink();
+        int[] f = SelectGameTests.farChunk();
+        int bx = f[0], cz = f[1], ax = bx + 5;
+        level.getChunk(bx, cz);
+        level.setChunkForced(ax, cz, true);
+        int z0 = cz << 4, b0 = bx << 4, a0 = ax << 4;
+        String chest = "minecraft:chest[facing=north,type=single,waterlogged=false]", sign = "minecraft:oak_sign[rotation=4,waterlogged=false]";
+        BlockPos bHoney = new BlockPos(b0 + 1, Y, z0 + 1), bChest = new BlockPos(b0 + 2, Y, z0 + 1), bSign = new BlockPos(b0 + 3, Y, z0 + 1),
+                bKelp = new BlockPos(b0 + 5, Y + 16, z0 + 2), aHoney = new BlockPos(a0, Y, z0), aChest = new BlockPos(a0 + 1, Y, z0);
+        put(level, bHoney, HONEY, null);
+        put(level, bChest, chest, WorldTestKit.snbt("{id:\"minecraft:chest\",Items:[{Slot:0b,count:2,id:\"minecraft:diamond\"}]}"));
+        put(level, bSign, sign, WorldTestKit.snbt("{id:\"minecraft:sign\"}"));
+        put(level, bKelp, KELP, null);
+        put(level, aHoney, HONEY, null);
+        put(level, aChest, chest, WorldTestKit.snbt("{id:\"minecraft:chest\",Items:[{Slot:3b,count:1,id:\"minecraft:emerald\"}]}"));
+        level.getChunkSource().save(true);
+        long slice = WorldReads.sliceNanos;
+        Runnable cleanup = () -> {
+            WorldReads.sliceNanos = slice;
+            level.setChunkForced(ax, cz, false);
+            SelectGrants.clear();
+        };
+        // B's sections at y 192..223 and four columns into C; then a corner of A.
+        Box bc = new Box(b0, Y - 8, z0, b0 + 19, Y + 17, z0 + 3), a = new Box(a0, Y, z0, a0 + 3, Y + 1, z0 + 3);
+        Section bs = new Section(bx, Y >> 4, cz);
+        List<List<String>> cold = new ArrayList<>();
+        Steps steps = new Steps()
+                .then(() -> {
+                    SelectGrants.set(level.dimension(), new BlockPos(b0, Y, z0), 8);
+                    WorldReads.sliceNanos = 1;
+                    return SurfaceGameTests.blocks(new Messages.SnapshotRequest(nextId(), dim(h), List.of(bc, a), null));
+                }, ex -> {
+                    LOG.info("Autosketch blocks snapshot timing (cold, sliced: a saved, an ungenerated and a loaded chunk): {}", WorldReads.lastRead);
+                    WorldReads.ReadStats st = WorldReads.lastRead;
+                    check(st != null && st.chunks() == 3 && st.loaded() == 1 && st.disk() == 1 && st.fallback() == 0 && st.missing() == 1 && st.ticks() >= 3,
+                            "A loaded, B from disk, C missing, a column per tick: " + st);
+                    check(level.getChunkSource().getChunkNow(bx, cz) == null && level.getChunkSource().getChunkNow(bx + 1, cz) == null, "B not loaded, C not generated");
+                    try {
+                        Messages.SnapshotResult r = Messages.SnapshotResult.decode(ex.reply);
+                        check(stateAt(r, bHoney).equals(HONEY) && stateAt(r, bChest).equals(chest) && stateAt(r, bSign).equals(sign), "B's blocks read from disk");
+                        check(stateAt(r, bKelp).equals(KELP), "B's next section too");
+                        check(stateAt(r, new BlockPos(b0 + 17, Y, z0 + 1)).equals(AIR), "C reads as air");
+                        check(stateAt(r, aHoney).equals(HONEY) && stateAt(r, aChest).equals(chest), "A's blocks");
+                        check(List.of(new ChunkXZ(bx + 1, cz)).equals(r.missing()), "C is listed: " + r.missing());
+                        List<String> bes = new ArrayList<>();
+                        for (SnapshotRegion g : r.regions()) for (var be : g.blockEntities()) bes.add(be.pos().toShortString() + " " + be.nbt().getString("id"));
+                        bes.sort(null);
+                        List<String> want = new ArrayList<>(List.of(bChest.toShortString() + " minecraft:chest", bSign.toShortString() + " minecraft:sign", aChest.toShortString() + " minecraft:chest"));
+                        want.sort(null);
+                        check(bes.equals(want), "the chests and the sign, with their ids: " + bes);
+                        for (SnapshotRegion g : r.regions())
+                            for (var be : g.blockEntities())
+                                if (be.pos().equals(bChest)) {
+                                    check(!be.nbt().contains("x") && be.nbt().getList("Items", 10).getCompound(0).getString("id").equals("minecraft:diamond"), "B's chest NBT, without its position: " + be.nbt());
+                                }
+                    } catch (ProtocolException e) {
+                        throw new GameTestAssertException("undecodable snapshot: " + e.getMessage());
+                    }
+                    cold.add(flat(ex));
+                })
+                .then(() -> mask(new SelectMessages.MaskSnapshotRequest(nextId(), dim(h), List.of(bs), 2)), ex -> {
+                    LOG.info("Autosketch mask snapshot timing (cold): {}", WorldReads.lastRead);
+                    WorldReads.ReadStats st = WorldReads.lastRead;
+                    check(st != null && st.disk() >= 1 && st.fallback() == 0, "B's column read from disk: " + st);
+                    check(level.getChunkSource().getChunkNow(bx, cz) == null, "B still not loaded");
+                    cold.add(flat(ex));
+                })
+                .then(() -> {
+                    WorldReads.sliceNanos = slice;
+                    level.getChunk(bx, cz);
+                    return SurfaceGameTests.blocks(new Messages.SnapshotRequest(nextId(), dim(h), List.of(bc, a), null));
+                }, ex -> {
+                    LOG.info("Autosketch blocks snapshot timing (B loaded): {}", WorldReads.lastRead);
+                    WorldReads.ReadStats st = WorldReads.lastRead;
+                    check(st != null && st.loaded() == 2 && st.disk() == 0 && st.missing() == 1, "A and B loaded, C missing: " + st);
+                    List<String> warm = flat(ex);
+                    check(warm.equals(cold.get(0)), "the loaded read answers as the cold one: " + firstDifference(cold.get(0), warm));
+                })
+                .then(() -> {
+                    level.getChunk(bx, cz);
+                    return mask(new SelectMessages.MaskSnapshotRequest(nextId(), dim(h), List.of(bs), 2));
+                }, ex -> {
+                    List<String> warm = flat(ex);
+                    check(warm.equals(cold.get(1)), "the loaded mask snapshot answers as the cold one: " + firstDifference(cold.get(1), warm));
+                });
+        h.startSequence()
+                .thenWaitUntil(() -> {
+                    if (level.getChunkSource().getChunkNow(bx, cz) != null) throw new GameTestAssertException("waiting for chunk B to unload");
+                })
+                .thenExecute(() -> steps.run(h, cleanup));
+    }
+
+    static String firstDifference(List<String> a, List<String> b) {
+        for (int i = 0; i < Math.min(a.size(), b.size()); i++)
+            if (!a.get(i).equals(b.get(i))) return "line " + i + ": " + abbreviate(a.get(i)) + " | " + abbreviate(b.get(i));
+        return "sizes " + a.size() + " and " + b.size();
+    }
+
+    private static String abbreviate(String s) {
+        return s.length() > 400 ? s.substring(0, 400) + "…" : s;
+    }
+
     /** Over {@code contextCap} cells inside the grant {@code too_large}; outside it without volumes {@code no_volumes}; a bad cell {@code bad_request}. */
     @GameTest(template = "empty", batch = "y_select_coarse_refusals", timeoutTicks = 400)
     public static void coarseRefusals(GameTestHelper h) {

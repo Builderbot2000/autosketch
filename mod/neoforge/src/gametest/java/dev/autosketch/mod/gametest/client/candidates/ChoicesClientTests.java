@@ -6,7 +6,6 @@ import com.google.gson.JsonObject;
 import dev.autosketch.mod.client.ui.LinkState;
 import dev.autosketch.mod.gametest.client.ClientTest;
 import dev.autosketch.mod.gametest.client.ClientTestSuite;
-import dev.autosketch.mod.gametest.client.overlay.VolumeOverlayClientTests;
 import dev.autosketch.mod.protocol.Messages;
 import dev.autosketch.mod.prompt.InGamePrompts;
 import java.util.List;
@@ -53,7 +52,6 @@ public final class ChoicesClientTests {
         String[] commands = new String[CHOICES.size()];
         ActionBar bar = new ActionBar();
         s.waitUntil("connected", () -> LinkState.connected(), 400);
-        int[] slot = VolumeOverlayClientTests.awayFromTheWand(s);
         s.step("clear chat", s::clearMessages);
         s.step("the agent asks, one reply per choice, then the free-text line", () -> {
             UUID me = s.player().getUUID();
@@ -102,9 +100,6 @@ public final class ChoicesClientTests {
             check(seen.contains("Autosketch: You already answered this question."), "action bar since the click " + seen);
             return true;
         }, 200);
-        s.cleanup("the hotbar slot back", () -> {
-            if (slot[0] >= 0) s.player().getInventory().selected = slot[0];
-        });
     }
 
     /**

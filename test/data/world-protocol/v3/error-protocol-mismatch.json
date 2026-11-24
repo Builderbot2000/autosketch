@@ -1,0 +1,11 @@
+{
+  "description": "The mod refuses a hello with another protocol version and closes (the MCP sent a newer one: the mod tells the player to update the mod)",
+  "sender": "mod",
+  "header": {
+    "type": "error",
+    "id": null,
+    "code": "protocol_mismatch",
+    "message": "mod speaks protocol 3, MCP sent 4",
+    "protocol": 3
+  }
+}

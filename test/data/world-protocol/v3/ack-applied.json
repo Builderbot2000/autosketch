@@ -1,0 +1,22 @@
+{
+  "description": "Every block applied",
+  "sender": "mod",
+  "header": {
+    "type": "patch.ack",
+    "id": 21,
+    "applied": 1,
+    "overwritten": 0,
+    "skipped": 0,
+    "rejected": 0,
+    "normalized": 0,
+    "origin": [0, 0, 0],
+    "size": [0, 0, 0]
+  },
+  "body": {
+    "palette": [],
+    "skipped": [],
+    "reasons": [],
+    "rejected": [],
+    "normalized": []
+  }
+}

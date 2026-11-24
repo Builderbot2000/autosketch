@@ -1,0 +1,13 @@
+{
+  "description": "The choice went to the agent as the player's answer on in-game request 21",
+  "sender": "mcp",
+  "header": {
+    "type": "ui.result",
+    "request": 30,
+    "player": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    "ok": true,
+    "result": {
+      "request": 21
+    }
+  }
+}

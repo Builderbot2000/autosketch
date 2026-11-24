@@ -1,0 +1,19 @@
+{
+  "description": "A full state answering one player's resync: only that player, the current seq without taking a new one, no jobs, no token figures yet",
+  "sender": "mcp",
+  "header": {
+    "type": "ui.state",
+    "players": [
+      "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+    ],
+    "seq": 2,
+    "full": true,
+    "jobs": [],
+    "request": null,
+    "tokens": null,
+    "refusal": {
+      "code": "outside_work_volume",
+      "text": "set_blocks in j1 reached outside its work volume"
+    }
+  }
+}

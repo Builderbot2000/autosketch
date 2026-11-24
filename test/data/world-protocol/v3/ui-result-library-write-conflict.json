@@ -1,0 +1,12 @@
+{
+  "description": "A write refused: the agent saved the prefab since the editor opened it; the screen reloads",
+  "sender": "mcp",
+  "header": {
+    "type": "ui.result",
+    "request": 14,
+    "player": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    "ok": false,
+    "error": "conflict",
+    "message": "prefab \"gothic_tower_a\" changed since it was opened (the agent may have saved it); reload it and edit again"
+  }
+}

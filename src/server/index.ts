@@ -133,9 +133,6 @@ async function main(): Promise<void> {
       notify: (content, meta) => server.server.notification({ method: CHANNEL_METHOD, params: { content, meta } } as never),
       listening: () => server.server.getClientCapabilities() !== undefined,
       touch: () => session.touch(),
-      // The scan probe (13, B4) opens as the session's temporary document, with the instance's palettes.
-      host: session,
-      palettes: () => book,
       autoLink,
       componentSet: session.componentSet,
       choices: session.choices,
@@ -197,7 +194,7 @@ async function main(): Promise<void> {
     const d = worldView.dimension;
     return !!d && ui.feed.pulseHits(boxes, d);
   };
-  // Request modes (13, B6): while an ask, plan or scan request is open, edits on the linked document are refused.
+  // Request modes (13, B6): while an ask, plan or select request is open, edits on the linked document are refused.
   session.callHooks.push(inGame.modeRule);
   // Once an instance loads (at startup, or later in place).
   if (autoLink) void session.whenInstance().then((c) => link.autoLink({ instanceDir: c.info.root, plugins: c.plugins, palettes: c.book }));

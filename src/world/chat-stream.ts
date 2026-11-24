@@ -17,7 +17,7 @@ import type { ChatAction, ChatMessage, PlayerRef, RequestMode } from "./protocol
  * - **Request streams:** while an in-game request is open, `chat` carries its id and player, so the
  *   mod shows activity to that player (log `mine`, the default). It closes on `done` or after
  *   `idleMs` with no tool calls, or when the next request opens. A request in a read-only mode
- *   (`ask`, `plan`, `scan`) doesn't close on idle time, since its mode is enforced while it is
+ *   (`ask`, `plan`, `select`) doesn't close on idle time, since its mode is enforced while it is
  *   open (B6, `modes.ts`). Outside a request, `chat` carries
  *   no request or player, and only players with log `all` see it.
  *

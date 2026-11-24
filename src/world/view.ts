@@ -9,7 +9,7 @@ import { COARSE_CELLS, MASK_MARGIN, type CoarseCell, type CoarseResult, type Gam
 /**
  * The world view (docs/design/18-select.md, piece 5): a read-only look at the world held **beside**
  * the open document, never in place of it, so it coexists with a linked document and with open
- * sandboxes (the scan probe replaced the document instead, `Session.adoptTemporary`).
+ * sandboxes.
  *
  * - **A document in world coordinates.** The view keeps the blocks it has read in an ordinary
  *   `Document` whose local coordinates are the world's: `doc.origin` is set so store coordinates stay
@@ -17,7 +17,7 @@ import { COARSE_CELLS, MASK_MARGIN, type CoarseCell, type CoarseResult, type Gam
  *   position. So `render`, `view_slice`, `raycast`, `select` and `analyze` work on it unchanged, and
  *   named selections (`candidate`) live in its `selections` like any document's.
  * - **Read-only.** Every edit on it is refused with `world_view_read_only` (a write guard, so ops,
- *   scripts, undo and restore are all covered). Reads write the voxels directly, as the probe does.
+ *   scripts, undo and restore are all covered). Reads write the voxels directly.
  * - **Per request.** It holds what was read for the current in-game request (`request()`), in that
  *   request's dimension, and starts empty again when the request changes or ends. With no request
  *   open it belongs to "no request" and the linked dimension.

@@ -28,7 +28,6 @@ import {
   type PlayerRef,
   type PromptResult,
   type RequestMode,
-  type ScanGrant,
   type UpgradeData,
   type UpgradeRequest,
   type SnapshotRequest,
@@ -36,7 +35,6 @@ import {
   type SurfaceRequest,
   type VolatileList,
   type VolumesSet,
-  type WireArea,
   type WireBox,
   type WorldBlock,
   type UiMcpMessage,
@@ -102,8 +100,6 @@ export interface FakeHostOptions {
   upgrade?: (m: UpgradeRequest, to: number) => UpgradeData & { failed?: number };
   /** The mod's `contextCap` (blocks), for `volumes.set`; default 4,194,304. */
   contextCap?: number;
-  /** Scan sizing (`13`, B4): default radius, maximum radius, blocks below and above the feet, full-block cap. */
-  scan?: { chunks?: number; chunksMax?: number; below?: number; above?: number; cap?: number };
   /** `selectChunks` (`18`): the select grant's radius and the search radius cap; default 256. */
   selectChunks?: number;
   /** Block tags (`ns:path` → block ids) for `#tag` materials in search and fill; unknown tags match nothing. */
@@ -172,8 +168,6 @@ export class FakeHost {
   mcpModes: readonly RequestMode[] = [];
   /** The features the MCP's last hello listed (absent: none). */
   mcpFeatures: readonly string[] = [];
-  /** The scan grant of the last scan request, while it lasts (*Wire format*, `prompt`, `scan`). */
-  scanGrant: (ScanGrant & { dimension: string }) | null = null;
   /** The read grant of the last select request, while it lasts (`13`, *Read grants in select mode*). */
   selectGrant: SelectGrant | null = null;
   /** The select grant's search, resumable with `continue`, and its current fill. */
@@ -307,10 +301,10 @@ export class FakeHost {
   /**
    * A player asks the agent from the game. Resolves with the MCP's `prompt.result`, or with the
    * mod's own refusal when nothing is sent: `no_link` when nobody is connected, `unsupported_mode`
-   * when the MCP's hello didn't list the mode (B6). `mode` (default `build`) and `radius` (scan
-   * only, in chunks) are the subcommand's; a host without the `modes` feature sends no mode.
+   * when the MCP's hello didn't list the mode (B6). `mode` (default `build`) is the subcommand; a
+   * host without the `modes` feature sends no mode.
    */
-  playerAsk(player: PlayerRef, text: string, context: Partial<GameContext> = {}, opts: { mode?: RequestMode; radius?: number } = {}): Promise<AskResult> {
+  playerAsk(player: PlayerRef, text: string, context: Partial<GameContext> = {}, opts: { mode?: RequestMode } = {}): Promise<AskResult> {
     const id = ++this.promptId;
     if (!this.connected) return Promise.resolve({ type: "prompt.result", id, delivered: false, reason: "no_link", local: true });
     const ctx: GameContext = { dimension: this.volumes?.dimension ?? "minecraft:overworld", position: [0.5, 64, 0.5], eye: [0.5, 65.62, 0.5], yaw: 0, pitch: 0, facing: "south", ...context };
@@ -318,20 +312,12 @@ export class FakeHost {
     const mode = opts.mode ?? "build";
     if (modes && this.opts.enforceModes !== false && !this.mcpModes.includes(mode)) return Promise.resolve({ type: "prompt.result", id, delivered: false, reason: "unsupported_mode", local: true });
     if (mode === "select" && !this.has("select")) throw new Error("fake host: a mod without the select feature has no select subcommand");
-    let scan: ScanGrant | undefined;
-    if (modes && mode === "scan" && this.has("scan")) {
-      scan = this.grant(ctx, opts.radius);
-      this.scanGrant = { ...scan, dimension: ctx.dimension };
-      this.setSelectGrant(null);
-    }
     if (modes && mode === "select") {
-      // One grant at a time: a select request replaces a scan grant, and the other way round.
-      this.scanGrant = null;
       this.setSelectGrant({ dimension: ctx.dimension, centre: [Math.floor(ctx.position[0]) >> 4, Math.floor(ctx.position[2]) >> 4], radius: this.opts.selectChunks ?? SELECT_CHUNKS });
     }
     return new Promise((resolve) => {
       this.prompts.set(id, resolve);
-      this.send({ type: "prompt", id, player, text, context: ctx, ...(modes ? { mode } : {}), ...(scan ? { scan } : {}) });
+      this.send({ type: "prompt", id, player, text, context: ctx, ...(modes ? { mode } : {}) });
     });
   }
 
@@ -476,8 +462,7 @@ export class FakeHost {
       clearTimeout(timer);
       if (this.socket === s) {
         this.socket = undefined;
-        this.scanGrant = null; // a grant lasts until the connection closes
-        this.setSelectGrant(null);
+        this.setSelectGrant(null); // a grant lasts until the connection closes
       }
     });
     s.on("data", (chunk) => {
@@ -548,22 +533,6 @@ export class FakeHost {
         } else void this.handle(m, s);
       }
     });
-  }
-
-  /** The scan grant for a request at `ctx` (B4): chunks within the radius, and the full-block box within the cap. */
-  private grant(ctx: GameContext, radius?: number): ScanGrant {
-    const o = this.opts.scan ?? {};
-    const max = o.chunksMax ?? 12, asked = radius ?? o.chunks ?? 4;
-    const r = Math.min(asked, max);
-    const cx = Math.floor(ctx.position[0]) >> 4, cz = Math.floor(ctx.position[2]) >> 4;
-    const columns: WireArea = { min: [16 * (cx - r), 16 * (cz - r)], max: [16 * (cx + r) + 15, 16 * (cz + r) + 15] };
-    const fy = Math.floor(ctx.position[1]);
-    const y0 = Math.max(BUILD_MIN_Y, fy - (o.below ?? 32)), y1 = Math.min(BUILD_MAX_Y, fy + (o.above ?? 64));
-    const side = Math.min(columns.max[0] - columns.min[0] + 1, Math.floor(Math.sqrt((o.cap ?? 4_194_304) / (y1 - y0 + 1))));
-    const px = Math.floor(ctx.position[0]), pz = Math.floor(ctx.position[2]);
-    const lo = (p: number, a: number, b: number) => Math.min(Math.max(p - (side >> 1), a), b - side + 1);
-    const bx = lo(px, columns.min[0], columns.max[0]), bz = lo(pz, columns.min[1], columns.max[1]);
-    return { radius: r, ...(asked > max ? { clipped: true } : {}), columns, box: { min: [bx, y0, bz], max: [bx + side - 1, y1, bz + side - 1] } };
   }
 
   private setSelectGrant(g: SelectGrant | null): void {
@@ -646,7 +615,7 @@ export class FakeHost {
     const sel = this.selectRead(m.dimension, boxes, boxes.reduce((n, b) => n + boxVolume(b), 0));
     if (sel === "too_large") return this.send({ type: "error", id: m.id, code: "too_large", message: "the read is over contextCap" }, s);
     if (sel !== "grant") {
-      const err = this.checkRead(m.dimension, boxes, true);
+      const err = this.checkRead(m.dimension, boxes);
       if (err) return this.send({ type: "error", id: m.id, code: err, message: `can't serve a mask snapshot: ${err}` }, s);
     }
     this.snapshot({ type: "snapshot", id: m.id, dimension: m.dimension, boxes }, s, sel === "grant");
@@ -660,7 +629,7 @@ export class FakeHost {
     const sel = this.selectRead(m.dimension, aligned, regions.reduce((n, r) => n + r.states.length, 0));
     if (sel === "too_large") return this.send({ type: "error", id: m.id, code: "too_large", message: "the read is over contextCap" }, s);
     if (sel !== "grant") {
-      const err = this.checkRead(m.dimension, aligned, true);
+      const err = this.checkRead(m.dimension, aligned);
       if (err) return this.send({ type: "error", id: m.id, code: err, message: `can't serve a coarse snapshot: ${err}` }, s);
     }
     const missing = sel === "grant" ? missingIn(aligned, this.missingChunks) : [];
@@ -694,7 +663,8 @@ export class FakeHost {
         }
         if ("kind" in m && m.kind === "surface") {
           // A version-1 mod reads neither kind nor columns: to it this snapshot has no boxes or sections.
-          if (!this.has("scan")) return this.send({ type: "error", id: m.id, code: "bad_request", message: "snapshot takes exactly one of boxes or sections" }, s);
+          // Protocols 2 and 3 serve it under the feature `scan`, protocol 4 under `select`.
+          if (!this.has("scan") && !this.has("select")) return this.send({ type: "error", id: m.id, code: "bad_request", message: "snapshot takes exactly one of boxes or sections" }, s);
           return this.surface(m, s);
         }
       // falls through
@@ -702,7 +672,7 @@ export class FakeHost {
         const boxes = "boxes" in m ? m.boxes : m.sections.map(sectionBox);
         const sel = m.type === "snapshot" ? this.selectRead(m.dimension, boxes, boxes.reduce((n, b) => n + boxVolume(b), 0)) : undefined;
         if (sel === "too_large") return this.send({ type: "error", id: m.id, code: "too_large", message: "the read is over contextCap" }, s);
-        const err = sel === "grant" ? undefined : this.checkRead(m.dimension, boxes, m.type === "snapshot");
+        const err = sel === "grant" ? undefined : this.checkRead(m.dimension, boxes);
         if (err) return this.send({ type: "error", id: m.id, code: err, message: `can't serve ${m.type}: ${err}` }, s);
         if (m.type === "hashes") return this.send({ type: "hashes.result", id: m.id, sections: sectionHashes(m.boxes, (x, y, z) => this.get([x, y, z]), this.volatile) }, s);
         return this.snapshot({ type: "snapshot", id: m.id, dimension: m.dimension, boxes }, s, sel === "grant");
@@ -795,14 +765,12 @@ export class FakeHost {
 
   /** `snapshot` kind `surface`: per column the topmost non-air block, and the lowest one at or above `ceiling`. */
   private surface(m: SurfaceRequest, s: Socket): void {
-    const g = this.scanGrant;
     const a = m.columns;
     const sg = this.selectGrant;
     const inSelect = !!sg && sg.dimension === m.dimension && grantHasChunk(sg, a.min[0] >> 4, a.min[1] >> 4) && grantHasChunk(sg, a.max[0] >> 4, a.max[1] >> 4);
-    const inGrant = inSelect || (!!g && g.dimension === m.dimension && a.min[0] >= g.columns.min[0] && a.min[1] >= g.columns.min[1] && a.max[0] <= g.columns.max[0] && a.max[1] <= g.columns.max[1]);
-    if (!inGrant) {
+    if (!inSelect) {
       const box: WireBox = { min: [a.min[0], 0, a.min[1]], max: [a.max[0], 0, a.max[1]] };
-      const err = this.checkRead(m.dimension, [box], false);
+      const err = this.checkRead(m.dimension, [box]);
       if (err) return this.send({ type: "error", id: m.id, code: err, message: `can't serve a surface snapshot: ${err}` }, s);
     }
     const sx = a.max[0] - a.min[0] + 1, sz = a.max[1] - a.min[1] + 1, n = sx * sz;
@@ -840,10 +808,8 @@ export class FakeHost {
     this.send({ type: "snapshot.result", id: m.id, dimension: m.dimension, kind: "surface", columns: a, minY: BUILD_MIN_Y, ...(m.ceiling !== undefined ? { ceiling: m.ceiling } : {}), missing: missingList, palette, surface, ...(ceilings ? { ceilings } : {}) }, s);
   }
 
-  /** Read checks; a blocks snapshot inside the scan grant's box is served with or without volumes. */
-  private checkRead(dimension: string, boxes: WireBox[], blocks: boolean): ErrorCode | undefined {
-    const g = this.scanGrant;
-    if (blocks && g && g.dimension === dimension && boxes.every((b) => containsBox(g.box, b))) return undefined;
+  /** Read checks: inside the chunks the volumes keep loaded. */
+  private checkRead(dimension: string, boxes: WireBox[]): ErrorCode | undefined {
     const v = this.volumes;
     if (!v) return "no_volumes";
     if (dimension !== v.dimension) return "wrong_dimension";
@@ -945,7 +911,7 @@ const DIMENSIONS = new Set(["minecraft:overworld", "minecraft:the_nether", "mine
 const KNOWN = new Set(["hello", "error", "volumes.extend", "volumes.set", "hashes", "snapshot", "search", "fill", "expand", "patch", "registry", "upgrade", "prompt.result", "notice", "chat", ...UI_MCP_TYPES]);
 
 /** The features each protocol version's mod lists (*Versions and features*). */
-const FEATURES_BY_VERSION: Record<number, string[] | undefined> = { 1: undefined, 2: ["modes", "scan", "volumes.set"], 3: [...MOD_FEATURES] };
+const FEATURES_BY_VERSION: Record<number, string[] | undefined> = { 1: undefined, 2: ["modes", "scan", "volumes.set"], 3: ["modes", "scan", "volumes.set", "registry", "upgrade", "ui", "select"], 4: [...MOD_FEATURES] };
 
 /** A small vanilla registry report (format 1). */
 const DEFAULT_REPORT = {

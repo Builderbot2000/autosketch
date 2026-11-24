@@ -18,7 +18,7 @@ export interface ChoiceQuestion {
   /** The in-game request the question went to, or null when it went to none. */
   request: number | null;
   /** That request's mode, when it had one (a closed request reopens in it, as with candidates). */
-  mode?: "ask" | "plan" | "scan" | "build" | "select";
+  mode?: "ask" | "plan" | "build" | "select";
   /** The question as the player read it: the reply's lines, joined. */
   question: string;
   choices: string[];

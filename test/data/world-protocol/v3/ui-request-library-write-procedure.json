@@ -1,0 +1,19 @@
+{
+  "description": "The procedure editor saves the whole source",
+  "sender": "mod",
+  "header": {
+    "type": "ui.request",
+    "request": 17,
+    "player": {
+      "name": "Kev",
+      "uuid": "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+    },
+    "kind": "library.write.procedure",
+    "args": {
+      "root": "user",
+      "name": "towers/round",
+      "hash": "5d41402abc4b2a76b9719d911017c592ae2f1c0e8e1a4b7f3c6d2e9a0b1c2d3e",
+      "text": "// round tower\nexport default function (p) {\n  fill({ cylinder: { center: [0, 0, 0], radius: p.r, height: p.h } }, p.wall, \"walls\");\n}\n"
+    }
+  }
+}

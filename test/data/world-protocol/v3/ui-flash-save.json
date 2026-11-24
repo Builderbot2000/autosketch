@@ -1,0 +1,35 @@
+{
+  "description": "A prefab_save on the linked document flashes the saved box white (job \"save\", no job's edit), in the same window as an edit by the root",
+  "sender": "mcp",
+  "header": {
+    "type": "ui.flash",
+    "players": [
+      "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+      "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+    ],
+    "flashes": [
+      {
+        "job": "save",
+        "colour": "#ffffff",
+        "dimension": "minecraft:overworld",
+        "boxes": [
+          {
+            "min": [120, 64, -190],
+            "max": [126, 87, -184]
+          }
+        ]
+      },
+      {
+        "job": "base",
+        "colour": "#9b9b9b",
+        "dimension": "minecraft:overworld",
+        "boxes": [
+          {
+            "min": [100, 63, -200],
+            "max": [100, 63, -200]
+          }
+        ]
+      }
+    ]
+  }
+}

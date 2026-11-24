@@ -120,9 +120,8 @@ public final class WorldReads {
         // Every position takes at least one byte of body.
         if (total > FrameCodec.MAX_FRAME) throw ProtocolException.refuse(ErrorCodes.TOO_LARGE, req.id(), total + " positions can't fit in one frame; ask for fewer boxes or sections");
         ServerLevel select = selectGranted(req.id(), req.dimension(), regions, total);
-        ServerLevel granted = select != null ? select : granted(req.dimension(), regions);
-        ServerLevel level = granted != null ? granted : check(req.id(), req.dimension(), regions);
-        start(new Job(level, regions, sectionsOf(regions), ex, granted != null, select != null) {
+        ServerLevel level = select != null ? select : check(req.id(), req.dimension(), regions);
+        start(new Job(level, regions, sectionsOf(regions), ex, select != null, select != null) {
             @Override
             void finish() {
                 List<String> palette = new ArrayList<>();
@@ -182,17 +181,6 @@ public final class WorldReads {
         long cap = dev.autosketch.mod.AutosketchConfig.get().volumes.contextCap;
         if (positions > cap) throw ProtocolException.refuse(ErrorCodes.TOO_LARGE, id, positions + " positions are over contextCap (" + cap + "); ask for less, or a coarse snapshot");
         return levels.apply(h.grant().dimension());
-    }
-
-    /**
-     * Protocol 2 (B4): the scan grant's level when every box lies inside the grant's box in its
-     * dimension, so the snapshot is served without volumes (and without generating chunks); else null.
-     */
-    private @Nullable ServerLevel granted(String dimension, List<Box> boxes) {
-        ScanGrants.Held g = ScanGrants.current();
-        if (g == null || !g.dimension().location().toString().equals(dimension)) return null;
-        for (Box b : boxes) if (!g.grant().box().contains(b)) return null;
-        return levels.apply(g.dimension());
     }
 
     /** {@code no_volumes}, {@code wrong_dimension}, {@code outside_volumes} (chunk columns the link keeps loaded). */
@@ -260,7 +248,7 @@ public final class WorldReads {
         return capture(level, sx, sy, sz, boxes, false);
     }
 
-    /** As above; with {@code noGenerate} (a scan-grant read), a chunk never fully generated reads as air. */
+    /** As above; with {@code noGenerate} (a select-grant read), a chunk never fully generated reads as air. */
     static Captured capture(ServerLevel level, int sx, int sy, int sz, List<Box> boxes, boolean noGenerate) {
         if (sy < level.getMinSection() || sy >= level.getMaxSection()) return new Captured(null, Map.of());
         LevelChunk chunk = noGenerate ? SurfaceReads.existing(level, sx, sz, new int[1]) : level.getChunk(sx, sz);

@@ -18,7 +18,6 @@ import dev.autosketch.mod.protocol.SelectMessages.SearchChunk;
 import dev.autosketch.mod.protocol.SelectMessages.SearchCluster;
 import dev.autosketch.mod.protocol.SelectMessages.SearchResult;
 import dev.autosketch.mod.world.MaterialSearch;
-import dev.autosketch.mod.world.ScanGrants;
 import dev.autosketch.mod.world.SelectGrants;
 import dev.autosketch.mod.world.WorldModule;
 import java.util.Arrays;
@@ -198,13 +197,11 @@ public final class SelectGameTests {
             MaterialSearch.sliceNanos = slice;
             for (int[] c : hits) level.setChunkForced(c[0], c[1], false);
             SelectGrants.clear();
-            ScanGrants.clear();
             unlink();
         };
         try {
             // Refusals, before any walk.
             SelectGrants.clear();
-            ScanGrants.clear();
             refusedWith(h, search(walk(h, List.of(HONEY), 4, null, null, null)), "no_grant");
             SelectGrants.set(level.dimension(), centre, 8);
             refusedWith(h, search(new SelectMessages.SearchRequest(nextId(), "minecraft:the_nether", false, List.of(HONEY), 4, null, null, null)), "wrong_dimension");
@@ -258,14 +255,11 @@ public final class SelectGameTests {
                 .thenExecute(() -> {
                     SearchResult r = result(ex[4]);
                     h.assertTrue(r.reached() == 8 && r.materials().equals(List.of(KELP)), "continuing a complete walk answers it again");
-                    // A new select request starts without a walk; a scan request ends the grant.
+                    // A new select request starts without a walk; without a grant a search is refused.
                     SelectGrants.set(level.dimension(), centre, 8);
                     refusedWith(h, search(more(h, null)), "bad_request");
-                    ScanGrants.set(level.dimension(), new Messages.ScanGrant(1, false, new Area(0, 0, 15, 15), new Box(0, 0, 0, 1, 1, 1)));
-                    h.assertTrue(SelectGrants.current() == null, "a scan grant ends the select grant");
+                    SelectGrants.clear();
                     refusedWith(h, search(walk(h, List.of(HONEY), 4, null, null, null)), "no_grant");
-                    SelectGrants.set(level.dimension(), centre, 8);
-                    h.assertTrue(ScanGrants.current() == null, "a select grant ends the scan grant");
                 })
                 .thenExecute(cleanup)
                 .thenSucceed();
@@ -276,7 +270,7 @@ public final class SelectGameTests {
     }
 
     static TestExchange blocks(Messages.SnapshotRequest req) {
-        return ScanGameTests.blocks(req);
+        return SurfaceGameTests.blocks(req);
     }
 
     /**
@@ -288,7 +282,6 @@ public final class SelectGameTests {
     public static void selectGrantServesReadsInItsSquare(GameTestHelper h) {
         ServerLevel level = h.getLevel();
         unlink();
-        ScanGrants.clear();
         int[] f = farChunk();
         int fx = f[0], fz = f[1];
         level.getChunk(fx, fz);
@@ -302,7 +295,7 @@ public final class SelectGameTests {
         TestExchange tooLarge = blocks(new Messages.SnapshotRequest(nextId(), dim(h), List.of(over), null));
         Box outside = new Box((fx + 4) << 4, 70, fz << 4, (fx + 4) << 4, 70, fz << 4);
         TestExchange out = blocks(new Messages.SnapshotRequest(nextId(), dim(h), List.of(outside), null));
-        TestExchange surface = ScanGameTests.surface(new Messages.SurfaceRequest(nextId(), dim(h), new Area(stone.getX(), stone.getZ(), stone.getX() + 1, stone.getZ()), null));
+        TestExchange surface = SurfaceGameTests.surface(new Messages.SurfaceRequest(nextId(), dim(h), new Area(stone.getX(), stone.getZ(), stone.getX() + 1, stone.getZ()), null));
         h.succeedWhen(() -> {
             if (!in.done || !tooLarge.done || !out.done || !surface.done) throw new GameTestAssertException("waiting for the replies");
             try {
@@ -315,7 +308,7 @@ public final class SelectGameTests {
                 h.assertTrue(level.getChunkSource().getChunkNow(fx + 1, fz) == null, "and still not generated");
                 refusedWith(h, tooLarge, "too_large");
                 refusedWith(h, out, "no_volumes");
-                Messages.SurfaceResult s = ScanGameTests.result(surface);
+                Messages.SurfaceResult s = SurfaceGameTests.result(surface);
                 h.assertTrue(s.missing().equals(List.of(new Messages.ChunkXZ(fx + 1, fz))) && s.palette().get(s.surface().states()[0]).equals(HONEY), "surface inside the grant: " + s.missing());
             } catch (ProtocolException e) {
                 throw new GameTestAssertException("undecodable snapshot: " + e.getMessage());

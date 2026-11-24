@@ -1,0 +1,13 @@
+{
+  "description": "The picks went to the agent as text on in-game request 12",
+  "sender": "mcp",
+  "header": {
+    "type": "ui.result",
+    "request": 11,
+    "player": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    "ok": true,
+    "result": {
+      "request": 12
+    }
+  }
+}

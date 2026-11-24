@@ -132,12 +132,12 @@ describe("import, linked: the game's data fixer", () => {
   });
 
   it("has no upgrader without a connection or the upgrade feature", async () => {
-    const host = await FakeHost.start({ protocol: 2 });
+    const host = await FakeHost.start({ protocol: 3, features: ["modes", "volumes.set", "registry"] });
     const bridge = new Bridge({ instanceDir: host.instanceDir, volatile: {}, reconnect: false });
     try {
       expect(bridgeUpgrader(bridge)).toBeUndefined();
       await bridge.connect();
-      expect(bridgeUpgrader(bridge)).toBeUndefined(); // a protocol-2 mod
+      expect(bridgeUpgrader(bridge)).toBeUndefined(); // a mod without the upgrade feature
     } finally {
       bridge.close();
       await host.close();

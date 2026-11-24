@@ -1,0 +1,9 @@
+{
+  "description": "No work volume (cleared, or never set): unlinked",
+  "sender": "mod",
+  "header": {
+    "type": "volumes",
+    "link": 4,
+    "work": null
+  }
+}

@@ -72,10 +72,6 @@ public final class AutosketchConfig implements ConfigData {
     @ConfigEntry.Gui.TransitiveObject
     public Prompts prompts = new Prompts();
 
-    @ConfigEntry.Category("scan")
-    @ConfigEntry.Gui.TransitiveObject
-    public Scan scan = new Scan();
-
     @ConfigEntry.Category("discovery")
     @ConfigEntry.Gui.TransitiveObject
     public Discovery discovery = new Discovery();
@@ -137,20 +133,6 @@ public final class AutosketchConfig implements ConfigData {
     public static final class Discovery {
         @ConfigEntry.Gui.Tooltip(count = 2)
         public boolean pointer = true;
-    }
-
-    /** {@code /autosketch scan} (13, B4): the grant a scan request gives the MCP to read. */
-    public static final class Scan {
-        @ConfigEntry.Gui.Tooltip
-        public int scanChunks = 4;
-        @ConfigEntry.Gui.Tooltip
-        public int scanChunksMax = 12;
-        @ConfigEntry.Gui.Tooltip
-        public int scanBelow = 32;
-        @ConfigEntry.Gui.Tooltip
-        public int scanAbove = 64;
-        @ConfigEntry.Gui.Tooltip
-        public long scanCap = 4_194_304L;
     }
 
     /**
@@ -231,18 +213,6 @@ public final class AutosketchConfig implements ConfigData {
                     null, c -> c.discovery.pointer, (c, v) -> {
                         if (v instanceof Boolean b) c.discovery.pointer = b;
                     }),
-            intKey("scan", "scanChunks", 0, 32, c -> c.scan.scanChunks, (c, v) -> c.scan.scanChunks = v,
-                    "Default radius of /autosketch scan, in chunks around the player's chunk (4: 9x9 chunks, 144 blocks across)."),
-            intKey("scan", "scanChunksMax", 0, 32, c -> c.scan.scanChunksMax, (c, v) -> c.scan.scanChunksMax = v,
-                    "Largest scan radius in chunks; a larger request is clipped with a warning (12: 25x25 chunks, 400 blocks across)."),
-            intKey("scan", "scanBelow", 0, 4096, c -> c.scan.scanBelow, (c, v) -> c.scan.scanBelow = v,
-                    "How far below the player's feet the full-block part of a scan reaches."),
-            intKey("scan", "scanAbove", 0, 4096, c -> c.scan.scanAbove, (c, v) -> c.scan.scanAbove = v,
-                    "How far above the player's feet the full-block part of a scan reaches."),
-            new Key("scan", "scanCap", List.of("Most blocks the full-block part of a scan may cover; its width shrinks to fit (default: the context cap)."),
-                    "1 ~ " + (1L << 40), c -> c.scan.scanCap, (c, v) -> {
-                        if (v instanceof Long l) c.scan.scanCap = Math.max(1L, Math.min(1L << 40, l));
-                    }),
             intKey("select", "selectChunks", 0, 256, c -> c.select.selectChunks, (c, v) -> c.select.selectChunks = v,
                     "How far a select request lets the agent read, in chunks around the player's chunk when the request is sent (256: 513x513 chunks),",
                     "and the largest search radius; a larger search is clipped. Interim default (18, *Measure first*)."),
@@ -267,6 +237,21 @@ public final class AutosketchConfig implements ConfigData {
         if (tracking.tracker == null || !validTracker(tracking.tracker)) tracking.tracker = defaults.tracking.tracker;
         if (prompts.askAlias == null) prompts.askAlias = defaults.prompts.askAlias;
         volumes.wandItem = itemId(volumes.wandItem) == null ? defaults.volumes.wandItem : itemId(volumes.wandItem);
+    }
+
+    /**
+     * Sections of earlier builds that no key reads any more: {@code [scan]}, whose command was
+     * replaced by {@code /autosketch select} (18, *Removal*). {@link #read} ignores them, and since
+     * {@link #write} writes only the current keys, the next write (AutoConfig's after every load)
+     * drops them from the file.
+     */
+    static final List<String> RETIRED_SECTIONS = List.of("scan");
+
+    /** Whether {@code text} still has a key in a retired section (logged once on load, then dropped). */
+    static boolean hasRetired(String text) {
+        for (String path : ConfigToml.parse(text).keySet())
+            for (String s : RETIRED_SECTIONS) if (path.startsWith(s + ".")) return true;
+        return false;
     }
 
     /** A config with the values {@code text} sets; keys it lacks or can't read keep their defaults. */
@@ -397,7 +382,11 @@ public final class AutosketchConfig implements ConfigData {
         public AutosketchConfig deserialize() throws SerializationException {
             try {
                 Path file = dir.resolve(FILE);
-                if (Files.isRegularFile(file)) return read(Files.readString(file, StandardCharsets.UTF_8));
+                if (Files.isRegularFile(file)) {
+                    String text = Files.readString(file, StandardCharsets.UTF_8);
+                    if (hasRetired(text)) LOG.info("Autosketch: config/{} has a [scan] section from before /autosketch select replaced /autosketch scan; it is ignored and dropped when the file is next written", FILE);
+                    return read(text);
+                }
                 AutosketchConfig migrated = migrate(dir);
                 return migrated != null ? migrated : createDefault();
             } catch (IOException e) {

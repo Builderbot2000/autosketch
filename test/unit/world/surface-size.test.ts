@@ -3,7 +3,7 @@ import { encodeMessage } from "../../../src/world/protocol/codec.js";
 import type { SurfaceResult } from "../../../src/world/protocol/messages.js";
 
 /**
- * The surface of the largest scan, 25×25 chunks (13, B4: `scanChunksMax` 12), stays small on the
+ * A 25×25-chunk surface (the largest area the former scan read, 13 *Measured*; surface reads now serve 18's terrain) stays small on the
  * wire. Synthetic terrain: rolling heights around y 64–140 over 24 surface states, with a ceiling
  * layer, so every varint and palette index is realistic. The bound is recorded in 13 (*Measured*).
  */

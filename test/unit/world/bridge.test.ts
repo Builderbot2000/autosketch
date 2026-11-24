@@ -87,22 +87,22 @@ describe("bridge client (13, W1)", () => {
     host = await FakeHost.start({ instanceDir: dir });
     const port = host.port;
     await host.restart(); // the old port is closed, but write the old one back into the pairing file
-    await writePairing(dir, { protocol: 2, host: "127.0.0.1", port, token: host.token });
+    await writePairing(dir, { protocol: 3, host: "127.0.0.1", port, token: host.token });
     const unreachable = await new Bridge({ instanceDir: dir, volatile: {}, reconnect: false }).connect().catch((e: BridgeError) => e);
     expect((unreachable as BridgeError).refusal).toBe("world_disconnected");
     expect((unreachable as Error).message).toContain("networkingMode=mirrored");
   });
 
   it("reports a protocol mismatch without guessing around it, naming the older side", async () => {
-    host = await FakeHost.start({ protocol: 4 });
+    host = await FakeHost.start({ protocol: 5 });
     const newer = await new Bridge({ instanceDir: host.instanceDir, volatile: {}, reconnect: false }).connect().catch((e: BridgeError) => e);
     expect((newer as BridgeError).refusal).toBe("protocol_mismatch");
-    expect((newer as Error).message).toBe("The mod speaks bridge protocol 4 and this Autosketch speaks 2 and 3: the Autosketch MCP server is older; update the Autosketch MCP server.");
+    expect((newer as Error).message).toBe("The mod speaks bridge protocol 5 and this Autosketch speaks 3 and 4: the Autosketch MCP server is older; update the Autosketch MCP server.");
     // The MCP still said hello, in its own version, so the mod could tell the player too.
-    expect(host.received[0]).toMatchObject({ type: "hello", protocol: 3 });
+    expect(host.received[0]).toMatchObject({ type: "hello", protocol: 4 });
     await host.close();
     host = await FakeHost.start({ protocol: 0 });
     const older = await new Bridge({ instanceDir: host.instanceDir, volatile: {}, reconnect: false }).connect().catch((e: Error) => e.message);
-    expect(older).toBe("The mod speaks bridge protocol 0 and this Autosketch speaks 2 and 3: the Autosketch mod is older; update the Autosketch mod.");
+    expect(older).toBe("The mod speaks bridge protocol 0 and this Autosketch speaks 3 and 4: the Autosketch mod is older; update the Autosketch mod.");
   });
 });

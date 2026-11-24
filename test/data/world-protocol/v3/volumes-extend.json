@@ -1,0 +1,13 @@
+{
+  "description": "The MCP declares the work volume extended to whole blocks (a plugin multi-block cut by the player's box), for link 3",
+  "sender": "mcp",
+  "header": {
+    "type": "volumes.extend",
+    "id": 4,
+    "link": 3,
+    "work": {
+      "min": [98, 64, -200],
+      "max": [131, 90, -169]
+    }
+  }
+}

@@ -124,6 +124,23 @@ class ConfigMigrationTest {
         assertEquals("lit\\eral", c.prompts.askAlias);
     }
 
+    /** A file from before scan's removal (18, *Removal*) keeps its other values and loses its [scan] section on the next write. */
+    @Test
+    void retiredScanSectionIsDropped(@TempDir Path dir) throws Exception {
+        AutosketchConfig.Serializer s = new AutosketchConfig.Serializer(dir);
+        String old = "[volumes]\n\tcontextCap = 1000\n\n[scan]\n\tscanChunks = 6\n\tscanChunksMax = 12\n\tscanCap = 99\n\n[select]\n\tselectChunks = 64\n";
+        Files.writeString(dir.resolve("autosketch.toml"), old, StandardCharsets.UTF_8);
+        assertTrue(AutosketchConfig.hasRetired(old));
+        AutosketchConfig c = s.deserialize();
+        assertEquals(1000L, c.volumes.contextCap);
+        assertEquals(64, c.select.selectChunks);
+        s.serialize(c); // AutoConfig writes the file back after every load
+        String text = Files.readString(dir.resolve("autosketch.toml"));
+        assertFalse(text.contains("[scan]") || text.contains("scanChunks") || text.contains("scanCap"), text);
+        assertFalse(AutosketchConfig.hasRetired(text));
+        assertEquals(1000L, s.deserialize().volumes.contextCap);
+    }
+
     /** A file from before select (18) gains the [select] section with its defaults; values clamp to their ranges. */
     @Test
     void selectKeysJoinAnOlderFile(@TempDir Path dir) throws Exception {

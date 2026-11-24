@@ -130,7 +130,7 @@ class BridgeServerTest {
     @Test
     void pairingFileNamesPortAndToken() throws IOException {
         String text = Files.readString(config.resolve("autosketch-bridge.toml"), StandardCharsets.UTF_8);
-        assertTrue(text.contains("protocol = 3\n"));
+        assertTrue(text.contains("protocol = 4\n"));
         assertTrue(text.contains("host = \"127.0.0.1\"\n"));
         assertTrue(text.contains("port = " + bridge.port() + "\n"));
         assertTrue(text.contains("token = \"" + bridge.token() + "\"\n"));
@@ -188,10 +188,10 @@ class BridgeServerTest {
         long deadline = System.currentTimeMillis() + 2000;
         while (mismatches.size() < 2 && System.currentTimeMillis() < deadline) Thread.sleep(10);
         assertEquals(List.of(Messages.PROTOCOL_VERSION + 1, Messages.PROTOCOL_VERSION - 1), mismatches);
-        assertEquals("Autosketch: the MCP server speaks bridge protocol 2 and this mod speaks 3: the Autosketch MCP server is older; update it.",
-                BridgeServer.mismatchText(2));
-        assertEquals("Autosketch: the MCP server speaks bridge protocol 4 and this mod speaks 3: this mod is older; update the Autosketch mod.",
-                BridgeServer.mismatchText(4));
+        assertEquals("Autosketch: the MCP server speaks bridge protocol 3 and this mod speaks 4: the Autosketch MCP server is older; update it.",
+                BridgeServer.mismatchText(3));
+        assertEquals("Autosketch: the MCP server speaks bridge protocol 5 and this mod speaks 4: this mod is older; update the Autosketch mod.",
+                BridgeServer.mismatchText(5));
     }
 
     @Test

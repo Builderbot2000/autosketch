@@ -1,0 +1,21 @@
+{
+  "description": "One choice of a question, as its own reply message (one action per chat): clicking it makes the client send choices.pick with the question's id and the choice's index",
+  "sender": "mcp",
+  "header": {
+    "type": "chat",
+    "request": 21,
+    "player": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    "kind": "reply",
+    "lines": [
+      "[1] mossy stone brick house, 40 blocks north-east"
+    ],
+    "action": {
+      "line": 0,
+      "kind": "choices.pick",
+      "args": {
+        "id": "q1",
+        "index": 0
+      }
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "description": "Search answer when the whole radius was walked without a match (reached equals radius)",
+  "sender": "mod",
+  "header": {
+    "type": "search.result",
+    "id": 51,
+    "dimension": "minecraft:overworld",
+    "materials": [
+      "#minecraft:logs",
+      "minecraft:oak_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]"
+    ],
+    "centre": [-13, 32],
+    "radius": 2,
+    "reached": 2,
+    "minSection": -4,
+    "clusters": [],
+    "chunks": 0,
+    "missing": 0
+  },
+  "body": {
+    "chunks": [],
+    "missing": []
+  }
+}

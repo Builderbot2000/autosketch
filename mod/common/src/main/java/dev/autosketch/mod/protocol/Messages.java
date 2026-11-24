@@ -28,18 +28,22 @@ public final class Messages {
     private Messages() {}
 
     /** The one protocol version the mod speaks (13, *Versions and features*). */
-    public static final int PROTOCOL_VERSION = 3;
+    public static final int PROTOCOL_VERSION = 4;
 
-    /** Request modes (13, B6), named by the player's subcommand; {@code select} (18, piece 1) needs feature {@code select}. */
-    public static final List<String> REQUEST_MODES = List.of("ask", "scan", "plan", "build", "select");
+    /**
+     * Request modes (13, B6), named by the player's subcommand; {@code select} (18, piece 1) needs
+     * feature {@code select}. Protocol 4 retired {@code scan} (18, *Removal*).
+     */
+    public static final List<String> REQUEST_MODES = List.of("ask", "plan", "build", "select");
 
     /** Optional mod capabilities a mod hello lists in {@code features} (13, *Versions and features*). */
-    public static final String FEATURE_MODES = "modes", FEATURE_SCAN = "scan", FEATURE_VOLUMES_SET = "volumes.set";
+    public static final String FEATURE_MODES = "modes", FEATURE_VOLUMES_SET = "volumes.set";
     /** Protocol 3 features (14, *Version-specific data lives in the mod*). */
     public static final String FEATURE_REGISTRY = "registry", FEATURE_UPGRADE = "upgrade";
     /**
      * Added within protocol 3 (18): the mod serves {@code search}, {@code fill}, {@code expand}, the
-     * {@code mask} and {@code coarse} snapshots and select-mode reads, and sends mode {@code select}
+     * {@code mask} and {@code coarse} snapshots and select-mode reads (surface snapshots included,
+     * which protocols 2 and 3 listed under {@code scan}), and sends mode {@code select}
      * ({@link SelectMessages}). A mod lists it only once it serves all of them.
      */
     public static final String FEATURE_SELECT = "select";
@@ -459,7 +463,7 @@ public final class Messages {
     }
 
     /**
-     * {@code snapshot} kind {@code surface}, MCP → mod, protocol 2 (feature {@code scan}; 13, B4): per
+     * {@code snapshot} kind {@code surface}, MCP → mod, protocol 2 (feature {@code select} since protocol 4; 18, piece 10): per
      * column of {@code columns}, the topmost non-air block, and with {@code ceiling} also the lowest
      * non-air block at or above that y.
      */
@@ -617,32 +621,11 @@ public final class Messages {
     // ── prompt ────────────────────────────────────────────────────────────────────────────────
 
     /**
-     * The scan grant (13, *Message schemas*, {@code prompt}, {@code scan}; protocol 2): what the mod lets
-     * the MCP read for a {@code scan} request.
-     */
-    public record ScanGrant(int radius, boolean clipped, Area columns, Box box) {
-        public JsonObject toJson() {
-            JsonObject o = new JsonObject();
-            o.addProperty("radius", radius);
-            if (clipped) o.addProperty("clipped", true);
-            o.add("columns", columns.toJson());
-            o.add("box", box.toJson());
-            return o;
-        }
-
-        public static ScanGrant fromJson(JsonObject o, @Nullable Long id) throws ProtocolException {
-            if (o.has("clipped") && !Json.reqBool(o, "clipped", id)) throw ProtocolException.badRequest(id, "clipped is true or omitted");
-            return new ScanGrant(Json.reqInt(o, "radius", id), o.has("clipped"), Area.fromJson(Json.req(o, "columns", id), "scan.columns", id),
-                    Box.fromJson(Json.req(o, "box", id), "scan.box", id));
-        }
-    }
-
-    /**
      * {@code prompt}, mod → MCP: an in-game request. {@code context} is the game context object
      * ({@code prompt}'s {@code context.*} rows), built by the prompt package. {@code mode} (protocol 2,
-     * feature {@code modes}) and {@code scan} (only with mode {@code scan}) are null when absent.
+     * feature {@code modes}) is null when absent.
      */
-    public record Prompt(long id, Player player, String text, JsonObject context, @Nullable String mode, @Nullable ScanGrant scan) {
+    public record Prompt(long id, Player player, String text, JsonObject context, @Nullable String mode) {
         public Frame encode() {
             JsonObject h = Json.header("prompt");
             h.addProperty("id", id);
@@ -650,7 +633,6 @@ public final class Messages {
             h.addProperty("text", text);
             h.add("context", context);
             if (mode != null) h.addProperty("mode", mode);
-            if (scan != null) h.add("scan", scan.toJson());
             return new Frame(h);
         }
 
@@ -659,8 +641,7 @@ public final class Messages {
             long id = reqId(f);
             JsonObject h = f.header();
             String mode = Json.optString(h, "mode", id);
-            ScanGrant scan = h.has("scan") ? ScanGrant.fromJson(Json.reqObject(h, "scan", id), id) : null;
-            return new Prompt(id, Player.fromJson(Json.reqObject(h, "player", id), id), Json.reqString(h, "text", id), Json.reqObject(h, "context", id), mode, scan);
+            return new Prompt(id, Player.fromJson(Json.reqObject(h, "player", id), id), Json.reqString(h, "text", id), Json.reqObject(h, "context", id), mode);
         }
     }
 

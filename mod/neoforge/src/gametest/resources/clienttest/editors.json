@@ -7,8 +7,7 @@
   "modes": [
    "build",
    "ask",
-   "plan",
-   "scan"
+   "plan"
   ]
  },
  "replies": [

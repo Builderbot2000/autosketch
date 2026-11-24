@@ -38,10 +38,10 @@ import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 
 /**
- * {@code snapshot} kind {@code surface} (13, *Message schemas*; B4): per column of the area, the
- * topmost non-air block (the {@code WORLD_SURFACE} heightmap, one below its value) and, with
- * {@code ceiling}, the lowest non-air block at or above that y. Served inside the scan grant's columns
- * (with or without a work volume) or inside the chunks the link keeps loaded. Chunks are read one at a
+ * {@code snapshot} kind {@code surface} (13, *Message schemas*; 18, piece 10): per column of the
+ * area, the topmost non-air block (the {@code WORLD_SURFACE} heightmap, one below its value) and,
+ * with {@code ceiling}, the lowest non-air block at or above that y. Served inside the select grant's
+ * square (with or without a work volume) or inside the chunks the link keeps loaded. Chunks are read one at a
  * time on the server thread under {@link WorldReads#sliceNanos} per tick; a chunk that isn't loaded is
  * loaded from disk when it was fully generated, and never generated: one that wasn't is listed in
  * {@code missing} and its columns read as none. No ticket is taken. The body is encoded off-thread.
@@ -78,7 +78,7 @@ public final class SurfaceReads {
         tick();
     }
 
-    /** {@code wrong_dimension}, {@code no_volumes}, {@code outside_volumes}; the select grant ({@code too_large}), then the scan grant, first. */
+    /** {@code wrong_dimension}, {@code no_volumes}, {@code outside_volumes}; the select grant ({@code too_large}) first. */
     private ServerLevel check(Messages.SurfaceRequest req) throws ProtocolException {
         long id = req.id();
         Area a = req.columns();
@@ -91,14 +91,8 @@ public final class SurfaceReads {
             if (level == null) throw ProtocolException.refuse(PatchApplier.INTERNAL, id, "the dimension " + req.dimension() + " isn't loaded");
             return level;
         }
-        ScanGrants.Held g = ScanGrants.current();
-        if (g != null && g.dimension().location().toString().equals(req.dimension()) && g.grant().columns().contains(a)) {
-            ServerLevel level = levels.apply(g.dimension());
-            if (level == null) throw ProtocolException.refuse(PatchApplier.INTERNAL, id, "the dimension " + req.dimension() + " isn't loaded");
-            return level;
-        }
         LinkVolumes v = link.current();
-        if (v == null) throw ProtocolException.refuse(ErrorCodes.NO_VOLUMES, id, "no work volume is set and no scan grant covers " + a);
+        if (v == null) throw ProtocolException.refuse(ErrorCodes.NO_VOLUMES, id, "no work volume is set and no select grant covers " + a);
         if (!v.dimension().location().toString().equals(req.dimension()))
             throw ProtocolException.refuse(ErrorCodes.WRONG_DIMENSION, id, "the volumes are in " + v.dimension().location() + ", not " + req.dimension());
         List<Box> kept = new ArrayList<>(v.context());
@@ -108,7 +102,7 @@ public final class SurfaceReads {
             for (int cx = a.minX() >> 4; cx <= a.maxX() >> 4; cx++) {
                 boolean in = false;
                 for (Box b : kept) in |= cx >= b.minX() >> 4 && cx <= b.maxX() >> 4 && cz >= b.minZ() >> 4 && cz <= b.maxZ() >> 4;
-                if (!in) throw ProtocolException.refuse(ErrorCodes.OUTSIDE_VOLUMES, id, "columns " + a + " reach chunk " + cx + "," + cz + " outside the volumes and the scan grant");
+                if (!in) throw ProtocolException.refuse(ErrorCodes.OUTSIDE_VOLUMES, id, "columns " + a + " reach chunk " + cx + "," + cz + " outside the volumes and the select grant");
             }
         ServerLevel level = levels.apply(v.dimension());
         if (level == null) throw ProtocolException.refuse(PatchApplier.INTERNAL, id, "the dimension " + req.dimension() + " isn't loaded");

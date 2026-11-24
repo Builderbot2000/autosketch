@@ -1,0 +1,20 @@
+{
+  "description": "The mod confirms volumes.set 31 with a volumes message carrying its id: a new link, the default context",
+  "sender": "mod",
+  "header": {
+    "type": "volumes",
+    "id": 31,
+    "link": 5,
+    "dimension": "minecraft:overworld",
+    "work": {
+      "min": [-20, 60, 40],
+      "max": [11, 83, 71]
+    },
+    "context": [
+      {
+        "min": [-23, 57, 37],
+        "max": [14, 86, 74]
+      }
+    ]
+  }
+}

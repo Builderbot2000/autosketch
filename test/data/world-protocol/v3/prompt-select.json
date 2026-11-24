@@ -1,0 +1,22 @@
+{
+  "description": "A select request (/autosketch select the mossy stone brick house), looking at a block of it: no grant; reads are served within selectChunks of this position",
+  "sender": "mod",
+  "header": {
+    "type": "prompt",
+    "id": 4,
+    "player": {
+      "name": "Kev",
+      "uuid": "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+    },
+    "text": "the mossy stone brick house",
+    "context": {
+      "dimension": "minecraft:overworld",
+      "position": [-40.5, 68, 23.5],
+      "eye": [-40.5, 69.62, 23.5],
+      "yaw": -135,
+      "pitch": 5.5,
+      "facing": "north"
+    },
+    "mode": "select"
+  }
+}

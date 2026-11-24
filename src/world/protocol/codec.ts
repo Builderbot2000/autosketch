@@ -50,7 +50,6 @@ import {
   type ModMessage,
   type PlayerRef,
   type Sender,
-  type ScanGrant,
   type VolatileList,
   type WireArea,
   type WireBox,
@@ -242,7 +241,7 @@ function split(m: Message): { header: Record<string, unknown>; body: Uint8Array 
       return { header: { type: m.type, id: m.id, to: m.to, kind: m.kind, ...(m.failed ? { failed: m.failed } : {}) }, body: encodeUpgradeBody(m) };
     case "prompt":
       return {
-        header: { type: m.type, id: m.id, player: player(m.player), text: m.text, context: context(m.context), ...(m.mode ? { mode: m.mode } : {}), ...(m.scan ? { scan: scanGrant(m.scan) } : {}) },
+        header: { type: m.type, id: m.id, player: player(m.player), text: m.text, context: context(m.context), ...(m.mode ? { mode: m.mode } : {}) },
         body: none,
       };
     case "prompt.close":
@@ -355,10 +354,6 @@ function span(v: unknown, flat: 1 | 2, name: string): UiSpan {
 
 function player(p: PlayerRef): PlayerRef {
   return { name: p.name, uuid: p.uuid };
-}
-
-function scanGrant(g: ScanGrant): ScanGrant {
-  return { radius: g.radius, ...(g.clipped ? { clipped: true } : {}), columns: area(g.columns), box: box(g.box) };
 }
 
 function context(c: GameContext): GameContext {
@@ -660,13 +655,7 @@ function decode(type: string, v: Fields, body: Uint8Array, sender: Sender): Mess
       if (c.has("focus")) ctx.focus = c.box("focus");
       if (c.has("focusClipped") && c.bool("focusClipped")) ctx.focusClipped = true;
       const mode = v.has("mode") ? { mode: v.oneOf("mode", REQUEST_MODES) } : {};
-      let scan: { scan?: ScanGrant } = {};
-      if (v.has("scan")) {
-        if (mode.mode !== "scan") throw new ProtocolError("scan is sent only with mode scan");
-        const g = v.obj("scan");
-        scan = { scan: { radius: g.int("radius"), ...(g.has("clipped") && g.bool("clipped") ? { clipped: true } : {}), columns: g.area("columns"), box: g.box("box") } };
-      }
-      return { type, id: v.id("id"), player: playerRef(v.obj("player")), text: v.str("text"), context: ctx, ...mode, ...scan };
+      return { type, id: v.id("id"), player: playerRef(v.obj("player")), text: v.str("text"), context: ctx, ...mode };
     }
     case "prompt.close":
       return { type, player: playerRef(v.obj("player")) };

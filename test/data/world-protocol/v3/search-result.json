@@ -1,0 +1,76 @@
+{
+  "description": "Search answer after ring 6 of 256 (clipped): a closed cluster of three chunks near the player, an open one at ring 6, and two ungenerated chunks",
+  "sender": "mod",
+  "header": {
+    "type": "search.result",
+    "id": 50,
+    "dimension": "minecraft:overworld",
+    "materials": [
+      "minecraft:stone_bricks",
+      "minecraft:mossy_stone_bricks",
+      "minecraft:cracked_stone_bricks",
+      "minecraft:chiseled_stone_bricks"
+    ],
+    "centre": [-3, 1],
+    "radius": 256,
+    "clipped": true,
+    "reached": 6,
+    "minSection": -4,
+    "clusters": [
+      {
+        "min": [-1, 2],
+        "max": [0, 3],
+        "chunks": 3,
+        "blocks": 1214,
+        "closed": true
+      },
+      {
+        "min": [3, -5],
+        "max": [3, -4],
+        "chunks": 2,
+        "blocks": 75,
+        "closed": false
+      }
+    ],
+    "chunks": 5,
+    "missing": 2
+  },
+  "body": {
+    "chunks": [
+      {
+        "chunk": [3, -5],
+        "counts": [40, 0, 9, 0],
+        "cluster": 1,
+        "sections": [3]
+      },
+      {
+        "chunk": [3, -4],
+        "counts": [20, 6, 0, 0],
+        "cluster": 1,
+        "sections": [3, 4]
+      },
+      {
+        "chunk": [-1, 2],
+        "counts": [380, 212, 40, 4],
+        "cluster": 0,
+        "sections": [4, 5]
+      },
+      {
+        "chunk": [0, 2],
+        "counts": [301, 98, 17, 0],
+        "cluster": 0,
+        "sections": [4, 5, 6]
+      },
+      {
+        "chunk": [0, 3],
+        "counts": [120, 30, 2, 0],
+        "cluster": 0,
+        "sections": [4]
+      }
+    ],
+    "missing": [
+      [-9, -2],
+      [-9, -1]
+    ]
+  }
+}

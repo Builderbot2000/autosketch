@@ -3,15 +3,15 @@ import { resolveSelection } from "../../ops/selection.js";
 import { boxSchema, fail, text, type ToolDeps } from "./shared.js";
 
 /**
- * Setting the player's volumes from the agent (docs/design/13-live-world.md, *Backlog* B4). After
- * `/autosketch scan` the agent looks at the probe and sets the work and context volumes here; the
- * mod sets them as if the player had marked them, and linking follows. It reaches the game through
- * `session.inGame`, never by importing `world/`. Allowed with no request open, and in scan, select
- * and build requests; the request mode rule (`world/modes.ts`) refuses it in ask and plan.
+ * Setting the player's volumes from the agent (docs/design/13-live-world.md, *Backlog* B4). The
+ * agent sets the work and context volumes here in the linked document's coordinates; the mod sets
+ * them as if the player had marked them, and linking follows. It reaches the game through
+ * `session.inGame`, never by importing `world/`. Allowed with no request open, and in select and
+ * build requests; the request mode rule (`world/modes.ts`) refuses it in ask and plan.
  *
  * `from` confirms a shape of the world view instead (docs/design/18-select.md, piece 9): the work
  * volume is its box, the context that box grown by `margin`, in world coordinates, so it needs no
- * probe or linked document; the logic is `session.worldSelect`'s.
+ * linked document; the logic is `session.worldSelect`'s.
  */
 export function registerWorldVolumesTools({ tool, session }: ToolDeps): void {
   tool(
@@ -20,12 +20,12 @@ export function registerWorldVolumesTools({ tool, session }: ToolDeps): void {
       title: "Set the in-game volumes",
       description:
         "Sets the player's work volume (where the build may change) and context volume (what you see around it) in the game, as if they had marked them with the wand. " +
-        "Either work: a box in the open document's coordinates (the scan probe after /autosketch scan, else the linked document), with context: boxes, {padding:n} (work grown by n), or omitted for the default (+3); " +
+        "Either work: a box in the linked document's coordinates, with context: boxes, {padding:n} (work grown by n), or omitted for the default (+3); " +
         'or from:"candidate" to confirm the world view\'s candidate (after world_fill, in a select request): work = its bounding box, context = that box grown by margin (default 8), and the shape comes along as the named selection "candidate" in the linked document, a guide (only the box is enforced). ' +
         "from may also name a part kept in the world view (select({view:\"world\", …, name})); a shape whose context would pass the mod's contextCap is confirmed as a selection but sets no volumes, and the result suggests a part or sandboxes. " +
         "The player sees the outlines; linking follows. No accept step: the player refines or moves on. Text, <150 tokens.",
       inputSchema: {
-        work: boxSchema.optional().describe("The work volume, in the open document's coordinates (not with from)"),
+        work: boxSchema.optional().describe("The work volume, in the linked document's coordinates (not with from)"),
         context: z
           .union([z.object({ padding: z.number().int().min(1).max(32) }).strict(), z.array(boxSchema).min(1).max(16)])
           .optional()

@@ -12,7 +12,6 @@ import dev.autosketch.mod.protocol.Box;
 import dev.autosketch.mod.protocol.Frame;
 import dev.autosketch.mod.protocol.Json;
 import dev.autosketch.mod.protocol.Messages;
-import dev.autosketch.mod.world.ScanGrants;
 import dev.autosketch.mod.protocol.ProtocolException;
 import dev.autosketch.mod.prompt.ChatRules.LogMode;
 import java.util.ArrayList;
@@ -127,12 +126,12 @@ public final class InGamePrompts {
     }
 
     /**
-     * The {@code prompt} message for a request (13, *Wire format*, {@code prompt}): the game context,
-     * the request's {@code mode} (B6) and, for a scan, its grant (B4).
+     * The {@code prompt} message for a request (13, *Wire format*, {@code prompt}): the game context
+     * and the request's {@code mode} (B6).
      */
-    public static Frame prompt(long id, ServerPlayer player, String text, double reach, String mode, Messages.@Nullable ScanGrant scan) {
+    public static Frame prompt(long id, ServerPlayer player, String text, double reach, String mode) {
         Messages.Player who = new Messages.Player(player.getGameProfile().getName(), player.getUUID());
-        return new Messages.Prompt(id, who, text, GameContext.capture(player, reach, focus(player)), mode, scan).encode();
+        return new Messages.Prompt(id, who, text, GameContext.capture(player, reach, focus(player)), mode).encode();
     }
 
     /**
@@ -143,11 +142,11 @@ public final class InGamePrompts {
      * (1 sent, 0 not).
      */
     public static int request(ServerPlayer player, String mode, String text, Bridge bridge) {
-        return request(player, mode, text, bridge, () -> null);
+        return request(player, mode, text, bridge, () -> {});
     }
 
-    /** As {@link #request(ServerPlayer, String, String, Bridge)}, with the scan grant sized only once the request may go out. */
-    public static int request(ServerPlayer player, String mode, String text, Bridge bridge, java.util.function.Supplier<Messages.@Nullable ScanGrant> scan) {
+    /** As {@link #request(ServerPlayer, String, String, Bridge)}, running {@code beforeSend} (the select grant) only once the request may go out. */
+    public static int request(ServerPlayer player, String mode, String text, Bridge bridge, Runnable beforeSend) {
         long id = nextId();
         if (!bridge.connected()) {
             out.actionBar(player, refusal("no_link"));
@@ -158,9 +157,9 @@ public final class InGamePrompts {
             out.actionBar(player, Component.literal(unsupportedText(mode)).withStyle(ChatFormatting.RED));
             return 0;
         }
-        Messages.ScanGrant grant = scan.get();
+        beforeSend.run();
         PENDING.put(id, player.getUUID());
-        if (!bridge.send(prompt(id, player, text, AutosketchConfig.get().prompts.targetReach, mode, grant))) {
+        if (!bridge.send(prompt(id, player, text, AutosketchConfig.get().prompts.targetReach, mode))) {
             PENDING.remove(id);
             out.actionBar(player, refusal("no_link"));
             return 0;
@@ -170,41 +169,17 @@ public final class InGamePrompts {
     }
 
     /**
-     * {@code /autosketch scan [radius] [text]} (13, B4): a {@code scan} request carrying the grant sized
-     * from the config around the player ({@code radius} negative: {@code scanChunks}). The grant takes
-     * effect as the request goes out, replacing any earlier one. A radius over {@code scanChunksMax} is
-     * clipped, with a warning on the action bar.
-     */
-    public static int scan(ServerPlayer player, int radius, String text, Bridge bridge) {
-        AutosketchConfig.Scan cfg = AutosketchConfig.get().scan;
-        Messages.ScanGrant[] sized = {null};
-        int sent = request(player, "scan", text, bridge, () -> {
-            BlockPos feet = player.blockPosition();
-            Level level = player.level();
-            Messages.ScanGrant g = ScanGrants.size(radius, cfg.scanChunks, cfg.scanChunksMax, feet.getX(), feet.getY(), feet.getZ(),
-                    level.getMinBuildHeight(), level.getMaxBuildHeight() - 1, cfg.scanBelow, cfg.scanAbove, cfg.scanCap);
-            ScanGrants.set(level.dimension(), g);
-            sized[0] = g;
-            return g;
-        });
-        if (sent == 1 && sized[0].clipped())
-            out.actionBar(player, Component.literal("Autosketch: scanning " + sized[0].radius() + " chunks around you (the most scanChunksMax allows), asking the agent…").withStyle(ChatFormatting.YELLOW));
-        return sent;
-    }
-
-    /**
      * What a select request's grant does as the prompt goes out (13, *Where the mod serves reads*,
      * "Read grants in select mode"): given the prompt's dimension and the block of its
      * {@code context.position}, it grants the square within {@code selectChunks} of that chunk,
-     * replacing any grant, a scan grant included. The world module installs the real grant
-     * ({@link #setSelectGrant}); until it does, a select prompt still ends the scan grant, since one
-     * grant is in force at a time.
+     * replacing any grant. The world module installs the real grant ({@link #setSelectGrant}); until
+     * it does, a select prompt grants nothing.
      */
     public interface SelectGrant {
         void grant(ResourceKey<Level> dimension, BlockPos position);
     }
 
-    private static volatile SelectGrant selectGrant = (dimension, position) -> ScanGrants.clear();
+    private static volatile SelectGrant selectGrant = (dimension, position) -> {};
 
     /** Installs the select grant hook (the world module, tests); returns the previous one. */
     public static SelectGrant setSelectGrant(SelectGrant g) {
@@ -214,22 +189,19 @@ public final class InGamePrompts {
     }
 
     /**
-     * {@code /autosketch select [text]} (18, piece 1): a {@code select} request, read-only like
-     * {@code scan} (the MCP refuses edits and drafts), carrying the usual game context and no grant
+     * {@code /autosketch select [text]} (18, piece 1): a {@code select} request, read-only (the MCP
+     * refuses edits and drafts), carrying the usual game context and no grant
      * field. The select grant is fixed at the prompt's position as the request goes out, and only then
      * ({@link SelectGrant}); a request refused here (no link, an MCP whose hello lacks {@code select})
      * grants nothing. Empty text means the crosshair block is the starting point.
      */
     public static int select(ServerPlayer player, String text, Bridge bridge) {
-        return request(player, "select", text, bridge, () -> {
-            selectGrant.grant(player.level().dimension(), BlockPos.containing(player.position()));
-            return null;
-        });
+        return request(player, "select", text, bridge, () -> selectGrant.grant(player.level().dimension(), BlockPos.containing(player.position())));
     }
 
     /**
      * {@code /autosketch done} (13, B6): ends the open read-only request ({@code ask}, {@code plan},
-     * {@code scan}, {@code select}). Only the player lifts a read-only mode, so this is the in-game way to end one
+     * {@code select}). Only the player lifts a read-only mode, so this is the in-game way to end one
      * without sending a new request. Sends {@code prompt.close}, which the MCP answers with a notice on
      * the player's action bar (it owns the request state, so it says whether one was open). Without a
      * connection the player hears {@code no_link}; an MCP whose hello doesn't list

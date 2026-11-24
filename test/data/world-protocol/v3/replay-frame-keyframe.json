@@ -1,0 +1,86 @@
+{
+  "description": "The first frame of a replay: every position of the replayed volume at step 12, with the strip's markers, one open job and the step's flash",
+  "sender": "mcp",
+  "header": {
+    "type": "replay.frame",
+    "players": [
+      "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+    ],
+    "replay": "r1",
+    "step": 12,
+    "steps": 40,
+    "keyframe": true,
+    "dimension": "minecraft:overworld",
+    "regions": [
+      {
+        "min": [100, 64, -200],
+        "max": [103, 65, -199]
+      }
+    ],
+    "time": "2026-11-17T10:15:30.250Z",
+    "hud": {
+      "call": "fill: 6 blocks",
+      "brief": "courtyard paving"
+    },
+    "jobs": [
+      {
+        "id": "j2",
+        "colour": "#f26419",
+        "brief": "courtyard paving",
+        "dimension": "minecraft:overworld",
+        "work": {
+          "min": [100, 64, -200],
+          "max": [119, 64, -181]
+        },
+        "context": []
+      }
+    ],
+    "flashes": [
+      {
+        "job": "j2",
+        "colour": "#f26419",
+        "dimension": "minecraft:overworld",
+        "boxes": [
+          {
+            "min": [100, 64, -200],
+            "max": [103, 64, -199]
+          }
+        ]
+      }
+    ],
+    "markers": [
+      {
+        "step": 3,
+        "kind": "checkpoint",
+        "label": "before paving"
+      },
+      {
+        "step": 5,
+        "kind": "fork",
+        "label": "j2: courtyard paving"
+      },
+      {
+        "step": 18,
+        "kind": "refusal",
+        "label": "outside_work_volume"
+      },
+      {
+        "step": 30,
+        "kind": "merge",
+        "label": "j2"
+      }
+    ]
+  },
+  "body": {
+    "palette": [
+      "minecraft:stone_bricks",
+      "minecraft:oak_planks",
+      "minecraft:air"
+    ],
+    "regions": [
+      {
+        "states": [0, 0, 0, 0, 0, 1, 1, 0, 2, 2, 2, 2, 2, 1, 2, 2]
+      }
+    ]
+  }
+}

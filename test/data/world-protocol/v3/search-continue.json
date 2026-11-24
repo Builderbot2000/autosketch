@@ -1,0 +1,11 @@
+{
+  "description": "Walk on from where the last search stopped, for one more closed cluster",
+  "sender": "mcp",
+  "header": {
+    "type": "search",
+    "id": 52,
+    "dimension": "minecraft:overworld",
+    "continue": true,
+    "stop": 1
+  }
+}

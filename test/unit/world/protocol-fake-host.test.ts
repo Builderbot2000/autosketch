@@ -102,7 +102,7 @@ function cacheFrom(snap: SnapshotResult) {
 describe("fake host", () => {
   it("runs the happy path: hello, volumes, snapshot, patch with one skip, ack, dirty", async () => {
     const { host, client, hello, volumes } = await setup();
-    expect(hello).toMatchObject({ protocol: 3, singleplayer: true, game: { dataVersion: 3955 } });
+    expect(hello).toMatchObject({ protocol: 4, singleplayer: true, game: { dataVersion: 3955 } });
     expect(volumes).toEqual({ type: "volumes", link: 1, dimension: OW, work, context: [{ min: [-3, 61, -3], max: [10, 70, 10] }] });
     expect(host.volatile).toEqual(DEFAULT_VOLATILE);
 
@@ -147,9 +147,9 @@ describe("fake host", () => {
     clients.push(bad);
     expect(await bad.next("error")).toMatchObject({ code: "bad_token", id: null });
     await bad.waitClosed();
-    const old = await Client.open(host, { protocol: 2 });
+    const old = await Client.open(host, { protocol: 3 });
     clients.push(old);
-    expect(await old.next("error")).toMatchObject({ code: "protocol_mismatch", protocol: 3 });
+    expect(await old.next("error")).toMatchObject({ code: "protocol_mismatch", protocol: 4 });
     await old.waitClosed();
     expect(host.connected).toBe(false);
   });

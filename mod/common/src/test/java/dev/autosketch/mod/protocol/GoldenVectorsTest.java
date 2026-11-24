@@ -59,6 +59,7 @@ class GoldenVectorsTest {
     void everyMessageKindHasAVector() {
         List<String> names = Golden.frameNames();
         assertTrue(names.size() >= 119, "found " + names.size() + " vectors in " + Golden.dir());
+        assertTrue(Golden.frameNames("v3/").size() >= 127, "the frozen version-3 vectors");
         assertTrue(Golden.frameNames("v2/").size() >= 48, "the frozen version-2 vectors");
         assertTrue(Golden.frameNames("v1/").size() >= 36, "the frozen version-1 vectors");
     }
@@ -68,10 +69,29 @@ class GoldenVectorsTest {
         return Golden.frameNames().stream().map(name -> DynamicTest.dynamicTest(name, () -> check(name)));
     }
 
-    /** The version-2 frames (the MCP's N−1) still decode and re-encode unchanged (13, *Versions and features*: every addition is optional). */
+    /**
+     * Frozen frames carrying {@code prompt.scan}, which protocol 4 retired (18, *Removal*): the
+     * typed {@code prompt} no longer has the field, so they decode but don't re-encode byte for byte.
+     */
+    static final List<String> RETIRED = List.of("v2/prompt-scan", "v3/prompt-scan");
+
+    /** The version-3 frames (the MCP's N−1) still decode and re-encode unchanged, but for the retired scan grant. */
+    @TestFactory
+    Stream<DynamicTest> version3Vectors() {
+        return frozen("v3/");
+    }
+
+    /** The version-2 frames, no longer spoken, kept as a check that the codec only grew additively until protocol 4. */
     @TestFactory
     Stream<DynamicTest> version2Vectors() {
-        return Golden.frameNames("v2/").stream().map(name -> DynamicTest.dynamicTest(name, () -> check(name)));
+        return frozen("v2/");
+    }
+
+    private static Stream<DynamicTest> frozen(String dir) {
+        return Golden.frameNames(dir).stream().map(name -> DynamicTest.dynamicTest(name, () -> {
+            if (RETIRED.contains(name)) Messages.Prompt.decode(FrameCodec.decode(Golden.bin(name)));
+            else check(name);
+        }));
     }
 
     /** The version-1 frames, no longer spoken, kept as a check that the codec only grew additively. */
@@ -93,7 +113,7 @@ class GoldenVectorsTest {
             assertFalse(frame.hasBody());
             return; // a message with no typed decoder
         }
-        // The mod speaks one version, its own, so its typed hello always says 3: an older mod
+        // The mod speaks one version, its own, so its typed hello always says 4: an older mod
         // hello only has to decode.
         if (decoded instanceof ModHello && Json.reqInt(frame.header(), "protocol", null) != Messages.PROTOCOL_VERSION) return;
         assertArrayEquals(bin, FrameCodec.encode(encodeTyped(decoded)), "typed message re-encodes byte for byte");

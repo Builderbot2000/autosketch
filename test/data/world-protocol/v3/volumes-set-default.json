@@ -1,0 +1,13 @@
+{
+  "description": "The agent sets only the work volume: the mod gives it the default context, as when the player marks one",
+  "sender": "mcp",
+  "header": {
+    "type": "volumes.set",
+    "id": 31,
+    "dimension": "minecraft:overworld",
+    "work": {
+      "min": [-20, 60, 40],
+      "max": [11, 83, 71]
+    }
+  }
+}

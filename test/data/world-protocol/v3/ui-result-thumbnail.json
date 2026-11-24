@@ -1,0 +1,18 @@
+{
+  "description": "A prefab thumbnail: a synthetic 2×2 PNG as the body",
+  "sender": "mcp",
+  "header": {
+    "type": "ui.result",
+    "request": 6,
+    "player": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    "ok": true,
+    "result": {
+      "format": "png",
+      "width": 2,
+      "height": 2
+    }
+  },
+  "body": {
+    "bytes": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGOwX37tU4okw6cUSfvl1wAs7AZXKX+V2AAAAABJRU5ErkJggg=="
+  }
+}

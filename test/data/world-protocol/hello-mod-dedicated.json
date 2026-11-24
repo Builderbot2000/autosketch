@@ -3,7 +3,7 @@
   "sender": "mod",
   "header": {
     "type": "hello",
-    "protocol": 3,
+    "protocol": 4,
     "mod": {
       "version": "0.1.0"
     },

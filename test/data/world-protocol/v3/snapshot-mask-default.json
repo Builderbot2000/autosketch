@@ -1,0 +1,13 @@
+{
+  "description": "A mask snapshot with the default margin (8)",
+  "sender": "mcp",
+  "header": {
+    "type": "snapshot",
+    "id": 59,
+    "dimension": "minecraft:overworld",
+    "kind": "mask",
+    "sections": [
+      [0, 4, 2]
+    ]
+  }
+}

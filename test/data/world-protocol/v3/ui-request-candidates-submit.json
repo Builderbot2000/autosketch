@@ -1,0 +1,28 @@
+{
+  "description": "Submit: two picks, one labelled, and a note",
+  "sender": "mod",
+  "header": {
+    "type": "ui.request",
+    "request": 11,
+    "player": {
+      "name": "Kev",
+      "uuid": "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+    },
+    "kind": "candidates.submit",
+    "args": {
+      "id": "c1",
+      "picks": [
+        {
+          "prefab": "gothic_tower_a",
+          "cell": "B2",
+          "label": "corner tower"
+        },
+        {
+          "prefab": "gate_small",
+          "cell": "A3"
+        }
+      ],
+      "note": "smaller if possible"
+    }
+  }
+}

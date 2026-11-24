@@ -19,7 +19,7 @@
  *
  * Script (JSON, every key optional):
  *
- *   { "hello":   { "features": ["prompt.close", "ui"], "modes": ["ask", "scan", "plan", "build"] },
+ *   { "hello":   { "features": ["prompt.close", "ui"], "modes": ["ask", "plan", "build", "select"] },
  *     "send":    [ <message>, … ],                                   sent once after each handshake
  *     "replies": [ { "on": "<type>", "kind"?: "<ui.request kind>", "args"?: {…}, "send": <message> | [<message>, …] } ],
  *     "results": { "<ui.request kind>": { "ok": true, "result": {…}, "bodyBase64"?: "…" }

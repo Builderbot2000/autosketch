@@ -1,0 +1,9 @@
+{
+  "description": "The MCP's answer to prompt.close, on that player's action bar",
+  "sender": "mcp",
+  "header": {
+    "type": "notice",
+    "text": "Autosketch: ask request 3 ended; the agent may edit again.",
+    "player": "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+  }
+}

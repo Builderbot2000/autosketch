@@ -251,7 +251,7 @@ describe("world_search against the fake host (18, piece 2)", () => {
     expect((r.content as { text: string }[])[0]!.text).toMatch(/no select request is open/);
     bridge!.close();
     await host!.close();
-    const old = await setup({ features: ["modes", "scan", "volumes.set"] }, undefined, false);
+    const old = await setup({ features: ["modes", "volumes.set"] }, undefined, false);
     const o = await old.call("world_search", { materials: [BRICK] });
     expect(o.isError).toBe(true);
     expect((o.content as { text: string }[])[0]!.text).toMatch(/doesn't support selecting in the world/);

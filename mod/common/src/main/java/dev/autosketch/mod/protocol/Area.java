@@ -7,7 +7,7 @@ import org.jetbrains.annotations.Nullable;
 
 /**
  * An inclusive area of block columns in world coordinates (13, *Message schemas*, {@code snapshot}
- * kind {@code surface} and the scan grant; protocol 2), {@code min ≤ max} on both axes. JSON form
+ * kind {@code surface}; protocol 2), {@code min ≤ max} on both axes. JSON form
  * {@code {"min":[x,z],"max":[x,z]}}. Columns are indexed {@code dx + sizeX · dz}, x fastest.
  */
 public record Area(int minX, int minZ, int maxX, int maxZ) {

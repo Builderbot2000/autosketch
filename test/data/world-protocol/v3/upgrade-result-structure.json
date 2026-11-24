@@ -1,0 +1,13 @@
+{
+  "description": "The upgraded structure, stamped with the running version",
+  "sender": "mod",
+  "header": {
+    "type": "upgrade.result",
+    "id": 62,
+    "to": 3955,
+    "kind": "structure"
+  },
+  "body": {
+    "structure": "{DataVersion:3955,blocks:[{pos:[0,0,0],state:0}],entities:[],palette:[{Name:\"minecraft:dirt_path\"}],size:[1,1,1]}"
+  }
+}

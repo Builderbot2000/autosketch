@@ -5,7 +5,7 @@
     "type": "error",
     "id": null,
     "code": "protocol_mismatch",
-    "message": "mod speaks protocol 3, MCP sent 4",
-    "protocol": 3
+    "message": "mod speaks protocol 4, MCP sent 5",
+    "protocol": 4
   }
 }

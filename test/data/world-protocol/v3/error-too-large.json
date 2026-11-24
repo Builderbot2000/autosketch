@@ -1,0 +1,10 @@
+{
+  "description": "A select-mode read over contextCap in one call; the MCP asks again for less or coarser",
+  "sender": "mod",
+  "header": {
+    "type": "error",
+    "id": 63,
+    "code": "too_large",
+    "message": "the read covers 5242880 positions, more than contextCap 4194304"
+  }
+}

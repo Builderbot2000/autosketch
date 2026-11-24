@@ -1,0 +1,50 @@
+{
+  "description": "Mixed palette, given out of order (the encoder sorts by grid index)",
+  "sender": "mcp",
+  "header": {
+    "type": "patch",
+    "id": 22,
+    "link": 3,
+    "dimension": "minecraft:overworld",
+    "origin": [100, 64, -200],
+    "size": [4, 2, 3],
+    "count": 5
+  },
+  "body": {
+    "palette": [
+      "minecraft:grass_block[snowy=false]",
+      "minecraft:stone_bricks",
+      "minecraft:dirt",
+      "minecraft:air",
+      "minecraft:glass",
+      "minecraft:oak_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]"
+    ],
+    "blocks": [
+      {
+        "pos": [100, 64, -200],
+        "expected": "minecraft:grass_block[snowy=false]",
+        "state": "minecraft:stone_bricks"
+      },
+      {
+        "pos": [101, 64, -200],
+        "expected": "minecraft:grass_block[snowy=false]",
+        "state": "minecraft:stone_bricks"
+      },
+      {
+        "pos": [102, 64, -198],
+        "expected": "minecraft:dirt",
+        "state": "minecraft:air"
+      },
+      {
+        "pos": [100, 65, -200],
+        "expected": "minecraft:air",
+        "state": "minecraft:glass"
+      },
+      {
+        "pos": [103, 65, -199],
+        "expected": "minecraft:air",
+        "state": "minecraft:oak_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]"
+      }
+    ]
+  }
+}

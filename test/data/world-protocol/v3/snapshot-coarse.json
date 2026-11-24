@@ -1,0 +1,21 @@
+{
+  "description": "A coarse snapshot at 4³ cells: two boxes, grown outward to whole cells by the mod",
+  "sender": "mcp",
+  "header": {
+    "type": "snapshot",
+    "id": 60,
+    "dimension": "minecraft:overworld",
+    "kind": "coarse",
+    "cell": 4,
+    "boxes": [
+      {
+        "min": [-7, 64, 33],
+        "max": [-1, 70, 38]
+      },
+      {
+        "min": [17, 65, 33],
+        "max": [18, 66, 34]
+      }
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "description": "A request from a player who isn't on the allowlist",
+  "sender": "mcp",
+  "header": {
+    "type": "ui.result",
+    "request": 5,
+    "player": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "ok": false,
+    "error": "not_allowed",
+    "message": "Alex isn't on world.promptPlayers, so can't use the Autosketch screens"
+  }
+}

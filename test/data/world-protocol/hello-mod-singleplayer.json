@@ -1,9 +1,9 @@
 {
-  "description": "Mod hello from the integrated server of a singleplayer world, listing every feature up to version 3",
+  "description": "Mod hello from the integrated server of a singleplayer world, listing every feature (select included: it serves search, fill, expand, surface, mask and coarse snapshots, and select-mode reads)",
   "sender": "mod",
   "header": {
     "type": "hello",
-    "protocol": 3,
+    "protocol": 4,
     "mod": {
       "version": "0.1.0"
     },
@@ -20,11 +20,11 @@
     },
     "features": [
       "modes",
-      "scan",
       "volumes.set",
       "registry",
       "upgrade",
-      "ui"
+      "ui",
+      "select"
     ]
   }
 }

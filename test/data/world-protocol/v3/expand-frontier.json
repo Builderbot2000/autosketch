@@ -1,0 +1,10 @@
+{
+  "description": "Grow the read area by the chunks the frontier reaches and resume the fill",
+  "sender": "mcp",
+  "header": {
+    "type": "expand",
+    "id": 55,
+    "dimension": "minecraft:overworld",
+    "by": "frontier"
+  }
+}

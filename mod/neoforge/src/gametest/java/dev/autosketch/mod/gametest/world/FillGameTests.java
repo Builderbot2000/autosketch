@@ -20,7 +20,6 @@ import dev.autosketch.mod.protocol.SelectMessages.ExpandBy;
 import dev.autosketch.mod.protocol.SelectMessages.FillResult;
 import dev.autosketch.mod.protocol.SelectMessages.FrontierSection;
 import dev.autosketch.mod.protocol.SelectMessages.MaskSection;
-import dev.autosketch.mod.world.ScanGrants;
 import dev.autosketch.mod.world.SelectGrants;
 import dev.autosketch.mod.world.WorldFill;
 import dev.autosketch.mod.world.WorldModule;
@@ -359,7 +358,6 @@ public final class FillGameTests {
         put(level, centre, BRICK, null);
         try {
             SelectGrants.clear();
-            ScanGrants.clear();
             SelectGameTests.refusedWith(h, fill(new SelectMessages.FillRequest(nextId(), dim(h), centre, List.of(BRICK), null, null, null)), "no_grant");
             SelectGameTests.refusedWith(h, expand(new SelectMessages.ExpandRequest(nextId(), dim(h), ExpandBy.FRONTIER, null)), "no_grant");
             SelectGrants.set(level.dimension(), centre, 2);

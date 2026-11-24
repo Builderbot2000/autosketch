@@ -1,0 +1,8 @@
+{
+  "description": "The MCP asks for the registry report, holding none",
+  "sender": "mcp",
+  "header": {
+    "type": "registry",
+    "id": 50
+  }
+}

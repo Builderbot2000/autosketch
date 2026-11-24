@@ -12,8 +12,7 @@ import org.jetbrains.annotations.Nullable;
  * The select-mode read grant (13, *Where the mod serves reads*, "Read grants in select mode"; 18,
  * *Decisions*): the square of chunks within {@code selectChunks} (Chebyshev) of the chunk of the
  * select prompt's position, in its dimension, full build height, fixed when the prompt goes out. One
- * grant at a time: a select prompt replaces it, a scan prompt ends it ({@link ScanGrants#set}), and
- * so do the connection closing and the server stopping. It carries the request's search and its
+ * grant at a time: a select prompt replaces it, and so do the connection closing and the server stopping. It carries the request's search and its
  * fill with it.
  */
 public final class SelectGrants {
@@ -77,10 +76,9 @@ public final class SelectGrants {
         return current;
     }
 
-    /** Grants reads within {@code radius} chunks of {@code position}'s chunk, replacing any grant (a scan grant too). */
+    /** Grants reads within {@code radius} chunks of {@code position}'s chunk, replacing any grant. */
     public static Grant set(ResourceKey<Level> dimension, BlockPos position, int radius) {
         Grant g = new Grant(dimension, position.getX() >> 4, position.getZ() >> 4, radius);
-        ScanGrants.clear();
         current = new Held(g);
         return g;
     }

@@ -43,12 +43,12 @@ function positions(sections: MaskSection[]): string[] {
 }
 
 describe("select codec", () => {
-  it("lists select as a request mode and refuses a grant on a select prompt", () => {
+  it("lists select as a request mode, and no longer scan (retired in protocol 4)", () => {
     expect(REQUEST_MODES).toContain("select");
     const ctx = { dimension: OW, position: [0.5, 64, 0.5] as [number, number, number], eye: [0.5, 65.62, 0.5] as [number, number, number], yaw: 0, pitch: 0, facing: "south" as const };
     expect(roundTrip({ type: "prompt", id: 1, player: KEV, text: "", context: ctx, mode: "select" }, "mod")).toMatchObject({ mode: "select" });
-    const scan = { radius: 1, columns: { min: [0, 0], max: [15, 15] }, box: { min: [0, 0, 0], max: [1, 1, 1] } };
-    expect(() => decodeFrame(frameOf({ type: "prompt", id: 1, player: KEV, text: "", context: ctx, mode: "select", scan }), "mod")).toThrow(/scan is sent only with mode scan/);
+    expect(REQUEST_MODES).not.toContain("scan");
+    expect(() => decodeFrame(frameOf({ type: "prompt", id: 1, player: KEV, text: "", context: ctx, mode: "scan" }), "mod")).toThrow(/mode/);
   });
 
   it("checks searches: materials, a continuing search takes only stop, stop and gap at least 1", () => {
@@ -142,7 +142,7 @@ describe("fake host: select requests", () => {
   }
 
   it("needs the select feature: the bridge refuses unsent, and a mod without it refuses the kinds", async () => {
-    const { host, bridge } = await pair({ features: ["modes", "scan", "volumes.set"] });
+    const { host, bridge } = await pair({ features: ["modes", "volumes.set"] });
     const e = (await bridge.request({ type: "search", dimension: OW, materials: [BRICK] }).catch((x: unknown) => x)) as BridgeError;
     expect(e.refusal).toBe("world_mod_outdated");
     expect(e.message).toContain("selecting in the world");
@@ -276,14 +276,15 @@ describe("fake host: select requests", () => {
     expect(s.palette).toEqual(["minecraft:grass_block[snowy=false]"]);
   });
 
-  it("a new select or scan request replaces the grant, and its search and fill", async () => {
+  it("a new select request replaces the grant, and its search and fill", async () => {
     const { host, bridge } = await pair({}, [8.5, 64, 8.5]);
     host.set([3, 64, 5], BRICK);
     await bridge.request({ type: "fill", dimension: OW, seed: [3, 64, 5], match: [BRICK] });
-    void host.playerAsk(KEV, "", {}, { mode: "scan" });
-    await host.waitFor(() => host.scanGrant);
-    expect(host.selectGrant).toBeNull();
+    const first = host.selectGrant;
+    void host.playerAsk(KEV, "", { position: [40.5, 64, 8.5] }, { mode: "select" });
+    await host.waitFor(() => host.selectGrant !== first);
+    expect(host.selectGrant).toMatchObject({ centre: [2, 0] });
     const e = (await bridge.request({ type: "expand", dimension: OW, by: "frontier" }).catch((x: unknown) => x)) as BridgeError;
-    expect(e.refusal).toBe("no_grant");
+    expect(e.refusal).toBe("bad_request"); // the fill went with the old grant
   });
 });

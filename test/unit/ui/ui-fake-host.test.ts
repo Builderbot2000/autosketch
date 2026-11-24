@@ -290,7 +290,7 @@ describe("against the fake host with ui", () => {
   });
 
   it("sends nothing and answers nothing when the mod lacks ui", async () => {
-    host = await FakeHost.start({ volumes: { work: WORK }, features: ["modes", "scan", "volumes.set"] });
+    host = await FakeHost.start({ volumes: { work: WORK }, features: ["modes", "volumes.set"] });
     const session = new Session(await tempDir("autosketch-ui-ws-"));
     link = new LiveLink(session, { backoff: { minMs: 20, maxMs: 50 }, features: ["prompt.close", "ui"] });
     link.setSync(syncLink);

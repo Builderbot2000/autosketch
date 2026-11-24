@@ -28,7 +28,7 @@ export function registerWorldPromptTools({ tool, session }: ToolDeps): void {
       title: "Reply in the game chat",
       description:
         "Answers an in-game request in the Minecraft chat (the player sees nothing else you write). One chat line per entry. " +
-        "done:true marks it answered and closes its stream of activity lines; an ask, plan or scan request's mode stays in force until the player ends it in game. request defaults to the open request. " +
+        "done:true marks it answered and closes its stream of activity lines; an ask, plan or select request's mode stays in force until the player ends it in game. request defaults to the open request. " +
         `candidates (≤${MAX_CANDIDATES} library prefabs) adds a clickable [Show candidates] line opening an in-game picker; cells default to the last prefab_sheet's, and the player's picks come back as text. ` +
         `choices (≤${MAX_CHOICES}) asks a multiple-choice question after the lines: one clickable line per choice (numbered lines the player answers by typing the number on a client without the UI), plus "or type your own answer"; the chosen choice's text comes back as the player's answer. A choice given as {text, at:box} (world coordinates, e.g. a search cluster) is also pulsed in the world so the player can turn and see it. Text, <50 tokens.`,
       inputSchema: {

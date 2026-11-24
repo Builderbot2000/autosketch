@@ -36,7 +36,7 @@ public final class DoneClientTests {
             return true;
         }, 100);
         s.waitUntil("the MCP's notice is on the action bar", () -> {
-            check(s.actionBarHas("no ask, plan or scan request is open"), "action bar: " + s.actionBar());
+            check(s.actionBarHas("no ask, plan or select request is open"), "action bar: " + s.actionBar());
             return true;
         }, 100);
     }

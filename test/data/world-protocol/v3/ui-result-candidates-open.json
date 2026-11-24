@@ -1,0 +1,49 @@
+{
+  "description": "The candidates list: cells as on the agent's last sheet, the open request and its question",
+  "sender": "mcp",
+  "header": {
+    "type": "ui.result",
+    "request": 8,
+    "player": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    "ok": true,
+    "result": {
+      "id": "c1",
+      "request": 12,
+      "question": "show me a tower",
+      "entries": [
+        {
+          "cell": "B2",
+          "prefab": "gothic_tower_a",
+          "root": "user",
+          "size": [7, 24, 7],
+          "tags": [
+            "gothic",
+            "tower"
+          ],
+          "notes": "corner piece, door on the south face"
+        },
+        {
+          "cell": "C2",
+          "prefab": "round_keep_tower",
+          "root": "user",
+          "size": [9, 18, 9],
+          "tags": [
+            "tower",
+            "keep"
+          ],
+          "notes": null
+        },
+        {
+          "cell": "A3",
+          "prefab": "gate_small",
+          "root": "starter",
+          "size": [11, 9, 5],
+          "tags": [
+            "gate"
+          ],
+          "notes": null
+        }
+      ]
+    }
+  }
+}

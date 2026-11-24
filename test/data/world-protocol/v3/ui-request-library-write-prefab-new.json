@@ -1,0 +1,22 @@
+{
+  "description": "A first write to a prefab folder with no prefab.json yet: the hash library.entry gave is \"absent\"",
+  "sender": "mod",
+  "header": {
+    "type": "ui.request",
+    "request": 15,
+    "player": {
+      "name": "Kev",
+      "uuid": "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+    },
+    "kind": "library.write.prefab",
+    "args": {
+      "root": "user",
+      "name": "gate_small",
+      "hash": "absent",
+      "meta": {
+        "name": "Small gate",
+        "front": null
+      }
+    }
+  }
+}

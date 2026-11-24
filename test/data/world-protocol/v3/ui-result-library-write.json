@@ -1,0 +1,13 @@
+{
+  "description": "A write saved: the file's new hash, for the editor's next write",
+  "sender": "mcp",
+  "header": {
+    "type": "ui.result",
+    "request": 14,
+    "player": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    "ok": true,
+    "result": {
+      "hash": "9a0364b9e99bb480dd25e1f0284c8555b3c2a1f4e6d7c8b9a0f1e2d3c4b5a697"
+    }
+  }
+}

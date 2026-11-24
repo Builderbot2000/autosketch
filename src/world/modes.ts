@@ -11,19 +11,19 @@ import type { PlayerRef, RequestMode } from "./protocol/messages.js";
  *
  * - **Edits** are journal entries on the linked document: every `doc.edit`, `group`, undo, redo and
  *   restore step that runs its write guards, whatever tool or script makes it (`world_sync` entries
- *   bring the world in and run no guards). They are refused in `ask`, `plan`, `scan` and `select`. Only
+ *   bring the world in and run no guards). They are refused in `ask`, `plan` and `select`. Only
  *   journal entries on the linked document reach the world, so this is exactly "nothing happens to
  *   the world". Saved selections, cameras, checkpoints, exports and the library are not edits on it.
  * - **Drafts** are refused too (settled with the user 2026-11-16: read-only requests are text only):
  *   forking a sandbox, opening or creating another document (`DRAFT_TOOLS`), and any mutating call
- *   addressed to an existing sandbox. So `ask`, `plan`, `scan` and `select` answer in words (and
- *   `scan` and `select` with volumes); nothing is built anywhere, not even in a scratch copy.
+ *   addressed to an existing sandbox. So `ask`, `plan` and `select` answer in words (and
+ *   `select` with volumes); nothing is built anywhere, not even in a scratch copy.
  * - **Volume changes** are the volume tools (`VOLUME_TOOLS`, B4's `world_volumes`): refused in `ask`
- *   and `plan`, allowed in `scan`, `select` and `build`.
+ *   and `plan`, allowed in `select` and `build`.
  *
  * Select (docs/design/18-select.md, piece 1) reads the world through the world view and the select
  * tools (`world_search`, `world_fill`, `world_expand`, `world_view_read`), none of which edits a
- * document, so the rule needs nothing new for it: it is read-only and volume-changing, as scan is.
+ * document, so the rule needs nothing new for it: it is read-only and volume-changing.
  *
  * The rule holds while the read-only request is open (`InGameRequests.heldRequest`): from delivery
  * until the player ends it in game (`/autosketch done`, the mod's `prompt.close`), the next
@@ -34,9 +34,9 @@ import type { PlayerRef, RequestMode } from "./protocol/messages.js";
  */
 
 /** Modes that allow no edits on the linked document. */
-export const READ_ONLY_MODES: ReadonlySet<RequestMode> = new Set(["ask", "plan", "scan", "select"]);
+export const READ_ONLY_MODES: ReadonlySet<RequestMode> = new Set(["ask", "plan", "select"]);
 /** Modes that allow volume changes. */
-export const VOLUME_MODES: ReadonlySet<RequestMode> = new Set(["scan", "build", "select"]);
+export const VOLUME_MODES: ReadonlySet<RequestMode> = new Set(["build", "select"]);
 /** Tools that start a draft away from the linked document: refused in read-only modes. */
 export const DRAFT_TOOLS: ReadonlySet<string> = new Set(["scope_fork", "doc_new", "doc_open"]);
 /** Tools that change the player's volumes (B4). */
@@ -46,7 +46,6 @@ export const VOLUME_TOOLS: ReadonlySet<string> = new Set(["world_volumes"]);
 export const MODE_ALLOWS: Record<RequestMode, string> = {
   ask: "Ask mode: read and look only; edits, drafts (sandboxes, other documents) and volume changes are refused while this request is open.",
   plan: "Plan mode: look, then propose what you would build in words, in a world_reply; edits, drafts (sandboxes, other documents) and volume changes are refused while this request is open.",
-  scan: "Scan mode: look around and set the volumes with world_volumes; edits and drafts (sandboxes, other documents) are refused while this request is open.",
   build: "Build mode: you may edit the linked document.",
   select:
     "Select mode: find what the player means in the world, agree on its extent with them, then set the volumes from it with world_volumes; reading the world (world_search, world_fill, world_expand, the world view) is allowed, edits and drafts (sandboxes, other documents) are refused while this request is open.",
@@ -56,7 +55,6 @@ export const MODE_ALLOWS: Record<RequestMode, string> = {
 const ALLOWS: Record<RequestMode, string> = {
   ask: "reading and looking only",
   plan: "looking and proposing only",
-  scan: "looking and setting the volumes only",
   build: "everything",
   select: "finding, reading the world and setting the volumes only",
 };

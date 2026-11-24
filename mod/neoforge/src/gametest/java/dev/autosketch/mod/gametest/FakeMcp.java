@@ -47,7 +47,7 @@ public final class FakeMcp {
         BridgeServer bridge = AutosketchMod.internals().bridge();
         socket = new Socket("127.0.0.1", bridge.port());
         Messages.McpHello hello = new Messages.McpHello(Messages.PROTOCOL_VERSION, bridge.token(), name, "1.0.0", new JsonObject(),
-                List.of("ask", "scan", "plan", "build"), this.features);
+                List.of("ask", "plan", "build"), this.features);
         socket.getOutputStream().write(FrameCodec.encode(hello.encode()));
         Thread t = new Thread(() -> {
             try (DataInputStream in = new DataInputStream(socket.getInputStream())) {

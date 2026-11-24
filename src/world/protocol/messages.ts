@@ -9,10 +9,11 @@ import type { Vec3 } from "../../core/region.js";
  */
 
 /** The protocol version this side speaks natively (`N`). */
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 /**
  * Every version the MCP speaks: its own and the one before (`N`, `N−1`; `14`, *Version skew between
- * mod and MCP*). Everything version 3 adds is optional on the wire, so one codec reads both.
+ * mod and MCP*). Version 4 only retired mode `scan` and `prompt.scan` (`18`, *Removal*), which this
+ * MCP never asks a version-3 mod for (its hello doesn't list the mode), so one codec reads both.
  */
 export const SUPPORTED_PROTOCOLS: readonly number[] = [PROTOCOL_VERSION, PROTOCOL_VERSION - 1];
 /** Largest frame length value (bytes after the 4-byte length prefix). */
@@ -32,7 +33,7 @@ export interface WireBox {
   max: Vec3;
 }
 
-/** Inclusive area of block columns, `[x, z]` world coordinates (`snapshot` kind `surface`, the scan grant). */
+/** Inclusive area of block columns, `[x, z]` world coordinates (`snapshot` kind `surface`). */
 export interface WireArea {
   min: [number, number];
   max: [number, number];
@@ -67,16 +68,17 @@ export type PromptRefusal = (typeof PROMPT_REFUSALS)[number];
 
 /**
  * Request modes, named by the player's subcommand (`13`, B6). `select` (`18`, piece 1; feature
- * `select`) is read-only and may change the volumes; its prompt carries no grant.
+ * `select`) is read-only and may change the volumes; its prompt carries no grant. Protocol 4
+ * retired `scan` (`18`, *Removal*).
  */
-export const REQUEST_MODES = ["ask", "scan", "plan", "build", "select"] as const;
+export const REQUEST_MODES = ["ask", "plan", "build", "select"] as const;
 export type RequestMode = (typeof REQUEST_MODES)[number];
 
 /**
  * Optional capabilities a mod's `hello` lists in `features` (*Versions and features*). The MCP uses
  * an addition only when the mod lists it, never because of the protocol number.
  */
-export const MOD_FEATURES = ["modes", "scan", "volumes.set", "registry", "upgrade", "ui", "select"] as const;
+export const MOD_FEATURES = ["modes", "volumes.set", "registry", "upgrade", "ui", "select"] as const;
 export type ModFeature = (typeof MOD_FEATURES)[number];
 
 /**
@@ -491,18 +493,6 @@ export interface GameContext {
   focusClipped?: boolean;
 }
 
-/** What a `scan` request lets the MCP read (`13`, B4): the mod sizes it from its config. */
-export interface ScanGrant {
-  /** Radius in chunks around the player's chunk, after clipping to the mod's maximum. */
-  radius: number;
-  /** The player asked for a larger radius. */
-  clipped?: boolean;
-  /** Block columns of the chunks within the radius: readable as a surface snapshot. */
-  columns: WireArea;
-  /** The full-block box around the player: readable as a blocks snapshot. */
-  box: WireBox;
-}
-
 export interface PromptMessage {
   type: "prompt";
   id: number;
@@ -511,14 +501,12 @@ export interface PromptMessage {
   context: GameContext;
   /** The player's subcommand (B6); absent (a mod without the `modes` feature) means `build`. */
   mode?: RequestMode;
-  /** Only with mode `scan`. */
-  scan?: ScanGrant;
 }
 
 /**
  * The player ended the open read-only request in game (`/autosketch done`, B6; MCP feature
  * `prompt.close`). Only the player lifts a read-only mode: the MCP ends whichever `ask`, `plan` or
- * `scan` request is open and answers on the player's action bar with a `notice`.
+ * `select` request is open and answers on the player's action bar with a `notice`.
  */
 export interface PromptClose {
   type: "prompt.close";

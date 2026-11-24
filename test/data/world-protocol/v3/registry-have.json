@@ -1,0 +1,9 @@
+{
+  "description": "The MCP asks for the registry report, holding the one with this hash (from the file beside the pointer)",
+  "sender": "mcp",
+  "header": {
+    "type": "registry",
+    "id": 51,
+    "have": "fe85fca59cb0ad6d"
+  }
+}

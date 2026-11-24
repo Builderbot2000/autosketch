@@ -1,5 +1,5 @@
 {
-  "description": "Surface snapshot of a scan's columns (B4): topmost non-air block per column",
+  "description": "Surface snapshot of a starter area's columns (`18`, piece 10): topmost non-air block per column",
   "sender": "mcp",
   "header": {
     "type": "snapshot",

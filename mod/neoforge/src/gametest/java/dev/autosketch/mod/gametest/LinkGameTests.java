@@ -88,7 +88,7 @@ public final class LinkGameTests {
             List<String> locked = List.of("autosketch mode work", "autosketch pos1 " + VolumeGameTests.xyz(a), "autosketch pos2 " + VolumeGameTests.xyz(b),
                     "autosketch pos1", "autosketch show", "autosketch clear", "autosketch notices off", "autosketch context grow 4", "autosketch context add",
                     "autosketch context clear", "autosketch air", "autosketch air on", "autosketch air reach 9", "autosketch ask hello", "autosketch plan a wall",
-                    "autosketch build a wall", "autosketch scan", "autosketch scan 3 the tower", "autosketch done", "autosketch log all", "autosketch focus clear");
+                    "autosketch build a wall", "autosketch select", "autosketch select the tower", "autosketch done", "autosketch log all", "autosketch focus clear");
             for (String c : locked) {
                 int before = out.of(p).size();
                 check(exec(p, c) == 0, "/" + c + " is refused offline");

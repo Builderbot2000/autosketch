@@ -182,9 +182,9 @@ async function tracker(r: Rcon, m: Mcp): Promise<void> {
 }
 
 /**
- * Surface snapshots (13, B4) at the default scan radius (4 chunks) and the maximum (12), with and
+ * Surface snapshots (13, B4; 18, piece 10) at 4 and 12 chunks (the former scan radii), with and
  * without a ceiling: wall time, frame size, and the server's tick time while reading. The area is
- * served inside a flat context box over the whole radius (no player, so no scan grant), whose ticket
+ * served inside a flat context box over the whole radius (no player, so no select grant), whose ticket
  * keeps the chunks loaded: this measures reading loaded chunks.
  */
 async function surface(r: Rcon, m: Mcp): Promise<void> {

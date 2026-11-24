@@ -5,8 +5,7 @@ import type { WireBox } from "./protocol/messages.js";
 /**
  * Setting the player's volumes from the agent (docs/design/13-live-world.md, *Backlog* B4,
  * `world_volumes`; *Wire format*, `volumes.set`). The agent gives boxes in the coordinates of the
- * document it is looking at (the scan probe, or the linked document); they become world boxes
- * with that document's origin, and the mod sets them as if the player had marked them. Linking
+ * linked document; they become world boxes with its origin, and the mod sets them as if the player had marked them. Linking
  * follows as for any new work volume. No accept step: the player refines or moves on.
  */
 
@@ -15,7 +14,7 @@ export interface VolumesFrame {
   /** World position of local (0, 0, 0). */
   origin: Vec3;
   dimension: string;
-  /** "the probe" or "the linked document", for the result. */
+  /** Names the coordinates in the result ("local"). */
   label: string;
 }
 

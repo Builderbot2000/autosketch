@@ -96,13 +96,12 @@ public final class PromptModule {
         alias(r.dispatcher(), AutosketchConfig.get().prompts.askAlias.trim());
     }
 
-    /** The request modes with a plain {@code <text>} subcommand; {@code scan} (B4) and {@code select} (18) have their own. */
+    /** The request modes with a plain {@code <text>} subcommand; {@code select} (18) has its own. */
     static final List<String> TEXT_MODES = List.of("ask", "plan", "build");
 
     /**
      * Adds the request subcommands under {@code root} ({@code /autosketch}, or the alias), including
-     * {@code scan [radius] [text]} (B4: radius in chunks; a number first is the radius, anything else
-     * the text), {@code select [text]} (18, piece 1: the text is optional, none means the crosshair
+     * {@code select [text]} (18, piece 1: the text is optional, none means the crosshair
      * block) and {@code done} (B6: ends the open read-only request).
      */
     static void requests(LiteralArgumentBuilder<CommandSourceStack> root) {
@@ -114,14 +113,6 @@ public final class PromptModule {
                 .executes(ctx -> InGamePrompts.select(ctx.getSource().getPlayerOrException(), "", Autosketch.bridge()))
                 .then(Commands.argument("text", StringArgumentType.greedyString())
                         .executes(ctx -> InGamePrompts.select(ctx.getSource().getPlayerOrException(), StringArgumentType.getString(ctx, "text"), Autosketch.bridge()))));
-        root.then(Commands.literal("scan")
-                .executes(ctx -> InGamePrompts.scan(ctx.getSource().getPlayerOrException(), -1, "", Autosketch.bridge()))
-                .then(Commands.argument("radius", IntegerArgumentType.integer(0))
-                        .executes(ctx -> InGamePrompts.scan(ctx.getSource().getPlayerOrException(), IntegerArgumentType.getInteger(ctx, "radius"), "", Autosketch.bridge()))
-                        .then(Commands.argument("text", StringArgumentType.greedyString())
-                                .executes(ctx -> InGamePrompts.scan(ctx.getSource().getPlayerOrException(), IntegerArgumentType.getInteger(ctx, "radius"), StringArgumentType.getString(ctx, "text"), Autosketch.bridge()))))
-                .then(Commands.argument("text", StringArgumentType.greedyString())
-                        .executes(ctx -> InGamePrompts.scan(ctx.getSource().getPlayerOrException(), -1, StringArgumentType.getString(ctx, "text"), Autosketch.bridge()))));
     }
 
     /**

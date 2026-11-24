@@ -1,0 +1,18 @@
+{
+  "description": "Save one setting, with the config.toml hash the screen read",
+  "sender": "mod",
+  "header": {
+    "type": "ui.request",
+    "request": 2,
+    "player": {
+      "name": "Kev",
+      "uuid": "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+    },
+    "kind": "settings.set",
+    "args": {
+      "key": "scope.maxDepth",
+      "value": "2",
+      "hash": "5d41402abc4b2a76"
+    }
+  }
+}

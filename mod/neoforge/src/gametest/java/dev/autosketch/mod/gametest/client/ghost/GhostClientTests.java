@@ -39,7 +39,7 @@ public final class GhostClientTests {
     static final String GLASS = "minecraft:glass";
     static final String AIR = "minecraft:air";
     /** clienttest/ghost.json: the suite's own fake MCP. */
-    static final String SUITE_SCRIPT = "{\"hello\":{\"features\":[\"prompt.close\",\"ui\"],\"modes\":[\"build\",\"ask\",\"plan\",\"scan\"]}}";
+    static final String SUITE_SCRIPT = "{\"hello\":{\"features\":[\"prompt.close\",\"ui\"],\"modes\":[\"build\",\"ask\",\"plan\"]}}";
 
     // ── script helpers ──────────────────────────────────────────────────────────────────────
 

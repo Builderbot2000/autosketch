@@ -22,7 +22,6 @@ import dev.autosketch.mod.protocol.SelectMessages;
 import dev.autosketch.mod.protocol.SelectMessages.CoarseRegion;
 import dev.autosketch.mod.protocol.SelectMessages.CoarseResult;
 import dev.autosketch.mod.world.CoarseReads;
-import dev.autosketch.mod.world.ScanGrants;
 import dev.autosketch.mod.world.SelectGrants;
 import dev.autosketch.mod.world.WorldModule;
 import dev.autosketch.mod.world.WorldReads;
@@ -119,7 +118,6 @@ public final class MaskCoarseGameTests {
     public static void maskSnapshotReadsSectionsPlusMargin(GameTestHelper h) {
         ServerLevel level = h.getLevel();
         unlink();
-        ScanGrants.clear();
         int[] f = SelectGameTests.farChunk();
         int fx = f[0], fz = f[1];
         level.getChunk(fx, fz);
@@ -172,7 +170,6 @@ public final class MaskCoarseGameTests {
     public static void coarseReadsLoadedSavedAndUngeneratedChunks(GameTestHelper h) {
         ServerLevel level = h.getLevel();
         unlink();
-        ScanGrants.clear();
         int[] f = SelectGameTests.farChunk();
         int bx = f[0], cz = f[1], ax = bx + 5;
         level.getChunk(bx, cz);
@@ -248,7 +245,6 @@ public final class MaskCoarseGameTests {
     public static void coarseRefusals(GameTestHelper h) {
         ServerLevel level = h.getLevel();
         unlink();
-        ScanGrants.clear();
         int[] f = SelectGameTests.farChunk();
         int fx = f[0], fz = f[1];
         SelectGrants.set(level.dimension(), new BlockPos(fx << 4, Y, fz << 4), 16);

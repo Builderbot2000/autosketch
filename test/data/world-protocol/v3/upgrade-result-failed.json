@@ -1,0 +1,20 @@
+{
+  "description": "An upgrade where the fixer threw on one element, returned unchanged and counted in failed",
+  "sender": "mod",
+  "header": {
+    "type": "upgrade.result",
+    "id": 61,
+    "to": 3955,
+    "kind": "elements",
+    "failed": 1
+  },
+  "body": {
+    "states": [
+      "minecraft:stone"
+    ],
+    "blockEntities": [
+      "{Data:[I;1,2,3],id:\"examplemod:broken\"}"
+    ],
+    "entities": []
+  }
+}

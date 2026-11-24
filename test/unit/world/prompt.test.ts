@@ -359,7 +359,7 @@ describe("request modes, enforced (13, B6)", () => {
     // A call refused by a hook before it ran (world_volumes in ask) unwinds the link's call count, so later results keep their world: line.
     expect(texts(await client.callTool({ name: "fill", arguments: FILL })).join("\n")).toContain("world: 8 placed"); // terminal work again
     // Nothing left to end.
-    expect(await host.playerDone(HOST)).toMatchObject({ text: "Autosketch: no ask, plan, scan or select request is open." });
+    expect(await host.playerDone(HOST)).toMatchObject({ text: "Autosketch: no ask, plan or select request is open." });
   });
 
   it("/autosketch done ends an open read-only request before any reply, and closes its stream", async () => {
@@ -379,7 +379,7 @@ describe("request modes, enforced (13, B6)", () => {
     expect(inGame!.heldRequest?.id).toBe(1);
     await host.playerAsk(HOST, "build", {}, { mode: "build" });
     await host.waitFor(() => inGame!.current?.id === 2);
-    expect(await host.playerDone(HOST)).toMatchObject({ text: "Autosketch: no ask, plan, scan or select request is open." });
+    expect(await host.playerDone(HOST)).toMatchObject({ text: "Autosketch: no ask, plan or select request is open." });
     expect(inGame!.current?.id).toBe(2); // the build request's stream stays open
     const r = await client.callTool({ name: "world_reply", arguments: { lines: ["Built."], done: true } });
     expect(texts(r)[0]).toBe("ok · world_reply · 1 line to Dev (request 2) · request closed");
@@ -441,7 +441,7 @@ describe("request mode rule (13, B6), unit", () => {
   const doc = () => new Document({ name: "t", front: "south", dataVersion: 3955, seed: 1, createdAt: "" });
   const req = (mode: RequestMode) => ({ id: 7, player: HOST, mode });
 
-  it("volume tools pass in scan, select and build only; scan and select refuse edits", () => {
+  it("volume tools pass in select and build only; select refuses edits", () => {
     let current: ReturnType<typeof req> | undefined = req("ask");
     const d = doc();
     const rule = new RequestModeRule(() => current, () => d);
@@ -451,12 +451,9 @@ describe("request mode rule (13, B6), unit", () => {
     );
     current = req("plan");
     expect(() => rule.before({ tool: "world_volumes" })).toThrow(expect.objectContaining({ refusal: "request_mode" }) as never);
-    current = req("scan");
-    rule.before({ tool: "world_volumes" });
-    rule.before({ tool: "fill" }); // the hook doesn't judge tools; the guard judges edits
-    expect(() => d.edit("fill", "fill", (tx) => tx.set(0, 0, 0, "minecraft:stone"))).toThrow(/scan request \(request 7 from Dev\) allows looking and setting the volumes only, so fill can't edit/);
     current = req("select");
     rule.before({ tool: "world_volumes" });
+    rule.before({ tool: "fill" }); // the hook doesn't judge tools; the guard judges edits
     expect(() => d.edit("fill", "fill", (tx) => tx.set(0, 0, 0, "minecraft:stone"))).toThrow(/select request \(request 7 from Dev\) allows finding, reading the world and setting the volumes only, so fill can't edit/);
     current = req("build");
     rule.before({ tool: "world_volumes" });
@@ -472,7 +469,7 @@ describe("request mode rule (13, B6), unit", () => {
       "The open in-game plan request (request 7 from Dev) allows looking and proposing only, in words only, so scope_fork can't draft in a sandbox or another document either. Nothing was changed. Describe the idea in world_reply; to have it built, the player sends /autosketch build <text>. " +
         "Answer with world_reply. Only the player can end this request, in game with /autosketch done or by sending a new request; if the user at the terminal wants this edit, tell them so.",
     );
-    for (const mode of ["ask", "plan", "scan", "select"] as const) {
+    for (const mode of ["ask", "plan", "select"] as const) {
       current = req(mode);
       for (const tool of ["scope_fork", "doc_new", "doc_open"]) expect(() => rule.before({ tool })).toThrow(expect.objectContaining({ refusal: "request_mode" }) as never);
       expect(() => rule.before({ tool: "fill", scope: "job-1", mutating: true })).toThrow(expect.objectContaining({ refusal: "request_mode" }) as never);
@@ -574,6 +571,19 @@ describe("select requests (18, piece 1)", () => {
     expect(selectText(m, { served: true })).toContain(READS);
   });
 
+  it("world_volumes({work}) without a linked document points to from:\"candidate\" or linking", async () => {
+    const { client, host, events } = await setup({ auto: true });
+    await host.playerAsk(HOST, "the tower", AT, { mode: "select" });
+    await host.waitFor(() => events.length === 1);
+    expect(link!.state).not.toBe("linked");
+    const r = await client.callTool({ name: "world_volumes", arguments: { work: { min: [0, 0, 0], max: [3, 3, 3] } } });
+    expect(r.isError).toBe(true);
+    expect(texts(r)[0]).toContain(
+      'world_volumes({work}) takes a box in the linked document\'s coordinates, and no document is linked. In a select request, confirm the shape with world_volumes({from:"candidate"}) (world coordinates, no link needed); otherwise link with doc_open({world: true}).',
+    );
+    expect(host.received.some((m) => m.type === "volumes.set")).toBe(false);
+  });
+
   it("refuses edits on a linked document and drafts, allows looking and world_volumes past the mode hook", async () => {
     const { client, host, events, session } = await setup();
     await host.playerAsk(HOST, "the tower", AT, { mode: "select" });
@@ -592,6 +602,7 @@ describe("select requests (18, piece 1)", () => {
     expect(texts(fork)[0]).toMatch(/^The open in-game select request \(request 1 from Dev\) allows finding, reading the world and setting the volumes only, in words only, so doc_new can't draft/);
     expect((await client.callTool({ name: "view_slice", arguments: { axis: "y", at: 0 } })).isError).toBeFalsy();
     inGame!.modeRule.before({ tool: "world_volumes" }); // volume changes pass the mode rule
+    expect(texts(await client.callTool({ name: "world_volumes", arguments: { work: { min: [0, 0, 0], max: [3, 3, 3] } } }))[0]).toMatch(/^ok · world_volumes · work 4×4×4 at local \(0,0,0\)–\(3,3,3\)/);
     // /autosketch done ends it, after which edits pass again.
     await host.playerDone(HOST);
     await host.waitFor(() => inGame!.heldRequest === undefined);

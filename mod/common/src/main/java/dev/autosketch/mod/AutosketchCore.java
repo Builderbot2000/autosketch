@@ -196,8 +196,8 @@ public final class AutosketchCore {
                 host == null || host.getId() == null ? null : new Messages.Player(host.getName(), host.getId()), features());
     }
 
-    /** The protocol-2 features this build implements (13, *Versions and features*). */
-    static final List<String> FEATURES = List.of(Messages.FEATURE_MODES, Messages.FEATURE_SCAN, Messages.FEATURE_VOLUMES_SET);
+    /** The protocol-2 features this build implements (13, *Versions and features*); {@code scan} was retired in protocol 4 (18). */
+    static final List<String> FEATURES = List.of(Messages.FEATURE_MODES, Messages.FEATURE_VOLUMES_SET);
 
     /** Protocol-3 features, listed when a silo registered their handler (the request's type is the feature's name). */
     static final List<String> HANDLER_FEATURES = List.of(Messages.FEATURE_REGISTRY, Messages.FEATURE_UPGRADE);

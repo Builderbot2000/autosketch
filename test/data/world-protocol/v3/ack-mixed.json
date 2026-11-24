@@ -1,0 +1,47 @@
+{
+  "description": "Applied, skipped (hand-edited, with actual state and NBT), rejected and normalized positions",
+  "sender": "mod",
+  "header": {
+    "type": "patch.ack",
+    "id": 23,
+    "applied": 1,
+    "overwritten": 0,
+    "skipped": 2,
+    "rejected": 1,
+    "normalized": 1,
+    "origin": [110, 70, -190],
+    "size": [4, 1, 1]
+  },
+  "body": {
+    "palette": [
+      "minecraft:furnace[facing=south,lit=false]",
+      "minecraft:cobblestone"
+    ],
+    "skipped": [
+      {
+        "pos": [111, 70, -190],
+        "state": "minecraft:furnace[facing=south,lit=false]",
+        "nbt": "{BurnTime:0s,CookTime:0s,CookTimeTotal:200s,Items:[],RecipesUsed:{},id:\"minecraft:furnace\"}"
+      },
+      {
+        "pos": [112, 70, -190],
+        "state": "minecraft:cobblestone"
+      }
+    ],
+    "reasons": [
+      "unknown_state"
+    ],
+    "rejected": [
+      {
+        "pos": [113, 70, -190],
+        "reason": "unknown_state"
+      }
+    ],
+    "normalized": [
+      {
+        "pos": [110, 70, -190],
+        "nbt": "{Items:[{Slot:0b,count:3,id:\"minecraft:oak_planks\"},{Slot:13b,count:1,id:\"minecraft:lantern\"}],components:{},id:\"minecraft:chest\"}"
+      }
+    ]
+  }
+}

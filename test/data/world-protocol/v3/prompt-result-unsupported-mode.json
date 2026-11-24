@@ -1,0 +1,10 @@
+{
+  "description": "Request refused: its mode isn't one the MCP's hello listed (the mod should have refused it itself)",
+  "sender": "mcp",
+  "header": {
+    "type": "prompt.result",
+    "id": 3,
+    "delivered": false,
+    "reason": "unsupported_mode"
+  }
+}

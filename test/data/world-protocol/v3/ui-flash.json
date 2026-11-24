@@ -1,0 +1,39 @@
+{
+  "description": "Boxes changed in one 250 ms window: two boxes by job j1, one by the root",
+  "sender": "mcp",
+  "header": {
+    "type": "ui.flash",
+    "players": [
+      "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+      "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+    ],
+    "flashes": [
+      {
+        "job": "j1",
+        "colour": "#3fa7d6",
+        "dimension": "minecraft:overworld",
+        "boxes": [
+          {
+            "min": [120, 64, -190],
+            "max": [131, 64, -179]
+          },
+          {
+            "min": [125, 65, -185],
+            "max": [125, 70, -185]
+          }
+        ]
+      },
+      {
+        "job": "base",
+        "colour": "#9b9b9b",
+        "dimension": "minecraft:overworld",
+        "boxes": [
+          {
+            "min": [100, 63, -200],
+            "max": [100, 63, -200]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -237,7 +237,7 @@ export class WorldSelect {
   /**
    * `world_volumes({from: "candidate", margin?})` (`18`, piece 9): sets the work volume to the shape's
    * bounding box and the context to that box grown by `margin`, with `volumes.set`, in world
-   * coordinates (no probe or linked document needed). The shape, and the whole candidate when `from`
+   * coordinates (no linked document needed). The shape, and the whole candidate when `from`
    * names a part, are named in the linked document once it links (now, if the link already holds
    * these volumes). A context over the mod's `contextCap` is refused by the mod (`bad_volumes`; the
    * shape's box always lies inside the build height): the shape stays confirmed as a selection and

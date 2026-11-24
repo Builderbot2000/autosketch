@@ -1,0 +1,13 @@
+{
+  "description": "Fill through every non-air block (terrain-agnostic), the mod's default connectivity (26), budget and area",
+  "sender": "mcp",
+  "header": {
+    "type": "fill",
+    "id": 54,
+    "dimension": "minecraft:overworld",
+    "seed": [-31, 70, 14],
+    "match": [
+      "solid"
+    ]
+  }
+}

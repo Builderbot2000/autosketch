@@ -1,0 +1,20 @@
+{
+  "description": "Preview here: one candidate as the candidate ghost at the block the player looks at, turned 90 degrees",
+  "sender": "mod",
+  "header": {
+    "type": "ui.request",
+    "request": 9,
+    "player": {
+      "name": "Kev",
+      "uuid": "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+    },
+    "kind": "candidates.ghost",
+    "args": {
+      "id": "c1",
+      "prefab": "gothic_tower_a",
+      "dimension": "minecraft:overworld",
+      "at": [120, 64, -180],
+      "rotate": 90
+    }
+  }
+}

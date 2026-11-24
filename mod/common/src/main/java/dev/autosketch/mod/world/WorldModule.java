@@ -104,11 +104,10 @@ public final class WorldModule {
         fills = fill;
         CoarseReads cells = new CoarseReads(reads, levels, Util.backgroundExecutor());
         coarse = cells;
-        // The scan and select grants last until the next request replaces them, the connection closing or the server stopping (B4; 18).
+        // The select grant lasts until the next select request replaces it, the connection closing or the server stopping (18).
         Autosketch.bridge().addListener(new dev.autosketch.mod.api.Bridge.Listener() {
             @Override
             public void disconnected(BridgeSession session) {
-                ScanGrants.clear();
                 SelectGrants.clear();
             }
         });
@@ -151,7 +150,6 @@ public final class WorldModule {
 
     /** After the server stopped. */
     public static void serverStopped() {
-        ScanGrants.clear();
         SelectGrants.clear();
         services().tracker().refresh();
     }

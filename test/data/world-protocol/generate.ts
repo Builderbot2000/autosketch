@@ -1,9 +1,9 @@
 /**
- * Regenerates the golden vectors of the current protocol version (3) in this folder
+ * Regenerates the golden vectors of the current protocol version (4) in this folder
  * (docs/design/13-live-world.md, *Wire format*, *Golden vectors*). Run:
  * `npx tsx test/data/world-protocol/generate.ts`. All content is synthetic. The vectors are frozen:
  * regenerate only for a protocol change, and say so in the commit. Earlier versions' vectors live in
- * `v1/` and `v2/`, each copied unchanged when the next version was cut; this script never writes there.
+ * `v1/`, `v2/` and `v3/`, each copied unchanged when the next version was cut; this script never writes there.
  */
 import { createHash } from "node:crypto";
 import { writeFileSync, mkdirSync } from "node:fs";
@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { decodeFrame, encodeMessage, splitFrame } from "../../../src/world/protocol/codec.js";
 import { encodePreviewBody, maskRegions } from "../../../src/world/protocol/body.js";
 import { canonicalNbt, DEFAULT_VOLATILE, nbtHash, sectionHash } from "../../../src/world/protocol/hash.js";
-import { MCP_FEATURES, UI_PART_BYTES, type Message, type PatchBlock, type Sender, type UiFill, type UiGhost, type UiJob, type VolatileList, type WireBox } from "../../../src/world/protocol/messages.js";
+import { MCP_FEATURES, MOD_FEATURES, REQUEST_MODES, UI_PART_BYTES, type Message, type PatchBlock, type Sender, type UiFill, type UiGhost, type UiJob, type VolatileList, type WireBox } from "../../../src/world/protocol/messages.js";
 import { bytesToHex } from "../../../src/world/protocol/bytes.js";
 import { parseSnbt, toSnbt as snbtOf } from "../../../src/world/protocol/snbt.js";
 import { sidecarOf } from "./sidecar.js";
@@ -49,50 +49,43 @@ function vector(name: string, sender: Sender, description: string, m: Message, e
 
 mkdirSync(dir, { recursive: true });
 
-/**
- * The modes and mod features as they stood before `select` (`18`) was added within version 3: the
- * existing hello vectors stay frozen with them, and the `*-select` vectors list the additions.
- */
-const MODES_V3 = ["ask", "scan", "plan", "build"] as const;
-const MOD_FEATURES_V3 = ["modes", "scan", "volumes.set", "registry", "upgrade", "ui"] as const;
-
 // ── handshake and control ──────────────────────────────────────────────────────────────────────
-vector("hello-mcp", "mcp", "MCP hello: protocol, pairing token, client, volatile-key list (the built-in default plus one plugin entry and one state-only type), every request mode, and every MCP feature (prompt.close: the mod may send /autosketch done)", {
+vector("hello-mcp", "mcp", "MCP hello: protocol, pairing token, client, volatile-key list (the built-in default plus one plugin entry and one state-only type), every request mode (select included), and every MCP feature (prompt.close: the mod may send /autosketch done)", {
   type: "hello",
-  protocol: 3,
+  protocol: 4,
   token: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
   client: { name: "autosketch", version: "1.0.0" },
   volatile: { ...DEFAULT_VOLATILE, "create:mechanical_press": ["Speed", "Network/Stress"], "create:belt": "state_only" },
-  modes: [...MODES_V3],
+  modes: [...REQUEST_MODES],
   features: [...MCP_FEATURES],
 });
-vector("hello-mcp-build-only", "mcp", "MCP hello listing only the build mode and no features: the mod refuses ask, scan and plan requests itself (unsupported_mode), and /autosketch done (the MCP needs updating)", {
+vector("hello-mcp-build-only", "mcp", "MCP hello listing only the build mode and no features: the mod refuses ask, plan and select requests itself (unsupported_mode), and /autosketch done (the MCP needs updating)", {
   type: "hello",
-  protocol: 3,
+  protocol: 4,
   token: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
   client: { name: "autosketch", version: "1.1.0" },
   volatile: {},
   modes: ["build"],
 });
-vector("hello-mod-singleplayer", "mod", "Mod hello from the integrated server of a singleplayer world, listing every feature up to version 3", {
+vector("hello-mod-singleplayer", "mod", "Mod hello from the integrated server of a singleplayer world, listing every feature (select included: it serves search, fill, expand, surface, mask and coarse snapshots, and select-mode reads)", {
   type: "hello",
-  protocol: 3,
+  protocol: 4,
   mod: { version: "0.1.0" },
   game: { version: "1.21.1", dataVersion: 3955, loader: "neoforge", loaderVersion: "21.1.249" },
   singleplayer: true,
   host: { name: "Kev", uuid: UUID_KEV },
-  features: [...MOD_FEATURES_V3],
+  features: [...MOD_FEATURES],
 });
 vector("hello-mod-dedicated", "mod", "Mod hello from a dedicated server (no host player), listing only some features", {
   type: "hello",
-  protocol: 3,
+  protocol: 4,
   mod: { version: "0.1.0" },
   game: { version: "1.21.1", dataVersion: 3955, loader: "neoforge", loaderVersion: "21.1.249" },
   singleplayer: false,
   host: null,
   features: ["modes", "volumes.set", "registry"],
 });
-vector("error-protocol-mismatch", "mod", "The mod refuses a hello with another protocol version and closes (the MCP sent a newer one: the mod tells the player to update the mod)", { type: "error", id: null, code: "protocol_mismatch", message: "mod speaks protocol 3, MCP sent 4", protocol: 3 });
+vector("error-protocol-mismatch", "mod", "The mod refuses a hello with another protocol version and closes (the MCP sent a newer one: the mod tells the player to update the mod)", { type: "error", id: null, code: "protocol_mismatch", message: "mod speaks protocol 4, MCP sent 5", protocol: 4 });
 vector("error-request", "mod", "A request the mod can't serve, answered by id; the connection stays open", { type: "error", id: 12, code: "outside_volumes", message: "box 0,0,0..15,15,15 lies outside the linked volumes" });
 vector("error-internal", "mod", "A valid request the mod failed to serve (its own fault, unlike bad_request); the connection stays open", { type: "error", id: 13, code: "internal", message: "failed to read block entity at 104,66,-195" });
 vector("volumes", "mod", "Work volume and two context boxes: the default (work grown by 3) and a distant reference box", {
@@ -153,7 +146,7 @@ vector("hashes-result", "mod", "One hash per section the boxes touch, ascending 
 vector("snapshot-boxes", "mcp", "Full snapshot of the work and context boxes (linking)", { type: "snapshot", id: 6, dimension: OW, boxes: [work, ctx] });
 vector("snapshot-sections", "mcp", "Snapshot of the sections whose hashes differ", { type: "snapshot", id: 7, dimension: OW, sections: [[6, 4, -13], [7, 5, -12]] });
 
-vector("snapshot-surface", "mcp", "Surface snapshot of a scan's columns (B4): topmost non-air block per column", { type: "snapshot", id: 40, dimension: OW, kind: "surface", columns: { min: [-2, 30], max: [1, 32] } });
+vector("snapshot-surface", "mcp", "Surface snapshot of a starter area's columns (`18`, piece 10): topmost non-air block per column", { type: "snapshot", id: 40, dimension: OW, kind: "surface", columns: { min: [-2, 30], max: [1, 32] } });
 vector("snapshot-surface-ceiling", "mcp", "Surface snapshot with the ceiling above y 20 (the player is underground)", { type: "snapshot", id: 41, dimension: OW, kind: "surface", columns: { min: [-2, 30], max: [1, 32] }, ceiling: 20 });
 {
   // 4 × 3 columns, x fastest, then z. minY −64, so y = −64 + h − 1. Chunk [-1, 2] (x −16…−1, z 32…47) isn't generated.
@@ -348,15 +341,6 @@ vector("prompt-minimal", "mod", "An ask request looking at nothing, no focus box
   text: "what is the tower over there made of?",
   context: { dimension: OW, position: [0.5, 70, 0.5], eye: [0.5, 71.62, 0.5], yaw: -90.5, pitch: -30.75, facing: "east" },
   mode: "ask",
-});
-vector("prompt-scan", "mod", "A scan request (/autosketch scan 20 the tower and the courtyard): radius clipped to 12 chunks, the columns and full-block box the mod grants for the probe", {
-  type: "prompt",
-  id: 3,
-  player: { name: "Kev", uuid: UUID_KEV },
-  text: "the tower and the courtyard",
-  context: { dimension: OW, position: [-40.5, 68, 23.5], eye: [-40.5, 69.62, 23.5], yaw: 45, pitch: 10, facing: "west" },
-  mode: "scan",
-  scan: { radius: 12, clipped: true, columns: { min: [-240, -176], max: [159, 223] }, box: { min: [-144, 36, -80], max: [62, 132, 126] } },
 });
 vector("prompt-close", "mod", "The player ran /autosketch done: end the open read-only request (sent only when the MCP's hello lists prompt.close)", { type: "prompt.close", player: { name: "Kev", uuid: UUID_KEV } });
 vector("prompt-result-delivered", "mcp", "Request delivered to the agent session", { type: "prompt.result", id: 1, delivered: true });
@@ -861,24 +845,6 @@ function tinyPng(): Uint8Array {
 
 
 // ── select (`18`; mod feature select, added within protocol 3) ─────────────────────────────────
-vector("hello-mcp-select", "mcp", "MCP hello listing the select mode as well: the mod may send /autosketch select requests", {
-  type: "hello",
-  protocol: 3,
-  token: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
-  client: { name: "autosketch", version: "1.2.0" },
-  volatile: {},
-  modes: [...MODES_V3, "select"],
-  features: [...MCP_FEATURES],
-});
-vector("hello-mod-select", "mod", "Mod hello listing every feature, select included: it serves search, fill, expand, mask and coarse snapshots, and select-mode reads", {
-  type: "hello",
-  protocol: 3,
-  mod: { version: "0.2.0" },
-  game: { version: "1.21.1", dataVersion: 3955, loader: "neoforge", loaderVersion: "21.1.249" },
-  singleplayer: true,
-  host: { name: "Kev", uuid: UUID_KEV },
-  features: [...MOD_FEATURES_V3, "select"],
-});
 vector("prompt-select", "mod", "A select request (/autosketch select the mossy stone brick house), looking at a block of it: no grant; reads are served within selectChunks of this position", {
   type: "prompt",
   id: 4,

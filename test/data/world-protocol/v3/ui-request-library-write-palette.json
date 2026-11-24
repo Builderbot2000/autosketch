@@ -1,0 +1,47 @@
+{
+  "description": "The palette editor saves tags, notes, a reweighted role, a removed member, a renamed and a dropped role, and a member added by block id",
+  "sender": "mod",
+  "header": {
+    "type": "ui.request",
+    "request": 16,
+    "player": {
+      "name": "Kev",
+      "uuid": "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+    },
+    "kind": "library.write.palette",
+    "args": {
+      "root": "user",
+      "name": "castle",
+      "hash": "5d41402abc4b2a76b9719d911017c592ae2f1c0e8e1a4b7f3c6d2e9a0b1c2d3e",
+      "tags": [
+        "castle",
+        "grey"
+      ],
+      "notes": "",
+      "edit": {
+        "weights": {
+          "wall": {
+            "minecraft:stone_bricks": 3,
+            "minecraft:andesite": 1
+          }
+        },
+        "remove": {
+          "trim": [
+            "minecraft:polished_diorite"
+          ]
+        },
+        "drop": [
+          "glass"
+        ],
+        "rename": {
+          "roof": "roofing"
+        }
+      },
+      "addBlocks": {
+        "accent": [
+          "minecraft:mossy_stone_bricks"
+        ]
+      }
+    }
+  }
+}

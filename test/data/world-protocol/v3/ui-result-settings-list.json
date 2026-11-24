@@ -1,0 +1,63 @@
+{
+  "description": "Settings rows for the settings screen: one toggle and one number field, with sources, an overridden launch value and a restart-needed mark",
+  "sender": "mcp",
+  "header": {
+    "type": "ui.result",
+    "request": 4,
+    "player": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    "ok": true,
+    "result": {
+      "path": "/home/kev/.autosketch/config.toml",
+      "hash": "5d41402abc4b2a76",
+      "warnings": [],
+      "unknown": [],
+      "settings": [
+        {
+          "key": "library.starter",
+          "group": "Library",
+          "summary": "Include the starter library",
+          "applies": "restart",
+          "accepts": "true or false",
+          "control": {
+            "type": "toggle"
+          },
+          "default": true,
+          "value": true,
+          "text": "true",
+          "source": {
+            "kind": "default",
+            "label": "default"
+          },
+          "restartNeeded": false
+        },
+        {
+          "key": "scope.maxDepth",
+          "group": "Scopes",
+          "summary": "How deep scoped jobs may nest",
+          "applies": "restart",
+          "accepts": "an integer from 0 to 3",
+          "control": {
+            "type": "number",
+            "min": 0,
+            "max": 3
+          },
+          "default": 1,
+          "value": 2,
+          "text": "2",
+          "source": {
+            "kind": "file",
+            "label": "config.toml"
+          },
+          "overrides": {
+            "label": "command line",
+            "raw": "1",
+            "same": false,
+            "note": "launch command sets scope.maxDepth=1; ignored, config.toml says 2"
+          },
+          "restartNeeded": true,
+          "running": 1
+        }
+      ]
+    }
+  }
+}

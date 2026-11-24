@@ -90,7 +90,7 @@ export interface BridgeConnection {
    * A request needing a feature the mod doesn't list rejects with `world_mod_outdated` unsent.
    */
   request(m: Req<HashesRequest>): Promise<HashesResult>;
-  /** Needs the `scan` feature. */
+  /** Needs the `select` feature (surface reads serve `18`'s terrain, piece 10). */
   request(m: Req<SurfaceRequest>): Promise<SurfaceResult>;
   request(m: Req<SnapshotRequest>): Promise<SnapshotResult>;
   request(m: Req<PatchMessage>): Promise<PatchAck>;
@@ -131,7 +131,7 @@ export interface BridgeOptions {
   client?: { name: string; version: string };
   /**
    * Request modes the hello lists (`13`, B6): only modes this MCP enforces, since the mod refuses
-   * the others itself. Default all four: `ask`, `scan`, `plan`, `build`.
+   * the others itself. Default all of them: `ask`, `plan`, `build`, `select`.
    */
   modes?: RequestMode[];
   /**
@@ -171,7 +171,7 @@ const RESPONSE = {
 const DOWN = "world_disconnected";
 const OUTDATED = "world_mod_outdated";
 /** Modes listed when the options name none: a mode is listed only once the MCP enforces it. */
-const DEFAULT_MODES: readonly RequestMode[] = ["ask", "scan", "plan", "build", "select"];
+const DEFAULT_MODES: readonly RequestMode[] = ["ask", "plan", "build", "select"];
 
 export class Bridge implements BridgeConnection {
   hello: ModHello | undefined;
@@ -483,12 +483,11 @@ const DEFAULT_FEATURES: readonly McpFeature[] = MCP_FEATURES.filter((f) => f !==
 
 const FEATURE_NAMES: Record<ModFeature, string> = {
   modes: "request modes",
-  scan: "scanning (surface snapshots)",
   "volumes.set": "setting the volumes",
   registry: "the registry report",
   upgrade: "upgrading schematics through the game's data fixer",
   ui: "the in-game UI",
-  select: "selecting in the world (search, fill, expand, mask and coarse snapshots)",
+  select: "selecting in the world (search, fill, expand, surface, mask and coarse snapshots)",
 };
 
 /** The mod feature a request needs (*Versions and features*), if any. */
@@ -503,7 +502,7 @@ function featureFor(m: { type: McpMessage["type"]; kind?: string }): ModFeature 
     case "expand":
       return "select";
     case "snapshot":
-      return m.kind === "surface" ? "scan" : m.kind === "mask" || m.kind === "coarse" ? "select" : undefined;
+      return m.kind === "surface" || m.kind === "mask" || m.kind === "coarse" ? "select" : undefined;
     default:
       return undefined;
   }

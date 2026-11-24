@@ -92,5 +92,36 @@
     "request": 12
    }
   }
- }
+ },
+ "replies": [
+  {
+   "on": "ui.request",
+   "kind": "choices.pick",
+   "args": {
+    "id": "q1",
+    "index": 0
+   },
+   "send": {
+    "type": "ui.result",
+    "ok": true,
+    "result": {
+     "request": 21
+    }
+   }
+  },
+  {
+   "on": "ui.request",
+   "kind": "choices.pick",
+   "args": {
+    "id": "q1",
+    "index": 1
+   },
+   "send": {
+    "type": "ui.result",
+    "ok": false,
+    "error": "answered",
+    "message": "You already answered this question."
+   }
+  }
+ ]
 }

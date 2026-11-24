@@ -19,7 +19,9 @@ import org.joml.Matrix4f;
 /**
  * Draws a {@link DrawList} into the world (16, *Overlays in the world*): outlines and pulses twice,
  * once faint and through blocks (no depth test, so a job behind a wall is still seen), once at full
- * strength where they're in view; labels as camera-facing text, also through blocks. Version
+ * strength where they're in view; labels as camera-facing text, also through blocks. A steady fill
+ * (18, piece 8) draws its faces through blocks as pulses do but at its constant alpha, and its edges
+ * as outlines are drawn, both exactly as sent. Version
  * sensitive: render types, {@code RenderLevelStageEvent} and {@code Font.drawInBatch} are where a port
  * to another Minecraft version looks first (1.21 changed vertex building to {@code addVertex}/
  * {@code setColor}/{@code setNormal}).
@@ -96,6 +98,8 @@ public final class OverlayRenderer {
 
         VertexConsumer quads = buffers.getBuffer(Types.XRAY_QUADS);
         for (DrawList.Pulse p : list.pulses()) faces(quads, m, p.box(), 0.01, p.colour(), PULSE_ALPHA * p.strength());
+        for (DrawList.Steady f : list.fills())
+            for (int[] span : f.faces()) face(quads, m, span, f.colour(), f.alpha());
         buffers.endBatch(Types.XRAY_QUADS);
 
         for (int pass = 0; pass < 2; pass++) {
@@ -104,6 +108,8 @@ public final class OverlayRenderer {
             VertexConsumer lines = buffers.getBuffer(type);
             for (DrawList.Outline o : list.outlines()) edges(lines, m, o.box(), o.dashed() ? 0.03 : 0.02, o.colour(), alpha, o.dashed());
             for (DrawList.Pulse p : list.pulses()) edges(lines, m, p.box(), 0.015, p.colour(), alpha * p.strength(), false);
+            for (DrawList.Steady f : list.fills())
+                for (int[] e : f.edges()) line(lines, m, e[0], e[1], e[2], e[3], e[4], e[5], f.colour(), alpha);
             buffers.endBatch(type);
         }
 
@@ -161,6 +167,17 @@ public final class OverlayRenderer {
         int r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, bl = rgb & 0xFF, a = Math.round(alpha * 255);
         c.addVertex(m, (float) ax, (float) ay, (float) az).setColor(r, g, bl, a).setNormal(dx, dy, dz);
         c.addVertex(m, (float) bx, (float) by, (float) bz).setColor(r, g, bl, a).setNormal(dx, dy, dz);
+    }
+
+    /** One rectangle {@code [x1, y1, z1, x2, y2, z2]}, flat on one axis, at alpha {@code a} (0 to 255). */
+    static void face(VertexConsumer c, Matrix4f m, int[] s, int rgb, int a) {
+        int r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, bl = rgb & 0xFF;
+        float x0 = s[0], y0 = s[1], z0 = s[2], x1 = s[3], y1 = s[4], z1 = s[5];
+        float[] q;
+        if (s[0] == s[3]) q = new float[] {x0, y0, z0, x0, y1, z0, x0, y1, z1, x0, y0, z1};
+        else if (s[1] == s[4]) q = new float[] {x0, y0, z0, x1, y0, z0, x1, y0, z1, x0, y0, z1};
+        else q = new float[] {x0, y0, z0, x1, y0, z0, x1, y1, z0, x0, y1, z0};
+        for (int i = 0; i < 12; i += 3) c.addVertex(m, q[i], q[i + 1], q[i + 2]).setColor(r, g, bl, a);
     }
 
     /** The six faces of an inclusive block box, grown by {@code grow}. */

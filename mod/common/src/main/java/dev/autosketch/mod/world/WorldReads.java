@@ -13,6 +13,9 @@ import dev.autosketch.mod.protocol.FrameCodec;
 import dev.autosketch.mod.protocol.Messages;
 import dev.autosketch.mod.protocol.ProtocolException;
 import dev.autosketch.mod.protocol.SelectMessages;
+import it.unimi.dsi.fastutil.longs.Long2ObjectLinkedOpenHashMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.longs.LongArrayList;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -22,13 +25,18 @@ import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.Function;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -46,12 +54,22 @@ import org.slf4j.Logger;
  * the reply goes out from there. Positions outside the build height read as air with no block
  * entity. A request waits for any earlier one (the dispatcher's order), so it sees every patch acked
  * before it.
+ *
+ * <p>A blocks (or mask) snapshot inside the select grant (18, piece 5; M4) is read by chunk column, as
+ * the search, the fill and coarse reads read: a loaded chunk's sections copied on the server thread,
+ * one that isn't from its saved tag through the chunk storage's asynchronous I/O (which also sees
+ * chunks waiting to be written), decoded off-thread with its block entities ({@link #PREFETCH} ahead),
+ * another game version's loaded the vanilla way so the data fixers upgrade it; nothing is loaded,
+ * ticketed or generated, and an ungenerated chunk reads as air and is listed. Volume reads keep the
+ * section loop, since the link keeps their chunks loaded.
  */
 public final class WorldReads {
     private static final Logger LOG = LogUtils.getLogger();
 
     /** Server-thread time one tick may spend copying sections. */
     public static volatile long sliceNanos = 5_000_000L;
+    /** Unloaded chunks a select-grant read fetches and decodes ahead of the cursor. */
+    public static final int PREFETCH = 64;
 
     private final LinkState link;
     private final Function<ResourceKey<Level>, @Nullable ServerLevel> levels;
@@ -66,10 +84,12 @@ public final class WorldReads {
 
     /**
      * Cost of the last finished read: sections, ticks it was sliced over, server-thread and off-thread
-     * time, and the longest single tick's server time (a chunk loaded from disk inside one slice; 18,
-     * *Measured*).
+     * (reply building) time, the longest single tick's server time (18, *Measured*), and for a
+     * select-grant read its chunk columns (read loaded, decoded from disk, loaded the vanilla way,
+     * missing; all 0 for a volume read) and the wall time from request to reply.
      */
-    public record ReadStats(int sections, int ticks, long serverNanos, long offThreadNanos, long maxTickNanos) {}
+    public record ReadStats(int sections, int ticks, long serverNanos, long offThreadNanos, long maxTickNanos, int chunks, int loaded, int disk, int fallback,
+            int missing, long wallNanos) {}
 
     /** The last finished read's cost (measurements, 13 *Open questions*), or null. */
     public static volatile @Nullable ReadStats lastRead;
@@ -160,8 +180,8 @@ public final class WorldReads {
                                 }
                                 states[i++] = p;
                             }
-                    for (Captured cs : captured.values())
-                        for (Map.Entry<Long, CompoundTag> e : cs.bes.entrySet()) {
+                    for (long[] s : sections)
+                        for (Map.Entry<Long, CompoundTag> e : captured.get(key(s)).bes.entrySet()) {
                             BlockPos bp = BlockPos.of(e.getKey());
                             if (r.contains(bp)) bes.add(new BlockEntityNbt(bp, e.getValue()));
                         }
@@ -212,6 +232,7 @@ public final class WorldReads {
     // ── slicing ───────────────────────────────────────────────────────────────────────────────
 
     private void start(Job job) {
+        job.background = background;
         job.exchange.defer();
         jobs.addLast(job);
         tick();
@@ -225,40 +246,34 @@ public final class WorldReads {
             Job j = jobs.peekFirst();
             long t0 = System.nanoTime();
             j.ticks++;
+            boolean done;
             try {
-                while (j.next < j.sections.size() && (first || System.nanoTime() < deadline)) {
-                    long[] s = j.sections.get(j.next++);
-                    SKey column = key((int) s[0], 0, (int) s[2]);
-                    Captured c = j.missing.contains(column) ? new Captured(null, Map.of()) : capture(j.level, (int) s[0], (int) s[1], (int) s[2], j.boxes, j.noGenerate);
-                    if (c.ungenerated()) j.missing.add(column);
-                    j.captured.put(key(s), c);
-                    first = false;
-                }
+                done = j.step(deadline, first);
             } catch (RuntimeException e) {
                 jobs.pollFirst();
+                j.cancel();
                 LOG.error("Autosketch: reading the world failed", e);
                 j.exchange.error(PatchApplier.INTERNAL, "the mod failed reading the world: " + e);
                 continue;
             }
+            first = false;
             long spent = System.nanoTime() - t0;
             j.serverNanos += spent;
             j.maxTickNanos = Math.max(j.maxTickNanos, spent);
-            if (j.next < j.sections.size()) return;
+            if (!done) return;
             jobs.pollFirst();
             background.execute(j::finishSafely);
         }
     }
 
-    /** One section's states (a copy) and the NBT of its block entities inside the boxes. */
+    /** One section's states (a copy) and the NBT of its block entities inside the boxes; the chunk loaded (or generated) as needed. */
     static Captured capture(ServerLevel level, int sx, int sy, int sz, List<Box> boxes) {
-        return capture(level, sx, sy, sz, boxes, false);
+        if (sy < level.getMinSection() || sy >= level.getMaxSection()) return new Captured(null, Map.of());
+        return capture(level, level.getChunk(sx, sz), sy, boxes);
     }
 
-    /** As above; with {@code noGenerate} (a select-grant read), a chunk never fully generated reads as air. */
-    static Captured capture(ServerLevel level, int sx, int sy, int sz, List<Box> boxes, boolean noGenerate) {
-        if (sy < level.getMinSection() || sy >= level.getMaxSection()) return new Captured(null, Map.of());
-        LevelChunk chunk = noGenerate ? SurfaceReads.existing(level, sx, sz, new int[1]) : level.getChunk(sx, sz);
-        if (chunk == null) return new Captured(null, Map.of(), true);
+    /** One section of a chunk in memory (within the build height): its states copied, its block entities inside the boxes. */
+    static Captured capture(ServerLevel level, LevelChunk chunk, int sy, List<Box> boxes) {
         PalettedContainer<BlockState> states = chunk.getSection(chunk.getSectionIndexFromSectionY(sy)).getStates().copy();
         Map<Long, CompoundTag> bes = new HashMap<>();
         for (BlockEntity be : chunk.getBlockEntities().values()) {
@@ -267,6 +282,47 @@ public final class WorldReads {
             bes.put(p.asLong(), WorldBlocks.nbt(be, level.registryAccess()));
         }
         return new Captured(states, bes);
+    }
+
+    /** A chunk column decoded from its saved tag: what it was, and when {@code READ} its wanted sections. */
+    record ColumnRead(WorldFill.Column.Kind kind, @Nullable Map<SKey, Captured> sections) {}
+
+    /**
+     * Decodes the wanted sections of a saved chunk without loading it, off-thread: each section's
+     * states (null when all air) and the block entities inside the boxes, as the chunk's load would
+     * keep them (the position's state takes a block entity, not kept packed), their saved NBT without
+     * {@code x}, {@code y}, {@code z} and the chunk's {@code keepPacked}, as {@link WorldBlocks#nbt}
+     * prints a loaded one. {@code MISSING}
+     * when not fully generated, {@code LOAD} when saved by another game version or undecodable.
+     */
+    static ColumnRead decodeColumn(Optional<CompoundTag> saved, List<long[]> wanted, List<Box> boxes, int minSection, int maxSection) {
+        Set<Integer> ys = new HashSet<>();
+        for (long[] s : wanted) ys.add((int) s[1]);
+        WorldFill.Column c = WorldFill.decode(saved, minSection, maxSection, ys::contains);
+        if (c.kind() != WorldFill.Column.Kind.READ) return new ColumnRead(c.kind(), null);
+        PalettedContainer<BlockState>[] secs = c.sections();
+        Map<SKey, Map<Long, CompoundTag>> bes = new HashMap<>();
+        ListTag list = saved.get().getList("block_entities", Tag.TAG_COMPOUND);
+        for (int i = 0; i < list.size(); i++) {
+            CompoundTag t = list.getCompound(i);
+            int x = t.getInt("x"), y = t.getInt("y"), z = t.getInt("z"), sy = y >> 4;
+            if (t.getBoolean("keepPacked") || sy < minSection || sy >= maxSection || !ys.contains(sy) || !inAny(boxes, x, y, z)) continue;
+            PalettedContainer<BlockState> st = secs[sy - minSection];
+            if (st == null || !st.get(x & 15, y & 15, z & 15).hasBlockEntity()) continue;
+            CompoundTag nbt = t.copy();
+            nbt.remove("x");
+            nbt.remove("y");
+            nbt.remove("z");
+            nbt.remove("keepPacked"); // the chunk's save adds it, the block entity's doesn't
+            bes.computeIfAbsent(key(x >> 4, sy, z >> 4), k -> new HashMap<>()).put(BlockPos.asLong(x, y, z), nbt);
+        }
+        Map<SKey, Captured> out = new HashMap<>();
+        for (long[] s : wanted) {
+            SKey k = key(s);
+            Map<Long, CompoundTag> b = bes.get(k);
+            out.put(k, new Captured(secs[(int) s[1] - minSection], b == null ? Map.of() : b));
+        }
+        return new ColumnRead(WorldFill.Column.Kind.READ, out);
     }
 
     /** {@code ungenerated}: the chunk was never fully generated (a no-generate read), so it reads as air. */
@@ -285,6 +341,7 @@ public final class WorldReads {
         final List<Box> boxes;
         final List<long[]> sections;
         final Exchange exchange;
+        /** A select-grant read (18): read by chunk column, nothing loaded, ticketed or generated. */
         final boolean noGenerate;
         /** A select-grant read (18): ungenerated chunks are listed in the answer. */
         final boolean listMissing;
@@ -293,6 +350,18 @@ public final class WorldReads {
         final Map<SKey, Captured> captured = new LinkedHashMap<>();
         int next, ticks;
         long serverNanos, maxTickNanos, offThreadStart;
+        final long started = System.nanoTime();
+        /** Where disk reads are decoded (set by {@link #start}). */
+        @Nullable Executor background;
+        /**
+         * A select-grant read's chunk columns within the build height, ascending by cz, then cx, with
+         * their wanted sections; the cursor, the prefetch cursor and the disk reads in flight. Null for
+         * a volume read.
+         */
+        final @Nullable LongArrayList columns;
+        final Long2ObjectLinkedOpenHashMap<List<long[]>> wanted = new Long2ObjectLinkedOpenHashMap<>();
+        final Long2ObjectOpenHashMap<CompletableFuture<ColumnRead>> reading = new Long2ObjectOpenHashMap<>();
+        int nextColumn, aheadNext, loaded, disk, fallback;
 
         Job(ServerLevel level, List<Box> boxes, List<long[]> sections, Exchange exchange) {
             this(level, boxes, sections, exchange, false);
@@ -309,6 +378,111 @@ public final class WorldReads {
             this.sections = sections;
             this.exchange = exchange;
             this.noGenerate = noGenerate;
+            if (!noGenerate) {
+                columns = null;
+                return;
+            }
+            int minSection = level.getMinSection(), maxSection = level.getMaxSection();
+            for (long[] s : sections) {
+                if (s[1] < minSection || s[1] >= maxSection) captured.put(key(s), new Captured(null, Map.of()));
+                else wanted.computeIfAbsent(ChunkPos.asLong((int) s[0], (int) s[2]), k -> new ArrayList<>()).add(s);
+            }
+            columns = new LongArrayList(wanted.keySet());
+            columns.sort((a, c) -> ChunkPos.getZ(a) != ChunkPos.getZ(c) ? Integer.compare(ChunkPos.getZ(a), ChunkPos.getZ(c)) : Integer.compare(ChunkPos.getX(a), ChunkPos.getX(c)));
+        }
+
+        /** Reads within the slice (at least one section or column when {@code first}); true when everything is read. Server thread. */
+        boolean step(long deadline, boolean first) {
+            if (columns != null) return stepColumns(deadline, first);
+            while (next < sections.size() && (first || System.nanoTime() < deadline)) {
+                long[] s = sections.get(next++);
+                captured.put(key(s), capture(level, (int) s[0], (int) s[1], (int) s[2], boxes));
+                first = false;
+            }
+            return next >= sections.size();
+        }
+
+        /** A select-grant read: whole columns in order, loaded ones from memory, the others from their decoded saved tags; false while a read is pending. */
+        private boolean stepColumns(long deadline, boolean first) {
+            LongArrayList cols = columns;
+            prefetch();
+            while (nextColumn < cols.size() && (first || System.nanoTime() < deadline)) {
+                long k = cols.getLong(nextColumn);
+                int cx = ChunkPos.getX(k), cz = ChunkPos.getZ(k);
+                CompletableFuture<ColumnRead> f = reading.get(k);
+                if (f == null) {
+                    LevelChunk live = level.getChunkSource().getChunkNow(cx, cz);
+                    if (live != null) {
+                        for (long[] s : wanted.get(k)) captured.put(key(s), capture(level, live, (int) s[1], boxes));
+                        loaded++;
+                        nextColumn++;
+                        first = false;
+                        continue;
+                    }
+                    f = read(k);
+                }
+                if (!f.isDone()) {
+                    prefetch();
+                    return false;
+                }
+                reading.remove(k);
+                ColumnRead r = f.join();
+                switch (r.kind()) {
+                    case READ -> {
+                        disk++;
+                        captured.putAll(r.sections());
+                    }
+                    case MISSING -> missingColumn(k);
+                    case LOAD -> {
+                        LevelChunk l = SurfaceReads.existing(level, cx, cz, new int[1]);
+                        if (l == null) missingColumn(k);
+                        else {
+                            fallback++;
+                            for (long[] s : wanted.get(k)) captured.put(key(s), capture(level, l, (int) s[1], boxes));
+                        }
+                    }
+                }
+                nextColumn++;
+                first = false;
+                prefetch();
+            }
+            return nextColumn >= cols.size();
+        }
+
+        private void missingColumn(long k) {
+            missing.add(key(ChunkPos.getX(k), 0, ChunkPos.getZ(k)));
+            for (long[] s : wanted.get(k)) captured.put(key(s), new Captured(null, Map.of(), true));
+        }
+
+        /** Starts disk reads of the unloaded columns ahead of the cursor, up to {@link #PREFETCH} in flight. */
+        private void prefetch() {
+            LongArrayList cols = columns;
+            if (aheadNext < nextColumn) aheadNext = nextColumn;
+            while (reading.size() < PREFETCH && aheadNext < cols.size()) {
+                long k = cols.getLong(aheadNext++);
+                if (reading.containsKey(k) || level.getChunkSource().getChunkNow(ChunkPos.getX(k), ChunkPos.getZ(k)) != null) continue;
+                read(k);
+            }
+        }
+
+        /** Fetches a column's saved tag (asynchronous I/O) and decodes its wanted sections off-thread. */
+        private CompletableFuture<ColumnRead> read(long k) {
+            int cx = ChunkPos.getX(k), cz = ChunkPos.getZ(k);
+            List<long[]> secs = wanted.get(k);
+            int minSection = level.getMinSection(), maxSection = level.getMaxSection();
+            CompletableFuture<ColumnRead> f = level.getChunkSource().chunkMap.read(new ChunkPos(k))
+                    .thenApplyAsync(tag -> decodeColumn(tag, secs, boxes, minSection, maxSection), background)
+                    .exceptionally(e -> {
+                        LOG.warn("Autosketch: reading chunk {},{} from disk for a snapshot failed; loading it instead", cx, cz, e);
+                        return new ColumnRead(WorldFill.Column.Kind.LOAD, null);
+                    });
+            reading.put(k, f);
+            return f;
+        }
+
+        void cancel() {
+            for (CompletableFuture<ColumnRead> f : reading.values()) f.cancel(false);
+            reading.clear();
         }
 
         /** The ungenerated chunks, ascending by cz, then cx, for a select-grant read; else null. */
@@ -324,7 +498,9 @@ public final class WorldReads {
         abstract void finish();
 
         void send(Frame f) {
-            lastRead = new ReadStats(sections.size(), ticks, serverNanos, System.nanoTime() - offThreadStart, maxTickNanos);
+            long now = System.nanoTime();
+            lastRead = new ReadStats(sections.size(), ticks, serverNanos, now - offThreadStart, maxTickNanos, columns == null ? 0 : columns.size(), loaded, disk, fallback,
+                    missing.size(), now - started);
             try {
                 FrameCodec.encode(f);
             } catch (IllegalArgumentException e) {

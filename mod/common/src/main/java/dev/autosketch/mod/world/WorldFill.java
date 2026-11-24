@@ -207,8 +207,13 @@ public final class WorldFill {
      * Decodes a saved chunk without loading it. Off-thread. {@code MISSING} when it isn't fully
      * generated, {@code LOAD} when it was saved by another game version (or doesn't decode).
      */
-    @SuppressWarnings("unchecked")
     static Column decode(Optional<CompoundTag> saved, int minSection, int maxSection) {
+        return decode(saved, minSection, maxSection, sy -> true);
+    }
+
+    /** As above, decoding only the sections {@code wanted} accepts (by section y); the others are left null. */
+    @SuppressWarnings("unchecked")
+    static Column decode(Optional<CompoundTag> saved, int minSection, int maxSection, java.util.function.IntPredicate wanted) {
         if (saved.isEmpty()) return new Column(Column.Kind.MISSING, null);
         CompoundTag tag = saved.get();
         if (ChunkSerializer.getChunkTypeFromTag(tag) != ChunkType.LEVELCHUNK) return new Column(Column.Kind.MISSING, null);
@@ -218,7 +223,7 @@ public final class WorldFill {
         for (int i = 0; i < list.size(); i++) {
             CompoundTag s = list.getCompound(i);
             int sy = s.getByte("Y");
-            if (sy < minSection || sy >= maxSection || !s.contains("block_states", Tag.TAG_COMPOUND)) continue; // absent: all air
+            if (sy < minSection || sy >= maxSection || !wanted.test(sy) || !s.contains("block_states", Tag.TAG_COMPOUND)) continue; // absent: all air
             Optional<PalettedContainer<BlockState>> states = MaterialSearch.STATES.parse(NbtOps.INSTANCE, s.getCompound("block_states")).result();
             if (states.isEmpty()) return new Column(Column.Kind.LOAD, null);
             out[sy - minSection] = states.get();

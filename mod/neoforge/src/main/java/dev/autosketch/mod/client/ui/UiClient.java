@@ -60,6 +60,7 @@ public final class UiClient {
         modBus.addListener(AutosketchKeys::register);
         NeoForge.EVENT_BUS.addListener(AutosketchKeys::tick);
         NeoForge.EVENT_BUS.addListener((ClientPlayerNetworkEvent.LoggingOut e) -> reset());
+        ActionBarHold.init();
     }
 
     /** Adds a handler for one MCP → mod type ({@code ui.state}, {@code ui.ghost}, {@code replay.frame}, ...). */

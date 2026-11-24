@@ -108,7 +108,7 @@ public final class VolumeCommands implements CommandExtension {
         }
         ServerPlayer p = c.getSource().getPlayerOrException();
         if (!wand.select(p, name)) return refused(c, "no wand mode \"" + name + "\" (modes: " + String.join(", ", modes.get().stream().map(WandMode::name).toList()) + ")");
-        feedback.actionBar(p, Component.literal("Autosketch wand: " + name + " mode"));
+        feedback.actionBar(p, Component.literal(Feedback.MODE_LINE_PREFIX + name + " mode"));
         return ok(c, name + " mode");
     }
 

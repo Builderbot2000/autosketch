@@ -70,7 +70,7 @@ public final class WandControl {
         if (!Link.requireConnected(p)) return true;
         PlayerStates.State st = players.get(p.getUUID());
         st.mode = Math.floorMod(st.mode + 1, modes.get().size());
-        feedback.actionBar(p, Component.literal("Autosketch wand: " + mode(p).name() + " mode"));
+        feedback.actionBar(p, Component.literal(Feedback.MODE_LINE_PREFIX + mode(p).name() + " mode"));
         return true;
     }
 }

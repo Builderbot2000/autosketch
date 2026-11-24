@@ -38,6 +38,11 @@ public final class Feedback {
     private static final int NOTICE_TICKS = 60;
     public static final int OUTLINE_PERIOD = 10;
     private static final int MODE_LINE_PERIOD = 20;
+    /**
+     * How the wand's mode line starts. The client half keeps its own action-bar lines up for their
+     * time by dropping a repeated mode line meanwhile (client {@code ActionBarHold}, 18, C5).
+     */
+    public static final String MODE_LINE_PREFIX = "Autosketch wand: ";
     /** Outline points farther than this from the player aren't sent. */
     private static final double OUTLINE_RANGE = 96;
     private static final int MAX_POINTS = 2400;
@@ -116,7 +121,7 @@ public final class Feedback {
                 if (shown && particleTick) drawOutlines(p, all);
             }
             if (op && modeLine && link != LinkStatus.OFFLINE && holding && p.serverLevel().getGameTime() >= st.actionBarBusyUntil && !all.isEmpty())
-                p.displayClientMessage(Component.literal("Autosketch wand: " + all.get(Math.floorMod(st.mode, all.size())).name() + " mode"), true);
+                p.displayClientMessage(Component.literal(MODE_LINE_PREFIX + all.get(Math.floorMod(st.mode, all.size())).name() + " mode"), true);
         }
         if (particleTick && sent.size() > online.size()) sent.keySet().removeIf(u -> server.getPlayerList().getPlayer(u) == null);
     }

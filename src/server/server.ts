@@ -1,5 +1,5 @@
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { z } from "zod";
+import { z } from "zod";
 import type { InstanceContext } from "./context.js";
 import { INSTRUCTIONS } from "./instructions.js";
 import { noteError, observeCall } from "./observe-call.js";
@@ -58,10 +58,13 @@ export function createServer(ctx: Promise<InstanceContext> | undefined, opts: Se
     const scoped = config.doc !== false;
     const inputSchema = scoped ? { ...config.inputSchema, scope: scopeSchema } : config.inputSchema;
     const mutating = scoped && config.readOnly === false;
+    const accepted = Object.keys(inputSchema);
     return server.registerTool(
       name,
-      { title: config.title, description: config.description, inputSchema, annotations: { readOnlyHint: config.readOnly ?? true, openWorldHint: false } },
+      { title: config.title, description: config.description, inputSchema: strictListed(inputSchema), annotations: { readOnlyHint: config.readOnly ?? true, openWorldHint: false } },
       observeCall(() => session.events, name, async (args: z.infer<z.ZodObject<S>>) => {
+        const refused = unknownArguments(name, accepted, config.readOnly === false, args);
+        if (refused) return noteError(fail(refused.message), refused);
         let c: InstanceContext;
         const pending = session.instanceForCall();
         if (!pending) {
@@ -95,6 +98,38 @@ export function createServer(ctx: Promise<InstanceContext> | undefined, opts: Se
   const unknown = [...hidden].filter((n) => !seen.has(n));
   if (unknown.length) opts.log?.(`server.hideTools: no tool named ${unknown.join(", ")}`);
   return server;
+}
+
+/**
+ * A tool's input schema as registered: listed with `additionalProperties: false`, but parsed
+ * loosely so extra arguments reach the wrapper instead of being stripped by the SDK, and the
+ * wrapper refuses them by name (05, *Unknown arguments*).
+ */
+function strictListed(shape: z.ZodRawShape) {
+  return z.object(shape).loose().meta({ additionalProperties: false });
+}
+
+/**
+ * The refusal for arguments a tool doesn't declare (05, *Unknown arguments*), or undefined when
+ * there are none. `view` on a mutating tool that has no `view` argument is the world view's own
+ * refusal (18, piece 5): the edit was meant for the read-only view and must not land on the document.
+ */
+export function unknownArguments(tool: string, accepted: string[], mutating: boolean, args: unknown): (Error & { refusal: string }) | undefined {
+  if (typeof args !== "object" || args === null) return undefined;
+  const known = new Set(accepted);
+  const extra = Object.keys(args).filter((k) => !known.has(k));
+  if (!extra.length) return undefined;
+  if (mutating && extra.includes("view")) {
+    const v = JSON.stringify((args as { view?: unknown }).view);
+    return refusal(
+      "world_view_read_only",
+      `${tool} has no view argument, so view: ${v} is refused rather than editing the open document. The world view is a read-only look at the world, so ${tool} can't edit it; nothing in it reaches the world. ` +
+        "Build on the open document (the linked one once the player marks a work volume), or ask the player for a build request.",
+    );
+  }
+  const names = extra.map((k) => `"${k}"`).join(", ");
+  const takes = accepted.length ? `It takes: ${accepted.join(", ")}.` : "It takes no arguments.";
+  return refusal("unknown_argument", `${tool} has no argument${extra.length > 1 ? "s" : ""} ${names}, so the call was refused. ${takes}`);
 }
 
 /** The `resource` function tool modules receive (see ResourceFn in tools/shared.ts). */

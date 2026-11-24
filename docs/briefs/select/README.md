@@ -96,8 +96,8 @@ As in the components set: **an agent lives for exactly one step, and is never re
 | Silo | Steps (one merge each) |
 |---|---|
 | W | W1 mode `select`; `search`, `fill`, `expand`; snapshot `mask`/`coarse`; vectors, both codecs, fake host serving them; `18`'s status table · W2 choice kind, steady fill record, volume lines; `13`'s tables |
-| V | V1 world view beside the document, `view: "world"` on the five tools, `world_view_read` by box · V2 coarse level and its caption, `fade`, left-out-neighbour highlight test, surface read for terrain (after W1) |
-| M | M1 material search: ring walk, `maybeHas`, clusters, `gap`/`stop`, resumable, disk reads, tick slicing, grants, `selectChunks` config · M2 fill and expand: mask, frontier, budgets · M3 snapshot `mask` and `coarse` |
+| V | V1 world view beside the document, `view: "world"` on the five tools, `world_view_read` by box · V2 coarse level and its caption, `fade`, left-out-neighbour highlight test, surface read for terrain (after W1) · V3 coarse parts rendered one cube per cell (Z1 follow-up, `18` *Measured*) |
+| M | M1 material search: ring walk, `maybeHas`, clusters, `gap`/`stop`, resumable, disk reads, tick slicing, grants, `selectChunks` config · M2 fill and expand: mask, frontier, budgets · M3 snapshot `mask` and `coarse` · M4 unloaded chunks in grant blocks/mask snapshots read off-thread from disk (Z1 follow-up, `18` *Measured*) |
 | C | C1 `/autosketch select [text]` and alias, mode `select` in prompts, choice-line click (after W1; the choice kind's click after W2 if not yet merged, else in C2) · C2 steady fill record and candidate outline near and far, pulses for proposed hits · C3 work and context volumes on the overlay, particles as the fallback |
 | T | T1 `world_search` with heat-map image, cluster text, `continue` · T2 `world_fill`, `world_expand`, candidate in the world view with its margin read (after V1) · T3 `world_volumes({from: "candidate", margin?})`, too-large handling |
 | P | P1 select mode in `modes.ts` and `prompt.ts`, the select event text, agent guide `library/knowledge/skills/select.md` (workflow and terrain) · P2 `world_reply({choices})` and the choice answer as text (after W2) · P3 candidate shell and outline faces sent through the UI feed, proposed hits pulsed (after W2, T2) |
@@ -105,7 +105,7 @@ As in the components set: **an agent lives for exactly one step, and is never re
 | R | R1 scan removed on both sides, protocol bump retiring `scan` and `prompt.scan`, `13`'s B4 rows pointing to `18` |
 | Z | Z1 *Measure first* on Craftoria, defaults and the radius answer recorded in `18` (after M) · Z2 end-to-end world test, two houses and a ruin · Z3 status, `HANDOFF.md` |
 
-**Waves.** Wave 0: W1, V1. Wave 1, from W1: M1–M3, C1, T1, P1, V2, W2. Wave 2: T2 (V1), T3, C2, C3, P2, P3, Z1 (M). Wave 3: R1, S1, Z2, Z3.
+**Waves.** Wave 0: W1, V1. Wave 1, from W1: M1–M3, C1, T1, P1, V2, W2. Wave 2: T2 (V1), T3, C2, C3, P2, P3, Z1 (M). Wave 3: R1, S1, Z2, Z3; V3 and M4 (Z1 follow-ups) beside Z2.
 
 **Step prompt** (the whole prompt; add review notes or WIP instructions after it):
 

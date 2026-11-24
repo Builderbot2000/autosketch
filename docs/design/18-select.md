@@ -311,3 +311,4 @@ Settled with the user 2026-11-22:
 - **In-world outlines for the candidate in the first version**, and the work and context particle outlines replaced by overlay lines visible at distance.
 - **Connectivity**: the same fill as the magic wand (`{connected}`), 26 neighbours by default in the world.
 - **Defaults the agent may change**: the crosshair block as seed when there is no text; an 8-block margin for fade and context; re-read on expand and on confirm.
+- **Z1's two follow-ups are built in this set** (2026-11-24, decided by Claude on the user's instruction to finish the set): the coarse view draws one cube per cell (V3), since a 4³ overview that takes one to three minutes to render defeats its purpose; and unloaded chunks in blocks and mask snapshots inside the select grant are read from disk off the server thread like search, fill and coarse (M4), since a cold read at the cap takes 8 s against 0.15 s loaded.

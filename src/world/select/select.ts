@@ -1,11 +1,14 @@
 import type { Vec3 } from "../../core/region.js";
 import { refusal } from "../../scope/scopes.js";
 import type { BridgeConnection } from "../bridge.js";
-import { FILL_CONNECTIVITY, MASK_MARGIN, type ExpandBy, type FillResult, type GameContext, type MaskSection, type SearchRequest, type SearchResult } from "../protocol/messages.js";
+import { FILL_CONNECTIVITY, MASK_MARGIN, type ExpandBy, type FillResult, type GameContext, type MaskSection, type SearchRequest, type SearchResult, type WireBox } from "../protocol/messages.js";
 import type { WorldView } from "../view.js";
 import { CANDIDATE, candidateMask, describeFill, frozenRuns, sectionKey, type FillDescription } from "./fill.js";
 import { familyMembers, resolveMaterials, type MaterialGroup, type MaterialLookup } from "./materials.js";
 import type { Mask } from "../../core/mask.js";
+import type { EventListener } from "../../core/fanout.js";
+import type { Document } from "../../document/document.js";
+import { CONFIRM_MARGIN, describeConfirm, growWire, maskRuns, wireBoxOf } from "./confirm.js";
 import { describeSearch, heatMap, type HeatMap } from "./search.js";
 
 /**
@@ -28,6 +31,32 @@ export interface WorldSelectOptions {
   dimension?: () => string | undefined;
   /** The world view the candidate is named in and its margin read into (`18`, pieces 3 and 5). */
   view?: () => WorldView | undefined;
+  /** The linked document and its frame, while linked: a confirmed shape is named there (`18`, piece 9). */
+  linked?: () => { doc: Document; origin: Vec3; dimension: string; work: WireBox } | undefined;
+  /** The session's event fan-out: a `world.link` (linked, relinked) puts the confirmed shape into the new document. */
+  subscribe?: (fn: EventListener) => () => void;
+  /** Whether linking follows a volume change on its own (`world.autoLink`; default true), for the text. */
+  autoLink?: boolean;
+}
+
+/** `world_volumes({from})`: the shape to confirm, resolved from the world view by the tool. */
+export interface ConfirmArgs {
+  /** The named selection confirmed (`candidate`, or a part of it kept under another name). */
+  from: string;
+  /** Its voxels, world coordinates. */
+  shape: Mask;
+  /** The whole candidate when `from` names a part (it comes along too); absent when `from` is the candidate. */
+  candidate?: Mask;
+  /** Context margin around the work box (default 8, 1 to 32). */
+  margin?: number;
+}
+
+/** A confirmed shape, waiting to be named in the linked document (per request, in its dimension). */
+interface Confirmed {
+  request: number | undefined;
+  dimension: string;
+  /** Selection name → world voxels. */
+  shapes: Map<string, Mask>;
 }
 
 /** `world_fill`'s match: `"block"` (the seed's block, any state), `"family"` (the seed's family), or materials. */
@@ -97,8 +126,18 @@ interface SearchState {
 export class WorldSelect {
   private searchState?: SearchState;
   private fillState?: FillState;
+  private confirmed?: Confirmed;
+  private readonly off?: () => void;
 
-  constructor(private readonly opts: WorldSelectOptions) {}
+  constructor(private readonly opts: WorldSelectOptions) {
+    this.off = opts.subscribe?.((e) => {
+      if (e.kind === "world.link" && (e.state === "linked" || e.state === "relinked")) this.place();
+    });
+  }
+
+  close(): void {
+    this.off?.();
+  }
 
   /** The current request's latest search answer (the whole walk so far), if any. */
   get lastSearch(): SearchResult | undefined {
@@ -195,6 +234,50 @@ export class WorldSelect {
     return this.answer(st, { tool: "world_expand", by: a.by, result, before, match: st.match, connectivity: st.connectivity, ...(a.budget !== undefined ? { budget: a.budget } : {}) }, result.sections, margin);
   }
 
+  /**
+   * `world_volumes({from: "candidate", margin?})` (`18`, piece 9): sets the work volume to the shape's
+   * bounding box and the context to that box grown by `margin`, with `volumes.set`, in world
+   * coordinates (no probe or linked document needed). The shape, and the whole candidate when `from`
+   * names a part, are named in the linked document once it links (now, if the link already holds
+   * these volumes). A context over the mod's `contextCap` is refused by the mod (`bad_volumes`; the
+   * shape's box always lies inside the build height): the shape stays confirmed as a selection and
+   * nothing is set. The link's snapshot is the confirm's re-read (*Freshness*).
+   */
+  async confirm(a: ConfirmArgs): Promise<string> {
+    const dimension = this.dimensionOrRefuse("no volumes can be set");
+    const margin = a.margin ?? CONFIRM_MARGIN;
+    if (!Number.isInteger(margin) || margin < 1 || margin > 32) throw new Error("margin is 1 to 32 blocks (the context must cover at least the one-block seam)");
+    const box = wireBoxOf(a.shape);
+    if (!box) throw new Error(`"${a.from}" in the world view is empty: nothing to confirm`);
+    const shapes = new Map<string, Mask>([[a.from, a.shape]]);
+    if (a.candidate && a.from !== CANDIDATE) shapes.set(CANDIDATE, a.candidate);
+    this.confirmed = { request: this.opts.request(), dimension, shapes };
+    const d = { from: a.from, count: a.shape.count(), box, margin, withCandidate: shapes.size > 1, autoLink: this.opts.autoLink ?? true };
+    let volumes;
+    try {
+      volumes = await this.opts.bridge.request({ type: "volumes.set", dimension, work: box, context: [growWire(box, margin)] });
+    } catch (e) {
+      if ((e as { refusal?: string }).refusal !== "bad_volumes") throw e;
+      return describeConfirm({ ...d, tooLarge: (e as Error).message, placed: false });
+    }
+    if (volumes.work === null) throw new Error("The mod confirmed no work volume.");
+    const l = this.opts.linked?.();
+    const w = volumes.work;
+    const same = !!l && l.dimension === dimension && [0, 1, 2].every((i) => l.work.min[i] === w.min[i] && l.work.max[i] === w.max[i]);
+    return describeConfirm({ ...d, volumes, placed: same && this.place() });
+  }
+
+  /** Names the confirmed shapes in the linked document (local coordinates), when one is linked in their dimension. */
+  private place(): boolean {
+    const c = this.confirmed;
+    if (!c) return false;
+    if (c.request !== this.opts.request()) return void (this.confirmed = undefined), false;
+    const l = this.opts.linked?.();
+    if (!l || l.dimension !== c.dimension) return false;
+    for (const [name, m] of c.shapes) l.doc.selections.set(name, { frozen: maskRuns(m, l.origin) });
+    return true;
+  }
+
   /** Names the candidate in the view, reads `toRead` plus the margin, and words the answer. */
   private async answer(st: FillState, d: Omit<FillDescription, "sections" | "read">, toRead: readonly MaskSection[], margin: number): Promise<FillAnswer> {
     const all = [...st.sections.values()];
@@ -237,9 +320,9 @@ export class WorldSelect {
     return { wire: members, label: `the seed's family ${f.id} (${members.length} ids)` };
   }
 
-  private dimensionOrRefuse(): string {
+  private dimensionOrRefuse(what = "nothing can be filled"): string {
     const dimension = this.opts.context()?.dimension ?? this.opts.dimension?.();
-    if (!this.opts.bridge.connected) throw refusal("world_disconnected", "No game is connected, so nothing can be filled.");
+    if (!this.opts.bridge.connected) throw refusal("world_disconnected", `No game is connected, so ${what}.`);
     if (!dimension) throw refusal("world_no_request", "No select request is open: the player starts one with /autosketch select.");
     return dimension;
   }

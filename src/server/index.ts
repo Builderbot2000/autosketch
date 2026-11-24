@@ -161,6 +161,10 @@ async function main(): Promise<void> {
     context: () => worldView.context,
     dimension: () => link.volumes?.dimension,
     view: () => worldView,
+    // Confirming (18, piece 9): the confirmed shape is named in the linked document once it links.
+    linked: () => (link.state === "linked" && link.doc && link.volumes ? { doc: link.doc, origin: link.volumes.origin, dimension: link.volumes.dimension, work: link.volumes.work } : undefined),
+    subscribe: (fn) => session.subscribe(fn),
+    autoLink,
   });
   // The in-game UI (16): overlays, ghosts, replay and the player's requests, over the bridge.
   const ui = startUi({

@@ -5,11 +5,16 @@ import dev.autosketch.mod.api.PatchStatus;
 import dev.autosketch.mod.api.WandMode;
 import dev.autosketch.mod.link.Link;
 import dev.autosketch.mod.link.LinkStatus;
+import dev.autosketch.mod.platform.Platform;
 import dev.autosketch.mod.protocol.Box;
 import dev.autosketch.mod.volume.PlayerStates;
 import dev.autosketch.mod.volume.Wand;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import net.minecraft.core.particles.DustParticleOptions;
@@ -20,8 +25,10 @@ import org.jetbrains.annotations.Nullable;
 import org.joml.Vector3f;
 
 /**
- * What the player sees of the link (13, *Player feedback in-game*; M11): volume outlines as dust
- * particles in each wand mode's colour, while the wand is held or after {@code /autosketch show};
+ * What the player sees of the link (13, *Player feedback in-game*; M11): volume outlines in each wand
+ * mode's colour, while the wand is held or after {@code /autosketch show}, sent to the player's client
+ * half to draw on its overlay when it registered the UI channel and the link is {@code connected}
+ * (13, *Relay to the client*, op {@code 4}; 18, piece 8), else as dust particles;
  * the wand's mode on the action bar; action-bar notices from the MCP and for finished patches,
  * toggled per player with {@code /autosketch notices}. Particles go only to the player who sees
  * them. Server thread only.
@@ -40,6 +47,10 @@ public final class Feedback {
     private final Supplier<List<WandMode>> modes;
     private final Supplier<PatchStatus> patches;
     private long lastPatchId = -1;
+    private record Sent(ServerPlayer player, String json) {}
+    /** Per player, the outlines their client half last got (op 4). */
+    private final Map<UUID, Sent> sent = new HashMap<>();
+    private final Map<UUID, Integer> particles = new ConcurrentHashMap<>();
 
     public Feedback(PlayerStates players, BooleanSupplier noticesDefault, Supplier<List<WandMode>> modes, Supplier<PatchStatus> patches) {
         this.players = players;
@@ -50,6 +61,8 @@ public final class Feedback {
 
     public void serverStarted() {
         lastPatchId = -1;
+        sent.clear();
+        particles.clear();
     }
 
     public boolean noticesOn(ServerPlayer p) {
@@ -84,18 +97,62 @@ public final class Feedback {
             notice(server, null, patchLine(last));
         }
         long tick = server.getTickCount();
-        boolean outlines = tick % OUTLINE_PERIOD == 0, modeLine = tick % MODE_LINE_PERIOD == 0;
-        if (!outlines && !modeLine) return;
-        if (Link.status() == LinkStatus.OFFLINE) return; // 16: nothing drawn while no MCP is connected; volumes show again on connect
+        boolean particleTick = tick % OUTLINE_PERIOD == 0, modeLine = tick % MODE_LINE_PERIOD == 0;
+        // 16: nothing drawn while no MCP is connected; volumes show again on connect
+        LinkStatus link = Link.status();
         List<WandMode> all = modes.get();
-        for (ServerPlayer p : server.getPlayerList().getPlayers()) {
-            if (!p.hasPermissions(CommandExtension.OP_LEVEL)) continue;
-            PlayerStates.State st = players.get(p.getUUID());
-            boolean holding = Wand.isWand(p.getMainHandItem());
-            if (outlines && (holding || st.show)) drawOutlines(p, all);
-            if (modeLine && holding && p.serverLevel().getGameTime() >= st.actionBarBusyUntil && !all.isEmpty())
+        Platform platform = Platform.get();
+        List<ServerPlayer> online = server.getPlayerList().getPlayers();
+        for (ServerPlayer p : online) {
+            boolean op = p.hasPermissions(CommandExtension.OP_LEVEL);
+            PlayerStates.State st = op ? players.get(p.getUUID()) : null;
+            boolean holding = op && Wand.isWand(p.getMainHandItem());
+            boolean shown = op && link != LinkStatus.OFFLINE && (holding || st.show);
+            boolean channel = platform.hasUiChannel(p);
+            // 13, *Relay to the client*, op 4: the client half draws them while linked; everyone else gets particles.
+            if (channel && link == LinkStatus.CONNECTED) send(platform, p, shown ? outlines(p, all) : VolumeOutlines.none(dimension(p)));
+            else {
+                if (channel) send(platform, p, VolumeOutlines.none(dimension(p)));
+                if (shown && particleTick) drawOutlines(p, all);
+            }
+            if (op && modeLine && link != LinkStatus.OFFLINE && holding && p.serverLevel().getGameTime() >= st.actionBarBusyUntil && !all.isEmpty())
                 p.displayClientMessage(Component.literal("Autosketch wand: " + all.get(Math.floorMod(st.mode, all.size())).name() + " mode"), true);
         }
+        if (particleTick && sent.size() > online.size()) sent.keySet().removeIf(u -> server.getPlayerList().getPlayer(u) == null);
+    }
+
+    /** What the player's client half draws (op 4): each wand mode's boxes in its colour, in mode order. */
+    static VolumeOutlines outlines(ServerPlayer p, List<WandMode> all) {
+        List<VolumeOutlines.Entry> out = new ArrayList<>(all.size());
+        for (WandMode m : all) out.add(new VolumeOutlines.Entry(m.colour() & 0xFFFFFF, m.outline(p)));
+        return new VolumeOutlines(dimension(p), out);
+    }
+
+    private static String dimension(ServerPlayer p) {
+        return p.serverLevel().dimension().location().toString();
+    }
+
+    /**
+     * Sends the outlines when they differ from what this player's client last got. A new
+     * {@code ServerPlayer} (a join, so a fresh client half) always gets them.
+     */
+    private void send(Platform platform, ServerPlayer p, VolumeOutlines o) {
+        String json = o.toJson();
+        Sent prev = sent.get(p.getUUID());
+        if (prev != null && prev.player == p && prev.json.equals(json)) return;
+        sent.put(p.getUUID(), new Sent(p, json));
+        platform.sendVolumeOutlines(p, json);
+    }
+
+    /** For tests: the outlines JSON this player's client half last got, or null. */
+    public @Nullable String lastOutlines(UUID player) {
+        Sent s = sent.get(player);
+        return s == null ? null : s.json;
+    }
+
+    /** For tests: outline particles sent to this player since the server started. */
+    public int particlesSent(UUID player) {
+        return particles.getOrDefault(player, 0);
     }
 
     /** {@code Autosketch: 1,204 placed, 3 skipped} (13, *Player feedback in-game*). */
@@ -113,6 +170,8 @@ public final class Feedback {
             DustParticleOptions dust = new DustParticleOptions(new Vector3f(((rgb >> 16) & 255) / 255f, ((rgb >> 8) & 255) / 255f, (rgb & 255) / 255f), 1.0f);
             for (Box b : m.outline(p)) drawBox(p, dust, b, budget);
         }
+        int n = MAX_POINTS - Math.max(budget[0], 0);
+        if (n > 0) particles.merge(p.getUUID(), n, Integer::sum);
     }
 
     /** One box's outline in a colour, for this player only (air mode's preview point, B2). */

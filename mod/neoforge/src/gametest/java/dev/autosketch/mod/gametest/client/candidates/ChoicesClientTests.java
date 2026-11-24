@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import dev.autosketch.mod.client.ui.LinkState;
 import dev.autosketch.mod.gametest.client.ClientTest;
 import dev.autosketch.mod.gametest.client.ClientTestSuite;
+import dev.autosketch.mod.gametest.client.overlay.VolumeOverlayClientTests;
 import dev.autosketch.mod.protocol.Messages;
 import dev.autosketch.mod.prompt.InGamePrompts;
 import java.util.List;
@@ -50,7 +51,9 @@ public final class ChoicesClientTests {
     @ClientTest("candidates")
     public static void choiceLinesSendTheirIndexOnClick(ClientTestSuite s) {
         String[] commands = new String[CHOICES.size()];
+        ActionBar bar = new ActionBar();
         s.waitUntil("connected", () -> LinkState.connected(), 400);
+        int[] slot = VolumeOverlayClientTests.awayFromTheWand(s);
         s.step("clear chat", s::clearMessages);
         s.step("the agent asks, one reply per choice, then the free-text line", () -> {
             UUID me = s.player().getUUID();
@@ -79,24 +82,58 @@ public final class ChoicesClientTests {
             check(!commands[0].equals(commands[1]), "both choices run " + commands[0]);
             return true;
         }, 200);
+        s.step("record the action bar from here", () -> bar.reset(s));
         s.step("click the first choice", () -> check(s.player().connection.sendUnsignedCommand(commands[0].substring(1)), "the command needs signing"));
         s.waitUntil("choices.pick {id: q1, index: 0} sent, and the action bar says the answer went out", () -> {
+            List<String> seen = bar.seen(s);
             List<JsonObject> rs = picks(s);
             check(rs.size() == 1, rs.size() + " choices.pick");
             check(rs.get(0).getAsJsonObject("args").toString().equals("{\"id\":\"q1\",\"index\":0}"), "args " + rs.get(0).getAsJsonObject("args"));
-            String bar = CandidatesClientTests.overlay(s);
-            check(bar.equals("Autosketch: answer sent to the agent"), "action bar " + bar);
+            check(seen.contains("Autosketch: answer sent to the agent"), "action bar since the click " + seen);
             return true;
         }, 200);
+        s.step("record the action bar from here", () -> bar.reset(s));
         s.step("click the second choice", () -> check(s.player().connection.sendUnsignedCommand(commands[1].substring(1)), "the command needs signing"));
         s.waitUntil("choices.pick {id: q1, index: 1} sent, and the refusal on the action bar", () -> {
+            List<String> seen = bar.seen(s);
             List<JsonObject> rs = picks(s);
             check(rs.size() == 2, rs.size() + " choices.pick");
             check(rs.get(1).getAsJsonObject("args").toString().equals("{\"id\":\"q1\",\"index\":1}"), "args " + rs.get(1).getAsJsonObject("args"));
-            String bar = CandidatesClientTests.overlay(s);
-            check(bar.equals("Autosketch: You already answered this question."), "action bar " + bar);
+            check(seen.contains("Autosketch: You already answered this question."), "action bar since the click " + seen);
             return true;
         }, 200);
+        s.cleanup("the hotbar slot back", () -> {
+            if (slot[0] >= 0) s.player().getInventory().selected = slot[0];
+        });
+    }
+
+    /**
+     * The action-bar texts shown since {@link #reset}, recorded as they change: the client half's own
+     * messages never pass the chat event the suite records, and a later one (the wand's mode line, a
+     * notice) may overwrite the one a check waits for, so a check reads this list rather than the
+     * text on screen now. Polled from the wait's condition, every tick.
+     */
+    static final class ActionBar {
+        private Object last;
+        private final List<String> seen = new java.util.ArrayList<>();
+
+        void reset(ClientTestSuite s) throws ReflectiveOperationException {
+            last = current(s);
+            seen.clear();
+        }
+
+        List<String> seen(ClientTestSuite s) throws ReflectiveOperationException {
+            Object c = current(s);
+            if (c != null && c != last) seen.add(((Component) c).getString());
+            last = c;
+            return List.copyOf(seen);
+        }
+
+        private static Object current(ClientTestSuite s) throws ReflectiveOperationException {
+            java.lang.reflect.Field f = net.minecraft.client.gui.Gui.class.getDeclaredField("overlayMessageString");
+            f.setAccessible(true);
+            return f.get(s.mc().gui);
+        }
     }
 
     private static @Nullable Component last(List<Component> lines, String text) {

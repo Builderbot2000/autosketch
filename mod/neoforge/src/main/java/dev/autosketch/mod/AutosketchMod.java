@@ -119,5 +119,15 @@ public final class AutosketchMod {
         public void sendLinkStatus(ServerPlayer player, LinkStatus status) {
             UiNetwork.send(player, UiPayload.link(status.wire()));
         }
+
+        @Override
+        public boolean hasUiChannel(ServerPlayer player) {
+            return UiNetwork.TRANSPORT.hasChannel(player);
+        }
+
+        @Override
+        public void sendVolumeOutlines(ServerPlayer player, String json) {
+            UiNetwork.send(player, UiPayload.outlines(json));
+        }
     }
 }

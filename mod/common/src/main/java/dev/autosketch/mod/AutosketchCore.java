@@ -58,10 +58,10 @@ public final class AutosketchCore {
     private List<CommandExtension> commands = List.of();
 
     /** Mod-internal pieces, for GameTests only. Not an API: other silos use {@link Autosketch}. */
-    public record Internals(VolumeManager volumes, ChunkTickets tickets, BridgeServer bridge, PlayerStates players, WandControl wand, AirMode air) {}
+    public record Internals(VolumeManager volumes, ChunkTickets tickets, BridgeServer bridge, PlayerStates players, WandControl wand, AirMode air, Feedback feedback) {}
 
     public Internals internals() {
-        return new Internals(volumes, tickets, bridge, players, wand, air);
+        return new Internals(volumes, tickets, bridge, players, wand, air, feedback);
     }
 
     /** Builds the pieces and loads the config; the platform must be installed first. */

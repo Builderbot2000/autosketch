@@ -68,7 +68,8 @@ public final class MaterialSearch {
     /** Chunks read from disk ahead of the walk. */
     public static final int PREFETCH = 64;
 
-    private static final Codec<PalettedContainer<BlockState>> STATES = PalettedContainer.codecRW(
+    /** A section's saved block states, as the vanilla reader decodes them (shared with {@link WorldFill}). */
+    static final Codec<PalettedContainer<BlockState>> STATES = PalettedContainer.codecRW(
             Block.BLOCK_STATE_REGISTRY, BlockState.CODEC, PalettedContainer.Strategy.SECTION_STATES, Blocks.AIR.defaultBlockState());
 
     private final Function<ResourceKey<Level>, @Nullable ServerLevel> levels;

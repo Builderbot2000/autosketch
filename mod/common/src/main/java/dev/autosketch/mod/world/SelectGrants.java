@@ -13,8 +13,8 @@ import org.jetbrains.annotations.Nullable;
  * *Decisions*): the square of chunks within {@code selectChunks} (Chebyshev) of the chunk of the
  * select prompt's position, in its dimension, full build height, fixed when the prompt goes out. One
  * grant at a time: a select prompt replaces it, a scan prompt ends it ({@link ScanGrants#set}), and
- * so do the connection closing and the server stopping. It carries the request's search (and, from
- * M2, its fill) with it.
+ * so do the connection closing and the server stopping. It carries the request's search and its
+ * fill with it.
  */
 public final class SelectGrants {
     private SelectGrants() {}
@@ -40,10 +40,11 @@ public final class SelectGrants {
         }
     }
 
-    /** A grant in force and the request state it carries (the search, resumable with {@code continue}). */
+    /** A grant in force and the request state it carries (the search, resumable with {@code continue}, and the fill {@code expand} grows). */
     public static final class Held {
         private final Grant grant;
         private volatile @Nullable SearchWalk search;
+        private volatile WorldFill.@Nullable State fill;
 
         Held(Grant grant) {
             this.grant = grant;
@@ -59,6 +60,14 @@ public final class SelectGrants {
 
         void search(SearchWalk walk) {
             search = walk;
+        }
+
+        public WorldFill.@Nullable State fill() {
+            return fill;
+        }
+
+        void fill(WorldFill.State state) {
+            fill = state;
         }
     }
 

@@ -74,6 +74,8 @@ tasks.named('test', Test) {
     useJUnitPlatform()
     systemProperty 'autosketch.goldenDir', goldenDir
     inputs.dir(goldenDir).withPropertyName('goldenVectors').withPathSensitivity(PathSensitivity.RELATIVE)
+    // The fill parity fixture (18, piece 3), beside the vectors: FillWalkTest finds it from goldenDir.
+    inputs.file(rootProject.file('../test/data/select/fill-parity.json')).withPropertyName('fillParity').withPathSensitivity(PathSensitivity.RELATIVE)
     testLogging {
         events 'failed'
         exceptionFormat 'full'

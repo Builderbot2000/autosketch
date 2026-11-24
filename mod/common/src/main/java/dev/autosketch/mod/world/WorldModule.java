@@ -22,7 +22,7 @@ import org.jetbrains.annotations.Nullable;
 
 /**
  * Silo O's registration (13, M5–M9): the {@code patch}, {@code hashes} and {@code snapshot}
- * handlers (and select's {@code search}, 18), the patch status for {@code /autosketch status}, and the server-tick hooks that drive the
+ * handlers (and select's {@code search}, {@code fill} and {@code expand}, 18), the patch status for {@code /autosketch status}, and the server-tick hooks that drive the
  * patch budget, the sliced reads and the change tracker. Registers through {@link AutosketchSetup},
  * so no other package's files change; each loader's events call {@link #setup} and the tick hooks
  * (on NeoForge, {@code WorldEvents}).
@@ -36,6 +36,14 @@ public final class WorldModule {
     private static volatile @Nullable Services services;
     private static volatile @Nullable SurfaceReads surface;
     private static volatile @Nullable MaterialSearch search;
+    private static volatile @Nullable WorldFill fills;
+
+    /** Fill and expand (18, pieces 3 and 4), for GameTests. */
+    public static WorldFill fills() {
+        WorldFill f = fills;
+        if (f == null) throw new IllegalStateException("the world module isn't set up yet");
+        return f;
+    }
 
     /** The material search (18, piece 2), for GameTests. */
     public static MaterialSearch search() {
@@ -84,6 +92,8 @@ public final class WorldModule {
         surface = new SurfaceReads(Autosketch.link(), levels, Util.backgroundExecutor());
         MaterialSearch materials = new MaterialSearch(levels, Util.backgroundExecutor());
         search = materials;
+        WorldFill fill = new WorldFill(levels, Util.backgroundExecutor());
+        fills = fill;
         // The scan and select grants last until the next request replaces them, the connection closing or the server stopping (B4; 18).
         Autosketch.bridge().addListener(new dev.autosketch.mod.api.Bridge.Listener() {
             @Override
@@ -102,6 +112,8 @@ public final class WorldModule {
         // Select (18): served once a select request's grant is in force. The mod lists the feature
         // `select` in its hello only when fill, expand and the mask and coarse snapshots are served too (M3).
         e.messages().register("search", (msg, ex) -> materials.search(SelectMessages.SearchRequest.decode(msg.frame()), ex));
+        e.messages().register("fill", (msg, ex) -> fill.fill(SelectMessages.FillRequest.decode(msg.frame()), ex));
+        e.messages().register("expand", (msg, ex) -> fill.expand(SelectMessages.ExpandRequest.decode(msg.frame()), ex));
         e.patchStatus(patches);
     }
 
@@ -113,6 +125,7 @@ public final class WorldModule {
         s.reads().tick();
         if (surface != null) surface.tick();
         if (search != null) search.tick();
+        if (fills != null) fills.tick();
     }
 
     /** End of a server tick. */

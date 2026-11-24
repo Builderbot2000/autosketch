@@ -2,7 +2,7 @@
 
 One brief per silo of `18`'s *New pieces*, *Removal*, *Measure first* and *Testing*, as of commit `4825b48` (2026-11-22). Each team reads the main [briefs README](../README.md) first (branching, file ownership, code style and *Done means* all apply), then the [world README](../world/README.md) and the [UI README](../ui/README.md)'s *Rules for this set* where it touches `src/world/`, `src/ui/` or `mod/`, then this README, then its own brief, then `18` and the sections of `05`, `06`, `11`, `13`, `16` and `17` the brief cites. `18` is the source of truth. A brief only scopes, sequences and assigns files.
 
-**Status: not started.** [PROGRESS.md](PROGRESS.md) is the step log.
+**Status: complete (2026-11-24).** Every step (W1 to Z3, with the follow-ups V3, M4, M5 and S1) is merged; [PROGRESS.md](PROGRESS.md) is the step log and [HANDOFF.md](HANDOFF.md) the completion record and the follow-ups left open.
 
 Letters are local to this set. Agents work one step at a time and are never resumed (*How to run this set*). Branches are named `silo/sl-<letter>-<slug>` so they never collide with earlier sets.
 

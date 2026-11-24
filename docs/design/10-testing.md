@@ -89,7 +89,7 @@ npm run eval        # tier 3 (needs ANTHROPIC_API_KEY and an instance); -- --dry
 | Golden update command | Done: `npm run golden:update` (`UPDATE_GOLDEN=1`) | `test/golden/harness.ts` |
 | Tier 2 in `npm test` and CI speed | Done; the whole golden tier runs in under 1 s | `vitest.config.ts` (unchanged: it already includes `test/**`) |
 | Optional local tier | Done (before this work) | `test/local/` |
-| Optional e2e world tier | Done on the Craftoria server (8 scenarios, measurement scripts); no vanilla NeoForge server run (EULA) | `test/e2e/world/` |
+| Optional e2e world tier | Done on the Craftoria server (8 scenarios, measurement scripts; `17`'s components and `18`'s select end to end); no vanilla NeoForge server run (EULA) | `test/e2e/world/` |
 | Tier 3: runner, scripted driver, Agent SDK driver | Built. The SDK driver has not yet run against the real SDK or API (no tokens spent so far), so expect small fixes on the first real run | `test/eval/runner.ts`, `test/eval/drivers/`, `test/eval/host.ts` |
 | Tier 3: benchmark set (20 prompts, 3 seeds) | Done | `test/eval/prompts.ts`, `test/eval/seeds.ts` |
 | Tier 3: automatic checks, rubric, cost | Done (the rubric is wired and parsed, but no judge has run yet) | `test/eval/checks.ts`, `rubric.ts`, `cost.ts` |

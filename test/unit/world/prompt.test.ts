@@ -513,7 +513,7 @@ describe("select requests (18, piece 1)", () => {
     (crosshair ? "; or start from the crosshair block" : "") +
     ". 2. Propose: offer the likeliest clusters (nearest, densest) with world_reply({choices}). " +
     '3. Grow: world_fill({seed, match}) from a block of the chosen hit, then world_expand({by:"frontier"}) while its frontier is open. ' +
-    '4. Look and trim: render({view:"world", region:{dilate:["candidate",8]}, fade:"candidate"}), then cut "candidate" with the selection algebra. ' +
+    '4. Look and trim: render({view:"world", region:{dilate:"candidate",by:8}, fade:"candidate"}), then cut "candidate" with the selection algebra. ' +
     '5. Confirm: ask "is this it?" with world_reply({choices}), then world_volumes({from:"candidate"}). ' +
     "For terrain, read a starter volume with world_view_read and cut it instead of filling.";
 

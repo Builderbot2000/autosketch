@@ -4,8 +4,11 @@
  * a JSON report. Needs a running server (test/e2e/world/server.sh) and the env of harness.ts.
  *
  *   npx tsx test/e2e/world/measure.ts throughput|snapshot|tracker|surface [--runs 5]
+ *   npx tsx test/e2e/world/measure.ts select-search|select-fill|select-coarse|select-blocks [--at x z] [--gen n]
+ *
+ * The select-* runs are 18's *Measure first* (step Z1), on a normally generated world (see below).
  */
-import { encodeMessage, type PatchBlock } from "../../../src/world/protocol/index.js";
+import { encodeMessage, type FillResult, type PatchBlock } from "../../../src/world/protocol/index.js";
 import { rcon, setVolumes, startMcp, sleep, type Mcp, type Vec3 } from "./harness.js";
 import type { Rcon } from "./rcon.js";
 
@@ -235,6 +238,223 @@ async function surface(r: Rcon, m: Mcp): Promise<void> {
   await r.command("autosketch clear");
 }
 
+// ── 18, *Measure first* (step Z1) ─────────────────────────────────────────────────────────────
+//
+// Run on a normally generated world (not the flat e2e world): the select reads are only telling on
+// real terrain. The server has no player, so the select grant comes from `/autosketch measure grant`
+// (MeasureCommands, console and RCON only), and each read's cost from `/autosketch measure last`.
+//
+//   --at <x> <z>     the grant's centre (default 0 0), a chunk inside the pre-generated area
+//   --gen <chunks>   radius of the pre-generated square around it (default 24)
+
+const OW = "minecraft:overworld";
+const argAt = process.argv.indexOf("--at");
+const AT: [number, number] = argAt > 0 ? [Number(process.argv[argAt + 1]), Number(process.argv[argAt + 2])] : [0, 0];
+const argGen = process.argv.indexOf("--gen");
+const GEN = argGen > 0 ? Number(process.argv[argGen + 1]) : 24;
+
+/** The mod's last costs, one record per read kind (`measure last`), as key → number. */
+async function last(r: Rcon): Promise<Record<string, Record<string, number>>> {
+  const out: Record<string, Record<string, number>> = {};
+  for (const line of (await r.command("autosketch measure last")).split("\n")) {
+    const m = /^(\w+) \w+\[(.*)\]$/.exec(line.trim());
+    if (!m) continue;
+    out[m[1]!] = Object.fromEntries(m[2]!.split(", ").map((kv) => kv.split("=")).map(([k, v]) => [k!, Number(v)]));
+  }
+  return out;
+}
+
+const ms = (nanos: number | undefined) => Math.round((nanos ?? 0) / 1e5) / 10;
+
+/** The cost record with times in ms and the per-tick server time it implies. */
+function cost(s: Record<string, number> | undefined): Record<string, number> {
+  if (!s) return {};
+  const o: Record<string, number> = {};
+  for (const [k, v] of Object.entries(s)) o[k.replace(/Nanos$/, "Ms")] = k.endsWith("Nanos") ? ms(v) : v;
+  if (s.serverNanos !== undefined && s.ticks) o.serverMsPerTick = ms(s.serverNanos / s.ticks);
+  return o;
+}
+
+async function grant(r: Rcon, radius: number, at = AT): Promise<void> {
+  const g = await r.command(`autosketch measure grant ${at[0]} ${at[1]} ${radius}`);
+  if (!g.includes("select grant")) throw new Error(`grant failed: ${g}`);
+}
+
+/** Drops every forced chunk and waits for the chunks to unload (and be saved), so reads start cold. */
+async function cold(r: Rcon, waitMs = 45_000): Promise<void> {
+  await r.command("forceload remove all");
+  await r.command("save-all flush");
+  await sleep(waitMs);
+}
+
+const generated = (c: [number, number]) => Math.max(Math.abs(c[0] - (AT[0] >> 4)), Math.abs(c[1] - (AT[1] >> 4))) <= GEN;
+
+async function search(m: Mcp, materials: string[], radius: number, stop?: number, around?: Vec3) {
+  const t = performance.now();
+  const res = await m.link.bridge.request({ type: "search", dimension: OW, materials, radius, ...(stop ? { stop } : {}), ...(around ? { around } : {}) });
+  return { ms: Math.round(performance.now() - t), res, bytes: encodeMessage(res).length };
+}
+
+/**
+ * Search (18, *Measure first* 1): how often real terrain's sections answer "maybe" per material over
+ * the generated square, cold walks at 64 and 256 chunks for a material that isn't there, and the
+ * time to the first closed cluster for a build near the centre, loaded and cold.
+ */
+async function selectSearch(r: Rcon, m: Mcp): Promise<void> {
+  await grant(r, 256);
+  const materials = ["minecraft:stone_bricks", "minecraft:mossy_stone_bricks", "minecraft:cobblestone", "minecraft:mossy_cobblestone", "minecraft:oak_planks", "minecraft:spruce_planks",
+    "minecraft:oak_log", "minecraft:spruce_log", "minecraft:bricks", "minecraft:glass", "minecraft:glass_pane", "minecraft:smooth_stone", "minecraft:deepslate_bricks",
+    "minecraft:stone", "minecraft:andesite", "minecraft:sandstone", "minecraft:terracotta", "minecraft:white_wool"];
+  // Warm-up walk, so the first material doesn't pay the class loading.
+  await search(m, ["minecraft:pink_concrete"], GEN, 1024);
+  const rates: Record<string, unknown> = {};
+  for (const mat of materials) {
+    const s = await search(m, [mat], GEN, 1024);
+    const c = (await last(r)).search!;
+    const read = c.chunks! - c.missing!;
+    const sections = read * 24;
+    rates[mat] = { maybe_pct: Math.round((1000 * c.maybeSections!) / sections) / 10, match_pct: Math.round((1000 * c.matchSections!) / sections) / 10, clusters: s.res.clusters.length, blocks: s.res.chunks.reduce((a, ch) => a + ch.counts[0]!, 0), wall_ms: s.ms, server_ms_per_tick: cost(c).serverMsPerTick };
+  }
+  log("search_maybe_rates", { square_chunks: (GEN * 2 + 1) ** 2, sections_per_chunk: 24, rates });
+  // Cold walks: nothing forced, a material that isn't there, so the walk goes to the radius.
+  for (const radius of [64, 256]) {
+    await cold(r);
+    const idle = await mspt(r);
+    const s = await search(m, ["minecraft:pink_concrete"], radius, 1024);
+    const c = cost((await last(r)).search);
+    const unexpected = s.res.missing.filter(generated).length;
+    log(`search_cold_${radius}`, { wall_ms: s.ms, reached: s.res.reached, missing: s.res.missing.length, generated_listed_missing: unexpected, answer_bytes: s.bytes, ...c, mspt_idle: idle, mspt_last100_after: await mspt(r) });
+  }
+  // The same walks again, warm (chunks still cached by the chunk storage's I/O, nothing loaded).
+  {
+    const s = await search(m, ["minecraft:pink_concrete"], 64, 1024);
+    log("search_again_64", { wall_ms: s.ms, ...cost((await last(r)).search) });
+  }
+  // A build near the centre: a mossy stone brick house 5 chunks east, a ruin of it 9 chunks north.
+  const hx = AT[0] + 80, hz = AT[1] + 4;
+  await r.command(`forceload add ${hx - 16} ${hz - 16} ${hx + 32} ${hz + 32}`);
+  await sleep(5000);
+  const y = await surfaceY(m, hx, hz);
+  await r.command(`fill ${hx} ${y} ${hz} ${hx + 10} ${y + 6} ${hz + 8} minecraft:mossy_stone_bricks hollow`);
+  await r.command(`fill ${hx + 1} ${y + 7} ${hz + 1} ${hx + 9} ${y + 7} ${hz + 7} minecraft:spruce_planks`);
+  log("house", { at: [hx, y, hz], size: [11, 8, 9] });
+  for (const state of ["loaded", "cold"] as const) {
+    if (state === "cold") await cold(r);
+    const idle = await mspt(r);
+    const s = await search(m, ["minecraft:mossy_stone_bricks", "minecraft:mossy_stone_brick_stairs", "minecraft:mossy_stone_brick_slab"], 256);
+    const c = cost((await last(r)).search);
+    log(`search_first_closed_${state}`, { wall_ms: s.ms, reached: s.res.reached, clusters: s.res.clusters.map((k) => ({ min: k.min, max: k.max, blocks: k.blocks, closed: k.closed })), ...c, mspt_idle: idle, mspt_last100_after: await mspt(r) });
+  }
+  // M2's follow-up: a chunk between unload and save may read as missing. Walk the square every second
+  // while the forced chunks unload, and count generated chunks listed missing.
+  await r.command(`forceload add ${AT[0] - 128} ${AT[1] - 128} ${AT[0] + 127} ${AT[1] + 127}`);
+  await sleep(10_000);
+  await r.command("forceload remove all");
+  const window: number[] = [];
+  for (let i = 0; i < 40; i++) {
+    const s = await search(m, ["minecraft:pink_concrete"], 8, 1024);
+    window.push(s.res.missing.filter(generated).length);
+    await sleep(1000);
+  }
+  log("unload_window_generated_listed_missing_per_walk", window);
+}
+
+/** The top non-air y of a column, through a one-column blocks snapshot (inside the grant). */
+async function surfaceY(m: Mcp, x: number, z: number): Promise<number> {
+  const s = await m.link.bridge.request({ type: "snapshot", dimension: OW, boxes: [{ min: [x, -64, z], max: [x, 319, z] }] });
+  const st = s.regions[0]!.states;
+  for (let i = st.length - 1; i >= 0; i--) if (!/air$/.test(s.palette[st[i]!]!)) return -64 + i + 1;
+  return 64;
+}
+
+/**
+ * Fill (18, *Measure first* 2): the terrain as a stand-in for a build of tens of millions of blocks,
+ * `solid` from a seed underground, grown by `expand` frontier in rounds at the default budget.
+ */
+async function selectFill(r: Rcon, m: Mcp): Promise<void> {
+  const rounds = Number(process.argv[process.argv.indexOf("--rounds") + 1] ?? 10) || 10;
+  await grant(r, 256);
+  await cold(r, 30_000);
+  const seed: Vec3 = [AT[0] + 8, -40, AT[1] + 8];
+  const rows: unknown[] = [];
+  let res: FillResult | undefined;
+  for (let i = 0; i < rounds; i++) {
+    const idle = await mspt(r);
+    const t = performance.now();
+    res = i === 0
+      ? await m.link.bridge.request({ type: "fill", dimension: OW, seed, match: ["solid"] })
+      : await m.link.bridge.request({ type: "expand", dimension: OW, by: "frontier" });
+    const wall = Math.round(performance.now() - t);
+    const bytes = encodeMessage(res).length;
+    const full = res.sections.filter((s) => s.mask === "full").length;
+    const c = cost((await last(r)).fill);
+    const row = { round: i, wall_ms: wall, count: res.count, stopped: res.stopped, sections_sent: res.sections.length, full_sections: full, frontier_sections: res.frontier.length, answer_bytes: bytes, missing: res.missing.length, generated_listed_missing: res.missing.filter(generated).length, ...c, mspt_idle: idle, mspt_last100_after: await mspt(r) };
+    rows.push(row);
+    log(`fill_round_${i}`, row);
+    if (res.stopped === "complete") break;
+  }
+  log("fill_box", res?.box);
+}
+
+/**
+ * Coarse view (18, *Measure first* 3): a big box of terrain read at 4³ cells, on the wire (the
+ * mod's coarse snapshot) and through the MCP (world_view_read, then render of the view), with the
+ * render saved for the legibility check.
+ */
+async function selectCoarse(r: Rcon, m: Mcp): Promise<void> {
+  const out = process.argv[process.argv.indexOf("--out") + 1] ?? "/tmp";
+  await grant(r, 256);
+  const { WorldView } = await import("../../../src/world/view.js");
+  const ctx = await (await import("./harness.js")).instanceContext();
+  m.session.worldView = new WorldView({ bridge: m.link.bridge, request: () => 1, dimension: () => OW, dataVersion: () => m.link.bridge.hello?.game.dataVersion ?? 0, palettes: () => ctx.book });
+  for (const half of [128, 256, 384]) {
+    const box = { min: [AT[0] - half, -64, AT[1] - half] as Vec3, max: [AT[0] + half - 1, 191, AT[1] + half - 1] as Vec3 };
+    if (half / 16 > GEN + 1) continue;
+    await cold(r, 30_000);
+    const idle = await mspt(r);
+    let t = performance.now();
+    const wire = await m.link.bridge.request({ type: "snapshot", kind: "coarse", dimension: OW, cell: 4, boxes: [box] });
+    const wireMs = Math.round(performance.now() - t);
+    const c = cost((await last(r)).coarse);
+    log(`coarse4_wire_${half * 2}`, { blocks: (half * 2) ** 2 * 256, cells: wire.regions[0]!.states.length, palette: wire.palette.length, wall_ms: wireMs, answer_bytes: encodeMessage(wire).length, ...c, mspt_idle: idle, mspt_last100_after: await mspt(r) });
+    m.session.worldView.clear();
+    const heap0 = process.memoryUsage().heapUsed;
+    t = performance.now();
+    const read = await m.call("world_view_read", { box });
+    const readMs = Math.round(performance.now() - t);
+    const heap = Math.round((process.memoryUsage().heapUsed - heap0) / 1e6);
+    t = performance.now();
+    const rendered = await m.client.callTool({ name: "render", arguments: { view: "world" } });
+    const renderMs = Math.round(performance.now() - t);
+    const parts = rendered.content as { type: string; text?: string; data?: string }[];
+    const img = parts.find((p) => p.type === "image");
+    if (img?.data) (await import("node:fs")).writeFileSync(`${out}/coarse-${half * 2}.png`, Buffer.from(img.data, "base64"));
+    log(`coarse_mcp_${half * 2}`, { read_ms: readMs, read: read.split("\n")[0], heap_mb_after_read: heap, render_ms: renderMs, caption: parts.filter((p) => p.type === "text").map((p) => p.text).join(" ").slice(0, 300) });
+  }
+}
+
+/**
+ * Blocks snapshots inside the select grant (M3's open item): an unloaded chunk is loaded on the
+ * server thread (SurfaceReads.existing). Cold and loaded, the longest tick and the mean per tick.
+ */
+async function selectBlocks(r: Rcon, m: Mcp): Promise<void> {
+  await grant(r, 256);
+  for (const [name, chunks] of [["1x1", 1], ["4x4", 4], ["8x8", 8]] as const) {
+    const box = { min: [AT[0], -64, AT[1]] as Vec3, max: [AT[0] + chunks * 16 - 1, Math.min(319, -64 + Math.floor(4_194_304 / (chunks * chunks * 256)) - 1), AT[1] + chunks * 16 - 1] as Vec3 };
+    for (const state of ["cold", "loaded"] as const) {
+      if (state === "cold") await cold(r, 30_000);
+      else await r.command(`forceload add ${box.min[0]} ${box.min[2]} ${box.max[0]} ${box.max[2]}`), await sleep(5000);
+      const idle = await mspt(r);
+      const t = performance.now();
+      const s = await m.link.bridge.request({ type: "snapshot", dimension: OW, boxes: [box] });
+      const wall = Math.round(performance.now() - t);
+      const c = cost((await last(r)).blocks);
+      log(`blocks_${name}_${state}`, { blocks: (box.max[0] - box.min[0] + 1) * (box.max[1] - box.min[1] + 1) * (box.max[2] - box.min[2] + 1), wall_ms: wall, missing: s.missing?.length ?? 0, ...c, mspt_idle: idle, mspt_last100_after: await mspt(r) });
+    }
+  }
+  await r.command("forceload remove all");
+}
+
 const r = await rcon();
 const m = await startMcp({ ackWaitMs: 0 });
 try {
@@ -242,6 +462,10 @@ try {
   else if (what === "snapshot") await snapshot(r, m);
   else if (what === "tracker") await tracker(r, m);
   else if (what === "surface") await surface(r, m);
+  else if (what === "select-search") await selectSearch(r, m);
+  else if (what === "select-fill") await selectFill(r, m);
+  else if (what === "select-coarse") await selectCoarse(r, m);
+  else if (what === "select-blocks") await selectBlocks(r, m);
   process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
 } catch (e) {
   process.stderr.write(`failed: ${(e as Error).stack}\n${JSON.stringify(out)}\n`);

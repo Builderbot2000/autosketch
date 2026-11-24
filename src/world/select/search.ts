@@ -1,5 +1,5 @@
 import { Image, type RGBA } from "../../palette/image.js";
-import type { SearchResult } from "../protocol/messages.js";
+import { SELECT_CHUNKS, type SearchResult } from "../protocol/messages.js";
 import type { MaterialGroup } from "./materials.js";
 
 /**
@@ -111,7 +111,7 @@ export function describeSearch(r: SearchResult, o: DescribeOptions): string {
   if (!cs.length) lines.push(`No matches within ring ${r.reached}.`);
   lines.push(
     r.reached >= r.radius
-      ? "The walk covered the whole radius."
+      ? `The walk covered the whole radius${r.radius < SELECT_CHUNKS && !r.clipped ? ` (${r.radius} chunks; a larger radius, up to the mod's selectChunks (${SELECT_CHUNKS} by default), walks farther, slower on a miss)` : ""}.`
       : `The walk stopped at ring ${r.reached}: world_search({continue:true}) walks on for more clusters (stop:n for several).`,
   );
   return lines.join("\n");

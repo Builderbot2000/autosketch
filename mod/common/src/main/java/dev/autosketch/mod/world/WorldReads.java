@@ -64,8 +64,12 @@ public final class WorldReads {
         this.background = background;
     }
 
-    /** Cost of the last finished read: sections, ticks it was sliced over, server-thread and off-thread time. */
-    public record ReadStats(int sections, int ticks, long serverNanos, long offThreadNanos) {}
+    /**
+     * Cost of the last finished read: sections, ticks it was sliced over, server-thread and off-thread
+     * time, and the longest single tick's server time (a chunk loaded from disk inside one slice; 18,
+     * *Measured*).
+     */
+    public record ReadStats(int sections, int ticks, long serverNanos, long offThreadNanos, long maxTickNanos) {}
 
     /** The last finished read's cost (measurements, 13 *Open questions*), or null. */
     public static volatile @Nullable ReadStats lastRead;
@@ -236,7 +240,9 @@ public final class WorldReads {
                 j.exchange.error(PatchApplier.INTERNAL, "the mod failed reading the world: " + e);
                 continue;
             }
-            j.serverNanos += System.nanoTime() - t0;
+            long spent = System.nanoTime() - t0;
+            j.serverNanos += spent;
+            j.maxTickNanos = Math.max(j.maxTickNanos, spent);
             if (j.next < j.sections.size()) return;
             jobs.pollFirst();
             background.execute(j::finishSafely);
@@ -286,7 +292,7 @@ public final class WorldReads {
         final Set<SKey> missing = new HashSet<>();
         final Map<SKey, Captured> captured = new LinkedHashMap<>();
         int next, ticks;
-        long serverNanos, offThreadStart;
+        long serverNanos, maxTickNanos, offThreadStart;
 
         Job(ServerLevel level, List<Box> boxes, List<long[]> sections, Exchange exchange) {
             this(level, boxes, sections, exchange, false);
@@ -318,7 +324,7 @@ public final class WorldReads {
         abstract void finish();
 
         void send(Frame f) {
-            lastRead = new ReadStats(sections.size(), ticks, serverNanos, System.nanoTime() - offThreadStart);
+            lastRead = new ReadStats(sections.size(), ticks, serverNanos, System.nanoTime() - offThreadStart, maxTickNanos);
             try {
                 FrameCodec.encode(f);
             } catch (IllegalArgumentException e) {

@@ -666,7 +666,7 @@ The mod shows a `chat` to the named player (a `reply` always; an `activity` unle
 
 The messages behind `18`'s select (pieces 2 to 5), added within protocol 3 (*Versions and features*). The MCP sends none of them unless the mod's hello lists `select`. All are requests with an `id`, served in arrival order like the others, sliced over ticks under the mod's budgets; they read only inside the select grant (*Where the mod serves reads*), never generate a chunk, and are refused with `no_grant` when no grant is in force and `wrong_dimension` outside its dimension.
 
-**Materials.** `search.materials` and `fill.match` are non-empty, duplicate-free lists of: a block id (`minecraft:stone_bricks`, any state of it), a canonical state (exactly that state), or a block tag `#ns:path` (resolved by the mod with the game's tags). `fill.match` also takes `solid`, every non-air block (`{connected}`'s `solid`). Words and families are the MCP's to resolve into these (`18`, piece 2): the mod knows no families.
+**Materials.** `search.materials` and `fill.match` are non-empty, duplicate-free lists of: a block id (`minecraft:stone_bricks`, any state of it), a canonical state (exactly that state), or a block tag `#ns:path` (resolved by the mod with the game's tags). `fill.match` also takes `solid`, every non-air block (`{connected}`'s `solid`); in the game, all three air blocks (`minecraft:air`, `cave_air`, `void_air`) count as air, so a solid fill never runs into a cave (decided in M2, 2026-11-23; the fake host and `{connected}` only ever see `minecraft:air`). Words and families are the MCP's to resolve into these (`18`, piece 2): the mod knows no families.
 
 **`search`**, MCP → mod (`18`, piece 2). Either a new walk:
 

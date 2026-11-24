@@ -1,5 +1,7 @@
 package dev.autosketch.mod.client.ui.overlay;
 
+import dev.autosketch.mod.protocol.UiMessages;
+import dev.autosketch.mod.protocol.UiMessages.Fill;
 import dev.autosketch.mod.protocol.UiMessages.Flash;
 import dev.autosketch.mod.protocol.UiMessages.Job;
 import dev.autosketch.mod.protocol.UiMessages.Refusal;
@@ -17,9 +19,9 @@ import org.jetbrains.annotations.Nullable;
 /**
  * The client's copy of the overlay and HUD state (13, *In-game UI*, {@code ui.state} and
  * {@code ui.flash}; 16, *Overlays in the world*, *HUD*), exactly as the MCP sent it: a map from job
- * id to the job's whole record, the open request, token totals and last refusal, and the flashes
- * still pulsing. Nothing is derived here: a full state replaces everything, a change puts or removes
- * whole jobs by id and replaces the fields it carries (no field-level merge, 13's
+ * id to the job's whole record, the steady fills by id (18, piece 8: the select candidate), the open
+ * request, token totals and last refusal, and the flashes still pulsing. Nothing is derived here: a full state replaces everything, a change puts or removes
+ * whole jobs (and fills) by id and replaces the fields it carries (no field-level merge, 13's
  * <em>Why replace-by-key per job</em>).
  *
  * <p>The {@code seq} check (13, <em>Sequence and resync</em>): a full state's {@code seq} is adopted;
@@ -31,11 +33,37 @@ public final class OverlayState {
     /** How long a flash pulses, in milliseconds (16, *Change flashes*: "a short pulse"). */
     public static final long FLASH_MS = 1500;
 
+    /**
+     * How long a proposed hit pulses (18, piece 8: a flash with job {@link UiMessages#CANDIDATE_FILL}):
+     * {@link #HIT_PULSES} pulses of {@link #FLASH_MS} each, long enough for the player to read the
+     * choice and turn to see it.
+     */
+    public static final int HIT_PULSES = 6;
+
     /** A flash and when it arrived ({@code Util.getMillis()} time). */
-    public record ActiveFlash(Flash flash, long start) {}
+    public record ActiveFlash(Flash flash, long start) {
+        /** A proposed hit's flash (job {@code candidate}), which pulses {@link #HIT_PULSES} times. */
+        public boolean hit() {
+            return flash.job().equals(UiMessages.CANDIDATE_FILL);
+        }
+
+        /** How long this flash is drawn. */
+        public long life() {
+            return hit() ? HIT_PULSES * FLASH_MS : FLASH_MS;
+        }
+
+        /** The pulse's strength at {@code now}: 1 falling to 0 over each {@link #FLASH_MS}. */
+        public float strength(long now) {
+            long t = now - start;
+            if (t < 0) return 1f;
+            if (t >= life()) return 0f;
+            return 1f - (t % FLASH_MS) / (float) FLASH_MS;
+        }
+    }
 
     private long seq; // 0: no full state held
     private final Map<String, Job> jobs = new LinkedHashMap<>();
+    private final Map<String, Fill> fills = new LinkedHashMap<>();
     private @Nullable RequestInfo request;
     private @Nullable Tokens tokens;
     private @Nullable Refusal refusal;
@@ -49,6 +77,11 @@ public final class OverlayState {
     /** Open jobs in the MCP's order (a full state's order; a job added by a change goes last). */
     public List<Job> jobs() {
         return List.copyOf(jobs.values());
+    }
+
+    /** Steady fills in the MCP's order (18, piece 8), each as last sent. */
+    public List<Fill> fills() {
+        return List.copyOf(fills.values());
     }
 
     public @Nullable RequestInfo request() {
@@ -71,6 +104,8 @@ public final class OverlayState {
         if (s.full()) {
             jobs.clear();
             for (Job j : s.jobs()) jobs.put(j.id(), j);
+            fills.clear();
+            for (Fill f : s.fills()) fills.put(f.id(), f);
             request = value(s.request());
             tokens = value(s.tokens());
             refusal = value(s.refusal());
@@ -80,6 +115,8 @@ public final class OverlayState {
         if (seq == 0 || s.seq() != seq + 1) return false;
         for (Job j : s.jobs()) jobs.put(j.id(), j);
         for (String id : s.removed()) jobs.remove(id);
+        for (Fill f : s.fills()) fills.put(f.id(), f);
+        for (String id : s.fillsRemoved()) fills.remove(id);
         if (s.request() != null) request = value(s.request());
         if (s.tokens() != null) tokens = value(s.tokens());
         if (s.refusal() != null) refusal = value(s.refusal());
@@ -98,7 +135,7 @@ public final class OverlayState {
 
     /** Flashes still pulsing at {@code now}; expired ones are dropped. */
     public List<ActiveFlash> flashes(long now) {
-        flashes.removeIf(a -> now - a.start() >= FLASH_MS);
+        flashes.removeIf(a -> now - a.start() >= a.life());
         return List.copyOf(flashes);
     }
 
@@ -106,6 +143,7 @@ public final class OverlayState {
     public void clear() {
         seq = 0;
         jobs.clear();
+        fills.clear();
         request = null;
         tokens = null;
         refusal = null;

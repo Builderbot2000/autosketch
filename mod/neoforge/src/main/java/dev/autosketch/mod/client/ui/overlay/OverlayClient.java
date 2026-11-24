@@ -76,7 +76,9 @@ public final class OverlayClient {
     public static DrawList drawList() {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level == null) return DrawList.EMPTY;
-        return DrawList.build(STATE, Util.getMillis(), mc.level.dimension().location().toString(), LinkState.connected(), UiToggles.volumes, UiToggles.flashes);
+        net.minecraft.world.phys.Vec3 cam = mc.gameRenderer.getMainCamera().getPosition();
+        return DrawList.build(STATE, Util.getMillis(), mc.level.dimension().location().toString(), cam.x, cam.y, cam.z, LinkState.connected(), UiToggles.volumes,
+                UiToggles.flashes);
     }
 
     private static void onState(UiState s) {

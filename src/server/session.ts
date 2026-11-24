@@ -133,6 +133,12 @@ export class Session {
    * document is linked; undefined without the UI. Tools never see the link.
    */
   saveFlash?: (box: PublicBox, doc: string) => void;
+  /**
+   * Proposed hits (18, piece 8): `world_reply` hands it the world boxes of the choices it offers, to
+   * pulse in the world. Set by the entry point to the in-game UI's feed; false when nothing could be
+   * shown (no mod with the UI, or no request's dimension). Tools never see the link.
+   */
+  pulseHits?: (boxes: PublicBox[]) => boolean;
   /** Answers to in-game requests (13, *Prompting from the game*), for `world_reply`; set beside `world`. */
   inGame?: InGameReplies;
   /**

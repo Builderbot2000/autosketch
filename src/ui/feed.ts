@@ -1,16 +1,20 @@
 import type { LoggedEvent } from "../core/events.js";
+import type { Mask } from "../core/mask.js";
 import type { PublicBox } from "../core/region.js";
 import { SessionModel, type Scope } from "../observe/session-model.js";
 import type { BridgeConnection } from "../world/bridge.js";
-import { SAVE_FLASH_COLOUR, SAVE_FLASH_JOB, UI_COALESCE_MS, UI_FLASH_BOXES, type UiFlash, type UiJob, type UiRefusal, type UiRequestInfo, type UiState, type UiTokens } from "../world/protocol/messages.js";
+import { CANDIDATE_FILL, SAVE_FLASH_COLOUR, SAVE_FLASH_JOB, UI_COALESCE_MS, UI_FLASH_BOXES, type UiFill, type UiFlash, type UiJob, type UiRefusal, type UiRequestInfo, type UiState, type UiTokens, type WireBox } from "../world/protocol/messages.js";
 import { mergeBoxes, translatePublic } from "./boxes.js";
+import { CANDIDATE_COLOUR, candidateFill } from "./candidate-outline.js";
 import { jobColour } from "./colours.js";
 import { toWorldBox, type WorldFrame } from "./frame.js";
 
 /**
  * The overlay feed (docs/design/16-in-game-ui.md, *MCP side*, Feed; `13`, *In-game UI*): keeps the
  * session model from the event bus and sends `ui.state` (full on connect and to a player that asks
- * for `resync`, changes after) and `ui.flash`, at most one of each per 250 ms window.
+ * for `resync`, changes after) and `ui.flash`, at most one of each per 250 ms window. The select
+ * candidate (`18`, piece 8) rides along as the `candidate` fill record, and proposed hits as flash
+ * records with job `candidate`.
  *
  * Off the tool-call path (`16`, *Principles* 5): the bus subscriber only applies the event to the
  * model and remembers the changed box, both O(1). Everything sent is built on a timer, and only
@@ -27,6 +31,12 @@ export interface FeedHost {
   players(): string[];
   /** The open in-game request, or null. */
   request(): UiRequestInfo | null;
+  /**
+   * The select candidate (`18`, piece 8): the world view's `candidate` while its request holds, or
+   * undefined. `key` changes exactly when the shape does (the stored selection's identity), so the
+   * shell is computed once per fill or expand, on the timer; `mask` is in world coordinates.
+   */
+  candidate?(): { key: unknown; dimension: string; mask(): Mask } | undefined;
   /** Window override for tests (default `UI_COALESCE_MS`). */
   intervalMs?: number;
 }
@@ -38,10 +48,13 @@ interface Sent {
   request: string;
   tokens: string;
   refusal: string;
+  /** Fill records by id, compared by identity (a candidate's record is only rebuilt when its shape changes). */
+  fills: Map<string, UiFill>;
 }
 
 interface Snapshot {
   jobs: UiJob[];
+  fills: UiFill[];
   request: UiRequestInfo | null;
   tokens: UiTokens | null;
   refusal: UiRefusal | null;
@@ -59,6 +72,10 @@ export class UiFeed {
   private pending = new Map<string, PublicBox[]>();
   private timer?: ReturnType<typeof setInterval>;
   private readonly offs: (() => void)[] = [];
+  /** The candidate's fill record and the shape key it was built from. */
+  private fill?: { key: unknown; dimension: string; record: UiFill };
+  /** Proposed hits to pulse in the next window, world boxes per dimension (`18`, piece 8). */
+  private hits: { dimension: string; boxes: WireBox[] }[] = [];
 
   constructor(private readonly host: FeedHost) {
     this.offs.push(host.bridge.onConnection((s) => (s === "up" ? this.up() : this.down())));
@@ -94,6 +111,18 @@ export class UiFeed {
     if (list.length > PENDING_CAP) this.pending.set(SAVE_FLASH_JOB, mergeBoxes(list, UI_FLASH_BOXES));
   }
 
+  /**
+   * Proposed hits (`18`, piece 8; `13`, *In-game UI*, Fill): world boxes the agent offered as choices
+   * go out in the next window's `ui.flash` as one record with job {@link CANDIDATE_FILL} in the
+   * candidate's colour (at most {@link UI_FLASH_BOXES}, merged past it). World coordinates, so no
+   * link or anchor is needed. False when nothing can be shown (no mod with `ui` connected).
+   */
+  pulseHits(boxes: readonly WireBox[], dimension: string): boolean {
+    if (!this.timer || !boxes.length) return false;
+    this.hits.push({ dimension, boxes: [...boxes] });
+    return true;
+  }
+
   /** Sends what changed since the last window: a `ui.state` if anything did, then a `ui.flash`. */
   tick(): void {
     if (!this.host.bridge.ui) return;
@@ -101,6 +130,7 @@ export class UiFeed {
     const frame = this.host.frame();
     if (!players.length) {
       this.pending.clear();
+      this.hits = [];
       return;
     }
     const snap = this.snapshot(frame);
@@ -111,13 +141,14 @@ export class UiFeed {
       if (m) this.host.bridge.send({ type: "ui.state", players, seq: ++this.seq, full: false, ...m });
     }
     this.sent = remember(key, snap);
-    if (this.pending.size && frame) {
-      const flashes: UiFlash[] = [];
+    const flashes: UiFlash[] = [];
+    if (frame)
       for (const [job, boxes] of this.pending)
         flashes.push({ job, colour: job === SAVE_FLASH_JOB ? SAVE_FLASH_COLOUR : jobColour(job), dimension: frame.dimension, boxes: mergeBoxes(boxes, UI_FLASH_BOXES).map((b) => toWorldBox(frame, b)) });
-      this.host.bridge.send({ type: "ui.flash", players, flashes });
-    }
+    for (const h of this.hits) flashes.push({ job: CANDIDATE_FILL, colour: CANDIDATE_COLOUR, dimension: h.dimension, boxes: h.boxes.length > UI_FLASH_BOXES ? mergeBoxes(h.boxes, UI_FLASH_BOXES) : h.boxes });
+    if (flashes.length) this.host.bridge.send({ type: "ui.flash", players, flashes });
     this.pending.clear();
+    this.hits = [];
   }
 
   /**
@@ -144,6 +175,7 @@ export class UiFeed {
     this.seq = 0;
     this.sent = undefined;
     this.pending.clear();
+    this.hits = [];
     clearInterval(this.timer);
     this.timer = setInterval(() => this.tick(), this.host.intervalMs ?? UI_COALESCE_MS);
     this.timer.unref?.();
@@ -154,6 +186,7 @@ export class UiFeed {
     clearInterval(this.timer);
     this.timer = undefined;
     this.pending.clear();
+    this.hits = [];
   }
 
   /** A sandbox-local box in the base document's frame (the fork's translation). */
@@ -163,12 +196,27 @@ export class UiFeed {
   }
 
   private sendFull(players: string[], s: Snapshot, seq: number): void {
-    this.host.bridge.send({ type: "ui.state", players, seq, full: true, jobs: s.jobs, request: s.request, tokens: s.tokens, refusal: s.refusal });
+    this.host.bridge.send({ type: "ui.state", players, seq, full: true, jobs: s.jobs, request: s.request, tokens: s.tokens, refusal: s.refusal, ...(s.fills.length ? { fills: s.fills } : {}) });
+  }
+
+  /** The candidate's fill record, rebuilt only when the shape changed; none while there is no candidate or it is empty. */
+  private candidateFills(): UiFill[] {
+    const c = this.host.candidate?.();
+    if (!c) {
+      this.fill = undefined;
+      return [];
+    }
+    if (!this.fill || this.fill.key !== c.key || this.fill.dimension !== c.dimension) {
+      const mask = c.mask();
+      this.fill = { key: c.key, dimension: c.dimension, record: candidateFill(mask, c.dimension) };
+    }
+    return this.fill.record.faces.length ? [this.fill.record] : [];
   }
 
   private snapshot(frame: WorldFrame | undefined): Snapshot {
     return {
       jobs: frame ? this.model.openScopes().flatMap((s) => (s.work ? [uiJob(s, frame)] : [])) : [],
+      fills: this.candidateFills(),
       request: this.host.request(),
       tokens: tokensOf(this.model),
       refusal: refusalOf(this.model),
@@ -185,12 +233,17 @@ export class UiFeed {
     if (JSON.stringify(s.request) !== sent.request) out.request = s.request;
     if (JSON.stringify(s.tokens) !== sent.tokens) out.tokens = s.tokens;
     if (JSON.stringify(s.refusal) !== sent.refusal) out.refusal = s.refusal;
+    const fills = s.fills.filter((f) => sent.fills.get(f.id) !== f);
+    const fillIds = new Set(s.fills.map((f) => f.id));
+    const fillsRemoved = [...sent.fills.keys()].filter((id) => !fillIds.has(id));
+    if (fills.length) out.fills = fills;
+    if (fillsRemoved.length) out.fillsRemoved = fillsRemoved;
     return Object.keys(out).length ? out : undefined;
   }
 }
 
 function remember(players: string, s: Snapshot): Sent {
-  return { players, jobs: new Map(s.jobs.map((j) => [j.id, JSON.stringify(j)])), request: JSON.stringify(s.request), tokens: JSON.stringify(s.tokens), refusal: JSON.stringify(s.refusal) };
+  return { players, jobs: new Map(s.jobs.map((j) => [j.id, JSON.stringify(j)])), request: JSON.stringify(s.request), tokens: JSON.stringify(s.tokens), refusal: JSON.stringify(s.refusal), fills: new Map(s.fills.map((f) => [f.id, f])) };
 }
 
 /** A job record from an open scope (its work and context are in the base frame, from `scope.fork`). */

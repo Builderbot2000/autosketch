@@ -8,6 +8,7 @@ import { Settings } from "../../../src/core/settings.js";
 import { libraryRoots } from "../../../src/library/roots.js";
 import { createServer } from "../../../src/server/server.js";
 import { Session } from "../../../src/server/session.js";
+import { CANDIDATE_COLOUR } from "../../../src/ui/candidate-outline.js";
 import { startUi, type UiCore } from "../../../src/ui/index.js";
 import { LiveLink } from "../../../src/world/live-link.js";
 import { CHANNEL_INSTRUCTIONS, InGameRequests } from "../../../src/world/prompt.js";
@@ -161,6 +162,30 @@ describe("world_reply choices (18, piece 7)", () => {
     await host.waitFor(() => replies(host).length === 4);
     expect(replies(host).every((c) => c.request === 1 && c.player === HOST.uuid)).toBe(true);
     expect(inGame!.current).toBeUndefined();
+  });
+
+  it("pulses the choices given with a world box as proposed hits, and keeps their text as the choices", async () => {
+    const { host, call, session } = await setup();
+    session.pulseHits = (boxes) => ui!.feed.pulseHits(boxes, "minecraft:overworld");
+    await host.playerAsk(HOST, "find my house", {}, { mode: "select" });
+    await host.waitFor(() => inGame!.current?.id === 1);
+    const r = await call("world_reply", { lines: ["Which one?"], choices: [{ text: "ruin 180 blocks west", at: { min: [-160, 75, 20], max: [-180, 60, 0] } }, "neither"] });
+    expect(r.text).toBe("ok · world_reply · 1 line to Dev (request 1) · choices q1: 2 clickable lines; the answer comes back as an event · 1 hit pulsed in the world");
+    expect(session.choices.get("q1")!.choices).toEqual(["ruin 180 blocks west", "neither"]);
+    await host.waitFor(() => host.ui.some((m) => m.type === "ui.flash"));
+    const flash = host.ui.find((m) => m.type === "ui.flash");
+    expect(flash).toMatchObject({ flashes: [{ job: "candidate", colour: CANDIDATE_COLOUR, dimension: "minecraft:overworld", boxes: [{ min: [-180, 60, 0], max: [-160, 75, 20] }] }] });
+  });
+
+  it("says hits weren't pulsed without the in-game UI", async () => {
+    const { host, call, session } = await setup({ features: ["modes", "select"] });
+    session.pulseHits = (boxes) => ui!.feed.pulseHits(boxes, "minecraft:overworld");
+    await host.playerAsk(HOST, "which?", {}, { mode: "select" });
+    await host.waitFor(() => inGame!.current?.id === 1);
+    const r = await call("world_reply", { lines: ["Which one?"], choices: [{ text: "a", at: { min: [0, 0, 0], max: [1, 1, 1] } }, "b"] });
+    expect(r.text).toContain(" · hits not pulsed (the mod has no in-game UI)");
+    await host.waitFor(() => replies(host).length === 1);
+    expect(replies(host)[0]!.lines).toContain("[1] a");
   });
 
   it("refuses more than the protocol's choices", async () => {

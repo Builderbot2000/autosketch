@@ -39,6 +39,7 @@ import { CHANNEL_INSTRUCTIONS, CHANNEL_METHOD, InGameRequests } from "../world/p
 import { autoSyncHook, syncLink } from "../world/sync.js";
 import { WorldView } from "../world/view.js";
 import { WorldSelect } from "../world/select/select.js";
+import { worldCandidate } from "./world-candidate.js";
 import { MCP_FEATURES } from "../world/protocol/messages.js";
 import { startUi } from "../ui/index.js";
 import type { LibraryHost as UiLibraryHost } from "../ui/library.js";
@@ -184,10 +185,18 @@ async function main(): Promise<void> {
     scopes: session.scopes,
     linkFrame: () => (link.volumes ? { dimension: link.volumes.dimension, origin: link.volumes.origin } : undefined),
     inGame: () => inGame,
+    // The candidate's shell and outline (18, piece 8): the view's `candidate` while its request holds
+    // (the view empties itself when the request changes or ends).
+    candidate: () => worldCandidate(worldView),
     log,
   });
   // The flash on save (17, piece 8): prefab_save's box, sent only while linked.
   session.saveFlash = (box, doc) => ui.feed.saveFlash(box, doc);
+  // Proposed hits offered as choices (18, piece 8): pulsed in the world, in the request's dimension.
+  session.pulseHits = (boxes) => {
+    const d = worldView.dimension;
+    return !!d && ui.feed.pulseHits(boxes, d);
+  };
   // Request modes (13, B6): while an ask, plan or scan request is open, edits on the linked document are refused.
   session.callHooks.push(inGame.modeRule);
   // Once an instance loads (at startup, or later in place).

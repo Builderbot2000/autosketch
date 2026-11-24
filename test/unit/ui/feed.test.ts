@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { LoggedEvent, ObserveEvent } from "../../../src/core/events.js";
 import type { PublicBox } from "../../../src/core/region.js";
+import { Mask } from "../../../src/core/mask.js";
 import { mergeBoxes } from "../../../src/ui/boxes.js";
+import { CANDIDATE_COLOUR, candidateFill } from "../../../src/ui/candidate-outline.js";
 import { jobColour } from "../../../src/ui/colours.js";
 import { UiFeed } from "../../../src/ui/feed.js";
 import type { WorldFrame } from "../../../src/ui/frame.js";
-import { SAVE_FLASH_COLOUR, SAVE_FLASH_JOB, type UiFlashMessage, type UiMcpMessage, type UiRequestInfo, type UiState } from "../../../src/world/protocol/messages.js";
+import { CANDIDATE_FILL, SAVE_FLASH_COLOUR, SAVE_FLASH_JOB, type UiFlashMessage, type UiMcpMessage, type UiRequestInfo, type UiState } from "../../../src/world/protocol/messages.js";
 
 /** The overlay feed (16, *MCP side*, Feed; 13, *In-game UI*): coalescing, resync, job colours. */
 
@@ -178,5 +180,64 @@ describe("job colours and box merging", () => {
     expect(m.length).toBeLessThanOrEqual(64);
     for (const b of boxes) expect(m.some((c) => c.min[0] <= b.min[0] && c.max[0] >= b.max[0])).toBe(true);
     expect(mergeBoxes([boxes[0]!, boxes[0]!], 64)).toEqual([boxes[0]]);
+  });
+});
+
+describe("ui feed: the select candidate (18, piece 8)", () => {
+  const D = "minecraft:overworld";
+  function withCandidate() {
+    const bridge = new FakeBridge();
+    const cand = { current: undefined as { key: unknown; dimension: string; mask(): Mask } | undefined, built: 0 };
+    const set = (...ps: [number, number, number][]) => {
+      const m = new Mask();
+      for (const p of ps) m.add(...p);
+      cand.current = { key: {}, dimension: D, mask: () => (cand.built++, m) };
+    };
+    const feed = new UiFeed({ bridge, frame: () => undefined, players: () => [P1], request: () => null, candidate: () => cand.current, intervalMs: 1e9 });
+    const states = () => bridge.sent.filter((m): m is UiState => m.type === "ui.state");
+    const flashes = () => bridge.sent.filter((m): m is UiFlashMessage => m.type === "ui.flash");
+    return { bridge, feed, cand, set, states, flashes };
+  }
+
+  it("sends the candidate as a fill record, rebuilt only when the shape changes, removed when it goes", () => {
+    const { feed, cand, set, states } = withCandidate();
+    expect(states()[0]!.fills).toBeUndefined(); // no candidate: the full state has no fills
+    set([5, 70, -3]);
+    feed.tick();
+    expect(states()[1]).toEqual({ type: "ui.state", players: [P1], seq: 2, full: false, fills: [candidateFill(cand.current!.mask(), D)] });
+    const built = cand.built;
+    feed.tick();
+    feed.tick();
+    expect(states()).toHaveLength(2); // unchanged: nothing sent, nothing rebuilt
+    expect(cand.built).toBe(built);
+    set([5, 70, -3], [6, 70, -3]); // an expand
+    feed.tick();
+    expect(states()[2]!.fills![0]!.edges).toHaveLength(12);
+    cand.current = undefined; // the request ended (the view emptied)
+    feed.tick();
+    expect(states()[3]).toEqual({ type: "ui.state", players: [P1], seq: 4, full: false, fillsRemoved: [CANDIDATE_FILL] });
+    feed.close();
+  });
+
+  it("puts the candidate in a full state, as to a player who resyncs", () => {
+    const { feed, set, states } = withCandidate();
+    set([0, 0, 0]);
+    feed.resync(P1);
+    const full = states().filter((s) => s.full);
+    expect(full.at(-1)!.fills!.map((f) => f.id)).toEqual([CANDIDATE_FILL]);
+    feed.close();
+  });
+
+  it("pulses proposed hits as one flash record with job candidate, in world coordinates, without a frame", () => {
+    const { feed, flashes } = withCandidate();
+    expect(feed.pulseHits([{ min: [10, 60, 10], max: [20, 70, 20] }, { min: [-300, 64, 5], max: [-280, 80, 30] }], D)).toBe(true);
+    feed.tick();
+    expect(flashes()).toEqual([
+      { type: "ui.flash", players: [P1], flashes: [{ job: CANDIDATE_FILL, colour: CANDIDATE_COLOUR, dimension: D, boxes: [{ min: [10, 60, 10], max: [20, 70, 20] }, { min: [-300, 64, 5], max: [-280, 80, 30] }] }] },
+    ]);
+    feed.tick();
+    expect(flashes()).toHaveLength(1); // pulsed once
+    feed.close();
+    expect(feed.pulseHits([{ min: [0, 0, 0], max: [1, 1, 1] }], D)).toBe(false); // no UI connection
   });
 });

@@ -12,7 +12,7 @@ import type { BridgeConnection } from "../world/bridge.js";
 import type { ModeRequest } from "../world/modes.js";
 import type { OpenRequest } from "../world/chat-stream.js";
 import type { UiRequestInfo } from "../world/protocol/messages.js";
-import { UiFeed } from "./feed.js";
+import { UiFeed, type FeedHost } from "./feed.js";
 import type { WorldFrame } from "./frame.js";
 import { CandidateRequests, type CandidatesHost } from "./candidates.js";
 import { ChoiceRequests } from "./choices.js";
@@ -57,6 +57,8 @@ export interface UiOptions {
   scopes: Pick<ScopeManager, "scopes" | "baseOffset">;
   /** The link's frame while the base document is linked. */
   linkFrame(): WorldFrame | undefined;
+  /** The select candidate the feed draws as a steady fill (`18`, piece 8; `FeedHost.candidate`). */
+  candidate?: FeedHost["candidate"];
   /** The open in-game request (the activity stream's), and the read-only one whose mode holds. */
   inGame?(): { current: OpenRequest | undefined; heldRequest: ModeRequest | undefined; candidatesAnswer?: CandidatesHost["answer"] } | undefined;
   log?(msg: string): void;
@@ -113,7 +115,7 @@ export function startUi(o: UiOptions): UiCore {
     scopeIds: () => [...o.scopes.scopes.keys()],
     ...intervalMs,
   });
-  const feed = new UiFeed({ bridge: o.bridge, frame: () => ghosts.frame(), linked: () => o.linkFrame() !== undefined, players: () => players.overlay(), request, ...intervalMs });
+  const feed = new UiFeed({ bridge: o.bridge, frame: () => ghosts.frame(), linked: () => o.linkFrame() !== undefined, players: () => players.overlay(), request, ...(o.candidate ? { candidate: o.candidate } : {}), ...intervalMs });
   const settings = new SettingsRows(o.settings, o.configPath, o.log);
   settings.watch();
   const requests = new UiRequests({

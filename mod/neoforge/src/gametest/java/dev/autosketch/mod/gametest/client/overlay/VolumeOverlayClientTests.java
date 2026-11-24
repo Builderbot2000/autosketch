@@ -10,7 +10,6 @@ import dev.autosketch.mod.feedback.Feedback;
 import dev.autosketch.mod.gametest.client.ClientTest;
 import dev.autosketch.mod.gametest.client.ClientTestSuite;
 import dev.autosketch.mod.protocol.Box;
-import dev.autosketch.mod.volume.Wand;
 import java.util.List;
 import net.minecraft.client.CloudStatus;
 import net.minecraft.world.phys.Vec3;
@@ -36,27 +35,6 @@ public final class VolumeOverlayClientTests {
         return volumes().stream().anyMatch(v -> v.box().equals(b) && v.colour() == colour);
     }
 
-    /**
-     * Steps: selects a hotbar slot that doesn't hold the wand and waits until the server sees it, so
-     * neither the wand's outlines nor its mode line on the action bar get in a test's way. Returns
-     * the slot that was selected before, for the cleanup.
-     */
-    public static int[] awayFromTheWand(ClientTestSuite s) {
-        int[] before = {-1};
-        s.step("a hotbar slot without the wand", () -> {
-            before[0] = s.player().getInventory().selected;
-            for (int i = 8; i >= 0; i--)
-                if (!Wand.isWand(s.player().getInventory().getItem(i))) {
-                    s.player().getInventory().selected = i;
-                    return;
-                }
-            s.command("item replace entity @s hotbar.8 with minecraft:air");
-            s.player().getInventory().selected = 8;
-        });
-        s.waitUntil("the server sees no wand in hand", () -> s.onServer(server -> !Wand.isWand(s.serverPlayer(server).getMainHandItem())), 100);
-        return before;
-    }
-
     static int particles(ClientTestSuite s) throws Exception {
         return s.onServer(server -> AutosketchMod.internals().feedback().particlesSent(s.player().getUUID()));
     }
@@ -68,7 +46,6 @@ public final class VolumeOverlayClientTests {
         long[] shownAt = {0};
         NativeImage[] shots = new NativeImage[2];
         OverlayScript.connect(s, OverlayScript.shared());
-        int[] slot = awayFromTheWand(s);
         s.step("work 16x8x16 at the origin, context by default, outlines shown", () -> {
             start[0] = s.player().position();
             check(volumes().isEmpty(), "volumes before " + volumes());
@@ -115,7 +92,7 @@ public final class VolumeOverlayClientTests {
                 }
             check(lines >= 100, "line pixels: " + lines + " (changed pixels: " + ClientTestSuite.changedPixels(on, off, 8) + ")");
         });
-        s.cleanup("outlines off, volumes cleared, the player and the slot back", () -> {
+        s.cleanup("outlines off, volumes cleared, the player back", () -> {
             for (NativeImage i : shots)
                 if (i != null) i.close();
             s.onServer(server -> {
@@ -125,7 +102,6 @@ public final class VolumeOverlayClientTests {
             s.command("autosketch clear");
             s.hideGui(false);
             s.mc().options.cloudStatus().set(CloudStatus.FANCY);
-            if (slot[0] >= 0) s.player().getInventory().selected = slot[0];
             if (start[0] != null) s.command("tp @s " + start[0].x + " " + start[0].y + " " + start[0].z);
         });
     }

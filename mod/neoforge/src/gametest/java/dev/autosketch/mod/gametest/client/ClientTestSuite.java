@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.mojang.blaze3d.platform.GlUtil;
 import com.mojang.blaze3d.platform.NativeImage;
+import dev.autosketch.mod.volume.Wand;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -83,8 +84,31 @@ public final class ClientTestSuite {
         return name;
     }
 
+    /** Starts a test's steps: every test begins with the hand {@link #awayFromTheWand away from the wand}. */
     void beginTest(String test) {
         this.test = test;
+        awayFromTheWand();
+    }
+
+    /**
+     * Steps every test starts with: select a hotbar slot that doesn't hold the wand and wait until the
+     * server sees it. The test world (and the player's inventory) persists across tests and runs, and
+     * a test that put the wand in hand (the air-mode tests) leaves it there; while it is held, the
+     * server shows the wand's mode line ({@code Autosketch wand: work mode}) on the action bar every
+     * second (Feedback), overwriting the client half's own lines that steps wait for, and draws the
+     * wand's outlines. A test that needs the wand puts it in hand itself.
+     */
+    private void awayFromTheWand() {
+        step("a hotbar slot without the wand", () -> {
+            for (int i = 8; i >= 0; i--)
+                if (!Wand.isWand(player().getInventory().getItem(i))) {
+                    player().getInventory().selected = i;
+                    return;
+                }
+            command("item replace entity @s hotbar.8 with minecraft:air");
+            player().getInventory().selected = 8;
+        });
+        waitUntil("the server sees no wand in hand", () -> onServer(server -> !Wand.isWand(serverPlayer(server).getMainHandItem())), 100);
     }
 
     List<Step> steps() {

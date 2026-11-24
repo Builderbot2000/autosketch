@@ -27,8 +27,9 @@ public final class AirModeClientTests {
     /** Wand in hand, work mode, air mode on at distance 5, looking up into the sky; corners cleared. */
     static void setUp(ClientTestSuite s) {
         s.step("wand in the main hand, work mode, air on at 5", () -> {
+            // By slot, not weapon.mainhand: the server learns of the new slot a tick after the command.
             s.player().getInventory().selected = 0;
-            s.command("item replace entity @s weapon.mainhand with minecraft:blaze_rod");
+            s.command("item replace entity @s hotbar.0 with minecraft:blaze_rod");
             s.command("autosketch mode work");
             s.command("autosketch air on");
             s.command("autosketch air reach 5");

@@ -137,6 +137,8 @@ public final class DataGameTests {
                     try {
                         Messages.ModHello hello = Messages.ModHello.decode(mcp.frames.peek());
                         check(hello.features() != null && hello.features().containsAll(List.of("registry", "upgrade")), "the hello lists registry and upgrade: " + hello.features());
+                        // 18 (M3): search, fill, expand and the mask and coarse snapshots are all served.
+                        check(hello.features().contains("select"), "the hello lists select: " + hello.features());
                         var out = mcp.socket.getOutputStream();
                         out.write(FrameCodec.encode(new Messages.RegistryRequest(1, null).encode()));
                         out.write(FrameCodec.encode(new Messages.RegistryRequest(2, hash).encode()));

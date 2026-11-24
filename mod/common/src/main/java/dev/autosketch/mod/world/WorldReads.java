@@ -12,6 +12,7 @@ import dev.autosketch.mod.protocol.Frame;
 import dev.autosketch.mod.protocol.FrameCodec;
 import dev.autosketch.mod.protocol.Messages;
 import dev.autosketch.mod.protocol.ProtocolException;
+import dev.autosketch.mod.protocol.SelectMessages;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -102,6 +103,16 @@ public final class WorldReads {
         });
     }
 
+    /**
+     * {@code snapshot} kind {@code mask} (13, *Message schemas*; 18, piece 5): a blocks snapshot of the
+     * sections plus the margin around them, its regions laid out by {@link SelectMessages#maskRegions},
+     * served as any blocks snapshot is (inside the select grant up to {@code contextCap} positions,
+     * else inside the volumes).
+     */
+    public void mask(SelectMessages.MaskSnapshotRequest req, Exchange ex) throws ProtocolException {
+        snapshot(new Messages.SnapshotRequest(req.id(), req.dimension(), req.regions(), null), ex);
+    }
+
     public void snapshot(Messages.SnapshotRequest req, Exchange ex) throws ProtocolException {
         List<Box> regions = req.regions();
         long total = 0;
@@ -185,7 +196,7 @@ public final class WorldReads {
     }
 
     /** {@code no_volumes}, {@code wrong_dimension}, {@code outside_volumes} (chunk columns the link keeps loaded). */
-    private ServerLevel check(long id, String dimension, List<Box> boxes) throws ProtocolException {
+    ServerLevel check(long id, String dimension, List<Box> boxes) throws ProtocolException {
         LinkVolumes v = link.current();
         if (v == null) throw ProtocolException.refuse(ErrorCodes.NO_VOLUMES, id, "no work volume is set");
         if (!v.dimension().location().toString().equals(dimension))

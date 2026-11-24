@@ -208,6 +208,9 @@ public final class AutosketchCore {
         for (String f : HANDLER_FEATURES) if (dispatcher.handles(f)) out.add(f);
         // 16's in-game UI: listed when the relay registered its handlers (ui.relay.UiRelay).
         if (dispatcher.handles("ui.state")) out.add(dev.autosketch.mod.protocol.UiMessages.FEATURE_UI);
+        // 18's select: the world module registers search, fill and expand with the mask and coarse
+        // snapshots together, so its fill handler stands for all of them (13, *Versions and features*).
+        if (dispatcher.handles("fill")) out.add(Messages.FEATURE_SELECT);
         return List.copyOf(out);
     }
 }

@@ -180,6 +180,8 @@ describe("coarse, fade and surface reads (18, pieces 5, 6, 10)", () => {
     expect(view.isCoarse([4, 62, 4])).toBe(true);
     let render = await call("render", { view: "world", views: ["top"], size: 128 });
     expect(texts(render)[0]).toContain("coarse: (0,60,0)–(7,63,7) at 2³ cells: each cell is drawn whole");
+    // Each non-air cell is drawn as one cube (V3), not as its 8 blocks.
+    expect(texts(render)[0]).toContain("drew 0 blocks and 18 coarse cells (one cube each)");
 
     // A full read of a smaller box replaces the coarse cells there, block for block.
     await call("world_view_read", { box: { min: [4, 62, 4], max: [7, 63, 5] } });
@@ -192,6 +194,9 @@ describe("coarse, fade and surface reads (18, pieces 5, 6, 10)", () => {
     expect(view.isCoarse([0, 61, 0])).toBe(true);
     render = await call("render", { view: "world", views: ["top"], size: 128 });
     expect(texts(render)[0]).toContain("coarse: (0,60,0)–(7,63,7) at 2³ cells (partly replaced by full detail)");
+    // The two cells the full read met are drawn block by block, the other 16 as cubes.
+    expect(view.coarseParts()).toEqual([{ box: { min: [0, 60, 0], max: [8, 64, 8] }, cell: 2, partial: true, except: [{ min: [4, 62, 4], max: [8, 64, 6] }] }]);
+    expect(texts(render)[0]).toMatch(/drew [1-9]\d* blocks and 16 coarse cells \(one cube each\)/);
 
     // A coarse read never overwrites what is held at full detail.
     await call("world_view_read", { box: { min: [0, 60, 0], max: [7, 63, 7] } });

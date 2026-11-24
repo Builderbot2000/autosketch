@@ -84,6 +84,11 @@ export interface CoarsePart {
   cell: CoarseCell;
   /** Some of it has since been read at full detail. */
   partial: boolean;
+  /**
+   * Boxes of the other reads that meet it (full, surface, or coarse at another cell size), where its
+   * cells may no longer be uniform: the render draws those per block, every other cell as one cube.
+   */
+  except?: Box[];
 }
 
 interface ViewState {
@@ -162,11 +167,19 @@ export class WorldView {
     return parts.some((p) => p.level === "coarse" && containsPoint(p.box, ...pos)) && !parts.some((p) => p.level === "full" && containsPoint(p.box, ...pos));
   }
 
-  /** The coarse parts, each with whether a full-detail read has since replaced some of it (render caption). */
+  /**
+   * The coarse parts, each with whether a full-detail read has since replaced some of it (render
+   * caption) and the other reads that meet it (where the render draws its cells per block).
+   */
   coarseParts(): CoarsePart[] {
     const parts = this.fresh().parts;
     const full = parts.filter((p) => p.level === "full");
-    return parts.filter((p) => p.level === "coarse").map((p) => ({ box: p.box, cell: p.cell!, partial: full.some((f) => !isEmptyBox(intersectBox(f.box, p.box))) }));
+    return parts
+      .filter((p) => p.level === "coarse")
+      .map((p) => {
+        const except = parts.filter((o) => o !== p && !(o.level === "coarse" && o.cell === p.cell) && !isEmptyBox(intersectBox(o.box, p.box))).map((o) => o.box);
+        return { box: p.box, cell: p.cell!, partial: full.some((f) => !isEmptyBox(intersectBox(f.box, p.box))), ...(except.length ? { except } : {}) };
+      });
   }
 
   /** Empties the view (it also empties itself when the request changes). */

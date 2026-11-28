@@ -38,6 +38,7 @@ import { watchGameReport } from "../assets/report.js";
 import { bridgeUpgrader } from "../world/upgrade.js";
 import { promptSettings, WORLD_PROMPT_PLAYERS, worldSettings } from "../world/settings.js";
 import { stoppableReads } from "../world/requests.js";
+import { requestUndoer } from "../world/request-undo.js";
 import { CHANNEL_INSTRUCTIONS, CHANNEL_METHOD, InGameRequests } from "../world/prompt.js";
 import { autoSyncHook, syncLink } from "../world/sync.js";
 import { WorldView } from "../world/view.js";
@@ -144,6 +145,9 @@ async function main(): Promise<void> {
       choices: session.choices,
       // The Claude Code turn's end (19, *When a request has concluded*): the plugin's hook posts it to observe/.
       turnEnds: (fn) => observer.bus.subscribe((e) => e.kind === "turn.end" && fn()),
+      // [Undo request] (19, *Stop*, step 5): a request's base-document entries, undone as one step through the call hooks.
+      baseDoc: () => session.doc,
+      undo: requestUndoer(session, (line) => link.addNote(line)),
       log,
     });
   } catch (e) {

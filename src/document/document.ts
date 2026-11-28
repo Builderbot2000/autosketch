@@ -410,29 +410,43 @@ export class Document {
     if (!cp) throw new Error(`no checkpoint "${name}" (have: ${[...this.journal.checkpoints.keys()].join(", ") || "none"})`);
     const target = this.journal.cursorFor(cp);
     if (target === undefined) throw new Error(`checkpoint "${name}" can no longer be restored: the ops after it were replaced by newer edits or trimmed from memory`);
+    return this.stepTo(target, name, { unreadable: `checkpoint "${name}" can't be restored`, refused: `restore "${name}" refused` }, opts);
+  }
+
+  /**
+   * Undoes back to chain position `target` as one restore (19, *Stop*: `[Undo request]` undoes a
+   * request's entries in one step): all or nothing through the write guards like `restore`, and the
+   * restore listeners hear `label`, so the world link sends the steps as one patch.
+   */
+  undoTo(target: number, label: string, opts: StepOptions = {}): { steps: number; direction: "undo" | "redo" | "none"; shift?: Vec3 } {
+    if (!Number.isInteger(target) || target < 0 || target > this.journal.position) throw new Error(`can't undo to position ${target} (the document is at ${this.journal.position})`);
+    return this.stepTo(target, label, { unreadable: `${label} can't be undone`, refused: `${label} refused` }, opts);
+  }
+
+  private stepTo(target: number, label: string, says: { unreadable: string; refused: string }, opts: StepOptions): { steps: number; direction: "undo" | "redo" | "none"; shift?: Vec3 } {
     const originBefore: Vec3 = [...this.origin];
     const steps = Math.abs(target - this.journal.position);
     const direction = target < this.journal.position ? "undo" : target > this.journal.position ? "redo" : "none";
-    if (this.guarded && direction !== "none") this.checkRestore(name, target, direction, opts);
+    if (this.guarded && direction !== "none") this.checkSteps(says, target, direction, opts);
     // `overwriting` holds from the start listener to the end one, so the coalesced patch is forced.
     this.stepping(opts, () => {
-      if (direction !== "none") for (const fn of this.restoreListeners) fn("start", name);
+      if (direction !== "none") for (const fn of this.restoreListeners) fn("start", label);
       try {
         while (this.journal.position > target) this.undo(opts);
         while (this.journal.position < target) this.redo(opts);
       } finally {
-        if (direction !== "none") for (const fn of this.restoreListeners) fn("end", name);
+        if (direction !== "none") for (const fn of this.restoreListeners) fn("end", label);
       }
     });
     return { steps, direction, ...shiftOf(originBefore, this.origin) };
   }
 
   /** Runs the write guards over every step of a restore without applying any (see `restore`). */
-  private checkRestore(name: string, target: number, direction: "undo" | "redo", opts: StepOptions): void {
+  private checkSteps(says: { unreadable: string; refused: string }, target: number, direction: "undo" | "redo", opts: StepOptions): void {
     const pos = this.journal.position;
     const from = Math.min(pos, target), to = Math.max(pos, target);
     const entries = this.journal.peek(from, to); // memory or disk, without changing the window
-    if (entries.length !== to - from) throw new Error(`checkpoint "${name}" can't be restored: ${to - from - entries.length} of its ${to - from} ops can't be read from the journal`);
+    if (entries.length !== to - from) throw new Error(`${says.unreadable}: ${to - from - entries.length} of its ${to - from} ops can't be read from the journal`);
     if (direction === "undo") entries.reverse();
     const side = direction === "undo" ? "before" : "after";
     entries.forEach((e, i) => {
@@ -443,7 +457,7 @@ export class Document {
       } catch (err) {
         const code = (err as { refusal?: unknown }).refusal;
         throw Object.assign(
-          new Error(`restore "${name}" refused: step ${i + 1} of ${entries.length} (${direction} of op #${e.seq} ${e.summary}) is refused: ${(err as Error).message.replace(/ Nothing was written\.$/, "")} Nothing was changed; the document is still at op #${this.journal.headSeq}.`),
+          new Error(`${says.refused}: step ${i + 1} of ${entries.length} (${direction} of op #${e.seq} ${e.summary}) is refused: ${(err as Error).message.replace(/ Nothing was written\.$/, "")} Nothing was changed; the document is still at op #${this.journal.headSeq}.`, { cause: err }),
           { refusal: typeof code === "string" && code ? code : "restore_refused" },
         );
       }

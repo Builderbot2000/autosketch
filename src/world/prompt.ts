@@ -5,7 +5,7 @@ import { lookTarget, removeCamera, saveCamera } from "../document/cameras.js";
 import type { Document } from "../document/document.js";
 import { refusal } from "../scope/scopes.js";
 import { ActivityStream, type OpenRequest } from "./chat-stream.js";
-import { PATCH_DROP, RequestLifecycle, type ControlAnswer } from "./requests.js";
+import { PATCH_DROP, RequestLifecycle, type ControlAnswer, type RequestLifecycleOptions } from "./requests.js";
 import type { LinkVolumes, WorldLink } from "./link.js";
 import { MODE_ALLOWS, modeOf, READ_ONLY_MODES, RequestModeRule, type ModeRequest } from "./modes.js";
 import { SELECT_CHUNKS, type ChatAction, type GameContext, type ModHello, type PlayerRef, type PromptClose, type PromptMessage, type PromptRefusal, type RequestControl, type RequestMode, type WireBox } from "./protocol/messages.js";
@@ -96,6 +96,10 @@ export interface InGameRequestsOptions extends PromptSettings {
   choices?: Pick<Choices, "openOn">;
   /** Subscribes to the Claude Code turn's end (`turn.end` on the observe bus, `19`); returns the unsubscribe function. Without it only the fallbacks end a turn. */
   turnEnds?: (fn: () => void) => () => void;
+  /** The base document now (`Session.doc`): a request's edits are its entries on it (`19`, *Settled in step Q2*). */
+  baseDoc?: () => Document | undefined;
+  /** Undoes a concluded request's edits as one step (`19`, `[Undo request]`; the entry point runs `undoRequest` through the call hooks). */
+  undo?: RequestLifecycleOptions["undo"];
   /** Least time between status lines of one request (`19`; default 1 s), for tests. */
   statusMs?: number;
   log?: (msg: string) => void;
@@ -149,11 +153,13 @@ export class InGameRequests implements InGameReplies {
       deliver: (m) => this.deliver(m, false),
       idleMs: opts.idleMs,
       ...(opts.statusMs !== undefined ? { statusMs: opts.statusMs } : {}),
+      ...(opts.baseDoc ? { baseDoc: opts.baseDoc } : {}),
+      ...(opts.undo ? { undo: opts.undo } : {}),
       // The mod drops the patches it hasn't started (`patch.drop`, sent only to a mod listing `requests`).
       onStop: () => link.bridge.send(PATCH_DROP),
       ...(opts.log ? { log: opts.log } : {}),
     });
-    this.offs.push(opts.subscribe((e) => this.lifecycle.onEvent(e)));
+    this.offs.push(opts.subscribe((e, doc) => this.lifecycle.onEvent(e, doc)));
     if (opts.turnEnds) this.offs.push(opts.turnEnds(() => this.lifecycle.turnEnded()));
     this.offs.push(link.bridge.on("prompt", (m) => void this.onPrompt(m)));
     this.offs.push(link.bridge.on("prompt.close", (m) => this.onClose(m)));

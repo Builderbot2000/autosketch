@@ -173,7 +173,7 @@ export class UiRequests {
         if (!this.host.choices) throw new UiRequestError("bad_request", `This Autosketch doesn't serve ${kind}.`);
         return this.host.choices.pick(a, ref);
       // `19`, Part A: names and shapes frozen in `13` (*Request kinds*); answered by the request lifecycle
-      // (`world/requests.ts`). `request.undo` is step Q2's and answers `bad_request` until then.
+      // (`world/requests.ts`; `request.undo` through `world/request-undo.ts`, step Q2).
       case "request.stop":
       case "queue.send":
       case "queue.cancel":

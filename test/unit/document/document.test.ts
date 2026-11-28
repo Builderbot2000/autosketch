@@ -143,6 +143,32 @@ describe("document edits", () => {
     expect(() => doc.restore("nope")).toThrow(/no checkpoint "nope"/);
   });
 
+  it("undoTo steps back to a position as one restore, all or nothing under a guard (19, [Undo request])", () => {
+    const doc = newDoc();
+    doc.edit("a", "a", (tx) => tx.set(0, 0, 0, S("stone")));
+    doc.edit("b", "b", (tx) => tx.set(1, 0, 0, S("stone")));
+    doc.edit("c", "c", (tx) => tx.set(2, 0, 0, S("stone")));
+    const heard: string[] = [];
+    doc.restoreListeners.add((phase, label) => heard.push(`${phase} ${label}`));
+    doc.guards.push((changes, op) => {
+      if (op === "undo" && changes.entry?.summary === "b") throw Object.assign(new Error("b is locked. Nothing was written."), { refusal: "lock_overlap" });
+    });
+    let err: unknown;
+    try {
+      doc.undoTo(0, "undo of request 4");
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toMatchObject({ refusal: "lock_overlap", message: expect.stringMatching(/^undo of request 4 refused: step 2 of 3 \(undo of op #2 b\) is refused: b is locked\. Nothing was changed/) });
+    expect((err as Error).cause).toMatchObject({ message: "b is locked. Nothing was written." });
+    expect([doc.journal.position, doc.blockCount(), heard.length]).toEqual([3, 3, 0]);
+    doc.guards.length = 0;
+    expect(doc.undoTo(1, "undo of request 4")).toMatchObject({ steps: 2, direction: "undo" });
+    expect([doc.journal.position, doc.blockCount()]).toEqual([1, 1]);
+    expect(heard).toEqual(["start undo of request 4", "end undo of request 4"]);
+    expect(() => doc.undoTo(2, "x")).toThrow(/can't undo to position 2 \(the document is at 1\)/);
+  });
+
   it("journals component changes with the op that made them", () => {
     const doc = newDoc();
     doc.edit("a", "a", (tx) => {

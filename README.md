@@ -84,7 +84,16 @@ AUTOSKETCH_INSTANCE=/path/to/instance npm run test:local   # against a real inst
 
 ### In-game test (internal, dev only)
 
-`scripts/ingame-setup.sh` sets up a hands-on test in the real game client. Run it from the repo root in the VS Code integrated terminal (WSL):
+`scripts/ingame-setup.sh` sets up a hands-on test in the real game client. Run it from the repo root in the VS Code integrated terminal (WSL).
+
+The quickest way is the unified script, which builds everything, checks the MCP server is registered and boots, waits for the game's bridge, then opens Claude Code on the channel (Claude Code starts the MCP server over stdio):
+
+```
+bash scripts/test.sh                    # prep -> MCP check -> wait -> launch
+bash scripts/test.sh --no-wait          # same, but launch without waiting for the bridge
+```
+
+The individual steps:
 
 ```
 bash scripts/ingame-setup.sh            # all three steps below, in order

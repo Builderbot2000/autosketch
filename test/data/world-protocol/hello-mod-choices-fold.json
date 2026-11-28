@@ -1,0 +1,33 @@
+{
+  "description": "Mod hello listing every feature, choices.fold included (18, piece 7, Folding): its client half folds a question's choice lines once choices.answered names the question",
+  "sender": "mod",
+  "header": {
+    "type": "hello",
+    "protocol": 4,
+    "mod": {
+      "version": "0.2.0"
+    },
+    "game": {
+      "version": "1.21.1",
+      "dataVersion": 3955,
+      "loader": "neoforge",
+      "loaderVersion": "21.1.249"
+    },
+    "singleplayer": true,
+    "host": {
+      "name": "Kev",
+      "uuid": "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+    },
+    "features": [
+      "modes",
+      "volumes.set",
+      "registry",
+      "upgrade",
+      "ui",
+      "select",
+      "requests",
+      "canvas",
+      "choices.fold"
+    ]
+  }
+}

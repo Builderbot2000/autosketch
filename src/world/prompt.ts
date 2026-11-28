@@ -68,7 +68,7 @@ export interface InGameReplies {
    * (only the player ends that, B6). `action` makes one line clickable (`17`, piece 3); it is sent
    * only when both hellos list `ui` (`clickable`), else dropped and the line goes as plain text.
    */
-  reply(lines: string[], opts?: { done?: boolean; request?: number; action?: ChatAction }): { request: OpenRequest | undefined; open: boolean; held?: RequestMode };
+  reply(lines: string[], opts?: { done?: boolean; request?: number; action?: ChatAction; question?: string }): { request: OpenRequest | undefined; open: boolean; held?: RequestMode };
   /** Whether a reply line can be clickable now: both hellos list `ui` (`13`, `chat`). */
   readonly clickable: boolean;
   /** Sets the player's volumes (`world_volumes`, B4) in the linked document's coordinates; resolves with the result text. Inside the canvas it moves the brush (`19`). */
@@ -184,8 +184,8 @@ export class InGameRequests implements InGameReplies {
     return this.stream.current;
   }
 
-  reply(lines: string[], opts: { done?: boolean; request?: number; action?: ChatAction } = {}): { request: OpenRequest | undefined; open: boolean; held?: RequestMode } {
-    const { action: _a, ...plain } = opts;
+  reply(lines: string[], opts: { done?: boolean; request?: number; action?: ChatAction; question?: string } = {}): { request: OpenRequest | undefined; open: boolean; held?: RequestMode } {
+    const { action: _a, question: _q, ...plain } = opts;
     const r = this.stream.reply(lines, this.clickable ? opts : plain);
     // The fallback while no hook has reported this session (`19`): `done` concludes its request.
     if (opts.done) this.lifecycle.replyDone(r.open ? r.request?.id : undefined);
@@ -308,7 +308,7 @@ export class InGameRequests implements InGameReplies {
    * and nothing opens. Throws, opening nothing, when no agent session can receive the event.
    * A clicked choice (`18`, piece 7, `ui/choices.ts`) is delivered the same way.
    */
-  async candidatesAnswer(a: { request: number | null; mode?: RequestMode; switchMode?: boolean; player: PlayerRef; question: string; text: string }): Promise<void> {
+  async candidatesAnswer(a: { request: number | null; mode?: RequestMode; switchMode?: boolean; player: PlayerRef; question: string; text: string; choice?: { id: string; index: number } }): Promise<void> {
     if (!this.opts.listening()) throw new Error("no agent session is listening for in-game requests");
     const id = a.request;
     const open = id !== null && (this.stream.current?.id === id || this.held?.id === id);
@@ -316,9 +316,15 @@ export class InGameRequests implements InGameReplies {
     if (a.switchMode && a.mode) this.checkSwitch(id, a.mode, a.player);
     if (a.switchMode && a.mode && open) this.switchMode(id!, a.mode);
     await this.opts.notify(this.remind(a.text), { ...(id !== null ? { request: String(id) } : {}), player: a.player.name });
+    if (a.choice) this.foldChoices(a.choice.id, a.choice.index);
     if (id === null) return;
     this.resume(id, a.player, a.mode ?? this.heldOn(id) ?? "build", a.question);
     if (!open) this.opts.log?.(`in-game ${a.mode ?? "build"} request ${id} reopened by ${a.player.name}'s answer`);
+  }
+
+  /** Question `id` was answered with choice `index`: the client half folds its choice lines (`18`, piece 7, *Folding*; the bridge drops it for a mod that doesn't). */
+  private foldChoices(id: string, index: number): void {
+    this.link.bridge.send({ type: "choices.answered", question: id, index });
   }
 
   /** The mode held on request `id`, if it is the held one. */
@@ -434,6 +440,7 @@ export class InGameRequests implements InGameReplies {
       return true;
     }
     this.link.bridge.send({ type: "prompt.result", id: m.id, delivered: true });
+    this.foldChoices(q.id, n - 1);
     // As a click: the question's request is working again while the agent takes the answer.
     if (q.request !== null) this.resume(q.request, m.player, to ?? this.heldOn(q.request) ?? q.mode ?? "build", q.question);
     this.opts.log?.(`in-game request ${m.id} from ${m.player.name} taken as choice ${n} of ${q.id} (request ${q.request})`);

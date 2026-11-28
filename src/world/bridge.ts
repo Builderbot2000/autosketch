@@ -9,6 +9,7 @@ import {
   type CanvasMessage,
   type CanvasSet,
   type ChatMessage,
+  type ChoicesAnswered,
   type CoarseResult,
   type CoarseSnapshotRequest,
   type ErrorMessage,
@@ -122,7 +123,9 @@ export interface BridgeConnection {
    * dropped unless both hellos list `ui` (`13`, *In-game UI*), and status lines and `patch.drop`
    * unless both list `requests` (`19`).
    */
-  send(m: NoticeMessage | ChatMessage | StatusMessage | PromptResult | PatchDrop | UiMcpMessage): void;
+  send(m: NoticeMessage | ChatMessage | StatusMessage | ChoicesAnswered | PromptResult | PatchDrop | UiMcpMessage): void;
+  /** Whether the client half folds answered choices (`18`, piece 7, *Folding*): both hellos list `ui` and the mod lists `choices.fold`. */
+  readonly fold?: boolean;
   /** Whether both hellos list `ui`, so `ui` messages are sent. False while disconnected. */
   readonly ui: boolean;
   /** Whether both hellos list `requests` (`19`). False while disconnected. */
@@ -288,11 +291,21 @@ export class Bridge implements BridgeConnection {
     });
   }
 
-  send(m: NoticeMessage | ChatMessage | StatusMessage | PromptResult | PatchDrop | UiMcpMessage): void {
+  send(m: NoticeMessage | ChatMessage | StatusMessage | ChoicesAnswered | PromptResult | PatchDrop | UiMcpMessage): void {
     if (!this.connected) return;
     if ((UI_MCP_TYPES as readonly string[]).includes(m.type) && !this.ui) return;
     if (((m.type === "chat" && m.kind === "status") || m.type === "patch.drop") && !this.requests) return;
+    // 18, piece 7, *Folding*: only a mod that folds hears of questions.
+    if (m.type === "choices.answered" && !this.fold) return;
+    if (m.type === "chat" && m.kind !== "status" && m.question !== undefined && !this.fold) {
+      const { question: _q, ...plain } = m;
+      return this.write(plain);
+    }
     this.write(m);
+  }
+
+  get fold(): boolean {
+    return this.ui && this.supports("choices.fold");
   }
 
   /** Whether both hellos list `requests` (`19`, Part A): only then do status lines, queueing and `patch.drop` apply. */
@@ -507,6 +520,7 @@ const FEATURE_NAMES: Record<ModFeature, string> = {
   select: "selecting in the world (search, fill, expand, surface, mask and coarse snapshots)",
   requests: "request control (status lines, stop and the queue)",
   canvas: "the canvas",
+  "choices.fold": "folding answered choices",
 };
 
 /** The mod feature a request needs (*Versions and features*), if any. */

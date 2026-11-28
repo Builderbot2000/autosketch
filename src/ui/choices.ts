@@ -14,7 +14,7 @@ export interface ChoicesHost {
   /** The session's questions (`Session.choices`). */
   readonly questions: Pick<Choices, "get">;
   /** Delivers the answer's text to the agent (`InGameRequests.candidatesAnswer`). Without it the kind is `bad_request`. */
-  answer?(a: { request: number | null; mode?: RequestMode; switchMode?: boolean; player: PlayerRef; question: string; text: string }): Promise<void>;
+  answer?(a: { request: number | null; mode?: RequestMode; switchMode?: boolean; player: PlayerRef; question: string; text: string; choice?: { id: string; index: number } }): Promise<void>;
 }
 
 type Args = Record<string, unknown>;
@@ -38,7 +38,7 @@ export class ChoiceRequests {
     const to = q.modes?.[index];
     const mode = to ?? q.mode;
     try {
-      await this.host.answer({ request: q.request, ...(mode ? { mode } : {}), ...(to ? { switchMode: true } : {}), player, question: q.question, text: choiceText(player.name, q, index) });
+      await this.host.answer({ request: q.request, ...(mode ? { mode } : {}), ...(to ? { switchMode: true } : {}), player, question: q.question, text: choiceText(player.name, q, index), choice: { id: q.id, index } });
     } catch (e) {
       q.answered = false;
       // A refused mode switch (`InGameRequests.checkSwitch`): the player hears why.

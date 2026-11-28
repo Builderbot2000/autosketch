@@ -12,7 +12,7 @@ import { CANDIDATE_COLOUR } from "../../../src/ui/candidate-outline.js";
 import { startUi, type UiCore } from "../../../src/ui/index.js";
 import { LiveLink } from "../../../src/world/live-link.js";
 import { CHANNEL_INSTRUCTIONS, InGameRequests } from "../../../src/world/prompt.js";
-import type { ChatMessage, PlayerRef, UiResult, WireBox } from "../../../src/world/protocol/messages.js";
+import { MOD_FEATURES, type ChatMessage, type PlayerRef, type UiResult, type WireBox } from "../../../src/world/protocol/messages.js";
 import { autoSyncHook, syncLink } from "../../../src/world/sync.js";
 import { FakeHost } from "../../support/fake-host.js";
 import { tempDir } from "../../helpers/fixtures.js";
@@ -233,6 +233,31 @@ describe("choices.pick and typed numbers (18, piece 7)", () => {
     expect(inGame!.lifecycle.entry(1)!.state).toBe("working");
     // The closed stream reopened, so the agent's next reply goes to request 1.
     expect(inGame!.current).toMatchObject({ id: 1, mode: "ask" });
+  });
+
+  it("tags each choice message with its question and folds them once a click or a typed number answers it", async () => {
+    const { host, call } = await setup();
+    await host.playerAsk(HOST, "which tower?", {}, { mode: "ask" });
+    await host.waitFor(() => inGame!.current?.id === 1);
+    await call("world_reply", { lines: ["Which?"], choices: ["north", "south"] });
+    await host.waitFor(() => replies(host).length === 4);
+    expect(replies(host).map((r) => r.question)).toEqual([undefined, "q1", "q1", "q1"]);
+    ok(await host.playerClick(HOST, replies(host)[2]!));
+    expect(host.folds).toEqual([{ type: "choices.answered", question: "q1", index: 1 }]);
+    await call("world_reply", { lines: ["And?"], choices: ["a", "b", "c"] });
+    await host.playerAsk(HOST, "3", {}, { mode: "ask" });
+    expect(host.folds.at(-1)).toEqual({ type: "choices.answered", question: "q2", index: 2 });
+  });
+
+  it("sends no question and no fold to a mod without choices.fold", async () => {
+    const { host, call } = await setup({ features: MOD_FEATURES.filter((f) => f !== "choices.fold") });
+    await host.playerAsk(HOST, "which tower?", {}, { mode: "ask" });
+    await host.waitFor(() => inGame!.current?.id === 1);
+    await call("world_reply", { lines: ["Which?"], choices: ["north", "south"] });
+    await host.waitFor(() => replies(host).length === 4);
+    expect(replies(host).every((r) => !("question" in r))).toBe(true);
+    ok(await host.playerClick(HOST, replies(host)[1]!));
+    expect(host.folds).toEqual([]);
   });
 
   it("reopens a closed request in its mode under the same id", async () => {

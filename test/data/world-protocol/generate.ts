@@ -1133,7 +1133,39 @@ vector("error-too-large", "mod", "A select-mode read over contextCap in one call
     game: { version: "1.21.1", dataVersion: 3955, loader: "neoforge", loaderVersion: "21.1.249" },
     singleplayer: true,
     host: KEV,
+    features: ["modes", "volumes.set", "registry", "upgrade", "ui", "select", "requests", "canvas"],
+  });
+  vector("hello-mod-choices-fold", "mod", "Mod hello listing every feature, choices.fold included (18, piece 7, Folding): its client half folds a question's choice lines once choices.answered names the question", {
+    type: "hello",
+    protocol: 4,
+    mod: { version: "0.2.0" },
+    game: { version: "1.21.1", dataVersion: 3955, loader: "neoforge", loaderVersion: "21.1.249" },
+    singleplayer: true,
+    host: KEV,
     features: [...MOD_FEATURES],
+  });
+  // Folding answered choices (18, piece 7, Folding; feature choices.fold).
+  vector("chat-reply-choice-question", "mcp", "A choice line tagged with its question, so the client half can fold it once the question is answered", {
+    type: "chat",
+    request: 21,
+    player: UUID_KEV,
+    kind: "reply",
+    lines: ["[2] ruin 180 blocks west"],
+    action: { line: 0, kind: "choices.pick", args: { id: "q1", index: 1 } },
+    question: "q1",
+  });
+  vector("chat-reply-choices-end", "mcp", "The line closing question q1's choices: no action, tagged with the question so it folds with them", {
+    type: "chat",
+    request: 21,
+    player: UUID_KEV,
+    kind: "reply",
+    lines: ["or type your own answer"],
+    question: "q1",
+  });
+  vector("choices-answered", "mcp", "Question q1 was answered with its second choice: the client half folds its lines to that one", {
+    type: "choices.answered",
+    question: "q1",
+    index: 1,
   });
   // Status lines (19, *Status line*): one per request, rewritten in place by the client half.
   vector("chat-status-working", "mcp", "A request's status line while its turn runs, with a Stop button", {

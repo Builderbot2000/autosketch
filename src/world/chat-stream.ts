@@ -139,12 +139,12 @@ export class ActivityStream {
    * one line clickable (`13`, `chat`; the caller sends it only when both hellos list `ui`). Returns
    * the request answered (undefined when none: then only players with log `all` see it).
    */
-  reply(lines: string[], opts: { done?: boolean; request?: number; action?: ChatAction } = {}): { request: OpenRequest | undefined; open: boolean } {
+  reply(lines: string[], opts: { done?: boolean; request?: number; action?: ChatAction; question?: string } = {}): { request: OpenRequest | undefined; open: boolean } {
     this.flush();
     const open = opts.request === undefined || opts.request === this.request?.id;
     const target = open ? this.request : this.recent.get(opts.request!);
     const request = opts.request ?? target?.id ?? null;
-    this.opts.send({ type: "chat", request, player: target?.player.uuid ?? null, kind: "reply", lines, ...(opts.action ? { action: opts.action } : {}) });
+    this.opts.send({ type: "chat", request, player: target?.player.uuid ?? null, kind: "reply", lines, ...(opts.action ? { action: opts.action } : {}), ...(opts.question ? { question: opts.question } : {}) });
     const isOpen = open && !!target;
     if (isOpen) this.touch();
     if (opts.done && isOpen) this.closeRequest();

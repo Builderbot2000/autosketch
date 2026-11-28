@@ -4,13 +4,17 @@ import static dev.autosketch.mod.gametest.client.ClientTestSuite.check;
 
 import com.google.gson.JsonObject;
 import dev.autosketch.mod.client.ui.LinkState;
+import dev.autosketch.mod.client.ui.chat.ChoiceLinesClient;
+import dev.autosketch.mod.client.ui.chat.mixin.ChatComponentAccess;
 import dev.autosketch.mod.gametest.client.ClientTest;
 import dev.autosketch.mod.gametest.client.ClientTestSuite;
 import dev.autosketch.mod.protocol.Messages;
+import dev.autosketch.mod.prompt.ChoiceLines;
 import dev.autosketch.mod.prompt.InGamePrompts;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import net.minecraft.client.GuiMessage;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
 import org.jetbrains.annotations.Nullable;
@@ -98,6 +102,59 @@ public final class ChoicesClientTests {
             check(rs.size() == 2, rs.size() + " choices.pick");
             check(rs.get(1).getAsJsonObject("args").toString().equals("{\"id\":\"q1\",\"index\":1}"), "args " + rs.get(1).getAsJsonObject("args"));
             check(seen.contains("Autosketch: You already answered this question."), "action bar since the click " + seen);
+            return true;
+        }, 200);
+    }
+
+    /** Chat's messages (newest first) as text, straight from chat's history (the client half adds a question's lines itself, so the suite's chat event never sees them). */
+    static List<String> history(ClientTestSuite s) {
+        List<GuiMessage> all = ((ChatComponentAccess) s.mc().gui.getChat()).autosketch$allMessages();
+        return all.stream().map(m -> m.content().getString()).toList();
+    }
+
+    /**
+     * Folding (18, piece 7, *Folding*; feature {@code choices.fold}): choice lines and the free-text
+     * line tagged with question {@code q7} go to the client half, which adds them (still clickable);
+     * {@code choices.answered {q7, 1}} folds them to one line for the second choice, leaving the
+     * question's text.
+     */
+    @ClientTest("candidates")
+    public static void answeredChoicesFold(ClientTestSuite s) {
+        String question = "Which tower should I keep?", free = FREE + " (q7)";
+        List<String> choices = List.of("[1] the north tower (q7)", "[2] the south tower (q7)");
+        s.waitUntil("connected", () -> LinkState.connected(), 400);
+        s.step("forget earlier questions", ChoiceLinesClient::reset);
+        s.step("the agent asks q7: the question, the tagged choices, the tagged free-text line", () -> {
+            UUID me = s.player().getUUID();
+            plain(s, me, question);
+            for (int i = 0; i < choices.size(); i++) {
+                JsonObject args = new JsonObject();
+                args.addProperty("id", "q7");
+                args.addProperty("index", i);
+                Messages.Chat c = new Messages.Chat(21L, me, Messages.Chat.REPLY, List.of(choices.get(i)), new Messages.ChatAction(0, "choices.pick", args), "q7");
+                s.onServer(server -> InGamePrompts.onChat(c, server));
+            }
+            Messages.Chat end = new Messages.Chat(21L, me, Messages.Chat.REPLY, List.of(free), null, "q7");
+            s.onServer(server -> InGamePrompts.onChat(end, server));
+        });
+        s.waitUntil("the client half added the choices, clickable", () -> {
+            check(ChoiceLinesClient.tracked("q7"), "q7 not kept");
+            List<GuiMessage> all = ((ChatComponentAccess) s.mc().gui.getChat()).autosketch$allMessages();
+            for (String c : choices) {
+                GuiMessage m = all.stream().filter(x -> x.content().getString().contains(c)).findFirst().orElse(null);
+                check(m != null, "missing " + c + ": " + history(s));
+                String command = CandidatesClientTests.click(m.content());
+                check(command != null && command.startsWith("/autosketch action "), c + " runs " + command);
+            }
+            check(history(s).stream().anyMatch(t -> t.contains(free)), "no free-text line: " + history(s));
+            return true;
+        }, 200);
+        s.step("choices.answered {q7, 1} from the MCP", () -> s.onServer(server -> ChoiceLines.onAnswered(new Messages.ChoicesAnswered("q7", 1), server)));
+        s.waitUntil("folded to the second choice; the question stays", () -> {
+            List<String> h = history(s);
+            check(h.stream().anyMatch(t -> t.contains(question)), "question gone: " + h);
+            check(h.stream().filter(t -> t.contains("(q7)")).toList().equals(List.of("Agent: ✔ " + choices.get(1))), "q7 lines " + h.stream().filter(t -> t.contains("(q7)")).toList());
+            check(!ChoiceLinesClient.tracked("q7"), "q7 still kept");
             return true;
         }, 200);
     }

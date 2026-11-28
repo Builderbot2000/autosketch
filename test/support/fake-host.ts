@@ -33,6 +33,7 @@ import {
   type RequestControlAction,
   type RequestMode,
   type StatusMessage,
+  type ChoicesAnswered,
   type UpgradeData,
   type UpgradeRequest,
   type SnapshotRequest,
@@ -187,6 +188,8 @@ export class FakeHost {
   readonly notices: NoticeMessage[] = [];
   /** Every `chat` kind `status` received while both hellos list `requests`, in order (`19`, *Status line*). */
   readonly statuses: StatusMessage[] = [];
+  /** `choices.answered` frames received (`18`, piece 7, *Folding*; only a host listing `choices.fold` gets them). */
+  readonly folds: ChoicesAnswered[] = [];
   /** Status lines that arrived although the two hellos don't both list `requests`. */
   readonly requestsUngated: StatusMessage[] = [];
   /** The canvas (`19`), whole chunk columns and the build height; null when none is set. */
@@ -821,6 +824,9 @@ export class FakeHost {
         }
         await this.beforePatch?.(m);
         return this.applyPatch(m, s);
+      case "choices.answered":
+        this.folds.push(m);
+        return;
       case "patch.drop":
         // A mod without `requests` doesn't know this id-less type and ignores it. The patch in progress
         // (held in `beforePatch`) has started, so it finishes; the queued ones behind it are dropped.
@@ -1062,7 +1068,7 @@ function widenToColumns(b: WireBox): WireBox {
 }
 
 const DIMENSIONS = new Set(["minecraft:overworld", "minecraft:the_nether", "minecraft:the_end"]);
-const KNOWN = new Set(["hello", "error", "volumes.extend", "volumes.set", "hashes", "snapshot", "search", "fill", "expand", "patch", "registry", "upgrade", "prompt.result", "notice", "chat", "canvas.set", "patch.drop", ...UI_MCP_TYPES]);
+const KNOWN = new Set(["hello", "error", "volumes.extend", "volumes.set", "hashes", "snapshot", "search", "fill", "expand", "patch", "registry", "upgrade", "prompt.result", "notice", "chat", "choices.answered", "canvas.set", "patch.drop", ...UI_MCP_TYPES]);
 
 /** The features each protocol version's mod lists (*Versions and features*). */
 const FEATURES_BY_VERSION: Record<number, string[] | undefined> = { 1: undefined, 2: ["modes", "scan", "volumes.set"], 3: ["modes", "scan", "volumes.set", "registry", "upgrade", "ui", "select"], 4: [...MOD_FEATURES] };

@@ -51,6 +51,11 @@ public final class PromptModule {
             if (dev.autosketch.mod.protocol.RequestMessages.isStatus(m.frame())) StatusLines.onStatus(dev.autosketch.mod.protocol.RequestMessages.Status.decode(m.frame()), server);
             else InGamePrompts.onChat(dev.autosketch.mod.protocol.Messages.Chat.decode(m.frame()), server);
         });
+        // 18, piece 7, *Folding*: the hello lists choices.fold because of this handler.
+        e.messages().register("choices.answered", (m, x) -> {
+            var server = Platform.get().currentServer();
+            if (server != null) ChoiceLines.onAnswered(dev.autosketch.mod.protocol.Messages.ChoicesAnswered.decode(m.frame()), server);
+        });
         Autosketch.bridge().addListener(new dev.autosketch.mod.api.Bridge.Listener() {
             @Override
             public void disconnected(dev.autosketch.mod.api.BridgeSession session) {

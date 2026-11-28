@@ -3,6 +3,7 @@ package dev.autosketch.mod.protocol;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -122,6 +123,19 @@ class UiMessagesTest {
         UiMessages.UiRequest pick = UiMessages.UiRequest.decode(FrameCodec.decode(Golden.bin("ui-request-choices-pick")));
         assertEquals("q1", pick.args().get("id").getAsString());
         assertEquals("answered", UiMessages.UiResult.decode(FrameCodec.decode(Golden.bin("ui-result-choices-answered"))).error());
+
+        // Folding (feature choices.fold): the question tag on a choice line and on the closing line, and choices.answered.
+        assertNull(chat.question());
+        Messages.Chat tagged = Messages.Chat.decode(FrameCodec.decode(Golden.bin("chat-reply-choice-question")));
+        assertEquals("q1", tagged.question());
+        assertEquals(1, tagged.action().args().get("index").getAsInt());
+        Messages.Chat end = Messages.Chat.decode(FrameCodec.decode(Golden.bin("chat-reply-choices-end")));
+        assertEquals("q1", end.question());
+        assertNull(end.action());
+        Messages.ChoicesAnswered answered = Messages.ChoicesAnswered.decode(FrameCodec.decode(Golden.bin("choices-answered")));
+        assertEquals(new Messages.ChoicesAnswered("q1", 1), answered);
+        assertEquals(Golden.json("choices-answered").getAsJsonObject("header"), answered.encode().header());
+        assertEquals(Golden.json("chat-reply-choice-question").getAsJsonObject("header"), tagged.encode().header());
 
         UiMessages.UiState s = UiMessages.UiState.decode(FrameCodec.decode(Golden.bin("ui-state-fill")));
         UiMessages.Fill f = s.fills().get(0);

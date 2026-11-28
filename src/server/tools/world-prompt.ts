@@ -96,8 +96,10 @@ export function registerWorldPromptTools({ tool, session }: ToolDeps): void {
       if (split) {
         // The rest go to the request the first message reached (or, like it, to none).
         const to = request ? { request: request.id } : a.request !== undefined ? { request: a.request } : {};
-        a.choices!.forEach((c, index) => g.reply([choiceLine(index, c, modes[index])], { ...to, action: { line: 0, kind: "choices.pick", args: { id: question!.id, index } } }));
-        const last = g.reply([CLICK_CHOICES_LINE], { ...to, ...(a.done ? { done: true } : {}) });
+        // Each tagged with the question, so a client half that folds can fold them once it is answered (`18`, piece 7, *Folding*).
+        const tag = { question: question!.id };
+        a.choices!.forEach((c, index) => g.reply([choiceLine(index, c, modes[index])], { ...to, ...tag, action: { line: 0, kind: "choices.pick", args: { id: question!.id, index } } }));
+        const last = g.reply([CLICK_CHOICES_LINE], { ...to, ...tag, ...(a.done ? { done: true } : {}) });
         answered = { open: last.open, held: last.held };
       }
       for (const stored of [list, question]) {

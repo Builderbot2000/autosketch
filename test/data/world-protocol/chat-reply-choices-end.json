@@ -1,0 +1,14 @@
+{
+  "description": "The line closing question q1's choices: no action, tagged with the question so it folds with them",
+  "sender": "mcp",
+  "header": {
+    "type": "chat",
+    "request": 21,
+    "player": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    "kind": "reply",
+    "lines": [
+      "or type your own answer"
+    ],
+    "question": "q1"
+  }
+}

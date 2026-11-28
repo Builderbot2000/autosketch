@@ -48,6 +48,11 @@ public final class Messages {
      */
     public static final String FEATURE_SELECT = "select";
     /**
+     * Added within protocol 4 (18, piece 7, *Folding*): the mod takes {@code chat}'s {@code question}
+     * and {@code choices.answered}, and its client half folds a question's choice lines once answered.
+     */
+    public static final String FEATURE_CHOICES_FOLD = "choices.fold";
+    /**
      * Optional MCP capabilities an MCP hello lists in {@code features}, mirroring the mod's list: the
      * mod uses an addition only when the MCP lists it. {@code prompt.close}: the MCP handles
      * {@code prompt.close} ({@code /autosketch done}, 13, B6).
@@ -842,11 +847,16 @@ public final class Messages {
      * player's client send the {@code ui.request} {@code action.kind} with {@code action.args}. A mod
      * or client that doesn't handle it shows the line as plain text.
      */
-    public record Chat(@Nullable Long request, @Nullable UUID player, String kind, List<String> lines, @Nullable ChatAction action) {
+    public record Chat(@Nullable Long request, @Nullable UUID player, String kind, List<String> lines, @Nullable ChatAction action, @Nullable String question) {
         public static final String ACTIVITY = "activity", REPLY = "reply";
 
         public Chat {
             lines = List.copyOf(lines);
+        }
+
+        /** A chat that belongs to no question. */
+        public Chat(@Nullable Long request, @Nullable UUID player, String kind, List<String> lines, @Nullable ChatAction action) {
+            this(request, player, kind, lines, action, null);
         }
 
         public boolean reply() {
@@ -866,6 +876,7 @@ public final class Messages {
                 a.add("args", action.args());
                 h.add("action", a);
             }
+            if (question != null) h.addProperty("question", question);
             return new Frame(h);
         }
 
@@ -891,7 +902,37 @@ public final class Messages {
                 if (k.isEmpty()) throw ProtocolException.badRequest(null, "action.kind must be non-empty");
                 action = new ChatAction(line, k, Json.reqObject(a, "args", null));
             }
-            return new Chat(request, p == null ? null : parseUuid(p, null), kind, lines, action);
+            String question = null;
+            if (h.has("question")) {
+                if (!kind.equals(REPLY)) throw ProtocolException.badRequest(null, "only a reply carries a question");
+                question = Json.reqString(h, "question", null);
+                if (question.isEmpty()) throw ProtocolException.badRequest(null, "question must be non-empty");
+            }
+            return new Chat(request, p == null ? null : parseUuid(p, null), kind, lines, action, question);
+        }
+    }
+
+    /**
+     * {@code choices.answered}, MCP → mod (feature {@code choices.fold}; 18, piece 7, *Folding*):
+     * question {@code question} was answered with choice {@code index} (from 0). Relayed to the client
+     * half, which folds the question's lines.
+     */
+    public record ChoicesAnswered(String question, int index) {
+        public Frame encode() {
+            JsonObject h = Json.header("choices.answered");
+            h.addProperty("question", question);
+            h.addProperty("index", index);
+            return new Frame(h);
+        }
+
+        public static ChoicesAnswered decode(Frame f) throws ProtocolException {
+            expectType(f, "choices.answered");
+            JsonObject h = f.header();
+            String q = Json.reqString(h, "question", null);
+            if (q.isEmpty()) throw ProtocolException.badRequest(null, "question must be non-empty");
+            int index = Json.reqInt(h, "index", null);
+            if (index < 0) throw ProtocolException.badRequest(null, "index must be >= 0");
+            return new ChoicesAnswered(q, index);
         }
     }
 

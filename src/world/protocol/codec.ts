@@ -272,10 +272,22 @@ function split(m: Message): { header: Record<string, unknown>; body: Uint8Array 
     case "chat":
       if (m.kind === "status") return { header: statusHeader(m), body: none };
       if (m.action && (m.kind !== "reply" || !Number.isInteger(m.action.line) || m.action.line < 0 || m.action.line >= m.lines.length)) throw new ProtocolError("chat: an action names one line of a reply");
+      if (m.question !== undefined && (m.kind !== "reply" || !m.question)) throw new ProtocolError("chat: question names a question, on a reply");
       return {
-        header: { type: m.type, request: m.request, player: m.player, kind: m.kind, lines: [...m.lines], ...(m.action ? { action: { line: m.action.line, kind: m.action.kind, args: m.action.args } } : {}) },
+        header: {
+          type: m.type,
+          request: m.request,
+          player: m.player,
+          kind: m.kind,
+          lines: [...m.lines],
+          ...(m.action ? { action: { line: m.action.line, kind: m.action.kind, args: m.action.args } } : {}),
+          ...(m.question !== undefined ? { question: m.question } : {}),
+        },
         body: none,
       };
+    case "choices.answered":
+      if (!m.question || !Number.isInteger(m.index) || m.index < 0) throw new ProtocolError("choices.answered: a question id and a choice index from 0");
+      return { header: { type: m.type, question: m.question, index: m.index }, body: none };
     case "ui.state": {
       const changed = <T>(k: string, v: T | null | undefined) => (m.full || v !== undefined ? { [k]: v ?? null } : {});
       if (m.full && m.removed?.length) throw new ProtocolError("ui.state: a full state removes nothing");
@@ -471,7 +483,7 @@ export function decodeFrame(frame: Uint8Array, sender: Sender): Message {
   return decodeMessage(frame.subarray(4), sender);
 }
 
-const MCP_TYPES = new Set(["hello", "error", "volumes.extend", "volumes.set", "hashes", "snapshot", "search", "fill", "expand", "patch", "registry", "upgrade", "prompt.result", "notice", "chat", "canvas.set", "patch.drop", ...UI_MCP_TYPES]);
+const MCP_TYPES = new Set(["hello", "error", "volumes.extend", "volumes.set", "hashes", "snapshot", "search", "fill", "expand", "patch", "registry", "upgrade", "prompt.result", "notice", "chat", "choices.answered", "canvas.set", "patch.drop", ...UI_MCP_TYPES]);
 const MOD_TYPES = new Set(["hello", "error", "volumes", "hashes.result", "snapshot.result", "search.result", "fill.result", "patch.ack", "dirty", "prompt", "prompt.close", "registry.result", "upgrade.result", "ui.request", "request.control", "canvas"]);
 const BODY_TYPES = new Set(["snapshot.result", "search.result", "fill.result", "patch", "patch.ack", "dirty", "registry.result", "upgrade", "upgrade.result", "ui.ghost", "replay.frame", "ui.result"]);
 
@@ -756,7 +768,19 @@ function decode(type: string, v: Fields, body: Uint8Array, sender: Sender): Mess
         if (typeof args !== "object" || args === null || Array.isArray(args)) throw new ProtocolError("chat: action.args must be an object");
         out.action = { line, kind, args: args as Record<string, unknown> };
       }
+      if (v.has("question")) {
+        if (out.kind !== "reply") throw new ProtocolError("chat: only a reply carries a question");
+        const q = v.str("question");
+        if (!q) throw new ProtocolError("chat: question must be non-empty");
+        out.question = q;
+      }
       return out;
+    }
+    case "choices.answered": {
+      const question = v.str("question"), index = v.int("index");
+      if (!question) throw new ProtocolError("choices.answered: question must be non-empty");
+      if (index < 0) throw new ProtocolError("choices.answered: index must be ≥ 0");
+      return { type, question, index };
     }
     case "ui.state": {
       const players = v.players(), seq = v.id("seq"), full = v.bool("full");

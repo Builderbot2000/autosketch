@@ -300,6 +300,11 @@ public final class InGamePrompts {
         for (ServerPlayer p : server.getPlayerList().getPlayers()) {
             if (!p.hasPermissions(CommandExtension.OP_LEVEL)) continue;
             if (!ChatRules.visible(logMode(p), p.getUUID(), target, reply)) continue;
+            // 18, piece 7, *Folding*: a question's lines go to the client half, which adds and later folds them.
+            if (reply && chat.question() != null && ChoiceLines.relay(p, chat, actionId)) {
+                reached++;
+                continue;
+            }
             for (Component c : action != null && clickable.test(p) ? withAction : plain) out.chat(p, c);
             reached++;
         }
@@ -373,8 +378,8 @@ public final class InGamePrompts {
         return format(lines, reply, clickLine, actionId, ACTION_HOVER);
     }
 
-    /** As above, with the clickable line's hover text. */
-    static List<Component> format(List<String> lines, boolean reply, int clickLine, long actionId, String hover) {
+    /** As above, with the clickable line's hover text (also the client half's, for the choice lines it adds, {@link ChoiceLines}). */
+    public static List<Component> format(List<String> lines, boolean reply, int clickLine, long actionId, String hover) {
         List<Component> out = new ArrayList<>();
         for (int i = 0; i < lines.size(); i++)
             for (String piece : ChatRules.wrap(lines.get(i), ChatRules.WRAP)) {

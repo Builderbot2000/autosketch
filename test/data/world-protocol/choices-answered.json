@@ -1,0 +1,9 @@
+{
+  "description": "Question q1 was answered with its second choice: the client half folds its lines to that one",
+  "sender": "mcp",
+  "header": {
+    "type": "choices.answered",
+    "question": "q1",
+    "index": 1
+  }
+}

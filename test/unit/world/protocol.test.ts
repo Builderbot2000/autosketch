@@ -41,6 +41,7 @@ describe("golden vectors", () => {
       "canvas",
       "canvas.set",
       "chat",
+      "choices.answered",
       "dirty",
       "error",
       "expand",

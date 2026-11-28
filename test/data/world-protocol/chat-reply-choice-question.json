@@ -1,0 +1,22 @@
+{
+  "description": "A choice line tagged with its question, so the client half can fold it once the question is answered",
+  "sender": "mcp",
+  "header": {
+    "type": "chat",
+    "request": 21,
+    "player": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    "kind": "reply",
+    "lines": [
+      "[2] ruin 180 blocks west"
+    ],
+    "action": {
+      "line": 0,
+      "kind": "choices.pick",
+      "args": {
+        "id": "q1",
+        "index": 1
+      }
+    },
+    "question": "q1"
+  }
+}

@@ -82,7 +82,7 @@ export type RequestMode = (typeof REQUEST_MODES)[number];
  * Optional capabilities a mod's `hello` lists in `features` (*Versions and features*). The MCP uses
  * an addition only when the mod lists it, never because of the protocol number.
  */
-export const MOD_FEATURES = ["modes", "volumes.set", "registry", "upgrade", "ui", "select", "requests", "canvas"] as const;
+export const MOD_FEATURES = ["modes", "volumes.set", "registry", "upgrade", "ui", "select", "requests", "canvas", "choices.fold"] as const;
 export type ModFeature = (typeof MOD_FEATURES)[number];
 
 /**
@@ -594,6 +594,23 @@ export interface ChatMessage {
   lines: string[];
   /** Replies only, feature `ui` (`17`, piece 3): makes one line clickable. Absent: plain lines. */
   action?: ChatAction;
+  /**
+   * Replies only, feature `choices.fold` (`18`, piece 7, *Folding*): this message is part of the
+   * choices of question `question` (a choice line, or the closing "or type your own answer" line),
+   * so the client half can fold them once `choices.answered` names the question. Absent: no question.
+   */
+  question?: string;
+}
+
+/**
+ * `choices.answered`, MCP → mod (feature `choices.fold`; `18`, piece 7, *Folding*): question
+ * `question` was answered with choice `index` (from 0), by a click or a typed number. The mod relays
+ * it to the client half, which folds the question's messages to the taken choice's line.
+ */
+export interface ChoicesAnswered {
+  type: "choices.answered";
+  question: string;
+  index: number;
 }
 
 /**
@@ -1138,6 +1155,7 @@ export type McpMessage =
   | NoticeMessage
   | ChatMessage
   | StatusMessage
+  | ChoicesAnswered
   | CanvasSet
   | PatchDrop
   | UiMcpMessage;

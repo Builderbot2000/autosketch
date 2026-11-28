@@ -237,6 +237,8 @@ public final class AutosketchCore {
         if (dispatcher.handles("chat")) out.add(dev.autosketch.mod.protocol.RequestMessages.FEATURE_REQUESTS);
         // 19's canvas: canvas.set here, the reads inside it by the world module's select code.
         if (dispatcher.handles("canvas.set") && dispatcher.handles("fill")) out.add(RequestMessages.FEATURE_CANVAS);
+        // 18, piece 7, *Folding*: the prompt module relays choices.answered (and questions' lines) to the client half.
+        if (dispatcher.handles("choices.answered")) out.add(Messages.FEATURE_CHOICES_FOLD);
         return List.copyOf(out);
     }
 }

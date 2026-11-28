@@ -62,6 +62,7 @@ public final class UiClient {
         NeoForge.EVENT_BUS.addListener((ClientPlayerNetworkEvent.LoggingOut e) -> reset());
         ActionBarHold.init();
         dev.autosketch.mod.client.ui.chat.StatusLineClient.init();
+        dev.autosketch.mod.client.ui.chat.ChoiceLinesClient.init();
     }
 
     /** Adds a handler for one MCP → mod type ({@code ui.state}, {@code ui.ghost}, {@code replay.frame}, ...). */
@@ -150,8 +151,12 @@ public final class UiClient {
     }
 
     static void dispatch(Frame f) throws ProtocolException {
-        // 19: a status line (chat kind status) is the one relayed frame that isn't a ui.* message.
-        Record m = dev.autosketch.mod.protocol.RequestMessages.isStatus(f) ? dev.autosketch.mod.protocol.RequestMessages.Status.decode(f) : UiMessages.decode(f);
+        // 19: a status line (chat kind status), and 18's question lines (chat) and choices.answered
+        // (piece 7, *Folding*), are the relayed frames that aren't ui.* messages.
+        Record m = dev.autosketch.mod.protocol.RequestMessages.isStatus(f) ? dev.autosketch.mod.protocol.RequestMessages.Status.decode(f)
+                : f.type().equals("chat") ? dev.autosketch.mod.protocol.Messages.Chat.decode(f)
+                : f.type().equals("choices.answered") ? dev.autosketch.mod.protocol.Messages.ChoicesAnswered.decode(f)
+                : UiMessages.decode(f);
         counts.merge(f.type(), 1, Integer::sum);
         if (m instanceof UiResult r) {
             Consumer<UiResult> c = waiting.remove(r.request());

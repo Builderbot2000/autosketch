@@ -1,0 +1,10 @@
+{
+  "description": "A queued patch discarded by patch.drop before it started; the MCP resyncs its cache",
+  "sender": "mod",
+  "header": {
+    "type": "error",
+    "id": 21,
+    "code": "dropped",
+    "message": "patch 21 dropped before it started: the player stopped the request"
+  }
+}

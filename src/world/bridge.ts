@@ -22,6 +22,7 @@ import {
   type HashesResult,
   type McpFeature,
   type McpMessage,
+  type PatchDrop,
   type ModFeature,
   type ModHello,
   type ModMessage,
@@ -118,12 +119,14 @@ export interface BridgeConnection {
   request(m: Req<CanvasSet>): Promise<CanvasMessage>;
   /**
    * Fire-and-forget messages; dropped while disconnected. `ui.*` and `replay.*` messages are also
-   * dropped unless both hellos list `ui` (`13`, *In-game UI*), and status lines unless both list
-   * `requests` (`19`).
+   * dropped unless both hellos list `ui` (`13`, *In-game UI*), and status lines and `patch.drop`
+   * unless both list `requests` (`19`).
    */
-  send(m: NoticeMessage | ChatMessage | StatusMessage | PromptResult | UiMcpMessage): void;
+  send(m: NoticeMessage | ChatMessage | StatusMessage | PromptResult | PatchDrop | UiMcpMessage): void;
   /** Whether both hellos list `ui`, so `ui` messages are sent. False while disconnected. */
   readonly ui: boolean;
+  /** Whether both hellos list `requests` (`19`). False while disconnected. */
+  readonly requests: boolean;
   /** Listens to one message type from the mod. Returns the unsubscribe function. */
   on<T extends ModType>(type: T, fn: (m: ModOf<T>) => void): () => void;
   /** Listens to connection changes: `up` after each completed handshake, `down` on each loss. */
@@ -285,11 +288,16 @@ export class Bridge implements BridgeConnection {
     });
   }
 
-  send(m: NoticeMessage | ChatMessage | StatusMessage | PromptResult | UiMcpMessage): void {
+  send(m: NoticeMessage | ChatMessage | StatusMessage | PromptResult | PatchDrop | UiMcpMessage): void {
     if (!this.connected) return;
     if ((UI_MCP_TYPES as readonly string[]).includes(m.type) && !this.ui) return;
-    if (m.type === "chat" && m.kind === "status" && !(this.features.includes("requests") && this.supports("requests"))) return;
+    if (((m.type === "chat" && m.kind === "status") || m.type === "patch.drop") && !this.requests) return;
     this.write(m);
+  }
+
+  /** Whether both hellos list `requests` (`19`, Part A): only then do status lines, queueing and `patch.drop` apply. */
+  get requests(): boolean {
+    return this.connected && this.features.includes("requests") && this.supports("requests");
   }
 
   get ui(): boolean {

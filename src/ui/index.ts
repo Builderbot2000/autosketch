@@ -19,7 +19,7 @@ import { ChoiceRequests } from "./choices.js";
 import { GhostRegions } from "./ghosts.js";
 import { LibraryRequests, type LibraryHost } from "./library.js";
 import { UiPlayers } from "./players.js";
-import { UiRequests } from "./requests.js";
+import { UiRequests, type RequestsHost } from "./requests.js";
 import { SettingsRows } from "./settings.js";
 
 /**
@@ -60,7 +60,7 @@ export interface UiOptions {
   /** The select candidate the feed draws as a steady fill (`18`, piece 8; `FeedHost.candidate`). */
   candidate?: FeedHost["candidate"];
   /** The open in-game request (the activity stream's), and the read-only one whose mode holds. */
-  inGame?(): { current: OpenRequest | undefined; heldRequest: ModeRequest | undefined; candidatesAnswer?: CandidatesHost["answer"] } | undefined;
+  inGame?(): { current: OpenRequest | undefined; heldRequest: ModeRequest | undefined; candidatesAnswer?: CandidatesHost["answer"]; requestControl?: RequestsHost["requestControl"] } | undefined;
   log?(msg: string): void;
   /** Coalescing window override for tests. */
   intervalMs?: number;
@@ -129,6 +129,12 @@ export function startUi(o: UiOptions): UiCore {
     ...(o.candidates ? { candidates: new CandidateRequests({ lists: o.candidates, openRequest, ghosts, answer, load: (id) => loadCandidate(o.library, id), registry: () => o.library.registry?.(), ...(o.stateOverrides ? { stateOverrides: o.stateOverrides } : {}) }) } : {}),
     workspace: o.workspace,
     live: () => ({ session: o.sessionId, doc: o.baseDoc()?.meta.name }),
+    // Request control (`19`): the status lines' buttons, answered by the in-game requests' lifecycle.
+    requestControl: (kind, args) => {
+      const g = o.inGame?.();
+      if (!g?.requestControl) return Promise.resolve({ ok: false, error: "bad_request", message: `This Autosketch doesn't serve ${kind}.` });
+      return g.requestControl(kind, args);
+    },
     linked: () => o.linkFrame() !== undefined,
     ...(o.log ? { log: o.log } : {}),
   });

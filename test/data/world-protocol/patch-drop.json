@@ -1,0 +1,7 @@
+{
+  "description": "The player stopped the request: the mod discards its queued, unstarted patches and finishes the one in progress",
+  "sender": "mcp",
+  "header": {
+    "type": "patch.drop"
+  }
+}

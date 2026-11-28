@@ -5,9 +5,10 @@ import { lookTarget, removeCamera, saveCamera } from "../document/cameras.js";
 import type { Document } from "../document/document.js";
 import { refusal } from "../scope/scopes.js";
 import { ActivityStream, type OpenRequest } from "./chat-stream.js";
+import { PATCH_DROP, RequestLifecycle, type ControlAnswer } from "./requests.js";
 import type { LinkVolumes, WorldLink } from "./link.js";
 import { MODE_ALLOWS, modeOf, READ_ONLY_MODES, RequestModeRule, type ModeRequest } from "./modes.js";
-import { SELECT_CHUNKS, type ChatAction, type GameContext, type ModHello, type PlayerRef, type PromptClose, type PromptMessage, type PromptRefusal, type RequestMode, type WireBox } from "./protocol/messages.js";
+import { SELECT_CHUNKS, type ChatAction, type GameContext, type ModHello, type PlayerRef, type PromptClose, type PromptMessage, type PromptRefusal, type RequestControl, type RequestMode, type WireBox } from "./protocol/messages.js";
 import { setVolumes, type ContextArg, type VolumesFrame } from "./set-volumes.js";
 import type { PromptSettings } from "./settings.js";
 
@@ -72,6 +73,8 @@ export interface InGameReplies {
   readonly clickable: boolean;
   /** Sets the player's volumes (`world_volumes`, B4) in the linked document's coordinates; resolves with the result text. */
   setVolumes(work: PublicBox, context?: ContextArg): Promise<string>;
+  /** True while the player has stopped the running request (`19`, *Stop*): long calls (`run_script`) abort between steps. */
+  readonly stopping?: boolean;
 }
 
 export interface InGameRequestsOptions extends PromptSettings {
@@ -89,6 +92,10 @@ export interface InGameRequestsOptions extends PromptSettings {
   componentSet?: { remind(text: string): string };
   /** The session's questions asked with choices (`Session.choices`, `18` piece 7): a typed number answers the open one. */
   choices?: Pick<Choices, "openOn">;
+  /** Subscribes to the Claude Code turn's end (`turn.end` on the observe bus, `19`); returns the unsubscribe function. Without it only the fallbacks end a turn. */
+  turnEnds?: (fn: () => void) => () => void;
+  /** Least time between status lines of one request (`19`; default 1 s), for tests. */
+  statusMs?: number;
   log?: (msg: string) => void;
 }
 
@@ -112,6 +119,12 @@ export class InGameRequests implements InGameReplies {
    * and the write guard it attaches to the linked document. Refuses with `request_mode`.
    */
   readonly modeRule: RequestModeRule;
+  /**
+   * The request lifecycle (`19`, Part A; `requests.ts`): states, turns, the queue, stop and status
+   * lines. Its `callHook` refuses every tool call while a request is stopping; the entry point
+   * installs it first in `Session.callHooks`.
+   */
+  readonly lifecycle: RequestLifecycle;
   private readonly offs: (() => void)[] = [];
   /**
    * The read-only request whose mode is in force (B6): set on delivery, ended only by the player
@@ -128,14 +141,27 @@ export class InGameRequests implements InGameReplies {
       () => this.held,
       () => (link.state === "linked" ? link.doc : undefined),
     );
+    this.lifecycle = new RequestLifecycle({
+      bridge: link.bridge,
+      deliver: (m) => this.deliver(m, false),
+      idleMs: opts.idleMs,
+      ...(opts.statusMs !== undefined ? { statusMs: opts.statusMs } : {}),
+      // The mod drops the patches it hasn't started (`patch.drop`, sent only to a mod listing `requests`).
+      onStop: () => link.bridge.send(PATCH_DROP),
+      ...(opts.log ? { log: opts.log } : {}),
+    });
+    this.offs.push(opts.subscribe((e) => this.lifecycle.onEvent(e)));
+    if (opts.turnEnds) this.offs.push(opts.turnEnds(() => this.lifecycle.turnEnded()));
     this.offs.push(link.bridge.on("prompt", (m) => void this.onPrompt(m)));
     this.offs.push(link.bridge.on("prompt.close", (m) => this.onClose(m)));
+    this.offs.push(link.bridge.on("request.control", (m) => this.onControl(m)));
     // The activity stream listens only while a game is connected, so an unlinked session pays nothing.
     this.offs.push(
       link.bridge.onConnection((s) => {
         if (s === "up") return this.stream.start();
         this.stream.stop();
         this.held = undefined;
+        this.lifecycle.disconnected();
       }),
     );
     if (link.bridge.connected) this.stream.start();
@@ -152,11 +178,34 @@ export class InGameRequests implements InGameReplies {
   reply(lines: string[], opts: { done?: boolean; request?: number; action?: ChatAction } = {}): { request: OpenRequest | undefined; open: boolean; held?: RequestMode } {
     const { action: _a, ...plain } = opts;
     const r = this.stream.reply(lines, this.clickable ? opts : plain);
+    // The fallback while no hook has reported this session (`19`): `done` concludes its request.
+    if (opts.done) this.lifecycle.replyDone(r.open ? r.request?.id : undefined);
     return this.held ? { ...r, held: this.held.mode } : r;
   }
 
   get clickable(): boolean {
     return this.link.bridge.ui;
+  }
+
+  get stopping(): boolean {
+    return this.lifecycle.stopping;
+  }
+
+  /**
+   * A server-side `/autosketch stop`, `queue` or `queue cancel <n>` (`request.control`, `19`):
+   * allowlisted like a prompt, then answered by the lifecycle with a `notice` or a `chat` reply.
+   */
+  onControl(m: RequestControl): void {
+    if (!promptAllowed(m.player, this.opts.promptPlayers, this.link.bridge.hello)) {
+      this.opts.log?.(`in-game ${m.action} from ${m.player.name} refused: not_allowed`);
+      return this.link.bridge.send({ type: "notice", text: "Autosketch: you aren't allowed to send requests (world.promptPlayers), so you can't stop or queue them either.", player: m.player.uuid });
+    }
+    this.lifecycle.control(m);
+  }
+
+  /** A status line's button (`request.stop`, `queue.send`, `queue.cancel`, `request.undo`); the UI layer checked the allowlist. */
+  requestControl(kind: string, args: Record<string, unknown>): Promise<ControlAnswer> {
+    return this.lifecycle.ui(kind, args);
   }
 
   /** The read-only request whose mode is in force, if any (B6). */
@@ -204,6 +253,7 @@ export class InGameRequests implements InGameReplies {
   close(): void {
     for (const off of this.offs.splice(0)) off();
     this.stream.stop();
+    this.lifecycle.close();
   }
 
   /**
@@ -224,6 +274,7 @@ export class InGameRequests implements InGameReplies {
     if (id === null || open) return;
     if (this.link.state === "linked" && this.link.doc) this.modeRule.attach(this.link.doc);
     this.open({ id, player: a.player, mode: a.mode ?? "build", text: a.question });
+    this.lifecycle.delivered({ id, player: a.player, text: a.question });
     this.opts.log?.(`in-game ${a.mode ?? "build"} request ${id} reopened by ${a.player.name}'s answer`);
   }
 
@@ -232,7 +283,11 @@ export class InGameRequests implements InGameReplies {
     return this.opts.componentSet?.remind(text) ?? text;
   }
 
-  /** Handles one `prompt`; resolves once `prompt.result` is sent. */
+  /**
+   * Handles one `prompt`; resolves once `prompt.result` is sent. While a turn runs and both hellos
+   * list `requests`, the prompt is queued instead (`19`, *Queueing*), after the checks its delivery
+   * will need, so a prompt that can't be delivered isn't queued.
+   */
   async onPrompt(m: PromptMessage): Promise<void> {
     const refuse = (reason: PromptRefusal) => {
       this.opts.log?.(`in-game request ${m.id} from ${m.player.name} refused: ${reason}`);
@@ -241,22 +296,43 @@ export class InGameRequests implements InGameReplies {
     if (!promptAllowed(m.player, this.opts.promptPlayers, this.link.bridge.hello)) return refuse("not_allowed");
     if (!this.link.bridge.modes.includes(m.mode ?? "build")) return refuse("unsupported_mode");
     if (await this.onTypedChoice(m, refuse)) return;
-    if (m.mode === "select") return this.onSelect(m, refuse);
+    if (this.lifecycle.shouldQueue) {
+      if (m.mode !== "select" && this.link.state !== "linked") return refuse("no_link");
+      if (!this.opts.listening()) return refuse("no_listener");
+      const r = this.lifecycle.enqueue(m);
+      if ("reason" in r) return refuse(r.reason);
+      this.opts.log?.(`in-game request ${m.id} from ${m.player.name} queued at ${r.position}`);
+      this.link.bridge.send(r);
+      return;
+    }
+    const why = await this.deliver(m, true);
+    if (why) refuse(why);
+  }
+
+  /**
+   * Delivers a prompt to the agent: the channel event, the mode's write guard, the request's stream
+   * and its lifecycle entry. `result` sends `prompt.result` delivered (a queued prompt already had its
+   * answer). Resolves with the refusal when it couldn't be delivered (the caller sends or reports it).
+   */
+  private async deliver(m: PromptMessage, result: boolean): Promise<PromptRefusal | undefined> {
+    if (m.mode === "select") return this.onSelect(m, result);
     if (this.link.state !== "linked") await this.link.ensureLinked?.();
     const doc = this.link.doc, volumes = this.link.volumes;
-    if (this.link.state !== "linked" || !doc || !volumes) return refuse("no_link");
-    if (!this.opts.listening()) return refuse("no_listener");
+    if (this.link.state !== "linked" || !doc || !volumes) return "no_link";
+    if (!this.opts.listening()) return "no_listener";
     const text = this.remind(requestText(doc, volumes, m));
     this.opts.touch?.();
     try {
       await this.opts.notify(text, { request: String(m.id), player: m.player.name });
     } catch (e) {
       this.opts.log?.(`channel notification failed: ${(e as Error).message}`);
-      return refuse("no_listener");
+      return "no_listener";
     }
     this.modeRule.attach(doc);
-    this.link.bridge.send({ type: "prompt.result", id: m.id, delivered: true });
+    if (result) this.link.bridge.send({ type: "prompt.result", id: m.id, delivered: true });
     this.open({ id: m.id, player: m.player, mode: modeOf(m), text: m.text });
+    this.lifecycle.delivered({ id: m.id, player: m.player, text: m.text });
+    return undefined;
   }
 
   /**
@@ -295,20 +371,21 @@ export class InGameRequests implements InGameReplies {
    * player's words, the context in world coordinates (the world view's), where the select-mode
    * reads reach, and the tools in order. A linked document gets the mode's write guard as usual.
    */
-  private async onSelect(m: PromptMessage, refuse: (reason: PromptRefusal) => void): Promise<void> {
-    if (!this.opts.listening()) return refuse("no_listener");
+  private async onSelect(m: PromptMessage, result: boolean): Promise<PromptRefusal | undefined> {
+    if (!this.opts.listening()) return "no_listener";
     const text = this.remind(selectText(m, { served: this.link.bridge.supports("select") }));
     try {
       await this.opts.notify(text, { request: String(m.id), player: m.player.name });
     } catch (e) {
       this.opts.log?.(`channel notification failed: ${(e as Error).message}`);
-      return refuse("no_listener");
+      return "no_listener";
     }
     if (this.link.state === "linked" && this.link.doc) this.modeRule.attach(this.link.doc);
-    this.link.bridge.send({ type: "prompt.result", id: m.id, delivered: true });
+    if (result) this.link.bridge.send({ type: "prompt.result", id: m.id, delivered: true });
     this.open({ id: m.id, player: m.player, mode: "select", text: m.text });
+    this.lifecycle.delivered({ id: m.id, player: m.player, text: m.text });
+    return undefined;
   }
-
 }
 
 // -- the select event ----------------------------------------------------------------------------

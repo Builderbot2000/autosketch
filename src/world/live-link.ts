@@ -508,6 +508,8 @@ export class LiveLink implements WorldLink {
       .then(
         (ack) => this.onAck(p, ack, f),
         (e: BridgeError) => {
+          // Dropped by a stop (`19`, *Stop*; `patch.drop`): the cache holds blocks the world never got, so resync it all.
+          if (e.refusal === "dropped" && this.frame === f) (this.dirty ??= { everything: false, blocks: new Map() }).everything = true;
           this.note(`world: patch not confirmed (${e.message}); the next sync makes the cache match the world again.`);
           this.emit({ kind: "world.patch", patch: id, jseq, blocks: blocks.length, ...(forced ? { forced } : {}), applied: 0, skipped: 0, rejected: 0, overwritten: 0, normalized: 0, dropped: e.refusal });
         },

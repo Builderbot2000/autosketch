@@ -162,6 +162,7 @@ describe("delivery (W11)", () => {
     expect(events[0]!.content).not.toContain("set:");
     expect(events[0]!.content).not.toContain("\n");
     session.componentSet.add([{ prefab: "gothic_tower_a", label: "corner tower" }, { prefab: "gate_small" }]);
+    inGame!.lifecycle.turnEnded(); // the turn ends (19), so the next prompt is delivered, not queued
     await host.playerAsk(HOST, "another one", {});
     await host.waitFor(() => events.length === 2);
     const lines = events[1]!.content.split("\n");
@@ -169,6 +170,7 @@ describe("delivery (W11)", () => {
     expect(lines[0]).toMatch(/^In-game build request from Dev: "another one"\..*pass done: true when finished\.$/);
     expect(lines[1]).toBe("set: corner tower = gothic_tower_a, gate_small");
     session.componentSet.clear();
+    inGame!.lifecycle.turnEnded(); // the turn ends (19), so the next prompt is delivered, not queued
     await host.playerAsk(HOST, "and a third", {});
     await host.waitFor(() => events.length === 3);
     expect(events[2]!.content).not.toContain("set:");
@@ -180,12 +182,14 @@ describe("delivery (W11)", () => {
     await host.waitFor(() => events.length === 1);
     expect(events[0]!.content).toContain('Looking at minecraft:stone (east face), saved as "target" (in the context volume, read-only).');
     expect(events[0]!.content).toContain('Focus box 4×2×2, saved as "focus" (partly in the context volume, read-only there).');
+    inGame!.lifecycle.turnEnded(); // the turn ends (19), so the next prompt is delivered, not queued
     await host.playerAsk(HOST, "and that", { target: { pos: w([-10, 0, 0]), state: "minecraft:stone", face: "east" } });
     await host.waitFor(() => events.length === 2);
     expect(events[1]!.content).toContain(`Looking at minecraft:stone (east face) at world (90, 64, -200), outside both volumes, so not saved.`);
     expect(events[1]!.content).not.toContain("Focus box");
     expect(session.doc!.selections.has("target")).toBe(false);
     expect(session.doc!.selections.has("focus")).toBe(false);
+    inGame!.lifecycle.turnEnded(); // the turn ends (19), so the next prompt is delivered, not queued
     await host.playerAsk(HOST, "from the nether", { dimension: "minecraft:the_nether" });
     await host.waitFor(() => events.length === 3);
     expect(events[2]!.content).toContain("Not looking at a block within reach.");
@@ -377,6 +381,7 @@ describe("request modes, enforced (13, B6)", () => {
     await host.waitFor(() => inGame!.current?.id === 1);
     expect(await host.playerDone(KEV)).toEqual({ type: "notice", text: "Autosketch: you aren't allowed to send requests (world.promptPlayers), so you can't end one either.", player: KEV.uuid });
     expect(inGame!.heldRequest?.id).toBe(1);
+    inGame!.lifecycle.turnEnded(); // the turn ends (19), so the next prompt is delivered, not queued
     await host.playerAsk(HOST, "build", {}, { mode: "build" });
     await host.waitFor(() => inGame!.current?.id === 2);
     expect(await host.playerDone(HOST)).toMatchObject({ text: "Autosketch: no ask, plan or select request is open." });
@@ -387,7 +392,7 @@ describe("request modes, enforced (13, B6)", () => {
 
   it("the mod sends /autosketch done only to an MCP that lists prompt.close", async () => {
     const { host } = await setup();
-    expect(host.mcpFeatures).toEqual(expect.arrayContaining(["prompt.close"]));
+    expect(host.mcpFeatures).toEqual(expect.arrayContaining(["prompt.close", "requests"]));
     host.mcpFeatures = []; // as an MCP from before the feature
     await host.playerAsk(HOST, "look", {}, { mode: "ask" });
     await host.waitFor(() => inGame!.current?.id === 1);
@@ -544,6 +549,7 @@ describe("select requests (18, piece 1)", () => {
         "Standing at world (-41, 68, 23) in minecraft:overworld, facing north. Looking at minecraft:mossy_stone_bricks (south face) at world (-31, 70, 14). " +
         READS + " " + steps(true) + " Answer the player with world_reply (request 1); pass done: true when finished.",
     );
+    inGame!.lifecycle.turnEnded(); // the turn ends (19), so the next prompt is delivered, not queued
     await host.playerAsk(HOST, "  ", AT, { mode: "select" });
     await host.waitFor(() => events.length === 2);
     expect(events[1]!.content.startsWith("In-game select request from Dev, with no words and no block under the crosshair: ask the player what they mean. " + ALLOWS)).toBe(true);

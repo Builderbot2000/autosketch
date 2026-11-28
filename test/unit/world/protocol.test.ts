@@ -52,6 +52,7 @@ describe("golden vectors", () => {
       "notice",
       "patch",
       "patch.ack",
+      "patch.drop",
       "prompt",
       "prompt.close",
       "prompt.result",

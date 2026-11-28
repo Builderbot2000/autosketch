@@ -6,6 +6,7 @@ import { scriptApiDts } from "../../script/dts.js";
 import { pluginScriptOps } from "../../script/plugins.js";
 import type { ScriptOp } from "../../script/ops.js";
 import { runScript, ScriptError, type ScriptRun } from "../../script/run.js";
+import { refusal } from "../../scope/scopes.js";
 import type { InstanceContext } from "../context.js";
 import { formatEdit } from "../format.js";
 import type { Session } from "../session.js";
@@ -28,8 +29,11 @@ export async function runScriptTool(c: InstanceContext, session: Session, source
   const prefabs = { resolve: (ref: string) => lib.resolve(ref), load: (p: Parameters<typeof loadPrefab>[0]) => loadPrefab(p, c.registry, session.schematicVersion(c.registry, dataVersionFor(c.info.mcVersion))) };
   let run: ScriptRun;
   try {
-    run = await runScript(doc, env(c), { source, ...(args ? { args } : {}), name, ops: extraScriptOps(c), prefabs, ...(preload.length ? { preload } : {}), ...limits });
+    // A stop (19, *Stop*) aborts the run between steps; it is rolled back, as on a timeout.
+    const abort = () => session.inGame?.stopping === true;
+    run = await runScript(doc, env(c), { source, ...(args ? { args } : {}), name, ops: extraScriptOps(c), prefabs, ...(preload.length ? { preload } : {}), ...limits, abort });
   } catch (e) {
+    if (e instanceof ScriptError && e.kind === "stopped") throw refusal("stopped", e.message);
     if (e instanceof ScriptError) return fail([e.message, e.log ? `log:\n${e.log.trimEnd()}` : undefined].filter(Boolean).join("\n"));
     throw e;
   }

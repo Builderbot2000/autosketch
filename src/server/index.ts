@@ -37,6 +37,7 @@ import { LiveLink } from "../world/live-link.js";
 import { watchGameReport } from "../assets/report.js";
 import { bridgeUpgrader } from "../world/upgrade.js";
 import { promptSettings, WORLD_PROMPT_PLAYERS, worldSettings } from "../world/settings.js";
+import { stoppableReads } from "../world/requests.js";
 import { CHANNEL_INSTRUCTIONS, CHANNEL_METHOD, InGameRequests } from "../world/prompt.js";
 import { autoSyncHook, syncLink } from "../world/sync.js";
 import { WorldView } from "../world/view.js";
@@ -140,6 +141,8 @@ async function main(): Promise<void> {
       autoLink,
       componentSet: session.componentSet,
       choices: session.choices,
+      // The Claude Code turn's end (19, *When a request has concluded*): the plugin's hook posts it to observe/.
+      turnEnds: (fn) => observer.bus.subscribe((e) => e.kind === "turn.end" && fn()),
       log,
     });
   } catch (e) {
@@ -147,9 +150,13 @@ async function main(): Promise<void> {
     process.exit(2);
   }
   session.inGame = inGame;
+  // A stopped request (19, *Stop*): every tool call is refused until the turn ends. First, so no other hook runs (no sync) for a refused call.
+  session.callHooks.unshift(inGame.lifecycle.callHook);
+  // World reads in flight are cancelled by a stop (19, *Stop*, step 2).
+  const reads = stoppableReads(link.bridge, () => inGame.lifecycle.stopSignal);
   // The world view (18, piece 5): beside the open document, per in-game request (held or open).
   session.worldView = new WorldView({
-    bridge: link.bridge,
+    bridge: reads,
     request: () => inGame.heldRequest?.id ?? inGame.current?.id,
     dimension: () => link.volumes?.dimension,
     dataVersion: () => link.bridge.hello?.game.dataVersion ?? 0,
@@ -160,7 +167,7 @@ async function main(): Promise<void> {
   // Reads across the canvas (19): document reads outside the brush and context go through the view.
   session.canvasReads = new CanvasReads({ frame: () => link.canvasFrame(), view: () => worldView, note: (line) => link.addNote(line) });
   session.worldSelect = new WorldSelect({
-    bridge: link.bridge,
+    bridge: reads,
     request: () => inGame.heldRequest?.id ?? inGame.current?.id,
     context: () => worldView.context,
     dimension: () => link.volumes?.dimension,

@@ -14,6 +14,7 @@
  *
  *   autosketch instances | setup --instance <id|path> … | config set|unset <key> [value]
  *   command-line setup, see src/cli/index.ts.
+ *   autosketch hook turn-end (the Claude Code plugin's Stop hook, docs/design/19)
  *
  * stdout carries the protocol; all logging goes to stderr.
  */
@@ -21,6 +22,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { Settings } from "../core/settings.js";
 import type { StateOverride } from "../core/rotate.js";
 import { startObserve, type Observer } from "../observe/index.js";
+import { pluginHook, turnHookLine } from "../observe/turn-hook.js";
 import type { PaletteBook } from "../palette/pick.js";
 import { scopeLimits } from "../scope/settings.js";
 import { readConfig } from "../core/config.js";
@@ -100,6 +102,7 @@ async function main(): Promise<void> {
     session.setInstance(ctx);
   } else void setup.autoChoose(session);
   session.events = observer.sink("base");
+  session.turnHookStatus = () => turnHookLine(observer.turnHook(), pluginHook());
   session.eventsFor = (doc) => observer.sink(doc);
   // The live world link (13), wired in here like observe/: tools reach it only through the session.
   // It connects on its own once the instance is loaded (world.autoLink), or on doc_open({world: true});

@@ -52,7 +52,11 @@ export type ObserveEvent =
   | { kind: "world.sync"; reason: "ack" | "context" | "dirty" | "reconnect" | "manual"; changed: number; jseq?: number }
   // Claude Code's OpenTelemetry log records, received at the OTLP receiver /v1/logs and kept unchanged
   // (13, *Backlog* B3; src/observe/otel.ts).
-  | { kind: "otel"; record: Record<string, unknown> };
+  | { kind: "otel"; record: Record<string, unknown> }
+  // The Claude Code turn ended (19, *When a request has concluded*): the plugin's `Stop` hook posted to
+  // `/v1/hooks/turn-end` (src/observe/http.ts). `at` is when it arrived (epoch ms); `reason` is
+  // "stop" (`Stop`) or "error" (`StopFailure`); `session` is Claude Code's session id when the hook gave one.
+  | { kind: "turn.end"; at: number; reason?: string; session?: string };
 
 export type ObserveKind = ObserveEvent["kind"];
 

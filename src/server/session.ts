@@ -139,6 +139,11 @@ export class Session {
    * shown (no mod with the UI, or no request's dimension). Tools never see the link.
    */
   pulseHits?: (boxes: PublicBox[]) => boolean;
+  /**
+   * The install check's line on the turn-end hook (19, *When a request has concluded*; 14): set by
+   * the entry point from observe/, for `instance_info`. Undefined without observe.
+   */
+  turnHookStatus?: () => string;
   /** Answers to in-game requests (13, *Prompting from the game*), for `world_reply`; set beside `world`. */
   inGame?: InGameReplies;
   /**

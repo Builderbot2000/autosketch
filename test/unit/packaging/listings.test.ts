@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { pluginSkills } from "../../../scripts/build-plugin.js";
+import { pluginHook } from "../../../src/observe/turn-hook.js";
 import { launchEnv } from "../../../src/server/context.js";
 import { defaultWorkspace } from "../../../src/server/session.js";
 import { SERVER_VERSION } from "../../../src/server/server.js";
@@ -20,6 +21,9 @@ describe("package and listings (14)", () => {
   it("carry one version (npm run package:version)", () => {
     expect([server.version, server.packages[0].version, manifest.version, plugin.version, SERVER_VERSION]).toEqual(Array(5).fill(pkg.version));
     expect(plugin.mcpServers.autosketch.args).toEqual(["-y", `autosketch@${pkg.version}`]);
+    // The turn-end hook runs the same server version (19).
+    const hookCommands = [...readFileSync(join(ROOT, "packaging/claude-plugin/hooks/hooks.json"), "utf8").matchAll(/autosketch@[^\s"]+/g)].map((m) => m[0]);
+    expect(hookCommands).toEqual([`autosketch@${pkg.version}`, `autosketch@${pkg.version}`]);
   });
 
   it("name the npm package the MCP Registry entry points at", () => {
@@ -55,6 +59,14 @@ describe("package and listings (14)", () => {
     expect(plugin.channels).toEqual([{ server: "autosketch", displayName: "Autosketch in-game requests" }]);
     expect(Object.keys(plugin.mcpServers)).toContain(plugin.channels[0].server);
     expect(marketplace.plugins).toMatchObject([{ name: plugin.name, source: "./packaging/claude-plugin" }]);
+  });
+
+  it("ship the turn-end hook on Stop and StopFailure, without blocking the turn (19)", () => {
+    const hooks = JSON.parse(readFileSync(join(ROOT, "packaging/claude-plugin/hooks/hooks.json"), "utf8"));
+    for (const event of ["Stop", "StopFailure"]) {
+      expect(hooks.hooks[event]).toEqual([{ hooks: [{ type: "command", command: `npx -y autosketch@${pkg.version} hook turn-end`, async: true, timeout: 10 }] }]);
+    }
+    expect(pluginHook({ CLAUDE_PLUGIN_ROOT: join(ROOT, "packaging/claude-plugin") })).toEqual({ state: "installed", root: join(ROOT, "packaging/claude-plugin") });
   });
 
   it("keep the plugin's skills generated from the knowledge packs (npm run package:plugin)", () => {

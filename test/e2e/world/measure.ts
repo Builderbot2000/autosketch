@@ -5,10 +5,13 @@
  *
  *   npx tsx test/e2e/world/measure.ts throughput|snapshot|tracker|surface [--runs 5]
  *   npx tsx test/e2e/world/measure.ts select-search|select-fill|select-coarse|select-blocks|select-surface [--at x z] [--gen n]
+ *   npx tsx test/e2e/world/measure.ts canvas-map [--at x z] [--gen n] [--out dir]
  *
- * The select-* runs are 18's *Measure first* (step Z1), on a normally generated world (see below).
+ * The select-* runs are 18's *Measure first* (step Z1), on a normally generated world (see below);
+ * canvas-map is 19's `canvasChunks` measurement (step Z1 of the canvas set), on the same world.
  */
 import { encodeMessage, type FillResult, type PatchBlock } from "../../../src/world/protocol/index.js";
+import { MCP_FEATURES } from "../../../src/world/protocol/messages.js";
 import { rcon, setVolumes, startMcp, sleep, type Mcp, type Vec3 } from "./harness.js";
 import type { Rcon } from "./rcon.js";
 
@@ -491,8 +494,87 @@ async function selectSurface(r: Rcon, m: Mcp): Promise<void> {
   await r.command("forceload remove all");
 }
 
+
+/**
+ * `canvasChunks` (19, *Open*; canvas set, step Z1): `world_map` over canvases of 64, 128 and 256
+ * chunks across centred on the generated square (the rest of the canvas ungenerated, as a player's
+ * explored area in a bigger world), cold and warm, with the frames and bytes it reads; then coarse
+ * reads (`world_view_read`, 4³ cells) of 64×64-chunk boxes, the largest one coarse read takes, at the
+ * centre and in an ungenerated corner of the 256-chunk canvas, and a render of the view.
+ */
+async function canvasMap(r: Rcon, m: Mcp): Promise<void> {
+  const out = process.argv[process.argv.indexOf("--out") + 1] ?? "/tmp";
+  const { WorldMap } = await import("../../../src/world/map.js");
+  const { WorldView } = await import("../../../src/world/view.js");
+  const ctx = await (await import("./harness.js")).instanceContext();
+  const fs = await import("node:fs");
+  // Count what the map reads: frames and their encoded size.
+  const wire = { requests: 0, bytes: 0 };
+  const bridge = new Proxy(m.link.bridge, {
+    get(t, k, recv) {
+      if (k === "request") return async (msg: Parameters<typeof t.request>[0]) => {
+        const res = await (t.request as (x: unknown) => Promise<object>)(msg);
+        wire.requests++;
+        wire.bytes += encodeMessage(res as never).length;
+        return res;
+      };
+      const v = Reflect.get(t, k, recv);
+      return typeof v === "function" ? v.bind(t) : v;
+    },
+  });
+  const map = new WorldMap({ bridge });
+  m.session.worldMap = map;
+  m.session.worldView = new WorldView({ bridge: m.link.bridge, request: () => 1, dimension: () => OW, dataVersion: () => m.link.bridge.hello?.game.dataVersion ?? 0, palettes: () => ctx.book });
+  await r.command("autosketch clear");
+  const c = [AT[0] >> 4, AT[1] >> 4];
+  const canvasOf = (n: number) => ({ min: [(c[0]! - n / 2) * 16, 0, (c[1]! - n / 2) * 16] as Vec3, max: [(c[0]! + n / 2) * 16 - 1, 0, (c[1]! + n / 2) * 16 - 1] as Vec3 });
+  for (const n of [64, 128, 256]) {
+    const set = await m.link.bridge.request({ type: "canvas.set", dimension: OW, box: canvasOf(n) });
+    if (set.box === null) throw new Error("canvas not set");
+    await sleep(500);
+    for (const state of ["cold", "warm"] as const) {
+      if (state === "cold") await cold(r, 30_000);
+      const idle = await mspt(r);
+      wire.requests = 0;
+      wire.bytes = 0;
+      const heap0 = process.memoryUsage().heapUsed;
+      const t = performance.now();
+      const res = await m.client.callTool({ name: "world_map", arguments: {} });
+      const wall = Math.round(performance.now() - t);
+      const parts = res.content as { type: string; text?: string; data?: string }[];
+      const text = parts.filter((p) => p.type === "text").map((p) => p.text).join("\n");
+      const img = parts.find((p) => p.type === "image");
+      if (res.isError) throw new Error(text);
+      if (img?.data && state === "warm") fs.writeFileSync(`${out}/world-map-${n}.png`, Buffer.from(img.data, "base64"));
+      const s = cost((await last(r)).surface);
+      log(`world_map_${n}_${state}`, { chunks: n * n, wall_ms: wall, snapshots: wire.requests, answer_bytes: wire.bytes, text_bytes: text.length, image_bytes: img?.data ? Buffer.from(img.data, "base64").length : 0, heap_mb: Math.round((process.memoryUsage().heapUsed - heap0) / 1e6), last_surface: s, mspt_idle: idle, mspt_last100_after: await mspt(r), text_head: text.split("\n").slice(0, 3).join(" | ").slice(0, 400) });
+    }
+  }
+  // Coarse reads inside the 256-chunk canvas: 64×64 chunks × 256 blocks high = 268 M blocks, 4³ cells.
+  for (const [name, x0, z0] of [["centre", (c[0]! - 32) * 16, (c[1]! - 32) * 16], ["corner", (c[0]! - 128) * 16, (c[1]! - 128) * 16]] as const) {
+    const box = { min: [x0, -64, z0] as Vec3, max: [x0 + 1023, 191, z0 + 1023] as Vec3 };
+    await cold(r, 30_000);
+    m.session.worldView.clear();
+    const idle = await mspt(r);
+    const heap0 = process.memoryUsage().heapUsed;
+    let t = performance.now();
+    const read = await m.call("world_view_read", { box });
+    const readMs = Math.round(performance.now() - t);
+    const c4 = cost((await last(r)).coarse);
+    const heap = Math.round((process.memoryUsage().heapUsed - heap0) / 1e6);
+    t = performance.now();
+    const rendered = await m.client.callTool({ name: "render", arguments: { view: "world" } });
+    const renderMs = Math.round(performance.now() - t);
+    const img = (rendered.content as { type: string; data?: string }[]).find((p) => p.type === "image");
+    if (img?.data) fs.writeFileSync(`${out}/canvas-coarse-${name}.png`, Buffer.from(img.data, "base64"));
+    log(`coarse4_${name}_1024x256x1024`, { read_ms: readMs, read: read.split("\n")[0]!.slice(0, 300), coarse: c4, heap_mb_after_read: heap, render_ms: renderMs, mspt_idle: idle, mspt_last100_after: await mspt(r) });
+  }
+  await r.command("autosketch canvas clear");
+  map.close();
+}
+
 const r = await rcon();
-const m = await startMcp({ ackWaitMs: 0 });
+const m = await startMcp({ ackWaitMs: 0, ...(what === "canvas-map" ? { features: [...MCP_FEATURES] } : {}) });
 try {
   if (what === "throughput") await throughput(r, m);
   else if (what === "snapshot") await snapshot(r, m);
@@ -503,6 +585,7 @@ try {
   else if (what === "select-coarse") await selectCoarse(r, m);
   else if (what === "select-blocks") await selectBlocks(r, m);
   else if (what === "select-surface") await selectSurface(r, m);
+  else if (what === "canvas-map") await canvasMap(r, m);
   process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
 } catch (e) {
   process.stderr.write(`failed: ${(e as Error).stack}\n${JSON.stringify(out)}\n`);

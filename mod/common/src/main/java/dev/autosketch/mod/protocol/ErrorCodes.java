@@ -22,6 +22,8 @@ public final class ErrorCodes {
     public static final String INTERNAL = "internal";
     /** A {@code search}, {@code fill} or {@code expand} while no select request's grant is in force (18; feature {@code select}). */
     public static final String NO_GRANT = "no_grant";
+    /** A queued patch discarded by {@code patch.drop} before it started (19, *Stop*; feature {@code requests}). */
+    public static final String DROPPED = "dropped";
 
     /** Patch reject reasons ({@code patch.ack}). {@code stale_link} and {@code outside_volumes} double as reasons. */
     public static final String UNKNOWN_STATE = "unknown_state";

@@ -10,6 +10,7 @@ import type { CandidateRequests } from "./candidates.js";
 import type { ChoiceRequests } from "./choices.js";
 import type { LibraryRequests } from "./library.js";
 import type { UiPlayers } from "./players.js";
+import type { ControlAnswer } from "../world/requests.js";
 import { loadReplayLog, ReplaySession, type ReplayLog } from "./replay-frames.js";
 import type { SettingsRows } from "./settings.js";
 
@@ -32,6 +33,8 @@ export interface RequestsHost {
   readonly candidates?: CandidateRequests;
   /** The questions asked with choices (`18`, piece 7); without them `choices.pick` answers `bad_request`. */
   readonly choices?: ChoiceRequests;
+  /** Request control (`19`, Part A; `InGameRequests.requestControl`); without it the request-control kinds answer `bad_request`. */
+  requestControl?(kind: string, args: Record<string, unknown>): Promise<ControlAnswer>;
   readonly workspace: string;
   /** The live session: its id (the folder name of its logs) and the open document's name. */
   live(): { session: string; doc: string | undefined };
@@ -169,12 +172,17 @@ export class UiRequests {
       case "choices.pick":
         if (!this.host.choices) throw new UiRequestError("bad_request", `This Autosketch doesn't serve ${kind}.`);
         return this.host.choices.pick(a, ref);
+      // `19`, Part A: names and shapes frozen in `13` (*Request kinds*); answered by the request lifecycle
+      // (`world/requests.ts`). `request.undo` is step Q2's and answers `bad_request` until then.
       case "request.stop":
       case "queue.send":
       case "queue.cancel":
-      case "request.undo":
-        // `19`, Part A: the wire knows these kinds; the MCP serves them once its hello lists `requests` (step Q1).
-        throw new UiRequestError("bad_request", `This Autosketch doesn't serve ${kind} yet.`);
+      case "request.undo": {
+        if (!this.host.requestControl) throw new UiRequestError("bad_request", `This Autosketch doesn't serve ${kind}.`);
+        const r = await this.host.requestControl(kind, a);
+        if (!r.ok) throw new UiRequestError(r.error, r.message);
+        return { result: r.result };
+      }
     }
   }
 

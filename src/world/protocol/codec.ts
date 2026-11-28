@@ -265,6 +265,8 @@ function split(m: Message): { header: Record<string, unknown>; body: Uint8Array 
       return { header: { type: m.type, ...(m.id !== undefined ? { id: m.id } : {}), dimension: m.dimension, box: box(m.box) }, body: none };
     case "canvas.set":
       return { header: { type: m.type, id: m.id, dimension: m.dimension, box: box(m.box) }, body: none };
+    case "patch.drop":
+      return { header: { type: m.type }, body: none };
     case "notice":
       return { header: { type: m.type, text: m.text, player: m.player }, body: none };
     case "chat":
@@ -469,7 +471,7 @@ export function decodeFrame(frame: Uint8Array, sender: Sender): Message {
   return decodeMessage(frame.subarray(4), sender);
 }
 
-const MCP_TYPES = new Set(["hello", "error", "volumes.extend", "volumes.set", "hashes", "snapshot", "search", "fill", "expand", "patch", "registry", "upgrade", "prompt.result", "notice", "chat", "canvas.set", ...UI_MCP_TYPES]);
+const MCP_TYPES = new Set(["hello", "error", "volumes.extend", "volumes.set", "hashes", "snapshot", "search", "fill", "expand", "patch", "registry", "upgrade", "prompt.result", "notice", "chat", "canvas.set", "patch.drop", ...UI_MCP_TYPES]);
 const MOD_TYPES = new Set(["hello", "error", "volumes", "hashes.result", "snapshot.result", "search.result", "fill.result", "patch.ack", "dirty", "prompt", "prompt.close", "registry.result", "upgrade.result", "ui.request", "request.control", "canvas"]);
 const BODY_TYPES = new Set(["snapshot.result", "search.result", "fill.result", "patch", "patch.ack", "dirty", "registry.result", "upgrade", "upgrade.result", "ui.ghost", "replay.frame", "ui.result"]);
 
@@ -729,6 +731,8 @@ function decode(type: string, v: Fields, body: Uint8Array, sender: Sender): Mess
     }
     case "canvas.set":
       return { type, id: v.id("id"), dimension: v.str("dimension"), box: v.box("box") };
+    case "patch.drop":
+      return { type };
     case "notice":
       return { type, text: v.str("text"), player: v.nullable("player") ? uuid(v.str("player")) : null };
     case "chat": {

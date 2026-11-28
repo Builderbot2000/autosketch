@@ -60,7 +60,7 @@ export type Cardinal = "north" | "south" | "west" | "east";
 export const REJECT_REASONS = ["unknown_state", "bad_nbt", "outside_volumes", "stale_link"] as const;
 export type RejectReason = (typeof REJECT_REASONS)[number];
 
-export const ERROR_CODES = ["protocol_mismatch", "bad_token", "not_ready", "bad_request", "unknown_type", "no_volumes", "wrong_dimension", "outside_volumes", "too_large", "replaced", "stale_link", "bad_extension", "bad_volumes", "internal", "no_grant"] as const;
+export const ERROR_CODES = ["protocol_mismatch", "bad_token", "not_ready", "bad_request", "unknown_type", "no_volumes", "wrong_dimension", "outside_volumes", "too_large", "replaced", "stale_link", "bad_extension", "bad_volumes", "internal", "no_grant", "dropped"] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
 
 /**
@@ -90,13 +90,14 @@ export type ModFeature = (typeof MOD_FEATURES)[number];
  * the mod's list: the mod uses an addition only when the MCP lists it. `prompt.close`: the MCP
  * handles the mod's `prompt.close` (`/autosketch done`, B6). `ui`: the MCP sends `16`'s in-game UI
  * messages and answers `ui.request` (*In-game UI*); used only when the mod lists `ui` too.
+ * `requests` (`19`, Part A, step Q1): status lines, queueing, stop and `request.control`.
+ * `canvas` (`19`, Part B, step F1): the canvas messages.
  */
-export const MCP_FEATURES = ["prompt.close", "ui", "canvas"] as const;
+export const MCP_FEATURES = ["prompt.close", "ui", "requests", "canvas"] as const;
 /**
- * Every MCP feature name on the wire (`13`, *Versions and features*), the ones this MCP doesn't
- * list yet included: `requests` (`19`, Part A: status lines, request control, queueing) and `canvas`
- * (`19`, Part B: the canvas messages). {@link MCP_FEATURES} is what this MCP's hello lists, and a
- * name joins it once the behaviour behind it is built (`requests` in step Q1, `canvas` in F1).
+ * Every MCP feature name on the wire (`13`, *Versions and features*). {@link MCP_FEATURES} is
+ * what this MCP's hello lists, and a name joins it once the behaviour behind it is built
+ * (`requests` joined in step Q1, `canvas` in F1); today they are the same list.
  */
 export const MCP_WIRE_FEATURES = ["prompt.close", "ui", "requests", "canvas"] as const;
 export type McpFeature = (typeof MCP_WIRE_FEATURES)[number];
@@ -682,6 +683,17 @@ export interface RequestControl {
   position?: number;
 }
 
+/**
+ * `patch.drop`, MCP → mod (feature `requests` on the mod's hello; `19`, *Stop*, step 2; added in
+ * step Q1): the player stopped the running request, so the mod discards the patches it has queued
+ * and not started, answering each with `error` `dropped` by its id, and finishes the one in
+ * progress (its ack goes out as usual), as on a disconnect (*Disconnect*). No id, no answer of its
+ * own. The MCP resyncs the cache after a dropped patch, since it holds blocks the world never got.
+ */
+export interface PatchDrop {
+  type: "patch.drop";
+}
+
 /** The `ui.request` kinds of request control (`19`, *Status line*): each takes `{request}`. */
 export const REQUEST_UI_KINDS = ["request.stop", "queue.send", "queue.cancel", "request.undo"] as const;
 
@@ -1127,6 +1139,7 @@ export type McpMessage =
   | ChatMessage
   | StatusMessage
   | CanvasSet
+  | PatchDrop
   | UiMcpMessage;
 /** Messages the mod sends. */
 export type ModMessage =

@@ -53,8 +53,8 @@ describe("requests and canvas: codec", () => {
     expect(MOD_FEATURES).toContain("requests");
     expect(MOD_FEATURES).toContain("canvas");
     expect(MCP_WIRE_FEATURES).toEqual(expect.arrayContaining([...MCP_FEATURES]));
-    // This MCP lists them only once their behaviour is built (Q1; F1 built the canvas frame).
-    expect(MCP_FEATURES as readonly string[]).not.toContain("requests");
+    // This MCP lists them only once their behaviour is built: requests since Q1, canvas since F1.
+    expect(MCP_FEATURES as readonly string[]).toContain("requests");
     expect(MCP_FEATURES as readonly string[]).toContain("canvas");
     for (const k of REQUEST_UI_KINDS) expect(UI_REQUEST_KINDS).toContain(k);
     expect(PROMPT_REFUSALS).toContain("busy");

@@ -1227,6 +1227,9 @@ vector("error-too-large", "mod", "A select-mode read over contextCap in one call
     kind: "reply",
     lines: ['Queue: 2 prompts behind request 14.', '1. "make the roof steeper"', '2. "add a banner over the gate"'],
   });
+  // Stop drops the mod's unstarted patches (19, *Stop*, step 2; step Q1).
+  vector("patch-drop", "mcp", "The player stopped the request: the mod discards its queued, unstarted patches and finishes the one in progress", { type: "patch.drop" });
+  vector("error-patch-dropped", "mod", "A queued patch discarded by patch.drop before it started; the MCP resyncs its cache", { type: "error", id: 21, code: "dropped", message: "patch 21 dropped before it started: the player stopped the request" });
   // The buttons' ui.requests and their results.
   vector("ui-request-request-stop", "mod", "The player clicked Stop on request 14's status line", { type: "ui.request", request: 40, player: KEV, kind: "request.stop", args: { request: 14 } });
   vector("ui-result-request-stop", "mcp", "The request is stopping: every later tool call is refused until its turn ends", { type: "ui.result", request: 40, player: UUID_KEV, ok: true, result: { request: 14, state: "stopping" } });

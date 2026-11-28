@@ -202,6 +202,11 @@ export class FakeHost {
   private worldFill: WorldFill | null = null;
   /** Called before a patch is applied; may return a promise to hold it (later requests wait, as in the mod). */
   beforePatch?: (patch: PatchMessage) => void | Promise<void>;
+  /** Patch ids answered `dropped` after a `patch.drop` (`19`, *Stop*), in order. */
+  readonly droppedPatches: number[] = [];
+  /** The newest patch id received, and the newest a `patch.drop` covers (patches up to it not yet started are dropped). */
+  private lastPatchId = 0;
+  private dropUpTo = 0;
   port = 0;
   token = "";
   link = 1;
@@ -610,6 +615,7 @@ export class FakeHost {
           continue;
         }
         this.received.push(m);
+        if (m.type === "patch") this.lastPatchId = m.id;
         if (this.socket !== s) continue;
         // Requests (messages with an id) run strictly in order; id-less messages don't wait behind a held patch.
         if ("id" in m && m.type !== "prompt.result" && m.type !== "error") {
@@ -809,8 +815,17 @@ export class FakeHost {
         return this.sendVolumes();
       }
       case "patch":
+        if (m.id <= this.dropUpTo) {
+          this.droppedPatches.push(m.id);
+          return this.send({ type: "error", id: m.id, code: "dropped", message: `patch ${m.id} dropped before it started: the player stopped the request` }, s);
+        }
         await this.beforePatch?.(m);
         return this.applyPatch(m, s);
+      case "patch.drop":
+        // A mod without `requests` doesn't know this id-less type and ignores it. The patch in progress
+        // (held in `beforePatch`) has started, so it finishes; the queued ones behind it are dropped.
+        if (this.has("requests")) this.dropUpTo = this.lastPatchId;
+        return;
       case "registry": {
         if (!this.has("registry")) return this.send({ type: "error", id: m.id, code: "unknown_type", message: "unknown message type registry" }, s);
         const { gzip, hash } = this.registryFile;
@@ -1047,7 +1062,7 @@ function widenToColumns(b: WireBox): WireBox {
 }
 
 const DIMENSIONS = new Set(["minecraft:overworld", "minecraft:the_nether", "minecraft:the_end"]);
-const KNOWN = new Set(["hello", "error", "volumes.extend", "volumes.set", "hashes", "snapshot", "search", "fill", "expand", "patch", "registry", "upgrade", "prompt.result", "notice", "chat", "canvas.set", ...UI_MCP_TYPES]);
+const KNOWN = new Set(["hello", "error", "volumes.extend", "volumes.set", "hashes", "snapshot", "search", "fill", "expand", "patch", "registry", "upgrade", "prompt.result", "notice", "chat", "canvas.set", "patch.drop", ...UI_MCP_TYPES]);
 
 /** The features each protocol version's mod lists (*Versions and features*). */
 const FEATURES_BY_VERSION: Record<number, string[] | undefined> = { 1: undefined, 2: ["modes", "scan", "volumes.set"], 3: ["modes", "scan", "volumes.set", "registry", "upgrade", "ui", "select"], 4: [...MOD_FEATURES] };

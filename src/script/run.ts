@@ -38,6 +38,12 @@ export interface RunOptions {
   prefabs?: PrefabSource;
   /** Prefab names to load besides the literals, for names the script computes. */
   preload?: readonly string[];
+  /**
+   * True once the run must stop (`19`, *Stop*: the player stopped the request). Checked before the
+   * run starts and between steps (each op, and QuickJS's interrupt check); a stopped run is rolled
+   * back like a timeout and throws a `ScriptError` of kind `stopped`.
+   */
+  abort?: () => boolean;
 }
 
 export interface ScriptRun {
@@ -56,11 +62,14 @@ export class ScriptError extends Error {
   constructor(
     message: string,
     readonly log: string,
-    readonly kind: "error" | "timeout" | "memory",
+    readonly kind: "error" | "timeout" | "memory" | "stopped",
   ) {
     super(message);
   }
 }
+
+/** A stopped run's message (`19`, *Stop*; its last sentence is `world/requests.ts`'s `STOPPED_TEXT`). */
+const STOPPED = "Script stopped and rolled back, so nothing was changed. The player stopped this request. End your turn now; don't retry or continue.";
 
 let module: Promise<QuickJSWASMModule> | undefined;
 const quickjs = () => (module ??= getQuickJS());
@@ -87,14 +96,17 @@ export async function runScript(doc: Document, env: OpEnv, opts: RunOptions): Pr
   const compsBefore = new Set(doc.components.keys());
   const selectionsBefore = new Map(doc.selections);
 
+  // The prefabs loaded asynchronously, so a stop may have come in meanwhile.
+  const aborted = () => opts.abort?.() === true;
+  if (aborted()) throw new ScriptError(STOPPED, "", "stopped");
   const rt = QJS.newRuntime();
   rt.setMemoryLimit(opts.memoryBytes ?? SCRIPT_DEFAULTS.memoryBytes);
   rt.setMaxStackSize(1024 * 1024);
-  rt.setInterruptHandler(() => Date.now() > deadline);
+  rt.setInterruptHandler(() => Date.now() > deadline || aborted());
   const ctx = rt.newContext();
   try {
     const fn = ctx.newFunction("__host", (nameH, argsH) => {
-      if (Date.now() > deadline) throw new Error("interrupted");
+      if (Date.now() > deadline || aborted()) throw new Error("interrupted");
       const name = ctx.getString(nameH);
       const args = JSON.parse(ctx.getString(argsH)) as unknown[];
       if (name === "__log") {
@@ -131,6 +143,7 @@ export async function runScript(doc: Document, env: OpEnv, opts: RunOptions): Pr
       if (r.error) {
         const e = ctx.dump(r.error) as { name?: string; message?: string; stack?: string } | string;
         r.error.dispose();
+        if (aborted()) throw new ScriptError(STOPPED, log, "stopped");
         throw describeError(e, timeoutMs, opts.memoryBytes ?? SCRIPT_DEFAULTS.memoryBytes, log);
       }
       const v = ctx.dump(r.value) as string | undefined;

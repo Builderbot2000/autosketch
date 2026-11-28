@@ -143,7 +143,7 @@ class GoldenVectorsTest {
             case "dirty" -> Dirty.decode(f);
             case "notice" -> Notice.decode(f);
             case "chat" -> RequestMessages.isStatus(f) ? RequestMessages.Status.decode(f) : Chat.decode(f);
-            case "request.control", "canvas", "canvas.set" -> RequestMessages.decode(f);
+            case "request.control", "canvas", "canvas.set", "patch.drop" -> RequestMessages.decode(f);
             case "registry" -> RegistryRequest.decode(f);
             case "registry.result" -> RegistryResult.decode(f);
             case "upgrade" -> UpgradeRequest.decode(f);
@@ -198,6 +198,7 @@ class GoldenVectorsTest {
             case RequestMessages.RequestControl x -> x.encode();
             case RequestMessages.Canvas x -> x.encode();
             case RequestMessages.CanvasSet x -> x.encode();
+            case RequestMessages.PatchDrop x -> x.encode();
             default -> throw new IllegalArgumentException(m.toString());
         };
     }

@@ -51,7 +51,7 @@ public final class RequestMessages {
     /** Whether a frame is one of this class's messages. */
     public static boolean handles(Frame f) {
         return switch (f.type()) {
-            case "request.control", "canvas", "canvas.set" -> true;
+            case "request.control", "canvas", "canvas.set", "patch.drop" -> true;
             case "chat" -> isStatus(f);
             default -> false;
         };
@@ -64,6 +64,7 @@ public final class RequestMessages {
             case "request.control" -> RequestControl.decode(f);
             case "canvas" -> Canvas.decode(f);
             case "canvas.set" -> CanvasSet.decode(f);
+            case "patch.drop" -> PatchDrop.decode(f);
             default -> throw new IllegalArgumentException("not a request or canvas message: " + f.type());
         };
     }
@@ -180,6 +181,25 @@ public final class RequestMessages {
             if (position != null && position < 1) throw ProtocolException.badRequest(null, "\"position\" must be at least 1");
             if ((position != null) != action.equals("queue.cancel")) throw ProtocolException.badRequest(null, "position goes exactly with queue.cancel");
             return new RequestControl(Player.fromJson(Json.reqObject(h, "player", null), null), action, position);
+        }
+    }
+
+    // ── patch.drop ────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * {@code patch.drop}, MCP → mod (the mod's hello lists {@code requests}; 19, *Stop*, step 2): the
+     * player stopped the running request. The mod discards the patches it has queued and not started,
+     * answering each with {@code error} {@code dropped} ({@link ErrorCodes#DROPPED}) by its id, and
+     * finishes the one in progress, as on a disconnect. No id and no answer of its own.
+     */
+    public record PatchDrop() {
+        public Frame encode() {
+            return new Frame(Json.header("patch.drop"));
+        }
+
+        public static PatchDrop decode(Frame f) throws ProtocolException {
+            if (f.id() != null) throw ProtocolException.badRequest(null, "patch.drop has no id");
+            return new PatchDrop();
         }
     }
 

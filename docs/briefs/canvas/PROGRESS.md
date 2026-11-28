@@ -9,7 +9,7 @@ The lead's log, one line per step (*How to run this set* in the README). Read th
 | Q1 | cv-q1 | interrupted | | usage limit 2026-11-27 ~21:00; WIP commit a41228c on its branch; stopped while wiring the lifecycle into InGameRequests. Untested |
 | G1 | cv-g1 | interrupted | | usage limit 2026-11-27 ~21:00; WIP commit 04b89e0 on its branch; stopped while writing the request GameTests. Untested |
 | K1 | cv-k1 | interrupted | | usage limit 2026-11-27 ~21:00; WIP commit 6bdf589 on its branch; stopped while writing CanvasManager. Untested |
-| F1 | cv-f1 | interrupted | | usage limit 2026-11-27 ~21:00; WIP commit 71d38fe on its branch; stopped while routing perception.ts reads (render, view_slice, analyze, raycast) through the world view. Untested |
+| F1 | cv-f1-r | merged | c5abf2d | restarted after the usage limit; frame set/cleared only by canvas set/clear (relink), a grown canvas or new brush inside keeps every coordinate; canvas not holding the brush (or other dimension) doesn't anchor; reads outside the mirror go through `readDocFor`/`selReach` (world-view.ts) + `CanvasReads` (canvas.ts) onto a read-only canvas read doc (`canvas_read_only`), `outside_canvas` beyond it, `world:` line says now vs view; picks' `within` counts toward reach; `select` (edit.ts) also reads via `readDocFor`, so a selection leaving the canvas outside the mirror is refused (lead: accepted, canvas is the read grant); `canvas` in MCP_FEATURES. Lead tiers green: typecheck, npm 1355 |
 
 ## Resume here (2026-11-27, lead session ended on the usage limit)
 

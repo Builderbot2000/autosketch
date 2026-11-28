@@ -51,6 +51,7 @@ import { startUi } from "../ui/index.js";
 import type { LibraryHost as UiLibraryHost } from "../ui/library.js";
 import type { InstanceContext } from "./context.js";
 import { libraryFor, rootsFor } from "./tools/library-context.js";
+import { channelSession } from "./channel-session.js";
 
 const log = (msg: string) => process.stderr.write(`[autosketch] ${msg}\n`);
 
@@ -115,7 +116,11 @@ async function main(): Promise<void> {
   let autoLink: boolean;
   try {
     const ws = worldSettings(settings);
-    autoLink = ws.autoLink;
+    // Not in a Claude Code session that drops channel events: the mod hands the link to the newest
+    // connection, so connecting here would take it from the session that can take requests.
+    const listens = channelSession();
+    autoLink = ws.autoLink && listens !== false;
+    if (ws.autoLink && listens === false) log("world: not linking on its own: this Claude Code session wasn't started with --channels naming autosketch, so in-game requests couldn't reach it; doc_open({world: true}) links anyway");
     // `ui` in the hello: src/ui/ answers the in-game UI's requests (16).
     link = new LiveLink(session, { ...ws, features: [...MCP_FEATURES], log });
   } catch (e) {

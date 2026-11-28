@@ -1,6 +1,7 @@
 import { z } from "zod";
-import { toPublic, type PublicBox } from "../../core/region.js";
+import { toPublic, type Box, type PublicBox } from "../../core/region.js";
 import type { Document } from "../../document/document.js";
+import type { Mask } from "../../core/mask.js";
 import { resolveSelection, type SelExpr } from "../../ops/selection.js";
 import { setRenderIdPrefix } from "../../perception/render/cameras.js";
 import { refusal } from "../../scope/scopes.js";
@@ -28,6 +29,50 @@ export function docFor(session: Session, view: "world" | undefined, opts: { allo
   if (v.empty && !opts.allowEmpty) throw refusal("world_view_empty", "The world view holds nothing yet: world_view_read({box}) reads blocks from the world into it.");
   setRenderIdPrefix(v.doc, WORLD_RENDER_PREFIX);
   return v.doc;
+}
+
+/** The canvas read document's render ids ("c1", "c2", …; 19), beside "r" and the world view's "w". */
+export const CANVAS_RENDER_PREFIX = "c";
+
+/**
+ * The document a read addresses (19, *The frame doesn't move with the brush*): as `docFor`, except
+ * that on the linked document with a canvas, a read whose reach leaves the brush and context reads
+ * those canvas positions through the world view and looks at the canvas read document (read-only,
+ * possibly stale; the result's `world:` line says so). `reach` gives the local, half-open boxes the
+ * call reads, worked out on the open document; undefined or empty reads the document as it is.
+ */
+export async function readDocFor(session: Session, view: "world" | undefined, reach: (doc: Document) => Box[] | undefined, opts: { allowEmpty?: boolean } = {}): Promise<Document> {
+  const doc = docFor(session, view, opts);
+  const cr = session.canvasReads;
+  if (view === "world" || !cr) return doc;
+  const boxes = reach(doc);
+  if (!boxes?.length) return doc;
+  const out = await cr.docFor(doc, boxes);
+  if (out !== doc) setRenderIdPrefix(out, CANVAS_RENDER_PREFIX);
+  return out;
+}
+
+/**
+ * The local boxes a selection reads (19): its bounding box, and the `within` box of each pick
+ * (`connected`, `similar`) in it, since a pick reads blocks there that the mirror may not hold.
+ */
+export function selReach(expr: unknown, resolve: (e: SelExpr) => Mask): Box[] {
+  const out: Box[] = [];
+  const add = (e: unknown) => {
+    const b = resolve(e as SelExpr).bbox();
+    if (b) out.push(b);
+  };
+  const visit = (e: unknown): void => {
+    if (Array.isArray(e)) return e.forEach(visit);
+    if (!e || typeof e !== "object") return;
+    for (const [k, v] of Object.entries(e)) {
+      if ((k === "connected" || k === "similar") && v && typeof v === "object" && "within" in v) add((v as { within: unknown }).within);
+      visit(v);
+    }
+  };
+  add(expr);
+  visit(expr);
+  return out;
 }
 
 /** world_view_read (18, piece 5). */

@@ -18,6 +18,7 @@ import type { ScopeLimits } from "../scope/settings.js";
 import type { LinkOpenOptions, WorldLink } from "../world/link.js";
 import type { InGameReplies } from "../world/prompt.js";
 import type { WorldView } from "../world/view.js";
+import type { CanvasReads } from "../world/canvas.js";
 import type { WorldSelect } from "../world/select/select.js";
 import type { Registry } from "../assets/registry.js";
 import type { ImportUpgrade } from "../formats/index.js";
@@ -152,6 +153,12 @@ export class Session {
    * with `view: "world"`; set by the entry point beside `world`.
    */
   worldView?: WorldView;
+  /**
+   * Reads across the canvas (19, *The frame doesn't move with the brush*): document reads that reach
+   * canvas positions outside the linked document's brush and context look at them through the world
+   * view, read-only. Tools reach it through `readDocFor` (tools/world-view.ts); set by the entry point.
+   */
+  canvasReads?: Pick<CanvasReads, "docFor" | "doc">;
   /**
    * The agent's select requests in the world (18, pieces 2 to 4 and 9): the current request's search
    * state and its fill, the candidate. Set by the entry point beside `worldView`.

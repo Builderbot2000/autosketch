@@ -99,7 +99,12 @@ export function registerDocumentTools({ tool, session }: ToolDeps): void {
       description: "The open document: bounds, block counts by state, components, palettes, history and checkpoints. Text, <300 tokens.",
       inputSchema: {},
     },
-    (c) => text(formatInfo(session.require(), c.registry, session.path)),
+    (c) => {
+      const doc = session.require();
+      // The linked document names its frame: the canvas, the brush and context, local (0,0,0) in the world (19).
+      const frame = session.world?.doc === doc ? session.world.describeFrame?.() : undefined;
+      return text(formatInfo(doc, c.registry, session.path) + (frame ? `\n${frame}` : ""));
+    },
   );
 }
 

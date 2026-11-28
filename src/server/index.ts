@@ -40,6 +40,7 @@ import { promptSettings, WORLD_PROMPT_PLAYERS, worldSettings } from "../world/se
 import { CHANNEL_INSTRUCTIONS, CHANNEL_METHOD, InGameRequests } from "../world/prompt.js";
 import { autoSyncHook, syncLink } from "../world/sync.js";
 import { WorldView } from "../world/view.js";
+import { CanvasReads } from "../world/canvas.js";
 import { WorldSelect } from "../world/select/select.js";
 import { worldCandidate } from "./world-candidate.js";
 import { MCP_FEATURES } from "../world/protocol/messages.js";
@@ -156,6 +157,8 @@ async function main(): Promise<void> {
   });
   // Search, fill, expand and confirm in the world (18, pieces 2 to 4 and 9), per in-game request like the view.
   const worldView = session.worldView;
+  // Reads across the canvas (19): document reads outside the brush and context go through the view.
+  session.canvasReads = new CanvasReads({ frame: () => link.canvasFrame(), view: () => worldView, note: (line) => link.addNote(line) });
   session.worldSelect = new WorldSelect({
     bridge: link.bridge,
     request: () => inGame.heldRequest?.id ?? inGame.current?.id,

@@ -219,7 +219,8 @@ describe("ui through the bridge and the fake host", () => {
     expect(both.host.uiFor(ALEX.uuid)).toEqual([]);
 
     const mcpOld = await pair(undefined, undefined); // the default hello leaves ui out until M answers requests
-    expect(mcpOld.host.mcpFeatures).toEqual(["prompt.close"]);
+    expect(mcpOld.host.mcpFeatures).toEqual(expect.arrayContaining(["prompt.close"]));
+    expect(mcpOld.host.mcpFeatures).not.toContain("ui");
     expect(mcpOld.bridge.ui).toBe(false);
     const modOld = await pair(["modes", "volumes.set", "registry", "upgrade"], ["prompt.close", "ui"]);
     expect(modOld.bridge.ui).toBe(false);

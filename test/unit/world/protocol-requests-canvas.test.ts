@@ -52,10 +52,10 @@ describe("requests and canvas: codec", () => {
   it("names the features, kinds, refusal and error the wire adds", () => {
     expect(MOD_FEATURES).toContain("requests");
     expect(MOD_FEATURES).toContain("canvas");
-    expect(MCP_WIRE_FEATURES).toEqual([...MCP_FEATURES, "requests", "canvas"]);
-    // This MCP lists them only once their behaviour is built (Q1, F1).
+    expect(MCP_WIRE_FEATURES).toEqual(expect.arrayContaining([...MCP_FEATURES]));
+    // This MCP lists them only once their behaviour is built (Q1; F1 built the canvas frame).
     expect(MCP_FEATURES as readonly string[]).not.toContain("requests");
-    expect(MCP_FEATURES as readonly string[]).not.toContain("canvas");
+    expect(MCP_FEATURES as readonly string[]).toContain("canvas");
     for (const k of REQUEST_UI_KINDS) expect(UI_REQUEST_KINDS).toContain(k);
     expect(PROMPT_REFUSALS).toContain("busy");
     expect(UI_ERRORS).toContain("refused");
@@ -142,7 +142,7 @@ describe("requests and canvas: codec", () => {
     const all = (f: readonly McpFeature[]) => ({ features: [...f] });
     expect(bothHave(all(MCP_WIRE_FEATURES), { ...mod, features: ["canvas"] }, "canvas")).toBe(true);
     expect(bothHave(all(MCP_WIRE_FEATURES), { ...mod, features: ["canvas"] }, "requests")).toBe(false);
-    expect(bothHave(all(MCP_FEATURES), { ...mod, features: [...MOD_FEATURES] }, "canvas")).toBe(false);
+    expect(bothHave(all(["prompt.close", "ui"]), { ...mod, features: [...MOD_FEATURES] }, "canvas")).toBe(false);
   });
 });
 

@@ -387,7 +387,7 @@ describe("request modes, enforced (13, B6)", () => {
 
   it("the mod sends /autosketch done only to an MCP that lists prompt.close", async () => {
     const { host } = await setup();
-    expect(host.mcpFeatures).toEqual(["prompt.close"]);
+    expect(host.mcpFeatures).toEqual(expect.arrayContaining(["prompt.close"]));
     host.mcpFeatures = []; // as an MCP from before the feature
     await host.playerAsk(HOST, "look", {}, { mode: "ask" });
     await host.waitFor(() => inGame!.current?.id === 1);

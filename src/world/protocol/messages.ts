@@ -91,7 +91,7 @@ export type ModFeature = (typeof MOD_FEATURES)[number];
  * handles the mod's `prompt.close` (`/autosketch done`, B6). `ui`: the MCP sends `16`'s in-game UI
  * messages and answers `ui.request` (*In-game UI*); used only when the mod lists `ui` too.
  */
-export const MCP_FEATURES = ["prompt.close", "ui"] as const;
+export const MCP_FEATURES = ["prompt.close", "ui", "canvas"] as const;
 /**
  * Every MCP feature name on the wire (`13`, *Versions and features*), the ones this MCP doesn't
  * list yet included: `requests` (`19`, Part A: status lines, request control, queueing) and `canvas`

@@ -12,7 +12,9 @@ import type { VolatileList, WireBox, WorldBlock } from "./protocol/messages.js";
  *
  * Coordinates: `volumes` are world coordinates (inclusive boxes, as on the wire); the document is
  * re-origined so the player's work volume's minimum corner is local (0,0,0), and
- * world = local + `volumes.origin` (`toWorld`, `toLocal`).
+ * world = local + `volumes.origin` (`toWorld`, `toLocal`). With a canvas (`19`, *The frame doesn't
+ * move with the brush*) local (0,0,0) is the canvas's minimum corner instead, so moving the brush
+ * never renumbers a coordinate; only setting or clearing the canvas changes the frame (a relink).
  */
 
 /**
@@ -38,8 +40,14 @@ export interface LinkVolumes {
   extended: WireBox;
   /** The effective context boxes (default: the work volume grown by 3). */
   context: WireBox[];
-  /** World position of document-local (0,0,0): `work.min`. */
+  /** World position of document-local (0,0,0): `canvas.min` with a canvas, else `work.min`. */
   origin: Vec3;
+  /**
+   * The canvas the frame is anchored to (`19`, Part B), world coordinates: whole chunk columns, the
+   * full build height. Absent without one, or when the mod's canvas is in another dimension or
+   * doesn't contain the work volume (then the work volume sets the frame, as in `13`).
+   */
+  canvas?: WireBox;
 }
 
 /** Changes the mod reported (`dirty`) since the cache last synced, in world coordinates. */
@@ -94,6 +102,11 @@ export interface WorldLink {
    * arriving unlinked). Resolves whether the document is linked. Optional, like `open`.
    */
   ensureLinked?(): Promise<boolean>;
+  /**
+   * One line naming the frame for `doc_info` (`19`): the canvas, the brush and context in local
+   * coordinates, and what local (0,0,0) is in the world. Undefined while nothing is linked.
+   */
+  describeFrame?(): string | undefined;
 }
 
 export interface LinkOpenOptions {

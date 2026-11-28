@@ -66,3 +66,5 @@ These would need someone in-game, and that is not planned. Don't wait on them or
 - [In-game UI (`16`)](ui/README.md): silos C, H, L, M, O, G, R, S, X (letters local to that set, matching `16`'s work plan).
 - [Reusable components (`17`)](components/README.md): silos W, K, F, Q, V, E, Z.
 - [Select (`18`)](select/README.md): silos W, V, M, C, T, P, R, S, Z.
+- [Canvas and request control (`19`)](canvas/README.md): silos W, H, Q, G, K, F, M, Z.
+- [The console, persistent mode, whole replies (`21`)](console/README.md): silos M, R, C, S, Z.

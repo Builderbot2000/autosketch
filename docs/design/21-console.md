@@ -13,7 +13,7 @@ Settled with the user on 2026-11-28.
 - **Showing it and typing into it are separate.** The panel can stay expanded while the player moves around and builds, so they can watch the agent work. The hotkey moves input onto the console as `T` does for chat, and Esc gives input back without hiding the panel. A second key expands or collapses it. Collapsed, only an icon shows.
 - **The panel stays small.** It must not dominate the player's view (*Size*).
 - **All agent output goes to the console** for a player whose client has the client half: replies, activity, status lines, choices and the MCP's notices. Their chat gets none of it. Chat stays the fallback for vanilla clients.
-- **The hotkey defaults to `` ` `` (grave).**
+- **The hotkey defaults to `'` (apostrophe).** The spec first chose `` ` `` (grave), but in the Craftoria instance grave is FTB Ultimine's hold-to-veinmine key; apostrophe and semicolon are unbound there. Changed with the user on 2026-11-28.
 - **Ctrl+C stops the running request.**
 - **The mode is a per-player setting that lasts the session.** The server half keeps it in memory, so it resets to `build` when the server restarts.
 - **`/autosketch mode` sets the request mode.** The wand mode is switched only by its key (swap-hands while holding the wand, as now). The `/autosketch mode work|context|focus|canvas` form is removed.
@@ -73,8 +73,8 @@ This replaces `13`'s B6 rule ("a read-only request holds its mode until `/autosk
 
 | Key | Where | Does |
 |---|---|---|
-| `` ` `` (default, `console_focus`) | in game | Focuses the console, expanding it if it was collapsed. |
-| Shift+`` ` `` (default, `console_toggle`) | in game | Expands or collapses the console without focusing it. |
+| `'` (default, `console_focus`) | in game | Focuses the console, expanding it if it was collapsed. |
+| Shift+`'` (default, `console_toggle`) | in game | Expands or collapses the console without focusing it. |
 | Enter | focused | Sends the prompt in the current mode, or runs the slash command, then leaves focus (as chat closes after sending). A prompt sent while a request runs is queued (`19`, *Queueing*). Empty input: leaves focus. |
 | Shift+Enter | focused | New line. |
 | Shift+Tab | focused | Cycles the mode through the ones the MCP's hello lists: build → ask → plan → select → build. This sets the player's setting. |
@@ -84,10 +84,10 @@ This replaces `13`'s B6 rule ("a read-only request holds its mode until `/autosk
 | Scroll, PgUp/PgDn | focused | Scrolls the transcript. |
 | Esc | focused | Leaves focus and keeps the draft. The panel stays expanded if it was. |
 
-- Inside the input, keys type: grave and tilde are characters there, as in chat.
+- Inside the input, keys type: the apostrophe and its shifted character are characters there, as in chat.
 - **Why Esc doesn't stop the request** as it does in Claude Code: Esc is Minecraft's key for leaving every screen, and a player who presses it to get out of the console mustn't stop a build by accident. Ctrl+C stops.
 - **Why Enter leaves focus:** in game the player usually sends and goes back to looking and building, as with chat. The panel stays expanded, so they keep watching. A setting (`console.keepFocus`, default off) keeps focus after sending.
-- **Key conflicts.** NeoForge's key-binding screen already marks conflicts. `/autosketch status` and the install check (`14`) report when `console_focus` or `console_toggle` shares a key with another binding in the instance. Before building (step P3), check whether any of the Craftoria instance's mods binds grave by default.
+- **Key conflicts.** NeoForge's key-binding screen already marks conflicts. `/autosketch status` and the install check (`14`) report when `console_focus` or `console_toggle` shares a key with another binding in the instance. Checked before building (2026-11-28): Craftoria binds grave to FTB Ultimine, and nothing to apostrophe, hence the default.
 
 ### Size and place
 
@@ -174,7 +174,7 @@ Until now the server half forwarded every `ui.request` to the MCP (`16`, *Mod si
 ## Changes to other specs
 
 - **`13`**: B6's read-only hold becomes *Part A*'s rule. M3 loses `/autosketch mode work|context|focus`, so the wand mode is the swap-hands key only. M13 loses the alias root. `mode` becomes the request mode. *What streams back*: replies are one message, and console clients get no agent output in chat.
-- **`16`**: *Key bindings* adds `console_focus` (grave) and `console_toggle` (Shift+grave). *Settings* adds `console.side`, `console.width`, `console.lines`, `console.opacity`, `console.peek` and `console.keepFocus`. The HUD's request line reads the `mode` action. The HUD stays where it is. Its request line repeats the console's status for a player who keeps the console collapsed.
+- **`16`**: *Key bindings* adds `console_focus` (apostrophe) and `console_toggle` (Shift+apostrophe). *Settings* adds `console.side`, `console.width`, `console.lines`, `console.opacity`, `console.peek` and `console.keepFocus`. The HUD's request line reads the `mode` action. The HUD stays where it is. Its request line repeats the console's status for a player who keeps the console collapsed.
 - **`19`**: *Status line* — for console clients the row lives in the console, not chat. *Stop* adds Ctrl+C.
 - **`world_reply`** (`src/server/tools/world-prompt.ts`): `text` added, `lines` kept.
 
@@ -193,7 +193,7 @@ Until now the server half forwarded every `ui.request` to the MCP (`16`, *Mod si
    - slash commands with completion;
    - the transcript (prompts, status rows, folded activity, Ctrl+O, replies, questions, notices);
    - the `console.*` requests and the widened relay.
-   Check grave's conflicts on Craftoria first. Client tests (`16`, *Testing*) cover:
+   Client tests (`16`, *Testing*) cover:
    - focus and toggle independently;
    - typing and sending in each mode, and Shift+Tab reaching the server;
    - a queued send, and Ctrl+C stopping;
@@ -206,10 +206,25 @@ Until now the server half forwarded every `ui.request` to the MCP (`16`, *Mod si
    - its size at the user's GUI scale;
    - the mode reset after a server restart;
    - a long reply as one message;
-   - grave, Shift+grave and Ctrl+C with the instance's real key bindings.
+   - `'`, Shift+`'` and Ctrl+C with the instance's real key bindings.
+
+## Implementation status
+
+Briefs: `docs/briefs/console/` (one row per step; each silo edits only its own row).
+
+| Step | Part | State |
+|---|---|---|
+| M1 | A: mode store, `/autosketch mode`, hold rule, `mode` action, removals | not built |
+| R1 | C: `world_reply` `text`, one-message replies, `ReplyText` | not built |
+| C1 | B: console shell (states, keys, size, icon, input, footer, settings) | not built |
+| S1 | *Wire*, *Output routing*: `console.*` requests, marker, relay | not built |
+| C2 | B: sending and the transcript | not built |
+| C3 | B: slash commands | not built |
+| Z1 | Z: restart and long-reply checks, statuses | not built |
+| Z2 | Z: hands-on in game with the user | not done |
 
 ## Open
 
-- **Shift+grave** for `console_toggle` is a guess. Check it on the user's keyboard layout during Z.
+- **Shift+apostrophe** for `console_toggle` is a guess. Check it on the user's keyboard layout during Z.
 - **Activity folding.** Is one latest line per request, with Ctrl+O for the rest, enough to follow the agent's work while moving? Judge it in Z.
 - Whether the transcript should be kept across a reconnect within the same server session (the MCP keeps the requests, and the client forgets on leaving the world).

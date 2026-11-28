@@ -1,0 +1,29 @@
+{
+  "description": "Tells the Autosketch MCP when a Claude Code turn ends, so in-game requests show done or stopped (docs/design/19-canvas-and-requests.md).",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx -y autosketch@0.1.0 hook turn-end",
+            "async": true,
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx -y autosketch@0.1.0 hook turn-end",
+            "async": true,
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

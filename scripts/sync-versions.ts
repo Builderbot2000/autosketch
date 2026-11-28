@@ -1,7 +1,7 @@
 /**
  * Copies package.json's version into every listing (docs/design/14-distribution.md, *Package and
  * listings*): server.json (top level and the npm package), the MCPB manifest, the Claude Code
- * plugin (its version and the `autosketch@<version>` it runs) and SERVER_VERSION in server.ts.
+ * plugin (its version and the `autosketch@<version>` it and its turn-end hook run) and SERVER_VERSION in server.ts.
  * Run after `npm version <x>`; a unit test fails while they disagree.
  *
  *   npm run package:version
@@ -30,6 +30,10 @@ const plugin = JSON.parse(read(pluginPath)) as { version: string; mcpServers: Re
 plugin.version = version;
 for (const s of Object.values(plugin.mcpServers)) s.args = s.args.map((a) => (a.startsWith("autosketch@") ? `autosketch@${version}` : a));
 writeJson(pluginPath, plugin);
+
+// The turn-end hook runs the same server version (19).
+const hooksPath = "packaging/claude-plugin/hooks/hooks.json";
+writeFileSync(join(ROOT, hooksPath), read(hooksPath).replace(/autosketch@[^\s"]+/g, `autosketch@${version}`));
 
 const serverTs = "src/server/server.ts";
 writeFileSync(join(ROOT, serverTs), read(serverTs).replace(/export const SERVER_VERSION = "[^"]*";/, `export const SERVER_VERSION = "${version}";`));

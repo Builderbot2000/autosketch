@@ -4,13 +4,13 @@ import { colorName } from "../../palette/color.js";
 import { fail, text, type ToolDeps } from "./shared.js";
 
 /** Instance and block lookup (02). */
-export function registerInstanceTools({ tool }: ToolDeps): void {
+export function registerInstanceTools({ tool, session }: ToolDeps): void {
   tool(
     "instance_info",
     {
       doc: false,
       title: "Instance info",
-      description: "What Minecraft instance Autosketch is reading: version, loader, block and material counts, load warnings. Text, <150 tokens.",
+      description: "What Minecraft instance Autosketch is reading: version, loader, block and material counts, load warnings, and whether Claude Code's turn-end hook is installed. Text, <180 tokens.",
       inputSchema: {},
     },
     (c) => {
@@ -24,6 +24,8 @@ export function registerInstanceTools({ tool }: ToolDeps): void {
           ? `block properties: from the game's registry report (DataVersion ${c.registry.report.dataVersion}, ${c.registry.report.source})`
           : "block properties: from the instance's files (no registry report yet: start the game once with the Autosketch mod)",
       ];
+      const hook = session.turnHookStatus?.();
+      if (hook) lines.push(hook);
       if (c.warnings.length) lines.push(`warnings (${c.warnings.length}): ${c.warnings.slice(0, 5).join("; ")}${c.warnings.length > 5 ? " …" : ""}`);
       return text(lines.join("\n"));
     },

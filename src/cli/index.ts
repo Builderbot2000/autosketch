@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { chooseInstance, discover, InstanceChoiceError, LAUNCHER_NAMES, type Discovery } from "../assets/discover/index.js";
 import { configPath as defaultConfigPath, expandHome, readConfig, setInstance, unsetInstance, updateConfig } from "../core/config.js";
 import { registeredSettings } from "../core/settings.js";
+import { runHook } from "./hook.js";
 // Every module that declares settings, so `config set` validates any key (15, *Settings tab*).
 import "../assets/settings.js";
 import "../observe/settings.js";
@@ -19,11 +20,12 @@ import "../world/settings.js";
  *   autosketch setup --instance <id | path> [--workspace <path>] [--version <v>] [--base-jar <jar>] [--client claude]
  *   autosketch config set <key> <value>      instance, workspace, version, baseJar, or a setting key
  *   autosketch config unset <key>            `config unset instance` unlinks the instance
+ *   autosketch hook turn-end                 the Claude Code plugin's `Stop` hook (`hook.ts`; `19`)
  *
  * Output goes to stdout, problems to stderr; the exit code is 0 on success.
  */
 
-export const CLI_COMMANDS: ReadonlySet<string> = new Set(["instances", "setup", "config"]);
+export const CLI_COMMANDS: ReadonlySet<string> = new Set(["instances", "setup", "config", "hook"]);
 
 export interface CliDeps {
   discover?: () => Promise<Discovery>;
@@ -41,6 +43,8 @@ export async function runCli(command: string, args: string[], deps: CliDeps = {}
   const out = deps.out ?? ((l: string) => void process.stdout.write(`${l}\n`));
   const err = deps.err ?? ((l: string) => void process.stderr.write(`${l}\n`));
   const ctx: Ctx = { out, err, path: deps.configPath ?? defaultConfigPath(), discover: deps.discover ?? (() => discover()), exec: deps.exec ?? execInherit };
+  // The hook never fails and prints nothing (19); it reads no config.
+  if (command === "hook") return runHook(args);
   try {
     if (command === "instances") return await instances(args, ctx);
     if (command === "setup") return await setup(args, ctx);

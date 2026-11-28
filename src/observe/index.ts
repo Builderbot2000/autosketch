@@ -9,11 +9,13 @@ import { EventLog, newSessionId, sessionDir } from "./log.js";
 import { OBSERVE_DELTAS, OBSERVE_HTTP, OBSERVE_LOG, OBSERVE_MAX_DELTA_BYTES, OBSERVE_RETAIN_SESSIONS, OBSERVE_SNAPSHOTS } from "./settings.js";
 import { SnapshotScheduler } from "./snapshots.js";
 import { LogTables } from "./states.js";
+import { newToken, removePortFile, runDir, writePortFile } from "./turn-hook.js";
 
 /**
  * Observability for one server process (docs/design/12-observability.md): the bus, the
  * `events.ndjson` log, `deltas.bin` (which in-game replay reads, `16`), time-lapse snapshots and
- * the receiver for Claude Code's telemetry (`http.ts`), configured from settings. The entry point hands `sink()` to the session; `document/` and `server/` see only
+ * the receiver for Claude Code's telemetry and turn-end hook (`http.ts`, with its port file,
+ * `turn-hook.ts`), configured from settings. The entry point hands `sink()` to the session; `document/` and `server/` see only
  * that `EventSink`.
  */
 
@@ -32,7 +34,8 @@ export interface ObserveOptions {
   /** The block baker, for snapshots (awaited off the tool-call path). */
   getBaker?: () => Promise<BlockBaker>;
   log?: (msg: string) => void;
-  /** Overrides for tests. */
+  /** Where the turn-end port file goes (`19`); default `<AUTOSKETCH_HOME>/run`. Overrides for tests below. */
+  runDir?: string;
   flushMs?: number;
   debounceMs?: number;
 }
@@ -46,6 +49,8 @@ export interface Observer {
   readonly http?: ObserveHttp;
   /** Resolves once the telemetry receiver is listening, to its base URL, or undefined when it is off or failed. */
   readonly ready: Promise<string | undefined>;
+  /** The turn-end route (`19`): whether it listens, and the valid pings received so far. */
+  turnHook(): { listening: boolean; reports: number; last?: number };
   /** A sink tagged with `doc`; `NO_EVENTS` when everything is off. */
   sink(doc?: string): EventSink;
   /** Stops the telemetry receiver, waits for pending snapshots, then flushes the log and deltas. */
@@ -97,18 +102,38 @@ export function startObserve(opts: ObserveOptions): Observer {
 
   let http: ObserveHttp | undefined;
   let ready: Promise<string | undefined> = Promise.resolve(undefined);
+  let portFile: string | undefined;
+  const dropPortFile = () => {
+    if (portFile) removePortFile(portFile);
+    portFile = undefined;
+  };
   if (httpOn) {
+    // The turn-end hook (19) finds this listener through the port file and proves itself with its token.
+    const token = newToken();
     const h = new ObserveHttp({
       port: port as number,
       fallbackToFreePort: opts.settings.resolve(OBSERVE_HTTP).source.kind === "default",
       publish: (e) => void bus.publish("base", e),
+      turnEndToken: token,
       ...(opts.log ? { log: opts.log } : {}),
     });
     http = h;
-    ready = h.start().catch((e: Error) => {
-      opts.log?.(`observe: the telemetry receiver failed to start on port ${port}: ${e.message}`);
-      return undefined;
-    });
+    ready = h
+      .start()
+      .then((url) => {
+        try {
+          portFile = writePortFile(opts.runDir ?? runDir(), { port: h.port, token });
+          // A crash still exits through here; a kill -9 leaves a file the hook drops (its pid is gone).
+          process.once("exit", dropPortFile);
+        } catch (e) {
+          opts.log?.(`observe: couldn't write the turn-end port file: ${(e as Error).message}`);
+        }
+        return url;
+      })
+      .catch((e: Error) => {
+        opts.log?.(`observe: the telemetry receiver failed to start on port ${port}: ${e.message}`);
+        return undefined;
+      });
   }
 
   const on = !!log || !!snapshots || !!deltas || !!http;
@@ -121,8 +146,11 @@ export function startObserve(opts: ObserveOptions): Observer {
     ...(deltas ? { deltas } : {}),
     ...(http ? { http } : {}),
     sink: (doc = "base") => (on ? bus.sink(doc) : NO_EVENTS),
+    turnHook: () => ({ listening: !!portFile, reports: http?.turnEnds ?? 0, ...(http?.lastTurnEnd !== undefined ? { last: http.lastTurnEnd } : {}) }),
     async close() {
       await ready;
+      dropPortFile();
+      process.off("exit", dropPortFile);
       await http?.close();
       // A snapshot waits for in-flight calls; at shutdown, don't let one hold up the exit for long.
       if (snapshots) await Promise.race([snapshots.idle(), new Promise((r) => setTimeout(r, 3000).unref())]);

@@ -2,10 +2,10 @@ import type { IncomingMessage } from "node:http";
 import { createGunzip } from "node:zlib";
 
 /**
- * Request checks for the OTLP receiver (`http.ts`; `16`, *What goes, what stays, what moves*).
- * Loopback binding and the Host check stop DNS rebinding; the Origin check stops another page open
- * in the user's browser (which can send requests to `127.0.0.1`) from posting into the log. Nothing
- * writes over HTTP but that log, so there is no token.
+ * Request checks for the OTLP receiver and the turn-end route (`http.ts`; `16`, *What goes, what
+ * stays, what moves*; `19`). Loopback binding and the Host check stop DNS rebinding; the Origin check
+ * stops another page open in the user's browser (which can send requests to `127.0.0.1`) from
+ * posting. The log needs nothing more; the turn-end route also needs the port file's token.
  */
 
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);

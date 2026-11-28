@@ -43,6 +43,7 @@ import { autoSyncHook, syncLink } from "../world/sync.js";
 import { WorldView } from "../world/view.js";
 import { CanvasReads } from "../world/canvas.js";
 import { WorldSelect } from "../world/select/select.js";
+import { WorldMap } from "../world/map.js";
 import { worldCandidate } from "./world-candidate.js";
 import { MCP_FEATURES } from "../world/protocol/messages.js";
 import { startUi } from "../ui/index.js";
@@ -166,6 +167,13 @@ async function main(): Promise<void> {
   const worldView = session.worldView;
   // Reads across the canvas (19): document reads outside the brush and context go through the view.
   session.canvasReads = new CanvasReads({ frame: () => link.canvasFrame(), view: () => worldView, note: (line) => link.addNote(line) });
+  // The canvas from above (19, *Seeing the whole canvas*); it keeps the mod's latest canvas, which the confirm asks.
+  const worldMap = new WorldMap({
+    bridge: link.bridge,
+    linked: () => (link.state === "linked" && link.volumes ? { origin: link.volumes.origin, dimension: link.volumes.dimension } : undefined),
+    player: () => worldView.context,
+  });
+  session.worldMap = worldMap;
   session.worldSelect = new WorldSelect({
     bridge: reads,
     request: () => inGame.heldRequest?.id ?? inGame.current?.id,
@@ -176,6 +184,7 @@ async function main(): Promise<void> {
     linked: () => (link.state === "linked" && link.doc && link.volumes ? { doc: link.doc, origin: link.volumes.origin, dimension: link.volumes.dimension, work: link.volumes.work } : undefined),
     subscribe: (fn) => session.subscribe(fn),
     autoLink,
+    canvas: () => worldMap.canvas,
   });
   // The in-game UI (16): overlays, ghosts, replay and the player's requests, over the bridge.
   const ui = startUi({

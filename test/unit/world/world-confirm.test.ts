@@ -22,6 +22,7 @@ import { Document } from "../../../src/document/document.js";
 import { REQUEST_MODES, type GameContext, type PlayerRef, type WireBox } from "../../../src/world/protocol/messages.js";
 import { describeConfirm, maskRuns, wireBoxOf } from "../../../src/world/select/confirm.js";
 import { WorldSelect } from "../../../src/world/select/select.js";
+import { WorldMap } from "../../../src/world/map.js";
 import { WorldView } from "../../../src/world/view.js";
 import { FakeHost } from "../../support/fake-host.js";
 import { fakeRegistry } from "../../helpers/registry.js";
@@ -92,11 +93,13 @@ afterAll(() => roots.forEach((d) => rmSync(d, { recursive: true, force: true }))
 let host: FakeHost | undefined;
 let bridge: Bridge | undefined;
 let view: WorldView | undefined;
+let worldMap: WorldMap | undefined;
 afterEach(async () => {
   view?.close();
+  worldMap?.close();
   bridge?.close();
   await host?.close();
-  host = bridge = view = undefined;
+  host = bridge = view = worldMap = undefined;
 });
 
 /** A linked document as the live link would hold it, and the `world.link` event it emits. */
@@ -113,14 +116,17 @@ async function setup(opts: Parameters<typeof FakeHost.start>[0] = {}) {
   let request: number | undefined;
   let context: GameContext | undefined;
   bridge.on("prompt", (m) => ((request = m.id), (context = m.context)));
+  let linked: FakeLink | undefined;
+  // Before connecting: the mod reports its canvas right after the hello.
+  const map = (worldMap = new WorldMap({ bridge, player: () => context, linked: () => linked }));
   await bridge.connect();
   const dir = mkdtempSync(join(tmpdir(), "autosketch-confirm-"));
   roots.push(dir);
   const session = new Session(dir);
   const v = (view = new WorldView({ bridge, request: () => request, dimension: () => OW }));
-  let linked: FakeLink | undefined;
   const listeners: EventListener[] = [];
   session.worldView = v;
+  session.worldMap = map;
   session.worldSelect = new WorldSelect({
     bridge,
     request: () => request,
@@ -130,6 +136,7 @@ async function setup(opts: Parameters<typeof FakeHost.start>[0] = {}) {
     linked: () => linked,
     subscribe: (fn) => (listeners.push(fn), () => {}),
     autoLink: true,
+    canvas: () => map.canvas,
   });
   const server = createServer(fixtureContext(dir), { session });
   const [a, b] = InMemoryTransport.createLinkedPair();
@@ -139,7 +146,8 @@ async function setup(opts: Parameters<typeof FakeHost.start>[0] = {}) {
   await host.waitFor(() => context);
   const call = async (name: string, args: Record<string, unknown>) => {
     const r = await client.callTool({ name, arguments: args });
-    return { error: !!r.isError, lines: (r.content as { text: string }[])[0]!.text.split("\n") };
+    const content = r.content as { type: string; text?: string }[];
+    return { error: !!r.isError, lines: content.find((c) => c.type === "text")!.text!.split("\n") };
   };
   /** Links a fresh document over `work` (world) and emits `world.link`, as the live link does. */
   const link = (work: WireBox) => {
@@ -170,6 +178,14 @@ describe("world_volumes({from}) against the fake host (18, piece 9)", () => {
     expect(c.lines[0]).toBe('ok · world_volumes · from "candidate" (18 blocks, box 6×3×1 at world (10,64,8)–(15,66,8)): work 6×3×1 at world (10,64,8)–(15,66,8), context +8 (1 box after the game\'s build-height clipping) · link 2.');
     expect(c.lines[1]).toMatch(/^The game shows the outlines; linking follows on its own .* "candidate" comes along as named selection in the linked document\./);
     expect(host.received.filter((m) => m.type === "volumes.set")).toMatchObject([{ dimension: OW, work: WALL, context: [{ min: [2, 56, 0], max: [23, 74, 16] }] }]);
+    // No canvas held the box plus margin, so it was set first (19, *Setting the canvas*), widened by the mod.
+    expect(host.received.filter((m) => m.type === "canvas.set")).toMatchObject([{ dimension: OW, box: { min: [2, 56, 0], max: [23, 74, 16] } }]);
+    expect(host.received.findIndex((m) => m.type === "canvas.set")).toBeLessThan(host.received.findIndex((m) => m.type === "volumes.set"));
+    expect(host.canvas).toEqual({ dimension: OW, box: { min: [0, -64, 0], max: [31, 319, 31] } });
+    expect(c.lines[2]).toBe(
+      "The canvas is set to 2×2 chunks at world (0,-64,0)–(31,319,31) (the box plus 8, widened to whole chunk columns and the build height): reads work anywhere in it in every mode, and the brush can move inside it.",
+    );
+    expect(c.lines[1]).toMatch(/in the canvas's frame: coordinates don't move with the brush/);
 
     // The link follows: the shape is named there in local coordinates, block for block.
     const doc = link(WALL);
@@ -198,30 +214,81 @@ describe("world_volumes({from}) against the fake host (18, piece 9)", () => {
     expect(m.has(0, 2, 0)).toBe(false);
   });
 
-  it("confirms a candidate over contextCap as a selection only, then a part of it with the whole candidate alongside", async () => {
+  it("sets the canvas when the shape is over the brush cap, and the agent then places the brush on a part inside it (19)", async () => {
+    // The select flow refused in the 2026-11-27 test: a shape whose context is over contextCap.
     const { host, call, link } = await setup({ contextCap: 1000 });
     wall(host);
     await call("world_fill", { seed: [12, 65, 8], match: [BRICK] });
     const big = await call("world_volumes", { from: "candidate" });
     expect(big.error).toBe(false);
-    expect(big.lines[0]).toBe(
-      'ok · world_volumes · from "candidate" (18 blocks, box 6×3×1 at world (10,64,8)–(15,66,8)): confirmed as a selection, but too large for a work volume. The mod refused the volumes (the context holds 7106 blocks, more than the cap of 1000): with its context (+8) the box is over the mod\'s contextCap, which isn\'t raised, so no volumes were set.',
-    );
-    expect(big.lines[1]).toBe('The shape stays the named selection "candidate" in the world view, and comes along into the next document linked in this request.');
+    expect(big.lines).toEqual([
+      'ok · world_volumes · from "candidate" (18 blocks, box 6×3×1 at world (10,64,8)–(15,66,8)): over the brush cap, so no volumes were set. The mod refused them (the context holds 7106 blocks, more than the cap of 1000): with its context (+8) the box is over the mod\'s contextCap. The canvas is set to 2×2 chunks at world (0,-64,0)–(31,319,31) (the box plus 8, widened to whole chunk columns and the build height).',
+      'The shape stays the named selection "candidate" in the world view, and comes along into the next document linked in this request.',
+      'You place the brush (the work volume) yourself, anywhere in the canvas, without asking the player: look at the whole canvas with world_map, choose a part, keep it with select({view:"world", sel:{freeze:{intersect:["candidate", <box>]}}, name:"part"}) and confirm it with world_volumes({from:"part"}). Reads anywhere in the canvas work in every mode (world_view_read, render with view:"world", world_search).',
+    ]);
+    expect(host.received.filter((m) => m.type === "canvas.set")).toMatchObject([{ dimension: OW, box: { min: [2, 56, 0], max: [23, 74, 16] } }]);
+    expect(host.canvas).toEqual({ dimension: OW, box: { min: [0, -64, 0], max: [31, 319, 31] } });
     expect(host.received.filter((m) => m.type === "volumes.set")).toHaveLength(1);
     expect(host.received.filter((m) => m.type === "volumes")).toHaveLength(0);
 
-    // A part: two columns, confirmed with a small margin; the whole candidate comes along.
+    // The agent looks at the whole canvas.
+    const map = await call("world_map", {});
+    expect(map.error).toBe(false);
+    expect(map.lines[0]).toBe("ok · world_map · canvas 2×2 chunks (32×32 blocks, world y -64 to 319) in minecraft:overworld, world (0,-64,0)–(31,319,31) = local (0,0,0)–(31,383,31); local (0,0,0) is world (0,-64,0) (the canvas's minimum corner: the frame once a brush inside it links).");
+    expect(map.lines).toContain("Brush: none set.");
+
+    // It places the brush on a part (two columns, margin 1): inside the canvas, so no new canvas.
     await call("select", { view: "world", sel: { freeze: { intersect: ["candidate", { min: [10, 60, 0], max: [11, 70, 15] }] } }, name: "part" });
     const p = await call("world_volumes", { from: "part", margin: 1 });
     expect(p.error).toBe(false);
     expect(p.lines[0]).toMatch(/^ok · world_volumes · from "part" \(6 blocks, box 2×3×1 at world \(10,64,8\)–\(11,66,8\)\): work 2×3×1 /);
     expect(p.lines[1]).toMatch(/"part" and the whole "candidate" come along as named selections/);
+    expect(p.lines).toHaveLength(2);
+    expect(host.received.filter((m) => m.type === "canvas.set")).toHaveLength(1);
+    expect(p.lines[0]).toContain("work 2×3×1 at world (10,64,8)–(11,66,8)");
+    expect(host.canvas?.box).toEqual({ min: [0, -64, 0], max: [31, 319, 31] });
     const doc = link({ min: [10, 64, 8], max: [11, 66, 8] });
     expect(resolveSelection("part", { doc }).mask.count()).toBe(6);
     const whole = resolveSelection("candidate", { doc }).mask;
     expect(whole.count()).toBe(18);
     expect(whole.has(5, 2, 0)).toBe(true); // past the work box: a guide, not a limit
+  });
+
+  it("keeps 18's selection-only answer on a mod without the canvas, and says when the canvas is refused", async () => {
+    const { host, call } = await setup({ contextCap: 1000, features: ["modes", "scan", "volumes.set", "registry", "upgrade", "ui", "select"] });
+    wall(host);
+    await call("world_fill", { seed: [12, 65, 8], match: [BRICK] });
+    const big = await call("world_volumes", { from: "candidate" });
+    expect(big.lines[0]).toBe(
+      'ok · world_volumes · from "candidate" (18 blocks, box 6×3×1 at world (10,64,8)–(15,66,8)): confirmed as a selection, but too large for a work volume. The mod refused the volumes (the context holds 7106 blocks, more than the cap of 1000): with its context (+8) the box is over the mod\'s contextCap, which isn\'t raised, so no volumes were set.',
+    );
+    expect(big.lines[2]).toMatch(/world_volumes\(\{from:"part"\}\).*sandboxes \(scope_fork\)/);
+    expect(host.received.filter((m) => m.type === "canvas.set")).toHaveLength(0);
+    await host.close();
+    bridge?.close();
+    view?.close();
+    worldMap?.close();
+
+    // canvasChunks 1: the canvas (2×2 chunks) is refused, the volumes are set as before.
+    const s2 = await setup({ canvasChunks: 1 });
+    wall(s2.host);
+    await s2.call("world_fill", { seed: [12, 65, 8], match: [BRICK] });
+    const c = await s2.call("world_volumes", { from: "candidate" });
+    expect(c.error).toBe(false);
+    expect(c.lines[0]).toMatch(/: work 6×3×1 at world/);
+    expect(c.lines[2]).toBe("The canvas wasn't set (the canvas would span 2 chunks, more than canvasChunks (1)).");
+    expect(s2.host.canvas).toBeNull();
+  });
+
+  it("sets no canvas when the mod's canvas already holds the shape and its margin", async () => {
+    const { host, call } = await setup({ canvas: { box: { min: [-32, 0, -32], max: [47, 0, 47] } } });
+    wall(host);
+    await call("world_fill", { seed: [12, 65, 8], match: [BRICK] });
+    const c = await call("world_volumes", { from: "candidate" });
+    expect(c.error).toBe(false);
+    expect(c.lines).toHaveLength(2);
+    expect(host.received.filter((m) => m.type === "canvas.set")).toHaveLength(0);
+    expect(host.canvas?.box).toEqual({ min: [-32, -64, -32], max: [47, 319, 47] });
   });
 
   it("refuses without a candidate, with both from and work, and drops a confirm when the request changes", async () => {

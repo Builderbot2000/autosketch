@@ -22,7 +22,7 @@ export function registerWorldVolumesTools({ tool, session }: ToolDeps): void {
         "Sets the player's work volume (where the build may change) and context volume (what you see around it) in the game, as if they had marked them with the wand. " +
         "Either work: a box in the linked document's coordinates, with context: boxes, {padding:n} (work grown by n), or omitted for the default (+3); " +
         'or from:"candidate" to confirm the world view\'s candidate (after world_fill, in a select request): work = its bounding box, context = that box grown by margin (default 8), and the shape comes along as the named selection "candidate" in the linked document, a guide (only the box is enforced). ' +
-        "from may also name a part kept in the world view (select({view:\"world\", …, name})); a shape whose context would pass the mod's contextCap is confirmed as a selection but sets no volumes, and the result suggests a part or sandboxes. " +
+        "from may also name a part kept in the world view (select({view:\"world\", …, name})); when no canvas holds the box plus margin, the canvas is set to it first; a shape whose context would pass the mod's contextCap (the brush cap) sets no volumes, and you place the brush on a part inside the canvas yourself. " +
         "The player sees the outlines; linking follows. No accept step: the player refines or moves on. Text, <150 tokens.",
       inputSchema: {
         work: boxSchema.optional().describe("The work volume, in the linked document's coordinates (not with from)"),

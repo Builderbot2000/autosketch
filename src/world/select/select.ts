@@ -8,7 +8,7 @@ import { familyMembers, resolveMaterials, type MaterialGroup, type MaterialLooku
 import type { Mask } from "../../core/mask.js";
 import type { EventListener } from "../../core/fanout.js";
 import type { Document } from "../../document/document.js";
-import { CONFIRM_MARGIN, describeConfirm, growWire, maskRuns, wireBoxOf } from "./confirm.js";
+import { CONFIRM_MARGIN, describeConfirm, growWire, holdsWire, maskRuns, wireBoxOf, type ConfirmDescription } from "./confirm.js";
 import { describeSearch, heatMap, type HeatMap } from "./search.js";
 
 /**
@@ -37,6 +37,8 @@ export interface WorldSelectOptions {
   subscribe?: (fn: EventListener) => () => void;
   /** Whether linking follows a volume change on its own (`world.autoLink`; default true), for the text. */
   autoLink?: boolean;
+  /** The mod's canvas now (`19`; null: none; undefined: not known), so a confirm sets one only when none holds the shape. */
+  canvas?: () => { dimension: string; box: WireBox } | null | undefined;
 }
 
 /** `world_volumes({from})`: the shape to confirm, resolved from the world view by the tool. */
@@ -246,9 +248,14 @@ export class WorldSelect {
    * bounding box and the context to that box grown by `margin`, with `volumes.set`, in world
    * coordinates (no linked document needed). The shape, and the whole candidate when `from`
    * names a part, are named in the linked document once it links (now, if the link already holds
-   * these volumes). A context over the mod's `contextCap` is refused by the mod (`bad_volumes`; the
-   * shape's box always lies inside the build height): the shape stays confirmed as a selection and
-   * nothing is set. The link's snapshot is the confirm's re-read (*Freshness*).
+   * these volumes). The link's snapshot is the confirm's re-read (*Freshness*).
+   *
+   * The canvas (`19`, *Setting the canvas*): when no canvas holds the box plus margin, it is set to
+   * that first (`canvas.set`, so the volumes land inside it and the mod keeps it). A context over the
+   * mod's `contextCap` (the brush cap) is refused by the mod (`bad_volumes`; the shape's box always
+   * lies inside the build height): no volumes are set, the canvas is the result, and the agent places
+   * the brush itself. A mod without `canvas` keeps `18`'s behaviour: the shape stays confirmed as a
+   * selection and nothing is set.
    */
   async confirm(a: ConfirmArgs): Promise<string> {
     const dimension = this.dimensionOrRefuse("no volumes can be set");
@@ -259,7 +266,7 @@ export class WorldSelect {
     const shapes = new Map<string, Mask>([[a.from, a.shape]]);
     if (a.candidate && a.from !== CANDIDATE) shapes.set(CANDIDATE, a.candidate);
     this.confirmed = { request: this.opts.request(), dimension, shapes };
-    const d = { from: a.from, count: a.shape.count(), box, margin, withCandidate: shapes.size > 1, autoLink: this.opts.autoLink ?? true };
+    const d = { from: a.from, count: a.shape.count(), box, margin, withCandidate: shapes.size > 1, autoLink: this.opts.autoLink ?? true, ...(await this.ensureCanvas(dimension, growWire(box, margin))) };
     let volumes;
     try {
       volumes = await this.opts.bridge.request({ type: "volumes.set", dimension, work: box, context: [growWire(box, margin)] });
@@ -272,6 +279,21 @@ export class WorldSelect {
     const w = volumes.work;
     const same = !!l && l.dimension === dimension && [0, 1, 2].every((i) => l.work.min[i] === w.min[i] && l.work.max[i] === w.max[i]);
     return describeConfirm({ ...d, volumes, placed: same && this.place() });
+  }
+
+  /** The canvas holding `area` (`19`): the mod's current one when it does, else one set to `area` now. Nothing from a mod without `canvas`. */
+  private async ensureCanvas(dimension: string, area: WireBox): Promise<Pick<ConfirmDescription, "canvas" | "canvasSet" | "canvasRefused">> {
+    const c = this.opts.canvas?.();
+    if (c && c.dimension === dimension && holdsWire(c.box, area)) return { canvas: c.box, canvasSet: false };
+    try {
+      const m = await this.opts.bridge.request({ type: "canvas.set", dimension, box: area });
+      return m.box ? { canvas: m.box, canvasSet: true } : {};
+    } catch (e) {
+      const code = (e as { refusal?: string }).refusal;
+      if (code === "world_mod_outdated") return {};
+      if (code === "bad_volumes") return { canvasRefused: (e as Error).message };
+      throw e;
+    }
   }
 
   /** Names the confirmed shapes in the linked document (local coordinates), when one is linked in their dimension. */

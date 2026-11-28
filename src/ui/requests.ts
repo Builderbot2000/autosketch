@@ -169,6 +169,12 @@ export class UiRequests {
       case "choices.pick":
         if (!this.host.choices) throw new UiRequestError("bad_request", `This Autosketch doesn't serve ${kind}.`);
         return this.host.choices.pick(a, ref);
+      case "request.stop":
+      case "queue.send":
+      case "queue.cancel":
+      case "request.undo":
+        // `19`, Part A: the wire knows these kinds; the MCP serves them once its hello lists `requests` (step Q1).
+        throw new UiRequestError("bad_request", `This Autosketch doesn't serve ${kind} yet.`);
     }
   }
 

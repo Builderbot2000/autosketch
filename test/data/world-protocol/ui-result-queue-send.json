@@ -1,0 +1,14 @@
+{
+  "description": "Request 15 was delivered into the running turn of request 14; the two end together",
+  "sender": "mcp",
+  "header": {
+    "type": "ui.result",
+    "request": 42,
+    "player": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    "ok": true,
+    "result": {
+      "request": 15,
+      "into": 14
+    }
+  }
+}

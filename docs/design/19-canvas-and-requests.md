@@ -114,6 +114,18 @@ These tools exist already. The canvas makes them available in every mode:
 - **`world_map`** (new, MCP): the canvas from above, one cell per chunk column, shaded by surface height, with the brush, the context, any open jobs and the player marked, and a chunk grid labelled in local coordinates. It is how the agent sees the whole canvas before choosing where to put the brush. It reports measurements only: heights, block counts, where the brush and player are.
 - The canvas's `skills/` guide (shipped, advisory, `07`): look at the whole canvas first, then place the brush over one coherent part.
 
+## Wire (step W1)
+
+The exact schemas are in `13` (*Message schemas*, *Request control and canvas*; *Versions and features*), with golden vectors; this section records what W1 decided and why (2026-11-27).
+
+- **Two features, both hellos, protocol still 4.** `requests` (Part A) and `canvas` (Part B), each listed by the mod and the MCP. Reason: they are independent and land in different silos (Q and G, K and F), so either can ship first. The MCP lists a feature in its hello only once its behaviour is built (`MCP_FEATURES` in `src/world/protocol/messages.ts`; `MCP_WIRE_FEATURES` names every one): Q1 adds `requests`, F1 `canvas`. The mod likewise (G1, K1).
+- **Status line:** `chat` kind `status` with `request`, `player`, `lines` (exactly one, the whole plain text), `state`, `text`, `calls`, `elapsedMs`, `queuePos` (exactly when queued), `noTurnSignal` (only on `done`) and `actions`, each `{label, kind, args}`. Reason for the plain line coming from the MCP: the client neither formats nor rewords (`16`), and the server half needs the same text for a client without the client half. Reason for `actions` and not a reply's `action`: one line, several buttons. Sent only when both hellos list `requests`; the plain-line fallback for an older mod is Q1's.
+- **The client half gets status lines relayed** (`13`, *Relay to the client*): the server half forwards the frame to a client with the channel instead of printing it, so the client half can replace the line by request id; buttons run `/autosketch action <n>` as reply lines do. Without the client half, the server half prints `lines[0]` on each state change, with the commands for the buttons.
+- **Commands from the server half: a new message `request.control`** `{player, action, position?}`, `action` one of `stop`, `queue`, `queue.cancel`, answered by a `notice` (stop, cancel) or a `chat` reply (the queue listing). Reason: `/autosketch action <n>` needs the client half and feature `ui`, and these commands must work on a vanilla client; the MCP already answers `prompt.close` the same way. The buttons use the `ui.request` kinds `request.stop`, `queue.send`, `queue.cancel`, `request.undo`, each `{request}`, answered `answered` once moot and `refused` (a new `ui.result` error) when the MCP declines (an undo of a running request, or one outside the brush).
+- **Queued prompt:** `prompt.result` `{delivered: false, queued: true, request, position}`, `request` the running request it waits behind, and the refusal `busy` past 8 (`QUEUE_MAX`). Reason: a queued prompt is neither delivered nor refused, and an old reader sees `delivered: false` without a reason it would misread.
+- **Canvas:** `canvas {id?, dimension, box | null}` (mod→MCP, after `volumes` and on every change) and `canvas.set {id, dimension, box}` (MCP→mod, a request answered by `canvas` with its id). The mod widens any box to whole chunk columns and the full build height; over `canvasChunks` (default 256) across on either axis it answers `bad_volumes`, an unknown dimension `wrong_dimension`.
+- **Canvas reads are the select grant's reads,** in every mode (`13`, *Reads inside the canvas*): the read area is the union of the grant and the canvas; `no_grant` only when neither is set; a `search` without `around` and without a grant centres on the canvas's middle chunk.
+
 ## Changes to other specs
 
 - `13`: the frame rule gains the canvas case. `world_volumes` is allowed inside the canvas in every mode. New messages `canvas.set` (MCP→mod, for select confirm) and `canvas` (mod→MCP, like `volumes`). New `chat` kind `status`, new `ui.request` kinds `request.stop`, `queue.send`, `queue.cancel` and `request.undo`, feature `requests`. Reads are served inside the canvas, as inside the select grant. Protocol version unchanged; all of these are new features.
@@ -136,6 +148,24 @@ These tools exist already. The canvas makes them available in every mode:
 | K4 | Both | End-to-end on Craftoria: a canvas of 64×64 chunks, three brush moves, an undo after moving back, a stop while a patch is in flight, a queued prompt delivered on turn end. |
 
 Q and K are independent. Within each, the order is as listed (Q3 needs Q1's messages; K2 needs K1's).
+
+## Implementation status
+
+Steps of the canvas set (`docs/briefs/canvas/README.md`; the *Steps* above map onto them: Q1 → Q1 and H1, Q2 → H1, Q3 → G1, Q4 → Q2, K1 → K1, K2 → F1 and F2, K3 → M1, K4 → Z1).
+
+| Step | Side | Status |
+|---|---|---|
+| W1 wire | both | Built. Features `requests` and `canvas` (`MOD_FEATURES`, `MCP_WIRE_FEATURES`; neither side lists them yet), `chat` kind `status` (`StatusMessage`), `request.control`, `prompt.result` `queued` and `busy`, the `ui.request` kinds `request.stop`, `queue.send`, `queue.cancel`, `request.undo` and the error `refused`, `canvas` and `canvas.set`; *Wire (step W1)* above, schemas in `13`. Codecs: `src/world/protocol/{messages,codec}.ts`, `mod/common/.../protocol/RequestMessages.java` (plus `Messages.PromptResult`, `UiMessages` kinds and errors); the bridge sends status lines only when both hellos list `requests` and `canvas.set` only to a mod listing `canvas` (`world_mod_outdated` otherwise). 30 new golden vectors, no current vector changed. Fake host (`test/support/fake-host.ts`): holds a canvas (`setCanvas`, `canvas.set` with widening and the `canvasChunks` cap), sends `canvas` when both hellos list it, serves blocks, mask, coarse and surface snapshots, `search`, `fill` and `expand` inside it in every mode, records status lines (`statuses`, `statusOf`), runs the commands as `request.control` (`playerControl`) and clicks status buttons (`playerClickStatus`). Tests: `test/unit/world/protocol-requests-canvas.test.ts`, `RequestMessagesTest`, both golden suites |
+| H1 hook and route | MCP, plugin | Not built |
+| Q1 request lifecycle | MCP | Not built |
+| Q2 undo request | MCP | Not built |
+| G1 request control in game | mod | Not built |
+| K1 canvas in the mod | mod | Not built |
+| F1 canvas frame | MCP | Not built |
+| F2 brush moves | MCP | Not built |
+| M1 `world_map`, select confirm, skill | MCP | Not built |
+| Z1 end to end | both | Not built |
+| Z2 status, handoff | — | Not built |
 
 ## Open
 

@@ -1,0 +1,10 @@
+{
+  "description": "A canvas.set over canvasChunks across, refused",
+  "sender": "mod",
+  "header": {
+    "type": "error",
+    "id": 32,
+    "code": "bad_volumes",
+    "message": "the canvas would span 300 chunks along x, more than canvasChunks (256)"
+  }
+}

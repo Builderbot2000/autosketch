@@ -1,0 +1,10 @@
+{
+  "description": "Refused: the player's queue already holds 8 prompts (feature requests)",
+  "sender": "mcp",
+  "header": {
+    "type": "prompt.result",
+    "id": 23,
+    "delivered": false,
+    "reason": "busy"
+  }
+}

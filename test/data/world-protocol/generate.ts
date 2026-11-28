@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { decodeFrame, encodeMessage, splitFrame } from "../../../src/world/protocol/codec.js";
 import { encodePreviewBody, maskRegions } from "../../../src/world/protocol/body.js";
 import { canonicalNbt, DEFAULT_VOLATILE, nbtHash, sectionHash } from "../../../src/world/protocol/hash.js";
-import { MCP_FEATURES, MOD_FEATURES, REQUEST_MODES, UI_PART_BYTES, type Message, type PatchBlock, type Sender, type UiFill, type UiGhost, type UiJob, type VolatileList, type WireBox } from "../../../src/world/protocol/messages.js";
+import { MCP_FEATURES, MCP_WIRE_FEATURES, MOD_FEATURES, REQUEST_MODES, UI_PART_BYTES, type Message, type PatchBlock, type Sender, type UiFill, type UiGhost, type UiJob, type VolatileList, type WireBox } from "../../../src/world/protocol/messages.js";
 import { bytesToHex } from "../../../src/world/protocol/bytes.js";
 import { parseSnbt, toSnbt as snbtOf } from "../../../src/world/protocol/snbt.js";
 import { sidecarOf } from "./sidecar.js";
@@ -74,7 +74,8 @@ vector("hello-mod-singleplayer", "mod", "Mod hello from the integrated server of
   game: { version: "1.21.1", dataVersion: 3955, loader: "neoforge", loaderVersion: "21.1.249" },
   singleplayer: true,
   host: { name: "Kev", uuid: UUID_KEV },
-  features: [...MOD_FEATURES],
+  // Frozen at the features before `19` (feature-gated additions don't change existing vectors); hello-mod-canvas lists every feature.
+  features: ["modes", "volumes.set", "registry", "upgrade", "ui", "select"],
 });
 vector("hello-mod-dedicated", "mod", "Mod hello from a dedicated server (no host player), listing only some features", {
   type: "hello",
@@ -1110,6 +1111,152 @@ vector("error-too-large", "mod", "A select-mode read over contextCap in one call
     players,
     flashes: [{ job: "candidate", colour: PINK, dimension: OW, boxes: [{ min: [128, 60, -240], max: [159, 90, -209] }, { min: [-48, 55, -32], max: [-17, 80, -1] }] }],
   });
+}
+
+// ── request control and canvas (features requests and canvas, added within protocol 4; `19`) ───
+{
+  const KEV = { name: "Kev", uuid: UUID_KEV };
+  const TEXT = "build a gatehouse on the east wall";
+  vector("hello-mcp-canvas", "mcp", "MCP hello listing every MCP feature, requests and canvas included (19): it sends status lines, handles request.control and request-control ui.requests, queues prompts, and handles canvas messages", {
+    type: "hello",
+    protocol: 4,
+    token: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    client: { name: "autosketch", version: "1.0.0" },
+    volatile: {},
+    modes: [...REQUEST_MODES],
+    features: [...MCP_WIRE_FEATURES],
+  });
+  vector("hello-mod-canvas", "mod", "Mod hello listing every feature, requests and canvas included (19): it shows status lines, sends request.control for /autosketch stop and queue, has the canvas, sends canvas, accepts canvas.set and serves reads inside the canvas", {
+    type: "hello",
+    protocol: 4,
+    mod: { version: "0.2.0" },
+    game: { version: "1.21.1", dataVersion: 3955, loader: "neoforge", loaderVersion: "21.1.249" },
+    singleplayer: true,
+    host: KEV,
+    features: [...MOD_FEATURES],
+  });
+  // Status lines (19, *Status line*): one per request, rewritten in place by the client half.
+  vector("chat-status-working", "mcp", "A request's status line while its turn runs, with a Stop button", {
+    type: "chat",
+    request: 14,
+    player: UUID_KEV,
+    kind: "status",
+    lines: [`⏳ Working · "${TEXT}" · 14 calls · 0:42`],
+    state: "working",
+    text: TEXT,
+    calls: 14,
+    elapsedMs: 42_310,
+    actions: [{ label: "Stop", kind: "request.stop", args: { request: 14 } }],
+  });
+  vector("chat-status-stopping", "mcp", "Stopped by the player, the turn not ended yet: no buttons", {
+    type: "chat",
+    request: 14,
+    player: UUID_KEV,
+    kind: "status",
+    lines: [`■ Stopping… · "${TEXT}" · 9 calls · 0:25`],
+    state: "stopping",
+    text: TEXT,
+    calls: 9,
+    elapsedMs: 25_040,
+    actions: [],
+  });
+  vector("chat-status-stopped", "mcp", "The stopped request's turn ended: the line offers Undo request", {
+    type: "chat",
+    request: 14,
+    player: UUID_KEV,
+    kind: "status",
+    lines: [`■ Stopped · "${TEXT}" · 9 calls · 0:27`],
+    state: "stopped",
+    text: TEXT,
+    calls: 9,
+    elapsedMs: 27_500,
+    actions: [{ label: "Undo request", kind: "request.undo", args: { request: 14 } }],
+  });
+  vector("chat-status-done", "mcp", "The turn ended, reported by the Stop hook", {
+    type: "chat",
+    request: 14,
+    player: UUID_KEV,
+    kind: "status",
+    lines: [`✔ Done · "${TEXT}" · 31 calls · 2:10`],
+    state: "done",
+    text: TEXT,
+    calls: 31,
+    elapsedMs: 130_200,
+    actions: [],
+  });
+  vector("chat-status-done-no-turn-signal", "mcp", "Done by a fallback (world_reply done or the idle timeout): no hook reported the turn's end", {
+    type: "chat",
+    request: 15,
+    player: UUID_KEV,
+    kind: "status",
+    lines: [`✔ Done (no turn signal) · "make the roof steeper" · 6 calls · 0:51`],
+    state: "done",
+    text: "make the roof steeper",
+    calls: 6,
+    elapsedMs: 51_000,
+    noTurnSignal: true,
+    actions: [],
+  });
+  vector("chat-status-queued", "mcp", "A prompt sent while request 14 runs, first in the queue, with Send now and Cancel", {
+    type: "chat",
+    request: 15,
+    player: UUID_KEV,
+    kind: "status",
+    lines: [`⧗ Queued 1 · "make the roof steeper"`],
+    state: "queued",
+    text: "make the roof steeper",
+    calls: 0,
+    elapsedMs: 0,
+    queuePos: 1,
+    actions: [
+      { label: "Send now", kind: "queue.send", args: { request: 15 } },
+      { label: "Cancel", kind: "queue.cancel", args: { request: 15 } },
+    ],
+  });
+  vector("prompt-result-queued", "mcp", "A prompt sent while request 14 runs is queued, first in the player's queue (feature requests)", { type: "prompt.result", id: 15, delivered: false, queued: true, request: 14, position: 1 });
+  vector("prompt-result-busy", "mcp", "Refused: the player's queue already holds 8 prompts (feature requests)", { type: "prompt.result", id: 23, delivered: false, reason: "busy" });
+  // Commands from the server half (19, *Stop*, *Queueing*), for clients without the client half.
+  vector("request-control-stop", "mod", "The player ran /autosketch stop", { type: "request.control", player: KEV, action: "stop" });
+  vector("request-control-queue", "mod", "The player ran /autosketch queue", { type: "request.control", player: KEV, action: "queue" });
+  vector("request-control-queue-cancel", "mod", "The player ran /autosketch queue cancel 2", { type: "request.control", player: KEV, action: "queue.cancel", position: 2 });
+  vector("notice-request-stopping", "mcp", "The MCP's answer to a stop, on that player's action bar", { type: "notice", text: "Autosketch: stopping request 14; the agent ends its turn at its next tool call.", player: UUID_KEV });
+  vector("chat-reply-queue", "mcp", "The MCP's answer to /autosketch queue: one line per queued prompt, numbered", {
+    type: "chat",
+    request: null,
+    player: UUID_KEV,
+    kind: "reply",
+    lines: ['Queue: 2 prompts behind request 14.', '1. "make the roof steeper"', '2. "add a banner over the gate"'],
+  });
+  // The buttons' ui.requests and their results.
+  vector("ui-request-request-stop", "mod", "The player clicked Stop on request 14's status line", { type: "ui.request", request: 40, player: KEV, kind: "request.stop", args: { request: 14 } });
+  vector("ui-result-request-stop", "mcp", "The request is stopping: every later tool call is refused until its turn ends", { type: "ui.result", request: 40, player: UUID_KEV, ok: true, result: { request: 14, state: "stopping" } });
+  vector("ui-result-request-answered", "mcp", "Stop clicked after the request had already concluded", { type: "ui.result", request: 41, player: UUID_KEV, ok: false, error: "answered", message: "Request 14 has already ended." });
+  vector("ui-request-queue-send", "mod", "The player clicked Send now on queued request 15", { type: "ui.request", request: 42, player: KEV, kind: "queue.send", args: { request: 15 } });
+  vector("ui-result-queue-send", "mcp", "Request 15 was delivered into the running turn of request 14; the two end together", { type: "ui.result", request: 42, player: UUID_KEV, ok: true, result: { request: 15, into: 14 } });
+  vector("ui-request-queue-cancel", "mod", "The player clicked Cancel on queued request 15", { type: "ui.request", request: 43, player: KEV, kind: "queue.cancel", args: { request: 15 } });
+  vector("ui-result-queue-cancel", "mcp", "Request 15 left the queue", { type: "ui.result", request: 43, player: UUID_KEV, ok: true, result: { request: 15 } });
+  vector("ui-request-request-undo", "mod", "The player clicked Undo request on stopped request 14", { type: "ui.request", request: 44, player: KEV, kind: "request.undo", args: { request: 14 } });
+  vector("ui-result-request-undo", "mcp", "Request 14's journal entries undone in one step", { type: "ui.result", request: 44, player: UUID_KEV, ok: true, result: { request: 14, entries: 7 } });
+  vector("ui-result-request-refused", "mcp", "The undo refused by the undo rules: an entry wrote outside the current brush", {
+    type: "ui.result",
+    request: 45,
+    player: UUID_KEV,
+    ok: false,
+    error: "refused",
+    message: "This entry wrote at (120,64,40)–(150,80,70); move the brush there first.",
+  });
+  // Canvas (19, Part B): whole chunk columns, the full build height.
+  const canvas: WireBox = { min: [0, -64, -512], max: [1023, 319, 511] };
+  vector("canvas", "mod", "The canvas after the hello: 64×64 chunks, the full build height", { type: "canvas", dimension: OW, box: canvas });
+  vector("canvas-none", "mod", "No canvas set (or the player cleared it)", { type: "canvas", box: null });
+  vector("canvas-set", "mcp", "Select confirm sets the canvas to a shape's box plus margin; the mod widens it to whole chunk columns and the build height", {
+    type: "canvas.set",
+    id: 31,
+    dimension: OW,
+    box: { min: [5, 60, -500], max: [1020, 120, 500] },
+  });
+  vector("canvas-confirm", "mod", "The canvas confirming canvas.set 31, widened to whole chunk columns and the full build height", { type: "canvas", id: 31, dimension: OW, box: canvas });
+  vector("error-canvas-too-wide", "mod", "A canvas.set over canvasChunks across, refused", { type: "error", id: 32, code: "bad_volumes", message: "the canvas would span 300 chunks along x, more than canvasChunks (256)" });
 }
 
 // ── hashing ────────────────────────────────────────────────────────────────────────────────────

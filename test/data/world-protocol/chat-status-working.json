@@ -1,0 +1,26 @@
+{
+  "description": "A request's status line while its turn runs, with a Stop button",
+  "sender": "mcp",
+  "header": {
+    "type": "chat",
+    "request": 14,
+    "player": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    "kind": "status",
+    "lines": [
+      "⏳ Working · \"build a gatehouse on the east wall\" · 14 calls · 0:42"
+    ],
+    "state": "working",
+    "text": "build a gatehouse on the east wall",
+    "calls": 14,
+    "elapsedMs": 42310,
+    "actions": [
+      {
+        "label": "Stop",
+        "kind": "request.stop",
+        "args": {
+          "request": 14
+        }
+      }
+    ]
+  }
+}

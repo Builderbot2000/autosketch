@@ -1,0 +1,12 @@
+{
+  "description": "A prompt sent while request 14 runs is queued, first in the player's queue (feature requests)",
+  "sender": "mcp",
+  "header": {
+    "type": "prompt.result",
+    "id": 15,
+    "delivered": false,
+    "queued": true,
+    "request": 14,
+    "position": 1
+  }
+}

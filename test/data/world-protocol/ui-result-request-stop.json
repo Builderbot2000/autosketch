@@ -1,0 +1,14 @@
+{
+  "description": "The request is stopping: every later tool call is refused until its turn ends",
+  "sender": "mcp",
+  "header": {
+    "type": "ui.result",
+    "request": 40,
+    "player": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    "ok": true,
+    "result": {
+      "request": 14,
+      "state": "stopping"
+    }
+  }
+}

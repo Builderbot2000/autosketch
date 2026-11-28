@@ -6,6 +6,8 @@ import {
   modHas,
   PROTOCOL_VERSION,
   SUPPORTED_PROTOCOLS,
+  type CanvasMessage,
+  type CanvasSet,
   type ChatMessage,
   type CoarseResult,
   type CoarseSnapshotRequest,
@@ -32,6 +34,7 @@ import {
   type RequestMode,
   type SnapshotRequest,
   type SnapshotResult,
+  type StatusMessage,
   type SurfaceRequest,
   type SurfaceResult,
   type UpgradeRequest,
@@ -111,11 +114,14 @@ export interface BridgeConnection {
   request(m: Req<MaskSnapshotRequest>): Promise<SnapshotResult>;
   /** One block per 2³ or 4³ cell (`18`, piece 5). Needs the `select` feature. */
   request(m: Req<CoarseSnapshotRequest>): Promise<CoarseResult>;
+  /** Sets the canvas (`19`, *Setting the canvas*); resolves with the `canvas` carrying the id. Needs the `canvas` feature. */
+  request(m: Req<CanvasSet>): Promise<CanvasMessage>;
   /**
    * Fire-and-forget messages; dropped while disconnected. `ui.*` and `replay.*` messages are also
-   * dropped unless both hellos list `ui` (`13`, *In-game UI*).
+   * dropped unless both hellos list `ui` (`13`, *In-game UI*), and status lines unless both list
+   * `requests` (`19`).
    */
-  send(m: NoticeMessage | ChatMessage | PromptResult | UiMcpMessage): void;
+  send(m: NoticeMessage | ChatMessage | StatusMessage | PromptResult | UiMcpMessage): void;
   /** Whether both hellos list `ui`, so `ui` messages are sent. False while disconnected. */
   readonly ui: boolean;
   /** Listens to one message type from the mod. Returns the unsubscribe function. */
@@ -166,6 +172,7 @@ const RESPONSE = {
   search: "search.result",
   fill: "fill.result",
   expand: "fill.result",
+  "canvas.set": "canvas",
 } as const satisfies Record<string, ModType>;
 
 const DOWN = "world_disconnected";
@@ -262,8 +269,9 @@ export class Bridge implements BridgeConnection {
   request(m: Req<ExpandRequest>): Promise<FillResult>;
   request(m: Req<MaskSnapshotRequest>): Promise<SnapshotResult>;
   request(m: Req<CoarseSnapshotRequest>): Promise<CoarseResult>;
+  request(m: Req<CanvasSet>): Promise<CanvasMessage>;
   request(
-    m: Req<HashesRequest | SurfaceRequest | SnapshotRequest | MaskSnapshotRequest | CoarseSnapshotRequest | SearchRequest | FillRequest | ExpandRequest | PatchMessage | VolumesExtend | VolumesSet | RegistryRequest | UpgradeRequest>,
+    m: Req<HashesRequest | SurfaceRequest | SnapshotRequest | MaskSnapshotRequest | CoarseSnapshotRequest | SearchRequest | FillRequest | ExpandRequest | PatchMessage | VolumesExtend | VolumesSet | RegistryRequest | UpgradeRequest | CanvasSet>,
   ): Promise<ModMessage> {
     if (!this.connected) return Promise.reject(new BridgeError(DOWN, "The game isn't connected (the world link is down); nothing was sent."));
     const needs = featureFor(m);
@@ -277,9 +285,10 @@ export class Bridge implements BridgeConnection {
     });
   }
 
-  send(m: NoticeMessage | ChatMessage | PromptResult | UiMcpMessage): void {
+  send(m: NoticeMessage | ChatMessage | StatusMessage | PromptResult | UiMcpMessage): void {
     if (!this.connected) return;
     if ((UI_MCP_TYPES as readonly string[]).includes(m.type) && !this.ui) return;
+    if (m.type === "chat" && m.kind === "status" && !(this.features.includes("requests") && this.supports("requests"))) return;
     this.write(m);
   }
 
@@ -408,7 +417,7 @@ export class Bridge implements BridgeConnection {
       const p = this.pending.get(id);
       this.pending.delete(id);
       p?.resolve(m);
-    } else if ("id" in m && m.type !== "prompt" && m.type !== "volumes") {
+    } else if ("id" in m && m.id !== undefined && m.type !== "prompt" && m.type !== "volumes") {
       const p = this.pending.get(m.id);
       if (p && p.expect === m.type) {
         this.pending.delete(m.id);
@@ -488,6 +497,8 @@ const FEATURE_NAMES: Record<ModFeature, string> = {
   upgrade: "upgrading schematics through the game's data fixer",
   ui: "the in-game UI",
   select: "selecting in the world (search, fill, expand, surface, mask and coarse snapshots)",
+  requests: "request control (status lines, stop and the queue)",
+  canvas: "the canvas",
 };
 
 /** The mod feature a request needs (*Versions and features*), if any. */
@@ -497,6 +508,8 @@ function featureFor(m: { type: McpMessage["type"]; kind?: string }): ModFeature 
     case "registry":
     case "upgrade":
       return m.type;
+    case "canvas.set":
+      return "canvas";
     case "search":
     case "fill":
     case "expand":

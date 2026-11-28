@@ -115,8 +115,8 @@ describe("ui codec", () => {
     for (const n of ["prefab", "palette", "procedure", "knowledge"]) expect(typeof req(`ui-request-library-write-${n}`).args.hash).toBe("string");
     expect(decodeFrame(new Uint8Array(readFileSync(join(DIR, "ui-result-library-write.bin"))), "mcp")).toMatchObject({ ok: true, result: { hash: expect.stringMatching(/^[0-9a-f]{64}$/) } });
     expect(decodeFrame(new Uint8Array(readFileSync(join(DIR, "ui-result-library-write-conflict.bin"))), "mcp")).toMatchObject({ ok: false, error: "conflict" });
-    // `conflict` was already a code (settings): the editors add no new one.
-    expect(UI_ERRORS).toEqual(["not_allowed", "conflict", "not_found", "bad_request", "busy", "internal", "answered"]);
+    // `conflict` was already a code (settings): the editors add no new one. `refused` came later with request control (`19`).
+    expect(UI_ERRORS).toEqual(["not_allowed", "conflict", "not_found", "bad_request", "busy", "internal", "answered", "refused"]);
   });
 
   it("save flash (17, piece 8): a flash record with the reserved job save in the fixed colour, beside a job's", () => {

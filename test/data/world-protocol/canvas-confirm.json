@@ -1,0 +1,13 @@
+{
+  "description": "The canvas confirming canvas.set 31, widened to whole chunk columns and the full build height",
+  "sender": "mod",
+  "header": {
+    "type": "canvas",
+    "id": 31,
+    "dimension": "minecraft:overworld",
+    "box": {
+      "min": [0, -64, -512],
+      "max": [1023, 319, 511]
+    }
+  }
+}

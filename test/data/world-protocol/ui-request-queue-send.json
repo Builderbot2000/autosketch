@@ -1,0 +1,16 @@
+{
+  "description": "The player clicked Send now on queued request 15",
+  "sender": "mod",
+  "header": {
+    "type": "ui.request",
+    "request": 42,
+    "player": {
+      "name": "Kev",
+      "uuid": "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+    },
+    "kind": "queue.send",
+    "args": {
+      "request": 15
+    }
+  }
+}

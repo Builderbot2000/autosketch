@@ -90,11 +90,13 @@ describe("protocol 3 golden vectors (N−1)", () => {
     const v3 = (n: string) => splitFrame(new Uint8Array(readFileSync(join(V3, `${n}.bin`))).subarray(4)).header;
     expect(v3("hello-mod-singleplayer").features).toEqual(["modes", "scan", "volumes.set", "registry", "upgrade", "ui"]);
     expect(changedFrames(V3, DIR)).toEqual(["error-protocol-mismatch", "hello-mcp", "hello-mcp-build-only", "hello-mod-dedicated", "hello-mod-singleplayer"]);
-    expect(addedFrames(V3, DIR)).toEqual([]);
+    // Added within protocol 4 (features requests and canvas, `19`): new frames only, no current frame changed.
+    expect(addedFrames(V3, DIR)).toEqual(REQUESTS_CANVAS_FRAMES);
     expect(addedFrames(DIR, V3)).toEqual(["hello-mcp-select", "hello-mod-select", "prompt-scan"]);
     const now = (n: string) => splitFrame(new Uint8Array(readFileSync(join(DIR, `${n}.bin`))).subarray(4)).header;
     expect(now("hello-mcp")).toMatchObject({ protocol: 4, modes: ["ask", "plan", "build", "select"] });
-    expect(now("hello-mod-singleplayer").features).toEqual([...MOD_FEATURES]);
+    expect(now("hello-mod-singleplayer").features).toEqual(["modes", "volumes.set", "registry", "upgrade", "ui", "select"]);
+    expect(now("hello-mod-canvas").features).toEqual([...MOD_FEATURES]);
   });
 });
 
@@ -376,10 +378,13 @@ describe("bridge and fake host, protocol 3 (N−1)", () => {
   });
 });
 
+/** The frames `19` added within protocol 4 (features `requests` and `canvas`, step W1). */
+const REQUESTS_CANVAS_FRAMES = ["canvas", "canvas-confirm", "canvas-none", "canvas-set", "chat-reply-queue", "chat-status-done", "chat-status-done-no-turn-signal", "chat-status-queued", "chat-status-stopped", "chat-status-stopping", "chat-status-working", "error-canvas-too-wide", "hello-mcp-canvas", "hello-mod-canvas", "notice-request-stopping", "prompt-result-busy", "prompt-result-queued", "request-control-queue", "request-control-queue-cancel", "request-control-stop", "ui-request-queue-cancel", "ui-request-queue-send", "ui-request-request-stop", "ui-request-request-undo", "ui-result-queue-cancel", "ui-result-queue-send", "ui-result-request-answered", "ui-result-request-refused", "ui-result-request-stop", "ui-result-request-undo"];
+
 describe("bridge and fake host, protocol 4", () => {
   it("pairs in protocol 4 and sees every feature the hello lists", async () => {
     const { host, bridge, hello } = await pair({ volumes: { work: WORK } });
-    expect(hello).toMatchObject({ protocol: PROTOCOL_VERSION, features: ["modes", "volumes.set", "registry", "upgrade", "ui", "select"] });
+    expect(hello).toMatchObject({ protocol: PROTOCOL_VERSION, features: ["modes", "volumes.set", "registry", "upgrade", "ui", "select", "requests", "canvas"] });
     expect(host.received[0]).toMatchObject({ type: "hello", protocol: 4, modes: ["ask", "plan", "build", "select"] });
     expect(host.mcpModes).toEqual(["ask", "plan", "build", "select"]);
     for (const f of MOD_FEATURES) expect(bridge.supports(f)).toBe(true);

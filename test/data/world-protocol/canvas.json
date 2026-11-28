@@ -1,0 +1,12 @@
+{
+  "description": "The canvas after the hello: 64×64 chunks, the full build height",
+  "sender": "mod",
+  "header": {
+    "type": "canvas",
+    "dimension": "minecraft:overworld",
+    "box": {
+      "min": [0, -64, -512],
+      "max": [1023, 319, 511]
+    }
+  }
+}

@@ -43,7 +43,8 @@ public final class UiMessages {
             "library.copy", "library.empty_trash", "logs.list", "replay.open", "replay.seek", "replay.close", "ghost.anchor", "ghost.clear",
             "candidates.open", "candidates.ghost", "candidates.ghost.clear", "candidates.submit",
             "library.write.prefab", "library.write.palette", "library.write.procedure", "library.write.knowledge",
-            "choices.pick");
+            "choices.pick",
+            "request.stop", "queue.send", "queue.cancel", "request.undo");
 
     /**
      * Most choices one question offers (18, piece 7): a player without the client half answers by
@@ -65,8 +66,12 @@ public final class UiMessages {
      */
     public static final List<String> LIBRARY_WRITE_KINDS = List.of("library.write.prefab", "library.write.palette", "library.write.procedure", "library.write.knowledge");
 
-    /** {@code ui.result} error codes; {@code answered} (17, piece 3): the candidates were already answered. */
-    public static final List<String> ERRORS = List.of("not_allowed", "conflict", "not_found", "bad_request", "busy", "internal", "answered");
+    /**
+     * {@code ui.result} error codes; {@code answered} (17, piece 3): the candidates were already
+     * answered; {@code refused} (19, feature {@code requests}): the MCP declined a request-control action
+     * itself (an undo of a running request, or one the undo rules refuse).
+     */
+    public static final List<String> ERRORS = List.of("not_allowed", "conflict", "not_found", "bad_request", "busy", "internal", "answered", "refused");
 
     /** The id of the session's candidate ghost, the {@code ghost} a {@code candidates.ghost} answers (17, piece 3). */
     public static final String CANDIDATE_GHOST = "candidate";

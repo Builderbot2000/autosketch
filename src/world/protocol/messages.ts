@@ -63,7 +63,11 @@ export type RejectReason = (typeof REJECT_REASONS)[number];
 export const ERROR_CODES = ["protocol_mismatch", "bad_token", "not_ready", "bad_request", "unknown_type", "no_volumes", "wrong_dimension", "outside_volumes", "too_large", "replaced", "stale_link", "bad_extension", "bad_volumes", "internal", "no_grant"] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
 
-export const PROMPT_REFUSALS = ["no_link", "not_allowed", "no_listener", "unsupported_mode"] as const;
+/**
+ * Why a prompt wasn't delivered. `busy` (`19`, *Queueing*; feature `requests`): the player's queue
+ * already holds {@link QUEUE_MAX} prompts; sent only to a mod whose hello lists `requests`.
+ */
+export const PROMPT_REFUSALS = ["no_link", "not_allowed", "no_listener", "unsupported_mode", "busy"] as const;
 export type PromptRefusal = (typeof PROMPT_REFUSALS)[number];
 
 /**
@@ -78,7 +82,7 @@ export type RequestMode = (typeof REQUEST_MODES)[number];
  * Optional capabilities a mod's `hello` lists in `features` (*Versions and features*). The MCP uses
  * an addition only when the mod lists it, never because of the protocol number.
  */
-export const MOD_FEATURES = ["modes", "volumes.set", "registry", "upgrade", "ui", "select"] as const;
+export const MOD_FEATURES = ["modes", "volumes.set", "registry", "upgrade", "ui", "select", "requests", "canvas"] as const;
 export type ModFeature = (typeof MOD_FEATURES)[number];
 
 /**
@@ -88,7 +92,14 @@ export type ModFeature = (typeof MOD_FEATURES)[number];
  * messages and answers `ui.request` (*In-game UI*); used only when the mod lists `ui` too.
  */
 export const MCP_FEATURES = ["prompt.close", "ui"] as const;
-export type McpFeature = (typeof MCP_FEATURES)[number];
+/**
+ * Every MCP feature name on the wire (`13`, *Versions and features*), the ones this MCP doesn't
+ * list yet included: `requests` (`19`, Part A: status lines, request control, queueing) and `canvas`
+ * (`19`, Part B: the canvas messages). {@link MCP_FEATURES} is what this MCP's hello lists, and a
+ * name joins it once the behaviour behind it is built (`requests` in step Q1, `canvas` in F1).
+ */
+export const MCP_WIRE_FEATURES = ["prompt.close", "ui", "requests", "canvas"] as const;
+export type McpFeature = (typeof MCP_WIRE_FEATURES)[number];
 
 /** A world block as the mod reports it: canonical state, block-entity NBT when it has one. */
 export interface WorldBlock {
@@ -513,7 +524,15 @@ export interface PromptClose {
   player: PlayerRef;
 }
 
-export type PromptResult = { type: "prompt.result"; id: number; delivered: true } | { type: "prompt.result"; id: number; delivered: false; reason: PromptRefusal };
+/**
+ * The answer to a `prompt`: delivered, refused with a reason, or (feature `requests`, `19`,
+ * *Queueing*) queued: `request` is the running request it waits behind, `position` its place in the
+ * player's queue (1 is next). A queued prompt keeps the context captured when it was sent.
+ */
+export type PromptResult =
+  | { type: "prompt.result"; id: number; delivered: true }
+  | { type: "prompt.result"; id: number; delivered: false; reason: PromptRefusal }
+  | { type: "prompt.result"; id: number; delivered: false; queued: true; request: number; position: number };
 
 /**
  * The MCP asks for the game's registry report (protocol 3, feature `registry`; `14`, *Version-specific
@@ -585,6 +604,110 @@ export interface ChatAction {
   line: number;
   kind: string;
   args: Record<string, unknown>;
+}
+
+// ── Request control (feature `requests`, added within protocol 4; `19`, Part A) ────────────────
+
+/**
+ * A request's states on its status line (`19`, *Status line*): `working` (delivered, its turn
+ * running), `stopping` (the player stopped it, the turn hasn't ended yet), `done` (the turn ended),
+ * `stopped` (stopped, and the turn has since ended), `queued` (waiting for the running turn to end).
+ */
+export const REQUEST_STATES = ["working", "stopping", "done", "stopped", "queued"] as const;
+export type RequestState = (typeof REQUEST_STATES)[number];
+
+/** Most prompts one player's queue holds; past it a prompt is refused `busy` (`19`, *Queueing*). */
+export const QUEUE_MAX = 8;
+/** Most status updates per request and second while its state doesn't change (`19`, *Status line*). */
+export const STATUS_INTERVAL_MS = 1000;
+
+/**
+ * A button on a status line (`[Stop]`, `[Send now]`, `[Cancel]`, `[Undo request]`): clicking it
+ * makes the player's client send the `ui.request` `kind` with `args`, as a reply line's action does.
+ * `label` is the button's text without brackets. A client without the client half shows no button;
+ * the server half offers the matching command instead (`/autosketch stop`, `queue cancel <n>`).
+ */
+export interface StatusAction {
+  label: string;
+  kind: string;
+  args: Record<string, unknown>;
+}
+
+/**
+ * `chat` kind `status` (`19`, *Status line*; feature `requests`): the one status line of an in-game
+ * request, kept by `request` and rewritten in place by the client half. Measurements only: the
+ * state, calls and elapsed time. `lines` holds exactly one line, the whole plain text a client
+ * without the client half shows (on each state change). `queuePos` is present exactly when queued;
+ * `noTurnSignal` only on `done` when the turn's end came from a fallback (`world_reply done` or the
+ * idle timeout) instead of the hook. Sent at most once per {@link STATUS_INTERVAL_MS} per request,
+ * and at once on each state change.
+ */
+export interface StatusMessage {
+  type: "chat";
+  request: number;
+  /** The requesting player's UUID. */
+  player: string;
+  kind: "status";
+  lines: [string];
+  state: RequestState;
+  /** The prompt's text, possibly shortened. */
+  text: string;
+  /** Tool calls the request has made so far. */
+  calls: number;
+  elapsedMs: number;
+  /** Place in the player's queue, 1 is next; only when `state` is `queued`. */
+  queuePos?: number;
+  /** Only on `done`: the turn's end was inferred, no hook reported it. */
+  noTurnSignal?: true;
+  /** Buttons, in order; may be empty. */
+  actions: StatusAction[];
+}
+
+/** What a server-side command asks (`19`, *Stop*, *Queueing*): `/autosketch stop`, `queue`, `queue cancel <n>`. */
+export const REQUEST_CONTROL_ACTIONS = ["stop", "queue", "queue.cancel"] as const;
+export type RequestControlAction = (typeof REQUEST_CONTROL_ACTIONS)[number];
+
+/**
+ * `request.control`, mod → MCP (feature `requests` on the MCP's hello): a player ran `/autosketch
+ * stop`, `queue` or `queue cancel <n>`, so a client without the client half can use them too.
+ * `stop` stops the running request; `queue` lists the player's queue; `queue.cancel` cancels the
+ * entry at `position` (1-based, as `queue` numbers them; present exactly with `queue.cancel`). The
+ * MCP answers `stop` and `queue.cancel` with a `notice` to that player, and `queue` with a `chat`
+ * reply (request `null`) listing the queue, one line per entry.
+ */
+export interface RequestControl {
+  type: "request.control";
+  player: PlayerRef;
+  action: RequestControlAction;
+  position?: number;
+}
+
+/** The `ui.request` kinds of request control (`19`, *Status line*): each takes `{request}`. */
+export const REQUEST_UI_KINDS = ["request.stop", "queue.send", "queue.cancel", "request.undo"] as const;
+
+// ── Canvas (feature `canvas`, added within protocol 4; `19`, Part B) ──────────────────────────
+
+/** The mod's default `canvasChunks`: the most chunks a canvas spans on either horizontal axis. */
+export const CANVAS_CHUNKS = 256;
+
+/**
+ * `canvas`, mod → MCP (feature `canvas` on the MCP's hello): the canvas after the hello and on every
+ * change, like `volumes`. The box is whole chunk columns, the dimension's full build height; `null`
+ * when none is set. `id` only on the `canvas` that confirms a `canvas.set`.
+ */
+export type CanvasMessage = { type: "canvas"; id?: number; dimension: string; box: WireBox } | { type: "canvas"; box: null };
+
+/**
+ * `canvas.set`, MCP → mod (feature `canvas` on the mod's hello; `19`, *Setting the canvas*): sets
+ * the canvas as if the player had marked it. The mod widens `box` to whole chunk columns and the full
+ * build height, and answers with a `canvas` carrying the id, or `error` `bad_volumes` (over
+ * `canvasChunks` across) or `wrong_dimension`.
+ */
+export interface CanvasSet {
+  type: "canvas.set";
+  id: number;
+  dimension: string;
+  box: WireBox;
 }
 
 // ── In-game UI (feature `ui`, added within protocol 3; `13`, *In-game UI*; `16`) ───────────────
@@ -811,6 +934,7 @@ export const UI_REQUEST_KINDS = [
   "library.write.procedure",
   "library.write.knowledge",
   "choices.pick",
+  ...REQUEST_UI_KINDS,
 ] as const;
 export type UiRequestKind = (typeof UI_REQUEST_KINDS)[number];
 
@@ -824,7 +948,12 @@ export interface UiRequest {
   args: Record<string, unknown>;
 }
 
-export const UI_ERRORS = ["not_allowed", "conflict", "not_found", "bad_request", "busy", "internal", "answered"] as const;
+/**
+ * `ui.result` errors. `refused` (`19`, feature `requests`): the MCP declined a request-control action
+ * itself (an undo of a request still running, or one the undo rules refuse, such as a stroke outside
+ * the brush); the message says why. Only the `request.*` and `queue.*` kinds return it.
+ */
+export const UI_ERRORS = ["not_allowed", "conflict", "not_found", "bad_request", "busy", "internal", "answered", "refused"] as const;
 export type UiError = (typeof UI_ERRORS)[number];
 
 // ── Candidates (`17`, piece 3; `13`, *Request kinds*) ──────────────────────────────────────────
@@ -996,6 +1125,8 @@ export type McpMessage =
   | PromptResult
   | NoticeMessage
   | ChatMessage
+  | StatusMessage
+  | CanvasSet
   | UiMcpMessage;
 /** Messages the mod sends. */
 export type ModMessage =
@@ -1014,10 +1145,17 @@ export type ModMessage =
   | PromptClose
   | RegistryResult
   | UpgradeResult
-  | UiRequest;
+  | UiRequest
+  | RequestControl
+  | CanvasMessage;
 
 export type Message = McpMessage | ModMessage;
 export type Sender = "mcp" | "mod";
+
+/** Whether both hellos list a feature (`requests`, `canvas`): only then does either side send its messages. */
+export function bothHave(mcp: Pick<ClientHello, "features"> | undefined, mod: ModHello | undefined, feature: "requests" | "canvas"): boolean {
+  return mcpHas(mcp, feature) && modHas(mod, feature);
+}
 
 /** Whether the mod's hello lists a feature (*Versions and features*: features gate on hellos, never on protocol numbers). */
 export function modHas(hello: ModHello | undefined, feature: ModFeature): boolean {

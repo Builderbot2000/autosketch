@@ -663,12 +663,32 @@ public final class Messages {
         }
     }
 
-    /** {@code prompt.result}, MCP → mod. {@code reason} only when not delivered (protocol 2 adds {@code unsupported_mode}). */
-    public record PromptResult(long id, boolean delivered, @Nullable String reason) {
+    /**
+     * {@code prompt.result}, MCP → mod. {@code reason} only when refused (protocol 2 adds
+     * {@code unsupported_mode}, feature {@code requests} adds {@code busy}). Feature {@code requests}
+     * (19, *Queueing*): a queued prompt is neither delivered nor refused; {@code queuedBehind} is the
+     * running request it waits behind and {@code position} its place in the player's queue (1 is next),
+     * both null otherwise.
+     */
+    public record PromptResult(long id, boolean delivered, @Nullable String reason, @Nullable Long queuedBehind, @Nullable Integer position) {
+        public PromptResult(long id, boolean delivered, @Nullable String reason) {
+            this(id, delivered, reason, null, null);
+        }
+
+        public boolean queued() {
+            return queuedBehind != null;
+        }
+
         public Frame encode() {
             JsonObject h = Json.header("prompt.result");
             h.addProperty("id", id);
             h.addProperty("delivered", delivered);
+            if (queuedBehind != null) {
+                h.addProperty("queued", true);
+                h.addProperty("request", queuedBehind);
+                h.addProperty("position", position);
+                return new Frame(h);
+            }
             if (reason != null) h.addProperty("reason", reason);
             return new Frame(h);
         }
@@ -678,6 +698,14 @@ public final class Messages {
             long id = reqId(f);
             JsonObject h = f.header();
             boolean delivered = Json.reqBool(h, "delivered", id);
+            if (!delivered && h.has("queued")) {
+                if (!Json.reqBool(h, "queued", id)) throw ProtocolException.badRequest(id, "\"queued\" is true or omitted");
+                if (h.has("reason")) throw ProtocolException.badRequest(id, "a queued prompt has no refusal reason");
+                long behind = Json.reqLong(h, "request", id);
+                int position = Json.reqInt(h, "position", id);
+                if (behind < 1 || position < 1) throw ProtocolException.badRequest(id, "\"request\" and \"position\" must be at least 1");
+                return new PromptResult(id, false, null, behind, position);
+            }
             return new PromptResult(id, delivered, delivered ? null : Json.optString(h, "reason", id));
         }
     }
@@ -847,7 +875,7 @@ public final class Messages {
             Long request = Json.reqNullableLong(h, "request", null);
             String p = Json.optString(h, "player", null);
             String kind = Json.reqString(h, "kind", null);
-            if (!kind.equals(ACTIVITY) && !kind.equals(REPLY)) throw ProtocolException.badRequest(null, "\"kind\" must be \"activity\" or \"reply\"");
+            if (!kind.equals(ACTIVITY) && !kind.equals(REPLY)) throw ProtocolException.badRequest(null, "\"kind\" must be \"activity\" or \"reply\" (a status line is RequestMessages.Status)");
             List<String> lines = new ArrayList<>();
             for (JsonElement e : Json.reqArray(h, "lines", null)) {
                 if (!e.isJsonPrimitive() || !e.getAsJsonPrimitive().isString()) throw ProtocolException.badRequest(null, "\"lines\" must be strings");

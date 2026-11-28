@@ -32,7 +32,9 @@ import {
   MAX_HEADER,
   PROMPT_REFUSALS,
   REPLAY_MARKERS,
+  REQUEST_CONTROL_ACTIONS,
   REQUEST_MODES,
+  REQUEST_STATES,
   UI_ERRORS,
   UI_FILL_SPANS,
   UI_MCP_TYPES,
@@ -50,6 +52,8 @@ import {
   type ModMessage,
   type PlayerRef,
   type Sender,
+  type StatusAction,
+  type StatusMessage,
   type VolatileList,
   type WireArea,
   type WireBox,
@@ -247,10 +251,24 @@ function split(m: Message): { header: Record<string, unknown>; body: Uint8Array 
     case "prompt.close":
       return { header: { type: m.type, player: player(m.player) }, body: none };
     case "prompt.result":
-      return { header: m.delivered ? { type: m.type, id: m.id, delivered: true } : { type: m.type, id: m.id, delivered: false, reason: m.reason }, body: none };
+      if (m.delivered) return { header: { type: m.type, id: m.id, delivered: true }, body: none };
+      if ("queued" in m) {
+        if (!Number.isInteger(m.position) || m.position < 1) throw new ProtocolError("prompt.result: a queued position is 1 or more");
+        return { header: { type: m.type, id: m.id, delivered: false, queued: true, request: m.request, position: m.position }, body: none };
+      }
+      return { header: { type: m.type, id: m.id, delivered: false, reason: m.reason }, body: none };
+    case "request.control":
+      if ((m.action === "queue.cancel") !== (m.position !== undefined)) throw new ProtocolError("request.control: position goes exactly with queue.cancel");
+      return { header: { type: m.type, player: player(m.player), action: m.action, ...(m.position !== undefined ? { position: m.position } : {}) }, body: none };
+    case "canvas":
+      if (m.box === null) return { header: { type: m.type, box: null }, body: none };
+      return { header: { type: m.type, ...(m.id !== undefined ? { id: m.id } : {}), dimension: m.dimension, box: box(m.box) }, body: none };
+    case "canvas.set":
+      return { header: { type: m.type, id: m.id, dimension: m.dimension, box: box(m.box) }, body: none };
     case "notice":
       return { header: { type: m.type, text: m.text, player: m.player }, body: none };
     case "chat":
+      if (m.kind === "status") return { header: statusHeader(m), body: none };
       if (m.action && (m.kind !== "reply" || !Number.isInteger(m.action.line) || m.action.line < 0 || m.action.line >= m.lines.length)) throw new ProtocolError("chat: an action names one line of a reply");
       return {
         header: { type: m.type, request: m.request, player: m.player, kind: m.kind, lines: [...m.lines], ...(m.action ? { action: { line: m.action.line, kind: m.action.kind, args: m.action.args } } : {}) },
@@ -308,6 +326,32 @@ function split(m: Message): { header: Record<string, unknown>; body: Uint8Array 
       if (m.ok) return { header: { type: m.type, request: m.request, player: m.player, ok: true, result: m.result }, body: m.body ?? none };
       return { header: { type: m.type, request: m.request, player: m.player, ok: false, error: m.error, message: m.message }, body: none };
   }
+}
+
+/** A status line's header (`19`, *Status line*), checked as the decoder checks it. */
+function statusHeader(m: StatusMessage): Record<string, unknown> {
+  if (m.lines.length !== 1) throw new ProtocolError("chat status: exactly one line");
+  if ((m.state === "queued") !== (m.queuePos !== undefined)) throw new ProtocolError("chat status: queuePos goes exactly with state queued");
+  if (m.noTurnSignal && m.state !== "done") throw new ProtocolError("chat status: noTurnSignal only on done");
+  return {
+    type: m.type,
+    request: m.request,
+    player: m.player,
+    kind: m.kind,
+    lines: [m.lines[0]],
+    state: m.state,
+    text: m.text,
+    calls: m.calls,
+    elapsedMs: m.elapsedMs,
+    ...(m.queuePos !== undefined ? { queuePos: m.queuePos } : {}),
+    ...(m.noTurnSignal ? { noTurnSignal: true } : {}),
+    actions: m.actions.map((a) => statusAction(a)),
+  };
+}
+
+function statusAction(a: StatusAction): StatusAction {
+  if (!a.label || !a.kind) throw new ProtocolError("chat status: an action has a label and a kind");
+  return { label: a.label, kind: a.kind, args: a.args };
 }
 
 function chunkList(list: readonly [number, number][]): [number, number][] {
@@ -425,8 +469,8 @@ export function decodeFrame(frame: Uint8Array, sender: Sender): Message {
   return decodeMessage(frame.subarray(4), sender);
 }
 
-const MCP_TYPES = new Set(["hello", "error", "volumes.extend", "volumes.set", "hashes", "snapshot", "search", "fill", "expand", "patch", "registry", "upgrade", "prompt.result", "notice", "chat", ...UI_MCP_TYPES]);
-const MOD_TYPES = new Set(["hello", "error", "volumes", "hashes.result", "snapshot.result", "search.result", "fill.result", "patch.ack", "dirty", "prompt", "prompt.close", "registry.result", "upgrade.result", "ui.request"]);
+const MCP_TYPES = new Set(["hello", "error", "volumes.extend", "volumes.set", "hashes", "snapshot", "search", "fill", "expand", "patch", "registry", "upgrade", "prompt.result", "notice", "chat", "canvas.set", ...UI_MCP_TYPES]);
+const MOD_TYPES = new Set(["hello", "error", "volumes", "hashes.result", "snapshot.result", "search.result", "fill.result", "patch.ack", "dirty", "prompt", "prompt.close", "registry.result", "upgrade.result", "ui.request", "request.control", "canvas"]);
 const BODY_TYPES = new Set(["snapshot.result", "search.result", "fill.result", "patch", "patch.ack", "dirty", "registry.result", "upgrade", "upgrade.result", "ui.ghost", "replay.frame", "ui.result"]);
 
 function decode(type: string, v: Fields, body: Uint8Array, sender: Sender): Message {
@@ -662,11 +706,33 @@ function decode(type: string, v: Fields, body: Uint8Array, sender: Sender): Mess
     case "prompt.result": {
       const id = v.id("id");
       if (v.bool("delivered")) return { type, id, delivered: true };
+      if (v.has("queued")) {
+        if (v.raw("queued") !== true) throw new ProtocolError("queued is true or omitted");
+        if (v.has("reason")) throw new ProtocolError("a queued prompt has no refusal reason");
+        return { type, id, delivered: false, queued: true, request: v.id("request"), position: v.positive("position") };
+      }
       return { type, id, delivered: false, reason: v.oneOf("reason", PROMPT_REFUSALS) };
     }
+    case "request.control": {
+      const action = v.oneOf("action", REQUEST_CONTROL_ACTIONS);
+      const position = v.has("position") ? v.positive("position") : undefined;
+      if ((action === "queue.cancel") !== (position !== undefined)) throw new ProtocolError("position goes exactly with queue.cancel");
+      return { type, player: playerRef(v.obj("player")), action, ...(position !== undefined ? { position } : {}) };
+    }
+    case "canvas": {
+      if (!v.nullable("box")) {
+        if (v.has("id") || v.has("dimension")) throw new ProtocolError("a canvas without a box has no id or dimension");
+        return { type, box: null };
+      }
+      const id = v.has("id") ? { id: v.id("id") } : {};
+      return { type, ...id, dimension: v.str("dimension"), box: v.box("box") };
+    }
+    case "canvas.set":
+      return { type, id: v.id("id"), dimension: v.str("dimension"), box: v.box("box") };
     case "notice":
       return { type, text: v.str("text"), player: v.nullable("player") ? uuid(v.str("player")) : null };
     case "chat": {
+      if (v.raw("kind") === "status") return statusOf(v);
       const out: ChatMessage = {
         type,
         request: v.nullable("request") ? v.id("request") : null,
@@ -777,6 +843,39 @@ function decode(type: string, v: Fields, body: Uint8Array, sender: Sender): Mess
     }
   }
   throw new ProtocolError(`unknown message type "${type}"`);
+}
+
+/** `chat` kind `status` (`19`, *Status line*). */
+function statusOf(v: Fields): StatusMessage {
+  const lines = v.strings("lines");
+  if (lines.length !== 1) throw new ProtocolError("chat status: lines must hold exactly one line");
+  const state = v.oneOf("state", REQUEST_STATES);
+  const queuePos = v.has("queuePos") ? v.positive("queuePos") : undefined;
+  if ((state === "queued") !== (queuePos !== undefined)) throw new ProtocolError("chat status: queuePos goes exactly with state queued");
+  const noTurnSignal = v.has("noTurnSignal") ? v.raw("noTurnSignal") : undefined;
+  if (noTurnSignal !== undefined && (noTurnSignal !== true || state !== "done")) throw new ProtocolError("chat status: noTurnSignal is true, only on done, or omitted");
+  if (v.has("action")) throw new ProtocolError("chat status: buttons go in actions, not action");
+  const actions = v.arr("actions").map((_, i) => {
+    const a = v.objAt("actions", i);
+    const label = a.str("label"), kind = a.str("kind"), args = a.raw("args");
+    if (!label || !kind) throw new ProtocolError(`actions[${i}]: label and kind must be non-empty`);
+    if (typeof args !== "object" || args === null || Array.isArray(args)) throw new ProtocolError(`actions[${i}].args must be an object`);
+    return { label, kind, args: args as Record<string, unknown> };
+  });
+  return {
+    type: "chat",
+    request: v.id("request"),
+    player: uuid(v.str("player")),
+    kind: "status",
+    lines: [lines[0]!],
+    state,
+    text: v.str("text"),
+    calls: v.int("calls"),
+    elapsedMs: v.int("elapsedMs"),
+    ...(queuePos !== undefined ? { queuePos } : {}),
+    ...(noTurnSignal ? { noTurnSignal: true as const } : {}),
+    actions,
+  };
 }
 
 function uiJobOf(f: Fields): UiJob {

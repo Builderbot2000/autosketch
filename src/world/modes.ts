@@ -19,7 +19,9 @@ import type { PlayerRef, RequestMode } from "./protocol/messages.js";
  *   addressed to an existing sandbox. So `ask`, `plan` and `select` answer in words (and
  *   `select` with volumes); nothing is built anywhere, not even in a scratch copy.
  * - **Volume changes** are the volume tools (`VOLUME_TOOLS`, B4's `world_volumes`): refused in `ask`
- *   and `plan`, allowed in `select` and `build`.
+ *   and `plan`, allowed in `select` and `build`. With a canvas (`19`) a work volume inside it (a
+ *   brush move) is allowed in every mode: the hook lets the tool through and `checkVolumes` decides
+ *   once the box is known.
  *
  * Select (docs/design/18-select.md, piece 1) reads the world through the world view and the select
  * tools (`world_search`, `world_fill`, `world_expand`, `world_view_read`), none of which edits a
@@ -98,7 +100,22 @@ export class RequestModeRule {
   constructor(
     private readonly current: () => ModeRequest | undefined,
     private readonly linkedDoc: () => Document | undefined,
+    /** Whether the linked frame has a canvas (`19`): the volume tools then pass the hook and `checkVolumes` decides by the box. */
+    private readonly canvas: () => boolean = () => false,
   ) {}
+
+  /**
+   * The volume rule with the box known (`19`, *Placing and moving the brush*): a work volume inside
+   * the canvas may be set in every mode; outside it, or with no canvas, only in modes with volume
+   * changes, as before.
+   */
+  checkVolumes(tool: string, insideCanvas: boolean): void {
+    const r = this.current();
+    if (!r || insideCanvas || VOLUME_MODES.has(r.mode)) return;
+    const e = requestModeRefusal(r, { volumes: tool });
+    if (this.canvas()) e.message += " (Moving the brush inside the canvas is allowed in every mode; this work volume isn't inside it.)";
+    throw e;
+  }
 
   /** Installs the guard on `doc`, which refuses edits only while `doc` is the linked document. */
   attach(doc: Document): void {
@@ -118,7 +135,7 @@ export class RequestModeRule {
     if (doc) this.attach(doc);
     const r = this.current();
     if (!r) return;
-    if (VOLUME_TOOLS.has(call.tool) && !VOLUME_MODES.has(r.mode)) throw requestModeRefusal(r, { volumes: call.tool });
+    if (VOLUME_TOOLS.has(call.tool) && !VOLUME_MODES.has(r.mode) && !this.canvas()) throw requestModeRefusal(r, { volumes: call.tool });
     if (READ_ONLY_MODES.has(r.mode) && (DRAFT_TOOLS.has(call.tool) || (call.mutating && call.scope !== undefined && call.scope !== "base")))
       throw requestModeRefusal(r, { draft: call.tool });
   }

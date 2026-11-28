@@ -9,7 +9,7 @@ import { PATCH_DROP, RequestLifecycle, type ControlAnswer } from "./requests.js"
 import type { LinkVolumes, WorldLink } from "./link.js";
 import { MODE_ALLOWS, modeOf, READ_ONLY_MODES, RequestModeRule, type ModeRequest } from "./modes.js";
 import { SELECT_CHUNKS, type ChatAction, type GameContext, type ModHello, type PlayerRef, type PromptClose, type PromptMessage, type PromptRefusal, type RequestControl, type RequestMode, type WireBox } from "./protocol/messages.js";
-import { setVolumes, type ContextArg, type VolumesFrame } from "./set-volumes.js";
+import { brushInCanvas, setVolumes, type ContextArg, type VolumesFrame } from "./set-volumes.js";
 import type { PromptSettings } from "./settings.js";
 
 /**
@@ -71,10 +71,12 @@ export interface InGameReplies {
   reply(lines: string[], opts?: { done?: boolean; request?: number; action?: ChatAction }): { request: OpenRequest | undefined; open: boolean; held?: RequestMode };
   /** Whether a reply line can be clickable now: both hellos list `ui` (`13`, `chat`). */
   readonly clickable: boolean;
-  /** Sets the player's volumes (`world_volumes`, B4) in the linked document's coordinates; resolves with the result text. */
+  /** Sets the player's volumes (`world_volumes`, B4) in the linked document's coordinates; resolves with the result text. Inside the canvas it moves the brush (`19`). */
   setVolumes(work: PublicBox, context?: ContextArg): Promise<string>;
   /** True while the player has stopped the running request (`19`, *Stop*): long calls (`run_script`) abort between steps. */
   readonly stopping?: boolean;
+  /** Throws `request_mode` when the open request's mode allows no volume changes (`world_volumes({from})`; `19`). Optional for test doubles. */
+  checkVolumeMode?(): void;
 }
 
 export interface InGameRequestsOptions extends PromptSettings {
@@ -140,6 +142,7 @@ export class InGameRequests implements InGameReplies {
     this.modeRule = new RequestModeRule(
       () => this.held,
       () => (link.state === "linked" ? link.doc : undefined),
+      () => link.state === "linked" && !!link.volumes?.canvas,
     );
     this.lifecycle = new RequestLifecycle({
       bridge: link.bridge,
@@ -240,14 +243,26 @@ export class InGameRequests implements InGameReplies {
   }
 
   async setVolumes(work: PublicBox, context?: ContextArg): Promise<string> {
-    const frame: VolumesFrame | undefined = this.link.state === "linked" && this.link.volumes ? { origin: this.link.volumes.origin, dimension: this.link.volumes.dimension, label: "local" } : undefined;
+    const v = this.link.state === "linked" ? this.link.volumes : undefined;
+    const frame: VolumesFrame | undefined = v ? { origin: v.origin, dimension: v.dimension, label: "local", ...(v.canvas ? { canvas: v.canvas } : {}) } : undefined;
+    // 19: a work volume inside the canvas moves the brush, allowed in every mode.
+    const brush = !!frame && brushInCanvas(frame, work);
+    this.modeRule.checkVolumes("world_volumes", brush);
     if (!this.link.bridge.connected) throw refusal("world_disconnected", "No game is connected, so there are no volumes to set.");
     if (!frame)
       throw refusal(
         "world_no_document",
         'world_volumes({work}) takes a box in the linked document\'s coordinates, and no document is linked. In a select request, confirm the shape with world_volumes({from:"candidate"}) (world coordinates, no link needed); otherwise link with doc_open({world: true}).',
       );
-    return setVolumes(this.link.bridge, frame, work, context, this.opts.autoLink ?? true);
+    if (brush) this.link.assertBrushMovable?.();
+    const text = await setVolumes(this.link.bridge, frame, work, context, this.opts.autoLink ?? true);
+    const moved = brush ? await this.link.followBrush?.() : undefined;
+    return moved ? `${text}\n${moved}` : text;
+  }
+
+  /** The volume rule for `world_volumes({from})` (`19`): a confirmed shape is no brush move, so the request mode decides as before. */
+  checkVolumeMode(): void {
+    this.modeRule.checkVolumes("world_volumes", false);
   }
 
   close(): void {

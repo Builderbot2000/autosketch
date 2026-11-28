@@ -107,6 +107,14 @@ export interface WorldLink {
    * coordinates, and what local (0,0,0) is in the world. Undefined while nothing is linked.
    */
   describeFrame?(): string | undefined;
+  /**
+   * After `world_volumes` set a work volume inside the canvas (`19`): moves the brush now, between
+   * calls, and resolves the move's report (both boxes, the time taken); undefined when the mod's
+   * volumes are no brush move. Optional, like `open`.
+   */
+  followBrush?(): Promise<string | undefined>;
+  /** Throws a refusal when the brush can't move now (scoped jobs open in it). Optional, like `open`. */
+  assertBrushMovable?(): void;
 }
 
 export interface LinkOpenOptions {

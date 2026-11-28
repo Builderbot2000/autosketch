@@ -20,6 +20,7 @@ import type { InGameReplies } from "../world/prompt.js";
 import type { WorldView } from "../world/view.js";
 import type { CanvasReads } from "../world/canvas.js";
 import type { WorldSelect } from "../world/select/select.js";
+import type { WorldMap } from "../world/map.js";
 import type { Registry } from "../assets/registry.js";
 import type { ImportUpgrade } from "../formats/index.js";
 import type { SchematicUpgrader } from "../formats/upgrade.js";
@@ -164,6 +165,11 @@ export class Session {
    * state and its fill, the candidate. Set by the entry point beside `worldView`.
    */
   worldSelect?: WorldSelect;
+  /**
+   * `world_map` (19, *Seeing the whole canvas*): the canvas from above, with the brush, jobs and the
+   * player marked; it also keeps the mod's latest canvas. Set by the entry point beside `worldSelect`.
+   */
+  worldMap?: Pick<WorldMap, "map">;
   /**
    * The session's component set (17, piece 1): the prefabs the player picked, kept by
    * `component_set`. Not tied to a document: it survives opening and closing documents and ends

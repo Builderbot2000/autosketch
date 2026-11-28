@@ -18,6 +18,7 @@ import { registerWorldPromptTools } from "./world-prompt.js";
 import { registerWorldVolumesTools } from "./world-volumes.js";
 import { registerWorldViewTools } from "./world-view.js";
 import { registerWorldSelectTools } from "./world-select.js";
+import { registerWorldMapTools } from "./world-map.js";
 import { registerCameraTools } from "./camera.js";
 import type { ToolDeps } from "./shared.js";
 
@@ -51,4 +52,5 @@ export const TOOL_GROUPS: readonly ((deps: ToolDeps) => void)[] = [
   registerWorldVolumesTools,
   registerWorldViewTools,
   registerWorldSelectTools,
+  registerWorldMapTools,
 ];

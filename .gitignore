@@ -8,3 +8,21 @@ test/eval/results/
 test/golden/__output__/
 build/
 *.tgz
+
+# Secrets and credentials (also enforced by scripts/secret-scan.mjs)
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.kdbx
+id_rsa*
+id_ed25519*
+.netrc
+.git-credentials
+credentials.json
+.claude/settings.local.json
+launcher_accounts*.json
+autosketch-bridge.toml
+.autosketch/

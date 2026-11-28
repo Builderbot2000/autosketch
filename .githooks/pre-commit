@@ -1,0 +1,4 @@
+#!/bin/sh
+# Blocks commits that add keys, tokens, credentials or payment data (scripts/secret-scan.mjs).
+# Enabled by `npm install` (the prepare script sets core.hooksPath to .githooks).
+exec node "$(git rev-parse --show-toplevel)/scripts/secret-scan.mjs"

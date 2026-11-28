@@ -10,6 +10,7 @@
     "prepack": "npm run clean && npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "secrets:scan": "node scripts/secret-scan.mjs --tree",
     "test:watch": "vitest",
     "test:golden": "vitest run test/golden",
     "golden:update": "UPDATE_GOLDEN=1 vitest run test/golden",
@@ -21,7 +22,8 @@
     "start": "node dist/server/index.js",
     "package:plugin": "tsx scripts/build-plugin.ts",
     "package:mcpb": "tsx scripts/build-mcpb.ts",
-    "package:version": "tsx scripts/sync-versions.ts"
+    "package:version": "tsx scripts/sync-versions.ts",
+    "prepare": "node -e \"try{require('node:child_process').execSync('git rev-parse --git-dir',{stdio:'ignore'});require('node:child_process').execSync('git config core.hooksPath .githooks')}catch{}\""
   },
   "keywords": [
     "minecraft",

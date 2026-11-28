@@ -377,6 +377,8 @@ export function requestText(doc: Document, v: LinkVolumes, m: PromptMessage): st
   const sameDim = ctx.dimension === v.dimension;
   const mode = modeOf(m);
   const out: string[] = [`In-game ${mode} request from ${m.player.name}: ${JSON.stringify(m.text)}.`, MODE_ALLOWS[mode], handoff(v)];
+  const canvas = canvasFacts(v);
+  if (canvas) out.push(canvas);
   out.push(saveTarget(doc, v, ctx, sameDim));
   const focus = saveFocus(doc, v, ctx, sameDim);
   if (focus) out.push(focus);
@@ -399,6 +401,20 @@ export function handoff(v: LinkVolumes): string {
   const r = `${refs} reference box${refs === 1 ? "" : "es"}`;
   const context = grow !== undefined ? `context +${grow}${refs ? ` and ${r}` : ""}` : `context ${r}`;
   return `${work}, ${context} (scope "base").`;
+}
+
+/**
+ * The canvas, the brush and the frame (19, Part B), or undefined without a canvas: `Canvas 64×64
+ * chunks: local (0,0,0)–(1023,383,1023) = world (…)–(…). Brush (work volume) local (…)–(…).`
+ */
+export function canvasFacts(v: LinkVolumes): string | undefined {
+  const c = v.canvas;
+  if (!c) return undefined;
+  const local = (b: WireBox) => `${pt(sub(b.min, v.origin))}–${pt(sub(b.max, v.origin))}`;
+  return (
+    `Canvas ${(c.max[0] - c.min[0] + 1) >> 4}×${(c.max[2] - c.min[2] + 1) >> 4} chunks: local ${local(c)} = world ${pt(c.min)}–${pt(c.max)}, so local (0,0,0) is ${c.min.every((n, i) => n === v.origin[i]) ? "its minimum corner" : `world ${pt(v.origin)}, its minimum corner when it was set,`} and stays there when the brush moves. ` +
+    `Brush (work volume) local ${local(v.extended)}. Read anywhere in the canvas (outside the brush and context through the world view: read-only, possibly stale); write only in the brush.`
+  );
 }
 
 /** How far `b` is `work` grown on every side (vertical sides may be clipped to build height), or undefined. */

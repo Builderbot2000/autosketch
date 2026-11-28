@@ -6,7 +6,7 @@ import { checkSelectionName, freezeNodes, resolveSelection, summarize, type SelE
 import { formatEdit, formatSelection } from "../format.js";
 import { boxSchema, common, commonSchema, componentLine, editWith, env, patternSchema, regionOf, selSchema, text, vec3, type ToolDeps } from "./shared.js";
 import { editWithPreview, previewSchema } from "./perception.js";
-import { docFor, worldViewSchema } from "./world-view.js";
+import { docFor, readDocFor, selReach, worldViewSchema } from "./world-view.js";
 
 /** Selections (05 L1). */
 export function registerSelectionTools({ tool, session }: ToolDeps): void {
@@ -28,7 +28,7 @@ export function registerSelectionTools({ tool, session }: ToolDeps): void {
       },
       readOnly: false,
     },
-    (c, a) => {
+    async (c, a) => {
       const doc = docFor(session, a.view, { allowEmpty: true });
       if (a.delete) {
         if (!a.name) throw new Error("delete needs name");
@@ -44,14 +44,18 @@ export function registerSelectionTools({ tool, session }: ToolDeps): void {
       }
       const expr = (a.sel ?? a.name) as SelExpr;
       if (a.sel !== undefined && a.name) checkSelectionName(a.name);
-      const r = resolveSelection(expr, { doc, registry: c.registry, index: c.palette });
+      // On the linked document with a canvas, a selection that reads blocks outside the brush and
+      // context sees them through the world view (19); it is still stored on the document itself.
+      const resolve = (e: SelExpr, d: typeof doc) => resolveSelection(e, { doc: d, registry: c.registry, index: c.palette });
+      const rdoc = await readDocFor(session, a.view, (d) => selReach(expr, (e) => resolve(e, d).mask), { allowEmpty: true });
+      const r = resolve(expr, rdoc);
       if (a.sel !== undefined && a.name) {
-        doc.selections.set(a.name, freezeNodes(a.sel as SelExpr, { doc, registry: c.registry, index: c.palette }));
+        doc.selections.set(a.name, freezeNodes(a.sel as SelExpr, { doc: rdoc, registry: c.registry, index: c.palette }));
         doc.revision++;
         session.touch();
       }
       if (expr !== "last") doc.lastSelection = a.name ?? expr;
-      return text(formatSelection(summarize(doc, r.mask), r.notes, a.sel !== undefined ? a.name : undefined, c.registry));
+      return text(formatSelection(summarize(rdoc, r.mask), r.notes, a.sel !== undefined ? a.name : undefined, c.registry));
     },
   );
 }

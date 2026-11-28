@@ -35,6 +35,12 @@ import { applyWorldState } from "./sync.js";
  *   `applyWorldState` as one `world_sync` entry, and a `world:` line goes to the result of the
  *   call that sent the patch (or the next call on the linked document).
  *
+ * - **Canvas frame** (`19`, *The frame doesn't move with the brush*; F1): with a canvas (the mod's
+ *   `canvas` message, in the work volume's dimension and containing it) local (0,0,0) is the
+ *   canvas's minimum corner, so a new brush keeps every coordinate. The document stays sparse: it
+ *   holds the brush's and context's sections only, and reads elsewhere in the canvas go through the
+ *   world view (`world/canvas.ts`). Setting or clearing the canvas is a relink that changes the frame.
+ *
  * Cache writes that arrive between tool calls (acks, context changes, relinks) are applied at
  * once when no call is running, otherwise when the running call's body has returned, so a tool
  * never sees the document change under it.
@@ -87,6 +93,30 @@ interface Frame extends LinkVolumes {
   contextLocal: Mask;
   /** Positions the cache holds, as world boxes (for sync filtering). */
   held: WireBox[];
+  /** Everything the cache holds, local (`workLocal` ∪ `contextLocal`), built on first use. */
+  mirror?: Mask;
+}
+
+/** A canvas as the mod reported it. */
+interface CanvasState {
+  dimension: string;
+  box: WireBox;
+}
+
+/** What canvas reads (`world/canvas.ts`) need of the linked frame. */
+export interface CanvasFrame {
+  doc: Document;
+  dimension: string;
+  /** World position of local (0,0,0): the canvas's minimum corner. */
+  origin: Vec3;
+  /** The canvas, local and half-open. */
+  canvas: Box;
+  /** What the cache holds (brush and context), local. */
+  mirror: Mask;
+  /** The brush (the work volume the agent writes), local. */
+  work: Mask;
+  /** The held boxes, local and half-open (each a part of `mirror`). */
+  held: Box[];
 }
 
 interface SentPatch {
@@ -124,6 +154,8 @@ export class LiveLink implements WorldLink {
   /** Serialises link changes (open, relink, context sync, reconnect). */
   private chain: Promise<unknown> = Promise.resolve();
   private wasLinked = false;
+  /** The mod's latest `canvas` on this connection (null: none set; undefined: not heard yet). */
+  private canvasMsg: CanvasState | null | undefined;
 
   constructor(
     private readonly host: LinkHost,
@@ -138,6 +170,7 @@ export class LiveLink implements WorldLink {
       if (m.everything) d.everything = true;
       else for (const b of m.blocks) d.blocks.set(b.pos.join(","), b);
     });
+    this.bridge.on("canvas", (m) => this.onCanvas(m.box === null ? null : { dimension: m.dimension, box: m.box }));
     this.bridge.onConnection((s, why) => (s === "up" ? this.onUp() : this.onDown(why)));
     host.callHooks.push({ before: (c) => this.before(c), after: (c, r) => this.after(c, r) });
   }
@@ -155,8 +188,29 @@ export class LiveLink implements WorldLink {
 
   get volumes(): LinkVolumes | undefined {
     if (!this.frame || !this.current()) return undefined;
-    const { link, dimension, work, extended, context, origin } = this.frame;
-    return { link, dimension, work, extended, context, origin };
+    const { link, dimension, work, extended, context, origin, canvas } = this.frame;
+    return { link, dimension, work, extended, context, origin, ...(canvas ? { canvas } : {}) };
+  }
+
+  /** The linked frame when it is anchored to a canvas (`19`), for canvas reads; undefined otherwise. */
+  canvasFrame(): CanvasFrame | undefined {
+    const f = this.frame, doc = this.current();
+    if (!f || !doc || !f.canvas) return undefined;
+    const local = (b: WireBox): Box => fromPublic({ min: sub(b.min, f.origin), max: sub(b.max, f.origin) });
+    f.mirror ??= f.workLocal.clone().unionWith(f.contextLocal);
+    return { doc, dimension: f.dimension, origin: f.origin, canvas: local(f.canvas), mirror: f.mirror, work: f.workLocal, held: f.held.map(local) };
+  }
+
+  describeFrame(): string | undefined {
+    const f = this.frame;
+    if (!f || !this.current()) return undefined;
+    const local = (b: WireBox): Box => fromPublic({ min: sub(b.min, f.origin), max: sub(b.max, f.origin) });
+    return frameLine(f, local);
+  }
+
+  /** Adds a line to the next linked call's `world:` lines (canvas reads use it to say what they read). */
+  addNote(line: string): void {
+    this.note(line);
   }
 
   isDirty(): boolean {
@@ -320,6 +374,18 @@ export class LiveLink implements WorldLink {
     return v;
   }
 
+  /** Whether both hellos list `canvas`, so the mod reports its canvas (`19`). */
+  private get canvasOn(): boolean {
+    return (this.opts.features ?? ["canvas"]).includes("canvas") && this.bridge.supports("canvas");
+  }
+
+  /** The mod sends `canvas` right after `volumes` when both hellos list it; wait briefly for it. */
+  private async canvasMessage(): Promise<CanvasState | null> {
+    if (!this.canvasOn) return null;
+    for (let i = 0; i < 200 && this.canvasMsg === undefined && this.bridge.connected; i++) await new Promise((r) => setTimeout(r, 10));
+    return this.canvasMsg ?? null;
+  }
+
   private async doOpen(o: LinkOpenOptions & { name: string }, relink: boolean): Promise<{ doc: Document; report: string }> {
     await this.connect(o);
     const v = await this.volumesMessage();
@@ -331,8 +397,17 @@ export class LiveLink implements WorldLink {
         throw new Error(`a document named "${o.name}" already exists and isn't a linked world document; pass another name, or overwrite: true to replace it`);
     }
     const previous = this.current();
+    const before = previous ? this.frame : undefined;
     const dimension = v.dimension;
-    const origin: Vec3 = [...v.work.min];
+    const canvas = frameCanvas(await this.canvasMessage(), v);
+    // 19: with a canvas, local (0,0,0) is its minimum corner, so a new brush keeps every coordinate;
+    // the same canvas, or one grown from it, keeps the frame it had (the frame changes only when the
+    // canvas is set or cleared).
+    const keep = !!before?.canvas && !!canvas && before.dimension === dimension && contains(canvas, before.canvas);
+    const origin: Vec3 = keep ? [...before!.origin] : [...(canvas ?? v.work).min];
+    // Setting or clearing the canvas is a relink; the frame moved when local (0,0,0) did.
+    const canvasChanged = !!before && !keep && !sameCanvas(before.canvas, canvas);
+    const frameChanged = canvasChanged && !sameVec(before!.origin, origin);
     const boxes = [v.work, ...v.context];
     const snap = await this.bridge.request({ type: "snapshot", dimension, boxes });
     const doc = Document.create({ name: o.name, dataVersion: this.bridge.hello?.game.dataVersion ?? 0, palettes: o.palettes });
@@ -363,7 +438,8 @@ export class LiveLink implements WorldLink {
     for (const b of held) bounds = unionBox(bounds, toLocalBox(b));
     doc.bounds = bounds;
     doc.context = contextLocal;
-    if (previous) {
+    // Saved selections and cameras are in the old frame's coordinates: kept only while it holds.
+    if (previous && !frameChanged) {
       for (const [k, s] of previous.selections) doc.selections.set(k, s);
       for (const [k, c] of previous.cameras) doc.cameras.set(k, c);
     }
@@ -371,7 +447,7 @@ export class LiveLink implements WorldLink {
     this.tap?.close();
     await this.host.adopt(doc, { overwrite: true });
     this.host.scopes.root = { work: workLocal, context: contextLocal };
-    this.frame = { link: v.link, dimension, work: v.work, extended, context: v.context, origin, workLocal, contextLocal, held };
+    this.frame = { link: v.link, dimension, work: v.work, extended, context: v.context, origin, workLocal, contextLocal, held, ...(canvas ? { canvas } : {}) };
     this.linkedDoc = doc;
     this.openedWith = o;
     this.dirty = undefined;
@@ -383,9 +459,18 @@ export class LiveLink implements WorldLink {
     const lines = [
       `${relink ? "Relinked" : "Linked"} to the world (${dimension}): work volume ${size(v.work)} at world ${fmtVec(v.work.min)}, local ${formatBox(toLocalBox(v.work))}; ` +
         `context ${v.context.length} box${v.context.length === 1 ? "" : "es"}, local ${formatBox(bounds!)} (read-only, live).`,
+      ...(canvas ? [canvasLine(canvas, origin, toLocalBox)] : []),
+      ...(canvasChanged
+        ? [
+            frameChanged
+              ? `The frame changed: ${canvas ? (before!.canvas ? "the canvas changed" : "a canvas was set") : "the canvas was cleared"}, so local (0,0,0) is now world ${fmtVec(origin)} (${canvas ? "the canvas's minimum corner" : "the work volume's minimum corner"}; it was world ${fmtVec(before!.origin)}). ` +
+                "Coordinates, saved selections, cameras and the history from before don't carry over."
+              : `A new canvas was set with the same minimum corner, so local (0,0,0) stays world ${fmtVec(origin)} and coordinates carry over; the history before this point is gone.`,
+          ]
+        : []),
       ...(added ? [`Work volume extended by ${fmt(added)} block${added === 1 ? "" : "s"} to include whole blocks (doors, beds, double chests, multi-blocks): ${formatBox(workLocal.bbox()!)}. The player was told.`] : []),
       "Writes outside the work volume are refused. Each edit goes to the game as one patch; blocks the player changed since are skipped, and results gain a \"world:\" line.",
-      ...(relink && previous ? ["The player set a new work volume, so the history before this point is gone (old checkpoints can't be restored)."] : []),
+      ...(relink && previous && !canvasChanged ? ["The player set a new work volume, so the history before this point is gone (old checkpoints can't be restored)."] : []),
     ];
     return { doc, report: lines.join("\n") };
   }
@@ -529,6 +614,44 @@ export class LiveLink implements WorldLink {
     this.note(`world: the player changed the context volume (now ${context.length} box${context.length === 1 ? "" : "es"}, local ${formatBox(bounds!)}).`);
   }
 
+  /** The mod's canvas changed (`19`): a relink when it changes the frame, nothing otherwise. */
+  private onCanvas(c: CanvasState | null): void {
+    this.canvasMsg = c;
+    const f = this.frame;
+    if (!f || !this.current()) return;
+    const v = this.bridge.volumes;
+    if (!v || v.work === null) return;
+    if (sameCanvas(frameCanvas(c, v), f.canvas)) return;
+    this.whenIdle(() => this.serial(() => this.followCanvas()));
+  }
+
+  /** Relinks over the new frame: setting or clearing the canvas changes it (`19`; the result says so). */
+  private async followCanvas(): Promise<void> {
+    const f = this.frame;
+    const v = this.bridge.volumes;
+    if (!f || !this.current() || !v || v.work === null) return;
+    if (sameCanvas(frameCanvas(this.canvasMsg ?? null, v), f.canvas)) return;
+    const open = this.host.scopes.openCount;
+    const next = frameCanvas(this.canvasMsg ?? null, v);
+    // Grown (the new canvas holds the old): the frame stays, nothing is relinked or snapshotted.
+    if (next && f.canvas && contains(next, f.canvas)) {
+      f.canvas = next;
+      this.host.touch();
+      const local = (b: WireBox): Box => fromPublic({ min: sub(b.min, f.origin), max: sub(b.max, f.origin) });
+      this.note(`world: the canvas grew to ${chunksOf(next)} chunks, local ${formatBox(local(next))} = world ${fmtWire(next)}; the frame is unchanged (local (0,0,0) stays world ${fmtVec(f.origin)}).`);
+      return;
+    }
+    if (open) return this.unlink(`the canvas changed while ${open} scoped job${open === 1 ? " is" : "s are"} open; merge or abandon them, then call doc_open({world: true}) to relink`);
+    try {
+      const r = await this.doOpen(this.openedWith!, true);
+      const lines = r.report.split("\n");
+      this.note(`world: ${lines[0]}`);
+      for (const l of lines) if (l.startsWith("The frame changed") || l.startsWith("A new canvas") || l.startsWith("Canvas ")) this.note(`world: ${l}`);
+    } catch (e) {
+      this.unlink(`relinking over the new canvas failed: ${(e as Error).message}`);
+    }
+  }
+
   private unlink(why: string): void {
     this.tap?.close();
     this.tap = undefined;
@@ -561,6 +684,7 @@ export class LiveLink implements WorldLink {
   }
 
   private onDown(why?: string): void {
+    this.canvasMsg = undefined;
     if (!this.frame || !this.current()) return;
     this.emit({ kind: "world.link", state: "disconnected", ...(why ? { reason: why } : {}) });
     this.note("world: the game disconnected; edits stay in the cache only until it reconnects, then the world wins.");
@@ -665,6 +789,43 @@ function writeSnapshot(doc: Document, snap: SnapshotResult, origin: Vec3): void 
 const add = (a: Vec3, b: Vec3): Vec3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const sameBox = (a: WireBox, b: WireBox) => a.min.join() === b.min.join() && a.max.join() === b.max.join();
+const sameVec = (a: Vec3, b: Vec3) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
+const sameCanvas = (a: WireBox | undefined, b: WireBox | undefined) => (a && b ? sameBox(a, b) : a === b);
+
+/**
+ * The canvas the frame is anchored to (`19`): the mod's, when it is in the work volume's dimension
+ * and contains the work volume. Otherwise none, and the work volume sets the frame as in `13` (the
+ * mod clears a canvas the player's brush falls outside of; this keeps the frame sane until it does).
+ */
+function frameCanvas(c: CanvasState | null, v: VolumesMessage): WireBox | undefined {
+  if (!c || v.work === null || c.dimension !== v.dimension || !contains(c.box, v.work)) return undefined;
+  return c.box;
+}
+
+/** `3×3`: a canvas's size in chunks across x and z. */
+const chunksOf = (c: WireBox) => `${(c.max[0] - c.min[0] + 1) >> 4}×${(c.max[2] - c.min[2] + 1) >> 4}`;
+
+/** Where local (0,0,0) is, relative to the canvas: its minimum corner, or where that was when it was set (grown since). */
+const anchorOf = (c: WireBox, origin: Vec3) => (sameVec(c.min, origin) ? "its minimum corner" : `world ${fmtVec(origin)}, its minimum corner when it was set`);
+
+/** `Canvas 64×64 chunks (1024×384×1024), local (0,0,0)–(1023,383,1023) = world (…)–(…); …` */
+function canvasLine(c: WireBox, origin: Vec3, local: (b: WireBox) => Box): string {
+  return (
+    `Canvas ${chunksOf(c)} chunks (${size(c)}), local ${formatBox(local(c))} = world ${fmtWire(c)}: local (0,0,0) is ${anchorOf(c, origin)}, and stays there when the brush moves. ` +
+    "You may read anywhere in it (reads outside the brush and context go through the world view: read-only, possibly stale) and write only in the brush (the work volume)."
+  );
+}
+
+/** `doc_info`'s frame line (`19`). */
+function frameLine(f: Frame, local: (b: WireBox) => Box): string {
+  const brush = `brush (work volume) local ${formatBox(local(f.extended))}, context local ${formatBox(f.contextLocal.bbox() ?? local(f.extended))}`;
+  if (!f.canvas) return `World frame: local (0,0,0) = world ${fmtVec(f.origin)}, the work volume's minimum corner (no canvas); ${brush}.`;
+  const at = sameVec(f.canvas.min, f.origin) ? "the canvas's minimum corner" : "the canvas's minimum corner when it was set";
+  return (
+    `World frame: canvas ${chunksOf(f.canvas)} chunks, local ${formatBox(local(f.canvas))} = world ${fmtWire(f.canvas)}; local (0,0,0) = world ${fmtVec(f.origin)}, ${at}; ${brush}. ` +
+    "Reads elsewhere in the canvas go through the world view (read-only, possibly stale); writes only in the brush."
+  );
+}
 const sameBoxes = (a: readonly WireBox[], b: readonly WireBox[]) => a.length === b.length && a.every((x, i) => sameBox(x, b[i]!));
 const contains = (o: WireBox, b: WireBox) => [0, 1, 2].every((i) => o.min[i]! <= b.min[i]! && o.max[i]! >= b.max[i]!);
 const size = (b: WireBox) => [0, 1, 2].map((i) => b.max[i]! - b.min[i]! + 1).join("×");

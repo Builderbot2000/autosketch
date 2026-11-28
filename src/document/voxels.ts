@@ -109,6 +109,11 @@ export class VoxelStore {
     if (s.count > 0) this.sections.set(sectionKey(s.sx, s.sy, s.sz), s);
   }
 
+  /** Removes every block (the canvas read document is rebuilt in place, `world/canvas.ts`). */
+  clear(): void {
+    this.sections.clear();
+  }
+
   allSections(): IterableIterator<Section> {
     return this.sections.values();
   }

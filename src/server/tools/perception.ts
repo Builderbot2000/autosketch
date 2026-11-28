@@ -13,12 +13,24 @@ import type { InstanceContext } from "../context.js";
 import type { Session } from "../session.js";
 import { perspectiveSchema, pointSchema, resolvePerspective, resolveTarget, targetSchema, type PerspectiveInput } from "./camera.js";
 import { bakerFor, box, boxSchema, editWith, image, selSchema, text, vec3, type Result, type ToolDeps } from "./shared.js";
-import { docFor, WORLD_RENDER_PREFIX, worldViewSchema } from "./world-view.js";
+import { CANVAS_RENDER_PREFIX, docFor, readDocFor, selReach, WORLD_RENDER_PREFIX, worldViewSchema } from "./world-view.js";
 
 /** Resolves a selection for a perception call without changing "last". */
 function maskOf(c: InstanceContext, doc: Document, expr: unknown): { mask: Mask; notes: string[] } {
   const r = resolveSelection(expr as SelExpr, { doc, registry: c.registry, index: c.palette });
   return { mask: r.mask, notes: r.notes };
+}
+
+/**
+ * The local boxes a read reaches beyond what it draws by default (19: canvas positions outside the
+ * brush are read through the world view): the bounding boxes of the given selections.
+ */
+function reachOf(c: InstanceContext, doc: Document, exprs: unknown[]): Box[] {
+  const out: Box[] = [];
+  for (const e of exprs) {
+    if (e !== undefined) out.push(...selReach(e, (x) => maskOf(c, doc, x).mask));
+  }
+  return out;
 }
 
 /** Publishes `render.produced` for an image a tool returns (12, *Kinds*). Never affects the result. */
@@ -116,7 +128,7 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
       },
     },
     async (c, a) => {
-      const doc = docFor(session, a.view);
+      const doc = await readDocFor(session, a.view, (d) => reachOf(c, d, [a.region, a.section]));
       const notes: string[] = [];
       let region: Box | Mask | undefined;
       if (a.region !== undefined) {
@@ -199,8 +211,18 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
         mode: z.enum(["grid", "runs"]).optional().describe("grid (default) or runs (run-length rows, for sparse layers)"),
       },
     },
-    (c, a) =>
-      text(viewSlice(docFor(session, a.view), c.registry, { axis: a.axis, at: a.at, ...(a.region ? { region: box(a.region as PublicBox) } : {}), ...(a.mode ? { mode: a.mode } : {}) })),
+    async (c, a) => {
+      const i = a.axis === "x" ? 0 : a.axis === "y" ? 1 : 2;
+      const doc = await readDocFor(session, a.view, (d) => {
+        const b = a.region ? box(a.region as PublicBox) : d.localBounds();
+        if (!b) return undefined;
+        const slab: Box = { min: [...b.min], max: [...b.max] };
+        slab.min[i] = a.at;
+        slab.max[i] = a.at + 1;
+        return [slab];
+      });
+      return text(viewSlice(doc, c.registry, { axis: a.axis, at: a.at, ...(a.region ? { region: box(a.region as PublicBox) } : {}), ...(a.mode ? { mode: a.mode } : {}) }));
+    },
   );
 
   tool(
@@ -217,9 +239,9 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
         region: selSchema.optional().describe("Measure only this selection"),
       },
     },
-    (c, a) => {
-      const doc = docFor(session, a.view);
+    async (c, a) => {
       if (a.component !== undefined && a.region !== undefined) throw new Error("give component or region, not both");
+      const doc = await readDocFor(session, a.view, (d) => (a.component !== undefined ? [d.componentLocal(a.component)?.box].filter((b): b is Box => !!b) : reachOf(c, d, [a.region])));
       let region: Box | Mask | undefined;
       if (a.component !== undefined) {
         const comp = doc.componentLocal(a.component);
@@ -277,7 +299,7 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
       title: "Raycast",
       description:
         "Names the block under a pixel of a recent render (pixel coordinates in the whole returned image, contact sheets included): position, state and the face hit. " +
-        'view is the render id from its caption (e.g. "r3"; default: the latest render of this document); a world view render\'s id ("w2") or "world" (its latest) raycasts the world view. Text, <50 tokens.',
+        'view is the render id from its caption (e.g. "r3"; default: the latest render of this document); a world view render\'s id ("w2") or "world" (its latest) raycasts the world view; a "c3" id is a render that reached the canvas outside the brush. Text, <50 tokens.',
       inputSchema: {
         px: z.number().int().min(0),
         py: z.number().int().min(0),
@@ -286,7 +308,9 @@ export function registerPerceptionTools({ tool, session }: ToolDeps): void {
     },
     (_c, a) => {
       const world = a.view === "world" || (a.view !== undefined && a.view.startsWith(WORLD_RENDER_PREFIX));
-      const doc = docFor(session, world ? "world" : undefined);
+      // A render of the canvas outside the brush (19) has a "c" id and lives on the canvas read document.
+      const canvas = a.view !== undefined && a.view.startsWith(CANVAS_RENDER_PREFIX) ? session.canvasReads?.doc : undefined;
+      const doc = canvas ?? docFor(session, world ? "world" : undefined);
       const id = a.view === "world" ? undefined : a.view;
       const rec = getRender(doc, id);
       if (!rec) throw new Error(id ? `no recent render "${id}" (kept: ${renderIds(doc).join(", ") || "none"})` : world ? 'no render of the world view yet; call render({view:"world"}) first' : "no render of this document yet; call render first");

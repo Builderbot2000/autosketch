@@ -6,9 +6,36 @@ The lead's log, one line per step (*How to run this set* in the README). Read th
 |---|---|---|---|---|
 | W1 | cv-w1 | merged | 8094542 | features `requests`, `canvas`, protocol 4; MCP_FEATURES unchanged, Q1 adds `requests`, F1 adds `canvas` (mod lists neither yet: G1/K1 add them); `chat` kind `status` {request, player, lines[1], state, text, calls, elapsedMs, queuePos?, noTurnSignal?, actions[{label,kind,args}]}, relayed whole to the client half (op 0), server half prints lines[0] otherwise; server-half commands = mod→MCP `request.control` {player, action: stop|queue|queue.cancel, position?}, answered by `notice` (stop, cancel) or `chat` (queue); ui.request `request.stop|queue.send|queue.cancel|request.undo` {request}, new ui.result `refused`; prompt.result queued {delivered:false, queued:true, request, position}, `busy` at QUEUE_MAX 8; `canvas` {id?, dimension, box|null} after `volumes`, `canvas.set` {id, dimension, box}, mod widens to chunk columns, `bad_volumes` over canvasChunks 256 per axis; canvas reads = select grant's (no hashes) in every mode, union with grant, search without `around` centres on canvas middle; src/ui/requests.ts answers the four kinds bad_request until Q1. Lead: a mod without `requests` gets no queueing (Q1 delivers as today); full clienttest needs `timeout 1800` (900 s too short for all nine suites). Lead tiers green: npm 1347, 67 GameTests, clienttest overlay+candidates 264 (3 overlay timeouts in the agent's loaded run did not repeat) |
 | H1 | cv-h1 | merged | 80d430e | port file ~/.autosketch/run/mcp-<pid>.json (owner-only, pid/port/token); hook pings every live MCP, prunes dead pids, carries session_id; bus event `kind: "turn.end"` (bus keys by kind, not type), reason stop/error; hooks.json has Stop + StopFailure (Esc fires neither → fallbacks); install check = `turn-end hook:` line in instance_info (lead: kept there, no CLI command); `19` has a `### Implementation status (H1)` note to fold into W1's table. Lead tiers green: typecheck, npm test |
-| Q1 | cv-q1 | running | | |
-| G1 | cv-g1 | running | | |
-| K1 | cv-k1 | running | | |
-| F1 | cv-f1 | running | | |
+| Q1 | cv-q1 | interrupted | | usage limit 2026-11-27 ~21:00; WIP commit a41228c on its branch; stopped while wiring the lifecycle into InGameRequests. Untested |
+| G1 | cv-g1 | interrupted | | usage limit 2026-11-27 ~21:00; WIP commit 04b89e0 on its branch; stopped while writing the request GameTests. Untested |
+| K1 | cv-k1 | interrupted | | usage limit 2026-11-27 ~21:00; WIP commit 6bdf589 on its branch; stopped while writing CanvasManager. Untested |
+| F1 | cv-f1 | interrupted | | usage limit 2026-11-27 ~21:00; WIP commit 71d38fe on its branch; stopped while routing perception.ts reads (render, view_slice, analyze, raycast) through the world view. Untested |
 
-**Resume here (2026-11-27).** Wave 0 merged (W1, H1). Wave 1 launched: Q1, G1, K1, F1. Prompts: `timeout 1800` for a full clienttest.
+## Resume here (2026-11-27, lead session ended on the usage limit)
+
+**State.** Wave 0 merged and pushed (H1 `80d430e`, W1 `8094542`; main at `2efd55d` plus this commit). Wave 1 (Q1, G1, K1, F1) was interrupted mid-step by the usage limit. Each worktree's work is committed as `WIP cv-<x>1: interrupted (usage limit)` on its branch. Nothing from wave 1 has been tested or merged.
+
+| Step | Worktree | Branch | WIP commit |
+|---|---|---|---|
+| Q1 | `.claude/worktrees/cv-q` | `silo/cv-q-requests` | `a41228c` |
+| G1 | `.claude/worktrees/cv-g` | `silo/cv-g-game-requests` | `04b89e0` |
+| K1 | `.claude/worktrees/cv-k` | `silo/cv-k-mod-canvas` | `6bdf589` |
+| F1 | `.claude/worktrees/cv-f` | `silo/cv-f-frame-brush` | `71d38fe` |
+
+Each worktree has `node_modules` symlinked to the main checkout. The worktree `.claude/worktrees/silo-r-fu` (`fix/replay-followups`) is older and not part of this set.
+
+**To continue.**
+
+1. **Restart each step with a fresh agent named `cv-<step>-r`** (for example `cv-q1-r`), never by resuming or messaging the old one; the hook blocks SendMessage to `cv-…`. Use the README's step prompt with the new session's scratchpad path, then the lead's notes below, then: "The branch has a WIP commit with partial work: read `git diff main...HEAD`, then finish the step and replace the WIP commit." Run all four in parallel; they don't share files beyond what the notes say.
+2. **Review each report** as before: the tiers on the branch (`npm run typecheck`, `npx vitest run`; for G1 and K1 also `cd mod && JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 ./gradlew build test runGameTestServer` and `timeout 1800 mod/clienttest.sh`, rerunning a timed-out suite alone), then `git log --stat main..<branch>` and a check for stray reverts. Merge with `--no-ff`, add a PROGRESS row, remove the worktree and branch, push main.
+3. **Merge-order wrinkles.** Q1 adds `requests` and F1 adds `canvas` to `MCP_FEATURES` (one-word conflict). G1 and K1 both register subcommands (one-line conflict). If Q1 adds a "drop unstarted patches" message and G1 didn't wire it, wire it at merge (see the notes).
+4. **Wave 2** once wave 1 is merged: Q2 (after Q1), F2 and M1 (after F1), each in a new worktree `.claude/worktrees/cv-<letter>` (Q's and F's can be reused after their wave-1 merge: recreate from main). **Wave 3:** Z1, then Z2. Steps and briefs: README, *How to run this set*.
+
+**Lead's notes, repeat in the restarted prompts.**
+
+- *Q1:* H1's bus event is `{kind: "turn.end", at, reason?, session?}` (`kind`, not `type`); reason `stop` or `error`. Esc fires no hook, so the fallbacks (`world_reply done`, then `idleMs`) must cover it. Add `requests` to `MCP_FEATURES` once built. `src/ui/requests.ts` answers `request.stop`, `queue.send`, `queue.cancel`, `request.undo` with bad_request "not served yet": replace the first three (`request.undo` stays unserved until Q2; `refused` or bad_request, its call, recorded). The server-half path is mod→MCP `request.control {player, action: stop|queue|queue.cancel, position?}`, answered by `notice` (stop, cancel) or a `chat` reply (queue). Decided by the lead: a mod without `requests` gets no queueing; deliver as today. If `13` records no MCP→mod "drop unstarted patches" message, add the smallest additive one (vector, both codecs; the Java side may just parse it) and say so.
+- *G1:* status frames (`chat` kind `status` {request, player, lines[1], state, text, calls, elapsedMs, queuePos?, noTurnSignal?, actions[{label,kind,args}]}) go whole to the client half over relay op 0; without it the server half prints lines[0] per state change with each button's command. Commands go out as `request.control`. Add `requests` to the mod's hello once built. Implement the patch drop behind a small method; if the MCP's message isn't on main, say so for the lead to wire at merge. Keep C4's `awayFromTheWand` and C5's `ActionBarHold` working. Full clienttest under `timeout 1800`.
+- *K1:* `canvas` {id?, dimension, box|null} goes mod→MCP after `volumes` and on every change; `canvas.set` {id, dimension, box} is answered by `canvas` with its id. Widen to whole chunk columns, full build height; `bad_volumes` over canvasChunks (256) on either axis; `wrong_dimension` for an unknown dimension. Canvas reads = the select grant's reads (blocks, mask, coarse, surface, search, fill, expand; not hashes) in every mode, the union with an open grant; `no_grant` only when neither is set; a search without `around` and without a select request centres on the canvas's middle chunk. Add `canvas` to the mod's hello once built. Subcommands in their own class; one line in shared registration. Full clienttest under `timeout 1800`.
+- *F1:* the fake host holds a canvas and serves reads inside it; the bridge already sends `canvas.set`. Add `canvas` to `MCP_FEATURES` once built. Q1 also edits `src/world/prompt.ts`: keep F1's edits there to the canvas lines of the event text. Frame changes only when the canvas is set or cleared (a relink), never otherwise (`01`). Brush moves and the undo rule are F2.
+
+**Settled in this run** (also in the rows above): the install check is the `turn-end hook:` line in `instance_info` (no CLI command); the full clienttest needs `timeout 1800`; overlay timeouts under parallel load are flakes until a suite fails alone.

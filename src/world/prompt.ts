@@ -241,6 +241,27 @@ export class InGameRequests implements InGameReplies {
     tell(`Autosketch: ${r.mode} request ${r.id} ended; the agent may edit again.`);
   }
 
+  /**
+   * Refuses a mode switch the player may not make (`18`, piece 7, *Mode switch*): a mode the mod's
+   * hello doesn't list, a question on no request, or a pick by someone other than the request's player.
+   */
+  private checkSwitch(id: number | null, mode: RequestMode, player: PlayerRef): void {
+    if (id === null) throw switchRefusal("That choice switches a request's mode, but it went to no request.");
+    if (!this.link.bridge.modes.includes(mode)) throw switchRefusal(`This game doesn't take ${mode} requests.`);
+    const owner = this.stream.current?.id === id ? this.stream.current.player : this.held?.id === id ? this.held.player : undefined;
+    if (owner && owner.name !== player.name) throw switchRefusal(`Only ${owner.name} can answer that: it switches their request ${id} to ${mode} mode.`);
+  }
+
+  /** Puts open request `id` in `mode`: the stream's mode and the held read-only mode follow (B6). */
+  private switchMode(id: number, mode: RequestMode): void {
+    const cur = this.stream.current?.id === id ? this.stream.current : undefined;
+    const player = cur?.player ?? this.held!.player;
+    if (cur) this.stream.open({ ...cur, mode });
+    this.held = READ_ONLY_MODES.has(mode) ? { id, player, mode } : undefined;
+    if (this.link.state === "linked" && this.link.doc) this.modeRule.attach(this.link.doc);
+    this.opts.log?.(`in-game request ${id} switched to ${mode} by ${player.name}'s answer`);
+  }
+
   /** Opens a delivered request's stream and, for a read-only mode, holds the mode (replacing any held one). */
   open(r: OpenRequest): void {
     const mode = modeOf(r);
@@ -287,10 +308,13 @@ export class InGameRequests implements InGameReplies {
    * and nothing opens. Throws, opening nothing, when no agent session can receive the event.
    * A clicked choice (`18`, piece 7, `ui/choices.ts`) is delivered the same way.
    */
-  async candidatesAnswer(a: { request: number | null; mode?: RequestMode; player: PlayerRef; question: string; text: string }): Promise<void> {
+  async candidatesAnswer(a: { request: number | null; mode?: RequestMode; switchMode?: boolean; player: PlayerRef; question: string; text: string }): Promise<void> {
     if (!this.opts.listening()) throw new Error("no agent session is listening for in-game requests");
     const id = a.request;
     const open = id !== null && (this.stream.current?.id === id || this.held?.id === id);
+    // A choice that switches the mode (`18`, piece 7, *Mode switch*): checked before anything is sent.
+    if (a.switchMode && a.mode) this.checkSwitch(id, a.mode, a.player);
+    if (a.switchMode && a.mode && open) this.switchMode(id!, a.mode);
     await this.opts.notify(this.remind(a.text), { ...(id !== null ? { request: String(id) } : {}), player: a.player.name });
     if (id === null || open) return;
     if (this.link.state === "linked" && this.link.doc) this.modeRule.attach(this.link.doc);
@@ -372,6 +396,17 @@ export class InGameRequests implements InGameReplies {
     if (!this.opts.listening()) {
       refuse("no_listener");
       return true;
+    }
+    const to = q.modes?.[n - 1];
+    if (to) {
+      try {
+        this.checkSwitch(q.request, to, m.player);
+      } catch (e) {
+        this.link.bridge.send({ type: "notice", text: `Autosketch: ${(e as Error).message}`, player: m.player.uuid });
+        this.link.bridge.send({ type: "prompt.result", id: m.id, delivered: true });
+        return true;
+      }
+      this.switchMode(q.request!, to);
     }
     q.answered = true;
     try {
@@ -578,4 +613,9 @@ function saveView(doc: Document, v: LinkVolumes, ctx: GameContext, sameDim: bool
   const eye = sub(ctx.eye, v.origin).map((c) => c - 0.5) as Vec3;
   saveCamera(doc, "player", { eye, target: lookTarget(eye, ctx.yaw, ctx.pitch) });
   return `Standing at ${pt(feet)} facing ${ctx.facing}; your view is saved as camera "player".`;
+}
+
+/** A refused mode switch (`18`, piece 7, *Mode switch*); `ui/choices.ts` answers it as the `ui.result` error `refused`. */
+export function switchRefusal(message: string): Error & { uiCode: "refused" } {
+  return Object.assign(new Error(message), { uiCode: "refused" as const });
 }

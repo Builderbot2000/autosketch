@@ -62,7 +62,7 @@ const textOf = (r: { content: unknown }) => (r.content as Content).filter((c) =>
 /** Channel events the agent received: text and meta. */
 type Sent = { content: string; meta: Record<string, string> };
 
-async function setup(opts: { features?: string[]; listening?: () => boolean } = {}) {
+async function setup(opts: { features?: string[]; listening?: () => boolean; players?: string[] } = {}) {
   host = await FakeHost.start({ volumes: { work: WORK }, ...(opts.features ? { features: opts.features } : {}) });
   const ctx = await libraryContext(host.instanceDir);
   const workspace = await tempDir("autosketch-choice-ws-");
@@ -77,7 +77,7 @@ async function setup(opts: { features?: string[]; listening?: () => boolean } = 
   const client = new Client({ name: "test", version: "0" });
   await Promise.all([server.connect(a), client.connect(b)]);
   const g = new InGameRequests(link, {
-    promptPlayers: [],
+    promptPlayers: opts.players ?? [],
     idleMs: 60_000,
     activityMs: 0,
     subscribe: (fn) => session.subscribe(fn),
@@ -99,7 +99,7 @@ async function setup(opts: { features?: string[]; listening?: () => boolean } = 
     sessionId: "20261118T000000000Z-live",
     settings,
     configPath,
-    promptPlayers: () => [],
+    promptPlayers: () => opts.players ?? [],
     library: { roots: () => libraryRoots({ workspace, env: process.env, settings: Settings.from([], {}, readConfig(configPath)) }) },
     candidates: session.candidates,
     choices: session.choices,
@@ -265,6 +265,52 @@ describe("choices.pick and typed numbers (18, piece 7)", () => {
     await host.playerAsk(HOST, "1", {}, { mode: "ask" });
     expect(events.at(-1)!.content).not.toContain("Choice answer");
     expect(inGame!.current).toMatchObject({ id: 3 });
+  });
+
+  it("switches a plan request to build when the player picks a choice with mode build, so edits go through", async () => {
+    const { host, call, events } = await setup();
+    await host.playerAsk(HOST, "plan a gate", {}, { mode: "plan" });
+    await host.waitFor(() => inGame!.current?.id === 1);
+    const clear = { sel: { min: [0, 0, 0], max: [1, 1, 1] } };
+    expect((await call("clear", clear)).text).toContain("plan");
+    const r = await call("world_reply", { lines: ["Plan ready."], choices: [{ text: "Go ahead", mode: "build" }, "Change it"] });
+    expect(r.text).toContain("picking [1] → build switches the request's mode");
+    await host.waitFor(() => replies(host).length === 4);
+    expect(replies(host)[1]!.lines).toEqual(["[1] Go ahead (switches to build)"]);
+    expect(replies(host)[2]!.lines).toEqual(["[2] Change it"]);
+    const before = events.length;
+    expect(ok(await host.playerClick(HOST, replies(host)[1]!))).toEqual({ request: 1 });
+    expect(events.slice(before)[0]!.content).toBe('Choice answer from Dev (request 1) to "Plan ready.": [1] "Go ahead". The player\'s answer switched request 1 to build mode.');
+    expect(inGame!.heldRequest).toBeUndefined();
+    expect(inGame!.current).toMatchObject({ id: 1, mode: "build" });
+    expect((await call("clear", clear)).isError).toBeFalsy();
+  });
+
+  it("switches the mode on a typed number too, and a choice without a mode leaves it", async () => {
+    const { host, call } = await setup();
+    await host.playerAsk(HOST, "plan a gate", {}, { mode: "plan" });
+    await host.waitFor(() => inGame!.current?.id === 1);
+    await call("world_reply", { lines: ["Plan ready."], choices: ["Change it", { text: "Go ahead", mode: "build" }] });
+    await host.playerAsk(HOST, "2", {}, { mode: "plan" });
+    expect(inGame!.heldRequest).toBeUndefined();
+    expect(inGame!.current).toMatchObject({ id: 1, mode: "build" });
+    await call("world_reply", { lines: ["Again?"], choices: ["yes", "no"] });
+    await host.playerAsk(HOST, "1", {}, { mode: "plan" });
+    expect(inGame!.current).toMatchObject({ id: 1, mode: "build" });
+  });
+
+  it("refuses a mode switch picked by someone other than the request's player, leaving the question open", async () => {
+    const { host, call, session, events } = await setup({ players: ["Dev", "Guest"] });
+    const other: PlayerRef = { name: "Guest", uuid: "00000000-0000-4000-8000-000000000002" };
+    await host.playerAsk(HOST, "plan a gate", {}, { mode: "plan" });
+    await host.waitFor(() => inGame!.current?.id === 1);
+    await call("world_reply", { lines: ["Plan ready."], choices: [{ text: "Go ahead", mode: "build" }] });
+    const before = events.length;
+    const r = await host.playerUiRequest(other, { kind: "choices.pick", args: { id: "q1", index: 0 } });
+    expect(r).toMatchObject({ ok: false, error: "refused" });
+    expect(events).toHaveLength(before);
+    expect(session.choices.get("q1")!.answered).toBe(false);
+    expect(inGame!.heldRequest).toMatchObject({ id: 1, mode: "plan" });
   });
 
   it("leaves a typed number past the choices, or with no open question, as a request", async () => {

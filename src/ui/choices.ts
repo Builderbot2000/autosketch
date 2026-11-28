@@ -14,7 +14,7 @@ export interface ChoicesHost {
   /** The session's questions (`Session.choices`). */
   readonly questions: Pick<Choices, "get">;
   /** Delivers the answer's text to the agent (`InGameRequests.candidatesAnswer`). Without it the kind is `bad_request`. */
-  answer?(a: { request: number | null; mode?: RequestMode; player: PlayerRef; question: string; text: string }): Promise<void>;
+  answer?(a: { request: number | null; mode?: RequestMode; switchMode?: boolean; player: PlayerRef; question: string; text: string }): Promise<void>;
 }
 
 type Args = Record<string, unknown>;
@@ -34,10 +34,15 @@ export class ChoiceRequests {
     if (!this.host.answer) throw new UiRequestError("bad_request", "This Autosketch can't send answers to the agent.");
     // Answered before the await, so a second click meanwhile is refused; undone if delivery fails.
     q.answered = true;
+    // A choice with a mode switches its request to it (piece 7, *Mode switch*): the player's pick is the authority.
+    const to = q.modes?.[index];
+    const mode = to ?? q.mode;
     try {
-      await this.host.answer({ request: q.request, ...(q.mode ? { mode: q.mode } : {}), player, question: q.question, text: choiceText(player.name, q, index) });
+      await this.host.answer({ request: q.request, ...(mode ? { mode } : {}), ...(to ? { switchMode: true } : {}), player, question: q.question, text: choiceText(player.name, q, index) });
     } catch (e) {
       q.answered = false;
+      // A refused mode switch (`InGameRequests.checkSwitch`): the player hears why.
+      if ((e as { uiCode?: string }).uiCode === "refused") throw new UiRequestError("refused", (e as Error).message);
       throw new UiRequestError("internal", `The choice wasn't sent: ${(e as Error).message}.`);
     }
     return { result: { request: q.request } };

@@ -297,7 +297,7 @@ describe("request modes, enforced (13, B6)", () => {
   const FILL = { box: { min: [1, 0, 1], max: [2, 1, 2] }, pattern: "stone" };
   const refusalText = (mode: string, id: number, tool: string) =>
     `The open in-game ${mode} request (request ${id} from Dev) allows ${mode === "ask" ? "reading and looking only" : mode === "plan" ? "looking and proposing only" : "looking and setting the volumes only"}, ` +
-    `so ${tool} can't edit the linked document. Nothing was written. To have it built, the player sends /autosketch build <text>. ` +
+    `so ${tool} can't edit the linked document. Nothing was written. To ask for build, offer it in world_reply as a choice with mode "build" (e.g. {text: "Build it", mode: "build"}); the player's pick switches this request, or they send /autosketch build <text>. ` +
     "Answer with world_reply. Only the player can end this request, in game with /autosketch done or by sending a new request; if the user at the terminal wants this edit, tell them so.";
 
   it("an ask request opens with its mode; fill is refused with request_mode and nothing reaches the world; looking still works", async () => {
@@ -471,7 +471,7 @@ describe("request mode rule (13, B6), unit", () => {
     let current: ReturnType<typeof req> | undefined = req("plan");
     const rule = new RequestModeRule(() => current, () => undefined);
     expect(() => rule.before({ tool: "scope_fork" })).toThrow(
-      "The open in-game plan request (request 7 from Dev) allows looking and proposing only, in words only, so scope_fork can't draft in a sandbox or another document either. Nothing was changed. Describe the idea in world_reply; to have it built, the player sends /autosketch build <text>. " +
+      "The open in-game plan request (request 7 from Dev) allows looking and proposing only, in words only, so scope_fork can't draft in a sandbox or another document either. Nothing was changed. Describe the idea in world_reply and offer a choice with mode \"build\" to ask for edits; the player's pick switches this request, or they send /autosketch build <text>. " +
         "Answer with world_reply. Only the player can end this request, in game with /autosketch done or by sending a new request; if the user at the terminal wants this edit, tell them so.",
     );
     for (const mode of ["ask", "plan", "select"] as const) {
@@ -598,7 +598,7 @@ describe("select requests (18, piece 1)", () => {
     const r = await client.callTool({ name: "fill", arguments: { box: { min: [1, 0, 1], max: [2, 1, 2] }, pattern: "stone" } });
     expect(r.isError).toBe(true);
     expect(texts(r)[0]).toBe(
-      "The open in-game select request (request 1 from Dev) allows finding, reading the world and setting the volumes only, so fill can't edit the linked document. Nothing was written. To have it built, the player sends /autosketch build <text>. " +
+      "The open in-game select request (request 1 from Dev) allows finding, reading the world and setting the volumes only, so fill can't edit the linked document. Nothing was written. To ask for build, offer it in world_reply as a choice with mode \"build\" (e.g. {text: \"Build it\", mode: \"build\"}); the player's pick switches this request, or they send /autosketch build <text>. " +
         "Answer with world_reply. Only the player can end this request, in game with /autosketch done or by sending a new request; if the user at the terminal wants this edit, tell them so.",
     );
     expect(session.doc!.journal.headSeq).toBe(seq);

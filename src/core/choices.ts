@@ -12,6 +12,14 @@
 /** Most choices one question offers; the protocol's `CHOICES_MAX`, which tools may not import. */
 export const MAX_CHOICES = 9;
 
+/**
+ * The modes a choice may switch its request to when the player takes it (`18`, piece 7, *Mode
+ * switch*): a plan's "Go ahead" can grant build. Not `select`, whose read grant the mod fixes as the
+ * request goes out.
+ */
+export const SWITCH_MODES = ["ask", "plan", "build"] as const;
+export type SwitchMode = (typeof SWITCH_MODES)[number];
+
 export interface ChoiceQuestion {
   /** `q1`, `q2`, …: the id a choice line's `choices.pick` action carries. */
   id: string;
@@ -22,6 +30,8 @@ export interface ChoiceQuestion {
   /** The question as the player read it: the reply's lines, joined. */
   question: string;
   choices: string[];
+  /** Per choice, the mode taking it switches the request to (aligned with `choices`; absent: no switch). */
+  modes?: (SwitchMode | undefined)[];
   /** Set once a choice was taken: later picks answer `answered`. */
   answered: boolean;
 }
@@ -55,9 +65,9 @@ export function typedChoice(text: string): number | undefined {
   return m ? Number(m[1]) : undefined;
 }
 
-/** A choice line as the player reads it: `[2] ruin 180 blocks west`. */
-export function choiceLine(index: number, choice: string): string {
-  return `[${index + 1}] ${choice}`;
+/** A choice line as the player reads it: `[2] ruin 180 blocks west`, marked when taking it switches the mode. */
+export function choiceLine(index: number, choice: string, mode?: SwitchMode): string {
+  return `[${index + 1}] ${choice}${mode ? ` (switches to ${mode})` : ""}`;
 }
 
 /** Longest question quoted back to the agent. */
@@ -68,8 +78,10 @@ const QUESTION_MAX = 200;
  * from Kev (request 12) to "Which house?": [2] "ruin 180 blocks west".` The choice's own text, as
  * the agent wrote it; the question left out when empty.
  */
-export function choiceText(player: string, q: Pick<ChoiceQuestion, "request" | "question" | "choices">, index: number): string {
+export function choiceText(player: string, q: Pick<ChoiceQuestion, "request" | "question" | "choices" | "modes">, index: number): string {
   const question = q.question.replace(/\s+/g, " ").trim();
   const quoted = question.length > QUESTION_MAX ? question.slice(0, QUESTION_MAX - 1) + "…" : question;
-  return `Choice answer from ${player}${q.request !== null ? ` (request ${q.request})` : ""}${quoted ? ` to ${JSON.stringify(quoted)}` : ""}: [${index + 1}] ${JSON.stringify(q.choices[index] ?? "")}.`;
+  const mode = q.modes?.[index];
+  const switched = mode ? ` The player's answer switched ${q.request !== null ? `request ${q.request}` : "the request"} to ${mode} mode.` : "";
+  return `Choice answer from ${player}${q.request !== null ? ` (request ${q.request})` : ""}${quoted ? ` to ${JSON.stringify(quoted)}` : ""}: [${index + 1}] ${JSON.stringify(q.choices[index] ?? "")}.${switched}`;
 }

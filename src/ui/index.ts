@@ -15,7 +15,7 @@ import type { UiRequestInfo } from "../world/protocol/messages.js";
 import { UiFeed, type FeedHost } from "./feed.js";
 import type { WorldFrame } from "./frame.js";
 import { CandidateRequests, type CandidatesHost } from "./candidates.js";
-import { ChoiceRequests } from "./choices.js";
+import { ChoiceRequests, type ChoicesHost } from "./choices.js";
 import { GhostRegions } from "./ghosts.js";
 import { LibraryRequests, type LibraryHost } from "./library.js";
 import { UiPlayers } from "./players.js";
@@ -60,7 +60,7 @@ export interface UiOptions {
   /** The select candidate the feed draws as a steady fill (`18`, piece 8; `FeedHost.candidate`). */
   candidate?: FeedHost["candidate"];
   /** The open in-game request (the activity stream's), and the read-only one whose mode holds. */
-  inGame?(): { current: OpenRequest | undefined; heldRequest: ModeRequest | undefined; candidatesAnswer?: CandidatesHost["answer"]; requestControl?: RequestsHost["requestControl"] } | undefined;
+  inGame?(): { current: OpenRequest | undefined; heldRequest: ModeRequest | undefined; candidatesAnswer?: ChoicesHost["answer"]; requestControl?: RequestsHost["requestControl"] } | undefined;
   log?(msg: string): void;
   /** Coalescing window override for tests. */
   intervalMs?: number;
@@ -99,7 +99,7 @@ export function startUi(o: UiOptions): UiCore {
     return g?.current?.id === id || g?.heldRequest?.id === id;
   };
   // `candidates.submit`'s and `choices.pick`'s text goes to the agent through the in-game requests (`17`, piece 5; `18`, piece 7).
-  const answer: NonNullable<CandidatesHost["answer"]> = async (a) => {
+  const answer: NonNullable<ChoicesHost["answer"]> = async (a) => {
     const g = o.inGame?.();
     if (!g?.candidatesAnswer) throw new Error("in-game requests aren't served here");
     await g.candidatesAnswer(a);

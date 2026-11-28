@@ -73,16 +73,17 @@ export const modeOf = (r: { mode?: RequestMode } | undefined): RequestMode => r?
 
 /**
  * The `request_mode` refusal: names the mode, what it allows, the subcommand the player would use
- * instead, and that only the player ends the request (`/autosketch done` or a new request), so the
- * agent tells the user at the terminal rather than lifting it.
+ * instead or the choice that would switch the mode (`18`, piece 7, *Mode switch*), and that only
+ * the player ends the request (`/autosketch done` or a new request), so the agent tells the user at
+ * the terminal rather than lifting it.
  */
 export function requestModeRefusal(r: ModeRequest, attempt: { edit: string } | { volumes: string } | { draft: string }): Error & { refusal: string } {
   const head = `The open in-game ${r.mode} request (request ${r.id} from ${r.player.name}) allows ${ALLOWS[r.mode]}`;
   const what =
     "edit" in attempt
-      ? `, so ${attempt.edit} can't edit the linked document. Nothing was written. To have it built, the player sends /autosketch build <text>.`
+      ? `, so ${attempt.edit} can't edit the linked document. Nothing was written. To ask for build, offer it in world_reply as a choice with mode "build" (e.g. {text: "Build it", mode: "build"}); the player's pick switches this request, or they send /autosketch build <text>.`
       : "draft" in attempt
-        ? `, in words only, so ${attempt.draft} can't draft in a sandbox or another document either. Nothing was changed. Describe the idea in world_reply; to have it built, the player sends /autosketch build <text>.`
+        ? `, in words only, so ${attempt.draft} can't draft in a sandbox or another document either. Nothing was changed. Describe the idea in world_reply and offer a choice with mode "build" to ask for edits; the player's pick switches this request, or they send /autosketch build <text>.`
         : `, so ${attempt.volumes} can't change the volumes. Nothing was sent. To have the agent set them, the player sends /autosketch select [text].`;
   const close = " Answer with world_reply. Only the player can end this request, in game with /autosketch done or by sending a new request; if the user at the terminal wants this edit, tell them so.";
   return refusal("request_mode", head + what + close);

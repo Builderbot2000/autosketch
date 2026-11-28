@@ -83,6 +83,8 @@ export interface RootVolumes {
   work: Mask;
   /** The read-only context volume (never overlapping `work`). */
   context: Mask;
+  /** The work volume is the brush on a canvas (`19`), which the agent may move: refusals name it so. */
+  brush?: boolean;
 }
 
 export interface ForkInput {
@@ -238,7 +240,7 @@ export class ScopeManager {
       if (!outside.isEmpty())
         throw refusal(
           "nest_outside",
-          `A child's work volume must lie inside ${ps ? "your own work volume" : "the work volume the player set in-game"} ${formatBox(ps ? ps.workBoxLocal : pv.work.bbox()!)}: ${outside.count()} of its blocks are outside (e.g. ${fmt(outside.positions()[0]!)}).`,
+          `A child's work volume must lie inside ${ps ? "your own work volume" : pv?.brush ? "the brush (the work volume on the canvas)" : "the work volume the player set in-game"} ${formatBox(ps ? ps.workBoxLocal : pv.work.bbox()!)}: ${outside.count()} of its blocks are outside (e.g. ${fmt(outside.positions()[0]!)}).`,
         );
     }
     const n = work.count();
@@ -249,7 +251,7 @@ export class ScopeManager {
       throw refusal(
         "nest_too_large",
         `This is most of your own job: do it yourself, or split it into smaller jobs. (The work volume has ${n.toLocaleString("en-US")} blocks, over ${Math.round(this.limits.maxWorkRatio * 100)}% of ` +
-          `${ps ? "your own work volume" : pv ? "the work volume the player set in-game" : "the base document's bounds"} (${parentVolume.toLocaleString("en-US")}).)`,
+          `${ps ? "your own work volume" : pv?.brush ? "the brush (the work volume on the canvas)" : pv ? "the work volume the player set in-game" : "the base document's bounds"} (${parentVolume.toLocaleString("en-US")}).)`,
       );
     for (const l of this.children(parentId)) {
       const overlap = l.work.clone().intersectWith(work);

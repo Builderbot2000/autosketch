@@ -12,6 +12,9 @@ import { boxSchema, fail, text, type ToolDeps } from "./shared.js";
  * `from` confirms a shape of the world view instead (docs/design/18-select.md, piece 9): the work
  * volume is its box, the context that box grown by `margin`, in world coordinates, so it needs no
  * linked document; the logic is `session.worldSelect`'s.
+ *
+ * With a canvas (docs/design/19-canvas-and-requests.md, *Placing and moving the brush*), a `work`
+ * box inside it moves the brush in every request mode (`InGameRequests.setVolumes`, `LiveLink`).
  */
 export function registerWorldVolumesTools({ tool, session }: ToolDeps): void {
   tool(
@@ -23,7 +26,8 @@ export function registerWorldVolumesTools({ tool, session }: ToolDeps): void {
         "Either work: a box in the linked document's coordinates, with context: boxes, {padding:n} (work grown by n), or omitted for the default (+3); " +
         'or from:"candidate" to confirm the world view\'s candidate (after world_fill, in a select request): work = its bounding box, context = that box grown by margin (default 8), and the shape comes along as the named selection "candidate" in the linked document, a guide (only the box is enforced). ' +
         "from may also name a part kept in the world view (select({view:\"world\", …, name})); a shape whose context would pass the mod's contextCap is confirmed as a selection but sets no volumes, and the result suggests a part or sandboxes. " +
-        "The player sees the outlines; linking follows. No accept step: the player refines or moves on. Text, <150 tokens.",
+        "The player sees the outlines; linking follows. No accept step: the player refines or moves on. " +
+        "With a canvas, a work box inside it moves the brush, in any request mode: it waits for patches in flight, keeps coordinates, history and selections, and reports both boxes and the time taken; undo of an edit outside the brush is refused until you move back. Text, <150 tokens.",
       inputSchema: {
         work: boxSchema.optional().describe("The work volume, in the linked document's coordinates (not with from)"),
         context: z
@@ -39,6 +43,7 @@ export function registerWorldVolumesTools({ tool, session }: ToolDeps): void {
     async (_c, a) => {
       if (a.from !== undefined) {
         if (a.work || a.context) return fail("Give either from (a shape in the world view) or work and context, not both.");
+        session.inGame?.checkVolumeMode?.();
         const sel = session.worldSelect, view = session.worldView;
         if (!sel || !view) return fail("The live world link isn't available in this server.");
         const named = (name: string) => (view.doc.selections.has(name) ? resolveSelection(name, { doc: view.doc }).mask : undefined);

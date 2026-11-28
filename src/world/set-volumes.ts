@@ -6,7 +6,8 @@ import type { WireBox } from "./protocol/messages.js";
  * Setting the player's volumes from the agent (docs/design/13-live-world.md, *Backlog* B4,
  * `world_volumes`; *Wire format*, `volumes.set`). The agent gives boxes in the coordinates of the
  * linked document; they become world boxes with its origin, and the mod sets them as if the player had marked them. Linking
- * follows as for any new work volume. No accept step: the player refines or moves on.
+ * follows as for any new work volume. No accept step: the player refines or moves on. Inside the
+ * canvas (`19`) the new work volume moves the brush instead: the frame and the journal stay.
  */
 
 /** The document whose coordinates the boxes are in. */
@@ -16,6 +17,16 @@ export interface VolumesFrame {
   dimension: string;
   /** Names the coordinates in the result ("local"). */
   label: string;
+  /** The canvas the frame is anchored to (`19`), world coordinates: a work volume inside it moves the brush. */
+  canvas?: WireBox;
+}
+
+/** Whether `work` (local) lies inside the frame's canvas (`19`): setting it moves the brush, allowed in every mode. */
+export function brushInCanvas(frame: VolumesFrame, work: PublicBox): boolean {
+  const c = frame.canvas;
+  if (!c) return false;
+  const w = toWorld(work, frame.origin);
+  return [0, 1, 2].every((i) => c.min[i]! <= w.min[i]! && c.max[i]! >= w.max[i]!);
 }
 
 /** The context as the tool takes it: boxes, a padding around the work volume, or the mod's default. */
@@ -43,8 +54,10 @@ export async function setVolumes(bridge: Pick<BridgeConnection, "request">, fram
   const local = (b: WireBox) => `${pt(b.min.map((c, i) => c - frame.origin[i]!))}–${pt(b.max.map((c, i) => c - frame.origin[i]!))}`;
   const n = v.context.length;
   const how = Array.isArray(context) ? `${n} context box${n === 1 ? "" : "es"} (seam and build-height clipping by the game)` : context ? `context +${context.padding}` : "the default context (+3)";
+  const head = `ok · world_volumes · work ${size(v.work)} at ${frame.label} ${local(v.work)} (world ${pt(v.work.min)}–${pt(v.work.max)}), ${how} · link ${v.link}. `;
+  if (brushInCanvas(frame, work)) return head + "The game shows the outlines; the brush moves inside the canvas, and local (0,0,0) stays where it is.";
   return (
-    `ok · world_volumes · work ${size(v.work)} at ${frame.label} ${local(v.work)} (world ${pt(v.work.min)}–${pt(v.work.max)}), ${how} · link ${v.link}. ` +
+    head +
     (autoLink ? "The game shows the outlines; linking follows on its own, replacing the open document, and the work volume's minimum corner becomes local (0,0,0)." : "The game shows the outlines; call doc_open({world: true}) to link (world.autoLink is off).")
   );
 }

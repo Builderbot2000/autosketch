@@ -5,7 +5,7 @@ import type { EventSink } from "../core/events.js";
 import type { EventListener } from "../core/fanout.js";
 import { Mask } from "../core/mask.js";
 import { formatBox, fromPublic, toPublic, unionBox, type Box, type Vec3 } from "../core/region.js";
-import { Document, type EditResult } from "../document/document.js";
+import { Document, type EditResult, type WriteGuard } from "../document/document.js";
 import { loadNative } from "../document/native.js";
 import type { AutosketchPlugin } from "../plugins/types.js";
 import { extendWholeBlocks } from "../scope/multiblock.js";
@@ -207,6 +207,33 @@ export class LiveLink implements WorldLink {
     const local = (b: WireBox): Box => fromPublic({ min: sub(b.min, f.origin), max: sub(b.max, f.origin) });
     return frameLine(f, local);
   }
+
+  /**
+   * Undo and redo of an entry that wrote outside the current brush (`19`): refused, naming where it
+   * wrote, since the document no longer holds those blocks (they may have been hand-edited since).
+   * Moving the brush back snapshots them fresh, and the undo then meets the sync barrier as usual.
+   * Positions in the context are left to the root's rule (derived connection changes pass there).
+   */
+  private readonly brushGuard: WriteGuard = (changes, op) => {
+    const f = this.frame;
+    if ((op !== "undo" && op !== "redo") || !f || !changes.entry) return;
+    const mirror = (f.mirror ??= f.workLocal.clone().unionWith(f.contextLocal));
+    let away = false;
+    changes.forEach((x, y, z) => {
+      if (!mirror.has(x, y, z)) away = true;
+    });
+    if (!away) return;
+    const e = changes.entry;
+    const wrote = new Mask();
+    for (let i = 0; i < e.positions.length; i += 3) wrote.add(e.positions[i]!, e.positions[i + 1]!, e.positions[i + 2]!);
+    const box = wrote.bbox()!;
+    const pub = toPublic(box);
+    throw refusal(
+      "outside_brush",
+      `${op} of #${e.seq} ${e.summary}: this entry wrote at local ${formatBox(box)} (world ${fmtVec(add(pub.min, f.origin))}–${fmtVec(add(pub.max, f.origin))}), outside the brush, local ${formatBox(f.workLocal.bbox()!)}. ` +
+        `Move the brush there first (world_volumes({work: {min: [${pub.min.join(",")}], max: [${pub.max.join(",")}]}}) or larger, inside the canvas); the region is read fresh from the world then, and blocks the player changed since stop the undo at the sync barrier. Nothing was written.`,
+    );
+  };
 
   /** Adds a line to the next linked call's `world:` lines (canvas reads use it to say what they read). */
   addNote(line: string): void {
@@ -446,7 +473,8 @@ export class LiveLink implements WorldLink {
 
     this.tap?.close();
     await this.host.adopt(doc, { overwrite: true });
-    this.host.scopes.root = { work: workLocal, context: contextLocal };
+    doc.guards.push(this.brushGuard);
+    this.host.scopes.root = { work: workLocal, context: contextLocal, ...(canvas ? { brush: true } : {}) };
     this.frame = { link: v.link, dimension, work: v.work, extended, context: v.context, origin, workLocal, contextLocal, held, ...(canvas ? { canvas } : {}) };
     this.linkedDoc = doc;
     this.openedWith = o;
@@ -569,6 +597,17 @@ export class LiveLink implements WorldLink {
     if (m.dimension !== f.dimension || !sameBox(m.work, f.work)) {
       const open = this.host.scopes.openCount;
       if (open) return this.unlink(`the player set a new work volume while ${open} scoped job${open === 1 ? " is" : "s are"} open; merge or abandon them, then call doc_open({world: true}) to relink`);
+      // 19: a new work volume inside the canvas moves the brush; the document, journal and frame stay.
+      if (this.brushMove(m)) {
+        try {
+          this.note(`world: ${await this.moveBrush(m)}`);
+        } catch (e) {
+          const latest = this.bridge.volumes;
+          if (latest && latest !== m && this.bridge.connected) return this.followVolumes(latest);
+          this.unlink(`moving the brush failed: ${(e as Error).message}`);
+        }
+        return;
+      }
       try {
         const r = await this.doOpen(this.openedWith!, true);
         this.note(`world: ${r.report.split("\n")[0]}`);
@@ -607,13 +646,124 @@ export class LiveLink implements WorldLink {
     f.context = context;
     f.held = held;
     f.contextLocal = next;
-    this.host.scopes.root = { work: f.workLocal, context: next };
+    f.mirror = undefined;
+    this.host.scopes.root = { work: f.workLocal, context: next, ...(f.canvas ? { brush: true } : {}) };
     doc.context = next;
     let bounds: Box | undefined;
     for (const b of held) bounds = unionBox(bounds, toLocalBox(b));
     doc.bounds = bounds;
     this.host.touch();
     this.note(`world: the player changed the context volume (now ${context.length} box${context.length === 1 ? "" : "es"}, local ${formatBox(bounds!)}).`);
+  }
+
+  /**
+   * Follows a `volumes.set` of the brush inside the canvas now (`world_volumes`, `19`), rather than
+   * after the call: resolves the move's report, or undefined when the mod's volumes are no brush
+   * move (unchanged, or a relink that follows on its own).
+   */
+  followBrush(): Promise<string | undefined> {
+    return this.serial(async () => {
+      const m = this.bridge.volumes;
+      const f = this.frame;
+      if (!m || m.work === null || !f || !this.current() || !this.brushMove(m)) return undefined;
+      return this.moveBrush(m);
+    });
+  }
+
+  assertBrushMovable(): void {
+    const open = this.host.scopes.openCount;
+    if (open)
+      throw refusal("scopes_open", `${open} scoped job${open === 1 ? " is" : "s are"} open in the brush, so it can't move: merge or abandon ${open === 1 ? "it" : "them"} first (scope_list shows them). Nothing was sent.`);
+  }
+
+  /** Whether `m` moves the brush inside the canvas the frame is anchored to (`19`): same dimension, a new work volume, the same or a grown canvas holding it. */
+  private brushMove(m: VolumesMessage): m is VolumesMessage & { work: WireBox } {
+    const f = this.frame;
+    if (!f?.canvas || m.work === null || m.dimension !== f.dimension || sameBox(m.work, f.work)) return false;
+    const c = frameCanvas(this.canvasMsg ?? null, m);
+    return !!c && contains(c, f.canvas);
+  }
+
+  /**
+   * Moves the brush (`19`, *Placing and moving the brush*): a relink of the brush only, between
+   * calls. Waits for every patch in flight to be acked (they carry the old link) and applies what
+   * the acks bring, drops the old brush's and context's sections the new ones don't cover (the
+   * journal stays), snapshots the new brush and context, lays the journal's last word into
+   * positions taken back so the snapshot syncs over them as usual (hand edits since commit one
+   * `world_sync` entry, a sync barrier), extends to whole blocks and sets the root's volumes. The
+   * frame, every coordinate, the journal, selections and cameras stay. The mod releases and retakes
+   * the tickets when it sets the volumes. Returns the report: both boxes and the time taken.
+   */
+  private async moveBrush(m: VolumesMessage & { work: WireBox }): Promise<string> {
+    const t0 = Date.now();
+    const f = this.frame!, doc = this.current()!;
+    let waited = 0;
+    while (this.inflight.size) {
+      waited += this.inflight.size;
+      await Promise.all([...this.inflight].map((p) => p.done));
+    }
+    // The acks' cache writes run now, against the old frame; link changes queued behind this move
+    // (the mod's `volumes` for it) are started, not awaited: they wait their turn and find nothing to do.
+    for (const fn of this.pendingWrites.splice(0)) void Promise.resolve(fn()).catch((e: Error) => this.opts.log?.(`world: ${e.message}`));
+    if (this.frame !== f || this.current() !== doc) throw new Error("the link changed while the brush was moving");
+    const origin = f.origin;
+    const toLocalBox = (b: WireBox): Box => fromPublic({ min: sub(b.min, origin), max: sub(b.max, origin) });
+    let held = [m.work, ...m.context];
+    const snap = await this.bridge.request({ type: "snapshot", dimension: f.dimension, boxes: held });
+    const oldMirror = f.mirror ?? f.workLocal.clone().unionWith(f.contextLocal);
+    const mirror = new Mask();
+    for (const b of held) mirror.unionWith(Mask.fromBox(toLocalBox(b)));
+    // Drop what the new brush and context don't cover: reads there go through the world view now.
+    const dropped = oldMirror.clone().subtract(mirror);
+    dropped.forEach((x, y, z) => {
+      doc.voxels.set(x, y, z, 0);
+      doc.blockEntities.delete(`${x},${y},${z}`);
+    });
+    const fresh = mirror.clone().subtract(oldMirror);
+    writeSnapshot(doc, snap, origin, fresh);
+    overlayJournal(doc, fresh);
+    doc.revision++;
+    const synced = this.apply(doc, { snapshot: snap }, { origin, volumes: held, volatile: this.volatile, summary: `world sync: brush moved to world ${fmtWire(m.work)}` });
+
+    // Whole blocks (13, *Model*), as on a link.
+    let workLocal = Mask.fromBox(toLocalBox(m.work));
+    const ext = extendWholeBlocks(doc, workLocal, this.openedWith?.plugins ?? []);
+    let extended = m.work;
+    if (!ext.added.isEmpty()) {
+      const eb = ext.mask.bbox()!;
+      extended = { min: add(eb.min, origin), max: add([eb.max[0] - 1, eb.max[1] - 1, eb.max[2] - 1], origin) };
+      if (!held.some((b) => contains(b, extended))) {
+        const more = Mask.fromBox(toLocalBox(extended)).subtract(mirror);
+        const s2 = await this.bridge.request({ type: "snapshot", dimension: f.dimension, boxes: [extended] });
+        writeSnapshot(doc, s2, origin, more);
+        overlayJournal(doc, more);
+        this.apply(doc, { snapshot: s2 }, { origin, volumes: [extended], volatile: this.volatile, summary: `world sync: brush extended to whole blocks` });
+        held = [...held, extended];
+        mirror.unionWith(more);
+      }
+      workLocal = ext.mask;
+      await this.bridge.request({ type: "volumes.extend", link: m.link, work: extended });
+    }
+    const contextLocal = mirror.clone().subtract(workLocal);
+    let bounds: Box | undefined;
+    for (const b of held) bounds = unionBox(bounds, toLocalBox(b));
+    doc.bounds = bounds;
+    doc.context = contextLocal;
+    this.host.scopes.root = { work: workLocal, context: contextLocal, brush: true };
+    const canvas = frameCanvas(this.canvasMsg ?? null, m) ?? f.canvas;
+    this.frame = { link: m.link, dimension: f.dimension, work: m.work, extended, context: m.context, origin, workLocal, contextLocal, held, mirror, ...(canvas ? { canvas } : {}) };
+    this.host.touch();
+    const added = ext.added.count();
+    this.emit({ kind: "world.link", state: "relinked", dimension: f.dimension, work: toPublic(toLocalBox(m.work)), extended: added, context: m.context.length, reason: "brush moved" });
+    const ms = Date.now() - t0;
+    const changed = synced.changed;
+    return (
+      `The brush moved from local ${formatBox(toLocalBox(f.extended))} to local ${formatBox(workLocal.bbox()!)} (world ${fmtWire(extended)}), context ${m.context.length} box${m.context.length === 1 ? "" : "es"}, local ${formatBox(bounds!)}; ` +
+      `${fmt(fresh.count())} blocks snapshotted, ${fmt(dropped.count())} dropped from the document (read through the world view now), in ${fmt(ms)} ms${waited ? ` after ${waited} patch${waited === 1 ? "" : "es"} in flight were acked` : ""}. ` +
+      `Coordinates, the history, saved selections and cameras are unchanged (local (0,0,0) stays world ${fmtVec(origin)}).` +
+      (added ? ` The brush was extended by ${fmt(added)} block${added === 1 ? "" : "s"} to include whole blocks.` : "") +
+      (changed ? ` ${fmt(changed)} block${changed === 1 ? "" : "s"} your history wrote there changed in the world since (hand edits): synced in as one world_sync entry, so undo stops there.` : "")
+    );
   }
 
   /** The mod's canvas changed (`19`): a relink when it changes the frame, nothing otherwise. */
@@ -772,8 +922,11 @@ export function gameDirOf(instanceDir: string): string {
   return instanceDir;
 }
 
-/** Writes a snapshot's regions into a fresh document (store = local; local = world − origin). */
-function writeSnapshot(doc: Document, snap: SnapshotResult, origin: Vec3): void {
+/**
+ * Writes a snapshot's regions into the document without a journal entry (store = local; local =
+ * world − origin): a fresh document, or (a brush move) only the local positions `where` accepts.
+ */
+function writeSnapshot(doc: Document, snap: SnapshotResult, origin: Vec3, where?: Mask): void {
   const ids = snap.palette.map((s) => doc.states.intern(s === "minecraft:cave_air" || s === "minecraft:void_air" ? "minecraft:air" : s));
   for (const r of snap.regions) {
     const { min, max } = r.box;
@@ -782,10 +935,52 @@ function writeSnapshot(doc: Document, snap: SnapshotResult, origin: Vec3): void 
       for (let z = min[2]; z <= max[2]; z++)
         for (let x = min[0]; x <= max[0]; x++) {
           const id = ids[r.states[i++]!]!;
-          doc.voxels.set(x - origin[0], y - origin[1], z - origin[2], id);
+          const lx = x - origin[0], ly = y - origin[1], lz = z - origin[2];
+          if (where && !where.has(lx, ly, lz)) continue;
+          doc.voxels.set(lx, ly, lz, id);
+          if (where) doc.blockEntities.delete(`${lx},${ly},${lz}`);
         }
-    for (const be of r.blockEntities) doc.blockEntities.set(`${be.pos[0] - origin[0]},${be.pos[1] - origin[1]},${be.pos[2] - origin[2]}`, be.nbt);
+    for (const be of r.blockEntities) {
+      const lx = be.pos[0] - origin[0], ly = be.pos[1] - origin[1], lz = be.pos[2] - origin[2];
+      if (!where || where.has(lx, ly, lz)) doc.blockEntities.set(`${lx},${ly},${lz}`, be.nbt);
+    }
   }
+}
+
+/**
+ * Lays the journal's last word into positions the document takes back from the world (a brush
+ * moving back, `19`): at each position of `fresh` an applied entry wrote, the state and block
+ * entity of the latest such entry. The fresh snapshot then syncs over this as usual, so a
+ * position the player changed since commits a `world_sync` entry and the sync barrier stops undo
+ * there (`13`, *World undo and restore*); a position nobody touched since matches and adds nothing.
+ * Returns the positions laid in.
+ */
+function overlayJournal(doc: Document, fresh: Mask): number {
+  const bb = fresh.bbox();
+  if (!bb) return 0;
+  // Block entities follow the latest entry that recorded one there; with none, the world's stays.
+  const seen = new Set<string>(), seenNbt = new Set<string>();
+  const entries = doc.journal.peek(0, doc.journal.position);
+  for (let e = entries.length - 1; e >= 0; e--) {
+    const en = entries[e]!;
+    const nbt = new Map((en.nbt ?? []).map((n) => [n.index, n.after]));
+    for (let i = 0, n = en.after.length; i < n; i++) {
+      const x = en.positions[i * 3]!, y = en.positions[i * 3 + 1]!, z = en.positions[i * 3 + 2]!;
+      if (x < bb.min[0] || x >= bb.max[0] || y < bb.min[1] || y >= bb.max[1] || z < bb.min[2] || z >= bb.max[2] || !fresh.has(x, y, z)) continue;
+      const k = `${x},${y},${z}`;
+      if (!seen.has(k)) {
+        seen.add(k);
+        doc.voxels.set(x, y, z, en.after[i]!);
+      }
+      if (nbt.has(i) && !seenNbt.has(k)) {
+        seenNbt.add(k);
+        const be = nbt.get(i);
+        if (be) doc.blockEntities.set(k, be);
+        else doc.blockEntities.delete(k);
+      }
+    }
+  }
+  return seen.size;
 }
 
 const add = (a: Vec3, b: Vec3): Vec3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];

@@ -1,4 +1,5 @@
 import type { ObserveEvent } from "../core/events.js";
+import type { Document } from "../document/document.js";
 import { refusal } from "../scope/scopes.js";
 import type { BridgeConnection } from "./bridge.js";
 import {
@@ -16,6 +17,8 @@ import {
   type StatusAction,
   type StatusMessage,
 } from "./protocol/messages.js";
+import type { RequestEdits, UndoDone } from "./request-undo.js";
+import { isWorldSync } from "./sync.js";
 
 /**
  * The in-game request lifecycle (docs/design/19-canvas-and-requests.md, Part A; `13`, *Request
@@ -38,6 +41,9 @@ import {
  *   reads in flight, `onStop` tells the mod to drop its unstarted patches, and `before` (a session
  *   call hook) refuses every tool call with `stopped` until the turn ends, which makes them
  *   `stopped`, lifts the refusal and delivers the next queued prompt.
+ * - **Undo** (*Stop*, step 5; *Settled in step Q2*): the base document's journal entries committed
+ *   while a request was `working` or `stopping` are its edits (`world_sync` entries are the world's,
+ *   not its own); `request.undo` on a concluded request undoes them as one step (`opts.undo`).
  * - **Status lines** (*Status line*): with `requests` on both hellos, a `chat` kind `status` per
  *   request on each state change and at most once per `statusMs` while its counts move; without it,
  *   a plain `chat` activity line on each state change.
@@ -69,6 +75,10 @@ export interface RequestEntry {
   never?: "cancelled" | PromptRefusal;
   /** While queued: the prompt as it was sent (its context is the one captured then). */
   prompt?: PromptMessage;
+  /** The base-document entries it committed while running (`19`, *Settled in step Q2*). */
+  edits?: RequestEdits;
+  /** How many of its entries `[Undo request]` undid. */
+  undone?: number;
   /** What its last status said, to rate-limit and skip repeats. */
   sent?: { state: RequestState; calls: number; sec: number; pos: number | undefined; at: number };
 }
@@ -84,6 +94,14 @@ export interface RequestLifecycleOptions {
   idleMs: number;
   /** Least time between two status lines of one request while its state is unchanged (default `STATUS_INTERVAL_MS`). */
   statusMs?: number;
+  /** The base document now, read when an entry commits (`[Undo request]` undoes only on the document the request edited). */
+  baseDoc?(): Document | undefined;
+  /**
+   * Undoes a concluded request's edits as one step (`request-undo.ts`, run by the entry point through
+   * the session's call hooks, so the sync and the world link see it as an undo). Without it
+   * `request.undo` answers `bad_request`.
+   */
+  undo?(request: number, edits: RequestEdits): Promise<UndoDone | Extract<ControlAnswer, { ok: false }>>;
   /** Called on a stop, after the states changed (the entry point sends `patch.drop` here). */
   onStop?(): void;
   now?(): number;
@@ -227,13 +245,27 @@ export class RequestLifecycle {
    * The session's call events: a `call.start` counts for the running requests; the idle fallback
    * restarts on each start and end and never fires while a call is in flight (a long `run_script`).
    */
-  onEvent(e: ObserveEvent): void {
+  onEvent(e: ObserveEvent, doc?: string): void {
+    if (e.kind === "doc.op") return this.recordEdit(e, doc);
     if (e.kind === "call.start") this.inFlight.add(e.call);
     else if (e.kind === "call.end") this.inFlight.delete(e.call);
     else return;
     if (!this.turn) return;
     if (e.kind === "call.start") for (const r of this.turn.entries) if (r.state === "working" || r.state === "stopping") r.calls++;
     this.touch();
+  }
+
+  /** A base-document journal entry committed: it is an edit of every request of the turn still running (not of a `world_sync`). */
+  private recordEdit(e: Extract<ObserveEvent, { kind: "doc.op" }>, tag: string | undefined): void {
+    if (tag !== "base" || !this.turn || isWorldSync(e)) return;
+    const doc = this.opts.baseDoc?.();
+    if (!doc) return;
+    for (const r of this.turn.entries) {
+      if (r.state !== "working" && r.state !== "stopping") continue;
+      // A relink or another document mid-request: only the current document's entries can be undone.
+      if (r.edits?.doc !== doc) r.edits = { doc, seqs: [] };
+      r.edits.seqs.push(e.jseq);
+    }
   }
 
   /** The hook reported the turn's end (`turn.end` on the observe bus). */
@@ -349,13 +381,12 @@ export class RequestLifecycle {
 
   /**
    * A status line's button (`ui.request` `request.stop`, `queue.send`, `queue.cancel`; `13`,
-   * *Request kinds*). `request.undo` is step Q2's: until then it answers `bad_request`.
+   * *Request kinds*), and `request.undo` (step Q2).
    */
   async ui(kind: string, args: Record<string, unknown>): Promise<ControlAnswer> {
     const id = args.request;
     if (typeof id !== "number" || !Number.isInteger(id) || id < 1) return { ok: false, error: "bad_request", message: "request must be a request id" };
     const e = this.known.get(id);
-    if (kind === "request.undo") return { ok: false, error: "bad_request", message: "This Autosketch doesn't serve request.undo yet." };
     if (!e) return { ok: false, error: "not_found", message: `No request ${id}.` };
     switch (kind) {
       case "request.stop":
@@ -376,6 +407,8 @@ export class RequestLifecycle {
         }
         return { ok: true, result: { request: id, into } };
       }
+      case "request.undo":
+        return this.undoRequest(e);
       case "queue.cancel":
         if (e.state !== "queued") return { ok: false, error: "answered", message: `Request ${id} was already ${e.never === "cancelled" ? "cancelled" : "delivered"}.` };
         this.cancel(e);
@@ -383,6 +416,27 @@ export class RequestLifecycle {
       default:
         return { ok: false, error: "bad_request", message: `Unknown request-control kind "${kind}".` };
     }
+  }
+
+  /**
+   * `[Undo request]` (`19`, *Stop*, step 5): a concluded request's edits undone as one step.
+   * Refused while it or any request runs, or is queued (as Claude Code can't rewind a turn while it
+   * works); `answered` once undone or when it made no edits.
+   */
+  private async undoRequest(e: RequestEntry): Promise<ControlAnswer> {
+    const id = e.id;
+    if (!this.opts.undo) return { ok: false, error: "bad_request", message: "This Autosketch doesn't serve request.undo." };
+    if (e.state === "queued") return { ok: false, error: "refused", message: `Request ${id} is queued and hasn't run, so it has no edits to undo.` };
+    if (e.state === "working" || e.state === "stopping") return { ok: false, error: "refused", message: `Request ${id} is still ${e.state}; it can be undone once its turn ends.` };
+    if (e.undone !== undefined) return { ok: false, error: "answered", message: `Request ${id} was already undone (${e.undone} entr${e.undone === 1 ? "y" : "ies"}).` };
+    const busy = this.turn?.entries.find((r) => r.state === "working" || r.state === "stopping");
+    if (busy || this.delivering) return { ok: false, error: "refused", message: `Request ${busy?.id ?? this.deliveringId ?? "?"} is running; request ${id} can be undone once its turn ends.` };
+    if (!e.edits?.seqs.length) return { ok: false, error: "answered", message: e.never ? `Request ${id} never ran, so it made no edits.` : `Request ${id} made no edits.` };
+    const r = await this.opts.undo(id, e.edits);
+    if (!r.ok) return r;
+    e.undone = r.entries;
+    this.status(e, true);
+    return { ok: true, result: { request: id, entries: r.entries } };
   }
 
   private cancel(e: RequestEntry): void {
@@ -508,9 +562,9 @@ export function elapsed(ms: number): string {
 }
 
 /** The plain text of a status line (`19`, *Status line*; the vectors' shapes). */
-export function statusLine(e: Pick<RequestEntry, "state" | "calls" | "noTurnSignal" | "never">, text: string, elapsedMs: number, pos: number | undefined): string {
+export function statusLine(e: Pick<RequestEntry, "state" | "calls" | "noTurnSignal" | "never" | "undone">, text: string, elapsedMs: number, pos: number | undefined): string {
   const t = JSON.stringify(text);
-  const counts = `${e.calls} call${e.calls === 1 ? "" : "s"} · ${elapsed(elapsedMs)}`;
+  const counts = `${e.calls} call${e.calls === 1 ? "" : "s"} · ${elapsed(elapsedMs)}${e.undone !== undefined ? ` · undone (${e.undone} entr${e.undone === 1 ? "y" : "ies"})` : ""}`;
   switch (e.state) {
     case "queued":
       return `⧗ Queued ${pos ?? ""} · ${t}`.replace("Queued  ·", "Queued ·");
@@ -527,10 +581,14 @@ export function statusLine(e: Pick<RequestEntry, "state" | "calls" | "noTurnSign
   }
 }
 
-/** The buttons of a state (`13`): Stop while working; Send now and Cancel while queued. Undo request comes with step Q2. */
+/**
+ * The buttons of a state (`13`): Stop while working; Send now and Cancel while queued; Undo request
+ * on a stopped request that made edits and isn't undone yet (`19`, *Stop*, step 5).
+ */
 function actionsOf(e: RequestEntry): StatusAction[] {
   const args = { request: e.id };
   if (e.state === "working") return [{ label: "Stop", kind: "request.stop", args }];
+  if (e.state === "stopped" && !e.never && e.undone === undefined && e.edits?.seqs.length) return [{ label: "Undo request", kind: "request.undo", args }];
   if (e.state === "queued")
     return [
       { label: "Send now", kind: "queue.send", args },

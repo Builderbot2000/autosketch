@@ -18,6 +18,7 @@ import { CHANNEL_INSTRUCTIONS, CHANNEL_METHOD, InGameRequests } from "../../../s
 import { MOD_FEATURES, QUEUE_MAX, type PlayerRef, type StatusMessage, type WireBox } from "../../../src/world/protocol/messages.js";
 import { elapsed, STOPPED_TEXT, stoppableReads, statusLine } from "../../../src/world/requests.js";
 import { autoSyncHook, syncLink } from "../../../src/world/sync.js";
+import { requestUndoer } from "../../../src/world/request-undo.js";
 import { FakeHost } from "../../support/fake-host.js";
 import { solidPng } from "../../helpers/fixtures.js";
 import { fakeRegistry } from "../../helpers/registry.js";
@@ -51,7 +52,7 @@ afterEach(async () => {
 
 const ChannelNote = z.object({ method: z.literal(CHANNEL_METHOD), params: z.object({ content: z.string(), meta: z.record(z.string()) }) });
 
-async function setup(opts: { features?: string[]; idleMs?: number } = {}) {
+async function setup(opts: { features?: string[]; idleMs?: number; undo?: boolean } = {}) {
   host = await FakeHost.start({ volumes: { work: WORK }, singleplayer: false, host: null, ...(opts.features ? { features: opts.features } : {}) });
   const session = new Session(tempDir());
   link = new LiveLink(session, { ackWaitMs: 2000, backoff: { minMs: 20, maxMs: 50 } });
@@ -79,6 +80,8 @@ async function setup(opts: { features?: string[]; idleMs?: number } = {}) {
       turnFns.push(fn);
       return () => turnFns.splice(turnFns.indexOf(fn), 1);
     },
+    // As the entry point wires [Undo request] (step Q2).
+    ...(opts.undo ? { baseDoc: () => session.doc, undo: requestUndoer(session, (line) => link!.addNote(line)) } : {}),
   });
   session.inGame = inGame;
   session.callHooks.unshift(inGame.lifecycle.callHook);
@@ -224,7 +227,7 @@ describe("request lifecycle (19, Part A)", () => {
     expect(await host.playerControl(HOST, "stop")).toMatchObject({ text: "Autosketch: stopping request 2; the agent ends its turn at its next tool call." });
   });
 
-  it("answers the request-control buttons: not_found, refused for a queued stop, bad_request for request.undo (step Q2)", async () => {
+  it("answers the request-control buttons: not_found, refused for a queued stop, bad_request for request.undo without an undoer", async () => {
     const { host } = await setup();
     await host.playerAsk(HOST, "build");
     await host.playerAsk(HOST, "later");
@@ -302,6 +305,150 @@ describe("request lifecycle (19, Part A)", () => {
     expect(plain).toEqual(['⏳ Working · "one" · 0 calls', '⏳ Working · "two" · 0 calls', '✔ Done · "one" · 0 calls', '✔ Done · "two" · 0 calls']);
     expect(host.statuses).toEqual([]);
     expect(host.requestsUngated).toEqual([]);
+  });
+});
+
+describe("[Undo request] (19, Stop, step 5; step Q2)", () => {
+  // Local (0,0,0) is the work volume's min corner, (100,64,-200).
+  const W = (x: number, y: number, z: number): [number, number, number] => [100 + x, 64 + y, -200 + z];
+  const FILL2 = { box: { min: [5, 0, 5], max: [5, 2, 5] }, pattern: "andesite" };
+  const patches = (h: FakeHost) => h.received.filter((m) => m.type === "patch").length;
+
+  it("undoes a stopped request's entries as one step and one patch; the line loses the button; a second click is answered", async () => {
+    const { client, host, session, turnEnd } = await setup({ undo: true });
+    await client.callTool({ name: "fill", arguments: { ...FILL, pattern: "andesite" } }); // before any request: stays
+    await host.playerAsk(HOST, "build a wall");
+    await client.callTool({ name: "fill", arguments: FILL });
+    await client.callTool({ name: "fill", arguments: FILL2 });
+    await host.waitFor(() => host.get(W(5, 2, 5)).state === "minecraft:andesite");
+    await host.playerControl(HOST, "stop");
+    turnEnd();
+    await statusIs(host, 1, "stopped");
+    expect(host.statusOf(1)!.actions).toEqual([{ label: "Undo request", kind: "request.undo", args: { request: 1 } }]);
+    const head = session.doc!.journal.headSeq;
+    const sent = patches(host);
+    expect(await inGame!.requestControl("request.undo", { request: 1 })).toEqual({ ok: true, result: { request: 1, entries: 2 } });
+    expect(session.doc!.journal.headSeq).toBe(head - 2);
+    expect(patches(host)).toBe(sent + 1);
+    await host.waitFor(() => host.get(W(5, 2, 5)).state === "minecraft:air");
+    for (const p of [W(1, 0, 1), W(2, 1, 2)]) expect(host.get(p).state).toBe("minecraft:andesite");
+    for (const y of [0, 1, 2]) expect(host.get(W(5, y, 5)).state).toBe("minecraft:air");
+    await host.waitFor(() => host.statusOf(1)!.lines[0]!.includes("undone"));
+    expect(host.statusOf(1)).toMatchObject({ state: "stopped", actions: [] });
+    expect(host.statusOf(1)!.lines[0]).toMatch(/^■ Stopped · "build a wall" · 2 calls · \d+:\d\d · undone \(2 entries\)$/);
+    expect(await inGame!.requestControl("request.undo", { request: 1 })).toEqual({ ok: false, error: "answered", message: "Request 1 was already undone (2 entries)." });
+    // The agent hears of it on its next linked call, and can redo it.
+    expect(texts(await client.callTool({ name: "doc_info", arguments: {} })).join("\n")).toContain("The player undid request 1: 2 entries (#2–#3) in one step.");
+    expect(texts(await client.callTool({ name: "redo", arguments: { steps: 2 } }))[0]).toMatch(/^redid 2: #2 /);
+  });
+
+  it("a done request can be undone too (no button on its line); one that made no edits, or never ran, is answered", async () => {
+    const { client, host, session, turnEnd } = await setup({ undo: true });
+    await host.playerAsk(HOST, "look around");
+    await client.callTool({ name: "doc_info", arguments: {} });
+    turnEnd();
+    await statusIs(host, 1, "done");
+    expect(await inGame!.requestControl("request.undo", { request: 1 })).toEqual({ ok: false, error: "answered", message: "Request 1 made no edits." });
+    await host.playerAsk(HOST, "build");
+    await client.callTool({ name: "fill", arguments: FILL });
+    await host.playerAsk(HOST, "queued then cancelled");
+    await inGame!.requestControl("queue.cancel", { request: 3 });
+    turnEnd();
+    await statusIs(host, 2, "done");
+    expect(host.statusOf(2)!.actions).toEqual([]);
+    expect(await inGame!.requestControl("request.undo", { request: 3 })).toMatchObject({ ok: false, error: "answered", message: "Request 3 never ran, so it made no edits." });
+    expect(await inGame!.requestControl("request.undo", { request: 2 })).toEqual({ ok: true, result: { request: 2, entries: 1 } });
+    expect(session.doc!.journal.headSeq).toBe(0);
+    await host.waitFor(() => host.get(W(1, 0, 1)).state === "minecraft:air");
+  });
+
+  it("refused while it or another request runs, or while queued; refused after a later edit, naming it", async () => {
+    const { client, host, session, turnEnd } = await setup({ undo: true });
+    await host.playerAsk(HOST, "build");
+    await client.callTool({ name: "fill", arguments: FILL });
+    await host.playerAsk(HOST, "then this");
+    expect(await inGame!.requestControl("request.undo", { request: 1 })).toEqual({ ok: false, error: "refused", message: "Request 1 is still working; it can be undone once its turn ends." });
+    expect(await inGame!.requestControl("request.undo", { request: 2 })).toEqual({ ok: false, error: "refused", message: "Request 2 is queued and hasn't run, so it has no edits to undo." });
+    turnEnd();
+    await statusIs(host, 2, "working");
+    expect(await inGame!.requestControl("request.undo", { request: 1 })).toEqual({ ok: false, error: "refused", message: "Request 2 is running; request 1 can be undone once its turn ends." });
+    await client.callTool({ name: "fill", arguments: FILL2 });
+    turnEnd();
+    await statusIs(host, 2, "done");
+    const head = session.doc!.journal.headSeq;
+    expect(await inGame!.requestControl("request.undo", { request: 1 })).toEqual({
+      ok: false,
+      error: "refused",
+      message: "Request 1 can't be undone: 1 later entry came after its last one (#1): #2 fill (5,0,5)–(5,2,5) andesite.",
+    });
+    expect(session.doc!.journal.headSeq).toBe(head);
+    expect(await inGame!.requestControl("request.undo", { request: 2 })).toMatchObject({ ok: true, result: { request: 2, entries: 1 } });
+    expect(await inGame!.requestControl("request.undo", { request: 1 })).toMatchObject({ ok: true, result: { request: 1, entries: 1 } });
+    expect(session.doc!.journal.headSeq).toBe(0);
+  });
+
+  it("goes the usual undo's way: hand edits since are synced first and refuse it; a world_sync between its entries refuses it (the sync barrier)", async () => {
+    const { client, host, session, turnEnd } = await setup({ undo: true });
+    await host.playerAsk(HOST, "build");
+    await client.callTool({ name: "fill", arguments: FILL });
+    turnEnd();
+    await statusIs(host, 1, "done");
+    host.playerSet(W(8, 0, 8), "minecraft:glass");
+    await host.waitFor(() => link!.isDirty());
+    const r = await inGame!.requestControl("request.undo", { request: 1 });
+    expect(r).toMatchObject({ ok: false, error: "refused" });
+    expect((r as { message: string }).message).toMatch(/^Request 1 can't be undone: 1 later entry came after its last one \(#1\): #2 world_sync \(1 block changed in the world\)\.$/);
+    expect(host.get(W(1, 0, 1)).state).toBe("minecraft:stone");
+
+    await host.playerAsk(HOST, "more");
+    await client.callTool({ name: "fill", arguments: FILL2 });
+    host.playerSet(W(9, 0, 9), "minecraft:glass");
+    await host.waitFor(() => link!.isDirty());
+    await client.callTool({ name: "fill", arguments: { box: { min: [12, 0, 12], max: [12, 0, 12] }, pattern: "stone" } }); // synced first: #4 world_sync, then #5
+    turnEnd();
+    await statusIs(host, 2, "done");
+    const head = session.doc!.journal.headSeq;
+    expect(await inGame!.requestControl("request.undo", { request: 2 })).toEqual({
+      ok: false,
+      error: "refused",
+      message: "Request 2 can't be undone: #4 world_sync (1 block changed in the world) lies between its entries; undoing past it would overwrite those blocks in the world.",
+    });
+    expect(session.doc!.journal.headSeq).toBe(head);
+  });
+
+  it("Send now: each request undoes its own entries; the first's include those made after the second joined", async () => {
+    const { client, host, session, turnEnd } = await setup({ undo: true });
+    await host.playerAsk(HOST, "build");
+    await client.callTool({ name: "fill", arguments: FILL });
+    await host.playerAsk(HOST, "and a post");
+    await inGame!.requestControl("queue.send", { request: 2 });
+    await statusIs(host, 2, "working");
+    await client.callTool({ name: "fill", arguments: FILL2 });
+    turnEnd();
+    await statusIs(host, 2, "done");
+    expect(await inGame!.requestControl("request.undo", { request: 2 })).toEqual({ ok: true, result: { request: 2, entries: 1 } });
+    expect(session.doc!.journal.headSeq).toBe(1);
+    expect(await inGame!.requestControl("request.undo", { request: 1 })).toEqual({ ok: true, result: { request: 1, entries: 1 } });
+    expect(session.doc!.journal.headSeq).toBe(0);
+  });
+
+  it("a scope merge made during the request is one of its entries", async () => {
+    const { client, host, session, turnEnd } = await setup({ undo: true });
+    await host.playerAsk(HOST, "build a keep");
+    await client.callTool({ name: "fill", arguments: FILL });
+    const f = await client.callTool({ name: "scope_fork", arguments: { work: { min: [8, 0, 8], max: [15, 7, 15] }, brief: "the keep", scope: "base" } });
+    expect(f.isError, texts(f)[0]).toBeFalsy();
+    const sf = await client.callTool({ name: "fill", arguments: { box: { min: [0, 0, 0], max: [1, 1, 1] }, pattern: "andesite", scope: "s1" } });
+    expect(sf.isError, texts(sf)[0]).toBeFalsy();
+    const m = await client.callTool({ name: "scope_merge", arguments: { scope: "s1", report: "keep base" } });
+    expect(m.isError, texts(m)[0]).toBeFalsy();
+    await host.waitFor(() => host.get(W(9, 1, 9)).state === "minecraft:andesite");
+    turnEnd();
+    await statusIs(host, 1, "done");
+    expect(await inGame!.requestControl("request.undo", { request: 1 })).toEqual({ ok: true, result: { request: 1, entries: 2 } });
+    expect(session.doc!.journal.headSeq).toBe(0);
+    await host.waitFor(() => host.get(W(9, 1, 9)).state === "minecraft:air");
+    expect(host.get(W(1, 0, 1)).state).toBe("minecraft:air");
   });
 });
 

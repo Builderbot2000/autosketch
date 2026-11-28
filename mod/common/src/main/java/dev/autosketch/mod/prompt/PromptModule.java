@@ -26,8 +26,9 @@ import org.slf4j.Logger;
  * {@code /autosketch ask|plan|build <text>} (B6: the subcommand names the request's mode; the
  * configured alias is a short root for them), {@code /autosketch done} (B6: the player ends the open
  * read-only request), {@code /autosketch select [text]} (18, piece 1), {@code /autosketch focus clear},
- * {@code /autosketch log off|mine|all}, the wand's {@code focus} mode, and the handlers for
- * {@code prompt.result} and {@code chat}. Each loader's setup event calls {@link #setup} (on
+ * {@code /autosketch log off|mine|all}, {@code /autosketch stop|queue} (19, {@link
+ * dev.autosketch.mod.command.RequestCommands}), the wand's {@code focus} mode, and the handlers for
+ * {@code prompt.result} and {@code chat} (status lines included, {@link StatusLines}). Each loader's setup event calls {@link #setup} (on
  * NeoForge, {@code PromptEvents}).
  */
 public final class PromptModule {
@@ -45,7 +46,16 @@ public final class PromptModule {
         });
         e.messages().register("chat", (m, x) -> {
             var server = Platform.get().currentServer();
-            if (server != null) InGamePrompts.onChat(dev.autosketch.mod.protocol.Messages.Chat.decode(m.frame()), server);
+            if (server == null) return;
+            // 19: a status line (feature requests) has its own handling; the hello lists requests because of it.
+            if (dev.autosketch.mod.protocol.RequestMessages.isStatus(m.frame())) StatusLines.onStatus(dev.autosketch.mod.protocol.RequestMessages.Status.decode(m.frame()), server);
+            else InGamePrompts.onChat(dev.autosketch.mod.protocol.Messages.Chat.decode(m.frame()), server);
+        });
+        Autosketch.bridge().addListener(new dev.autosketch.mod.api.Bridge.Listener() {
+            @Override
+            public void disconnected(dev.autosketch.mod.api.BridgeSession session) {
+                StatusLines.reset();
+            }
         });
         e.commands(PromptModule::commands);
         e.wandModes(FOCUS_MODE);
@@ -106,6 +116,7 @@ public final class PromptModule {
      */
     static void requests(LiteralArgumentBuilder<CommandSourceStack> root) {
         root.then(Commands.literal("done").executes(ctx -> InGamePrompts.done(ctx.getSource().getPlayerOrException(), Autosketch.bridge())));
+        dev.autosketch.mod.command.RequestCommands.register(root); // 19: stop, queue, queue cancel <n>
         for (String mode : TEXT_MODES)
             root.then(Commands.literal(mode).then(Commands.argument("text", StringArgumentType.greedyString())
                     .executes(ctx -> InGamePrompts.request(ctx.getSource().getPlayerOrException(), mode, StringArgumentType.getString(ctx, "text"), Autosketch.bridge()))));

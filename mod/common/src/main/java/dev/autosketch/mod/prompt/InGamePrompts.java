@@ -63,6 +63,11 @@ public final class InGamePrompts {
 
     private static volatile Output out = Output.PLAYER;
 
+    /** Where player-facing text goes now (the request commands, {@link StatusLines}). */
+    public static Output output() {
+        return out;
+    }
+
     /** Replaces the output (tests); returns the previous one. */
     public static Output setOutput(Output o) {
         Output prev = out;
@@ -235,20 +240,30 @@ public final class InGamePrompts {
         return "Autosketch: not sent: the Autosketch MCP server doesn't accept " + mode + " requests (update it; /autosketch build still works)";
     }
 
-    private static Component refusal(String reason) {
+    /** The action-bar refusal for {@code reason}, worded as a {@code prompt.result}'s. */
+    public static Component refusal(String reason) {
         return Component.literal(ChatRules.resultText(false, reason)).withStyle(ChatFormatting.RED);
+    }
+
+    /** The action-bar line for a prompt queued behind the running request (19, *Queueing*). */
+    public static String queuedText(@Nullable Integer position) {
+        return "Autosketch: queued behind the running request (" + (position == null ? "in" : "#" + position + " in") + " your queue; /autosketch queue)";
     }
 
     /** Handles {@code prompt.result}: the delivery result on the asking player's action bar. */
     public static void onResult(JsonObject h, MinecraftServer server) throws ProtocolException {
-        Long id = Json.reqLong(h, "id", null);
-        boolean delivered = Json.reqBool(h, "delivered", id);
-        String reason = delivered ? null : Json.optString(h, "reason", id);
-        UUID who = PENDING.remove(id);
+        Messages.PromptResult r = Messages.PromptResult.decode(new Frame(h));
+        UUID who = PENDING.remove(r.id());
         if (who == null) return;
         ServerPlayer player = server.getPlayerList().getPlayer(who);
         if (player == null) return;
-        Component text = Component.literal(ChatRules.resultText(delivered, reason)).withStyle(delivered ? ChatFormatting.GREEN : ChatFormatting.RED);
+        // 19, *Queueing*: a queued prompt is neither delivered nor refused; its status line follows.
+        if (r.queued()) {
+            out.actionBar(player, Component.literal(queuedText(r.position())).withStyle(ChatFormatting.YELLOW));
+            return;
+        }
+        boolean delivered = r.delivered();
+        Component text = Component.literal(ChatRules.resultText(delivered, r.reason())).withStyle(delivered ? ChatFormatting.GREEN : ChatFormatting.RED);
         out.actionBar(player, text);
     }
 
@@ -316,7 +331,8 @@ public final class InGamePrompts {
         return prev;
     }
 
-    private static long remember(Messages.ChatAction action) {
+    /** Keeps an action for {@code /autosketch action <n>} and returns its number (status-line buttons, {@link StatusLines}). */
+    public static long remember(Messages.ChatAction action) {
         long id = ACTION_IDS.incrementAndGet();
         ACTIONS.put(id, action);
         return id;

@@ -102,6 +102,22 @@ public final class PatchApplier implements PatchStatus {
         pump();
     }
 
+    /**
+     * Stop (19, *Stop*, step 2): drops every queued patch not yet started, as a disconnect does
+     * (13, *Connection and handshake*, step 7), answering each with {@code error} {@code code} so
+     * the MCP isn't left waiting for its ack; the patch in progress finishes and acks as usual, so the
+     * world is never left half-way through a patch. Returns how many were dropped. Server thread.
+     */
+    public int dropUnstarted(String code, String message) {
+        int dropped = 0;
+        for (Job j; (j = queue.poll()) != null; dropped++) {
+            if (j.exchange.live()) j.exchange.error(code, message);
+            else j.exchange.complete();
+        }
+        updatePending();
+        return dropped;
+    }
+
     /** Start of a server tick: a fresh budget, then continue. */
     public void tick() {
         usedThisTick = 0;

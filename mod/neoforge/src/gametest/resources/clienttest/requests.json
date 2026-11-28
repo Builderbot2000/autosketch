@@ -1,0 +1,10 @@
+{
+  "hello": { "features": ["prompt.close", "ui", "requests"], "modes": ["build", "ask", "plan"] },
+  "replies": [
+    { "on": "request.control", "send": { "type": "notice", "text": "Autosketch: the fake MCP got your request control.", "player": null } }
+  ],
+  "results": {
+    "request.stop": { "ok": true, "result": {} },
+    "queue.cancel": { "ok": true, "result": {} }
+  }
+}

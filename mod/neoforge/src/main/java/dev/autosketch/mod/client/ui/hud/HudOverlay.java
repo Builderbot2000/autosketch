@@ -3,8 +3,10 @@ package dev.autosketch.mod.client.ui.hud;
 import dev.autosketch.mod.api.Autosketch;
 import dev.autosketch.mod.client.ui.LinkState;
 import dev.autosketch.mod.client.ui.UiToggles;
+import dev.autosketch.mod.client.ui.chat.StatusLineClient;
 import dev.autosketch.mod.client.ui.overlay.OverlayClient;
 import dev.autosketch.mod.client.ui.overlay.OverlayState;
+import dev.autosketch.mod.protocol.RequestMessages.Status;
 import dev.autosketch.mod.protocol.UiMessages.Job;
 import dev.autosketch.mod.protocol.UiMessages.Refusal;
 import dev.autosketch.mod.protocol.UiMessages.RequestInfo;
@@ -19,9 +21,11 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.resources.ResourceLocation;
 import net.neoforged.neoforge.client.event.RegisterGuiLayersEvent;
 import net.neoforged.neoforge.client.gui.VanillaGuiLayers;
+import org.jetbrains.annotations.Nullable;
 
 /**
- * The HUD (16, *HUD*): a corner panel with the open request and its mode, the open job count and the
+ * The HUD (16, *HUD*): a corner panel with the open request and its mode, the request's status line
+ * and queue length (19, from {@link StatusLineClient}), the open job count and the
  * newest briefs, the last refusal, and the current prompt's token totals; one line when collapsed.
  * Every value is the held {@code ui.state}'s, as sent: the panel only lays it out (labels, number
  * abbreviation, truncation to the panel's width).
@@ -78,11 +82,21 @@ public final class HudOverlay {
     /** The panel's lines as drawn now (before truncation to width); empty when the HUD shows nothing. */
     public static List<String> lines() {
         if (!LinkState.connected() || !UiToggles.hud) return List.of();
-        return lines(OverlayClient.state(), collapsed);
+        return lines(OverlayClient.state(), collapsed, StatusLineClient.active(), StatusLineClient.queued());
     }
 
-    /** The lines for a state. */
+    /** The lines for a state, without a request status. */
     public static List<String> lines(OverlayState s, boolean collapsed) {
+        return lines(s, collapsed, null, 0);
+    }
+
+    /**
+     * The lines for a state, with the request status line (19, *Status line*: the HUD shows the same
+     * state, and the queue length): {@code active} the latest {@code working} or {@code stopping}
+     * status (its plain line as the MCP sent it), {@code queued} how many prompts wait. Nothing is
+     * added while neither is set.
+     */
+    public static List<String> lines(OverlayState s, boolean collapsed, @Nullable Status active, int queued) {
         RequestInfo r = s.request();
         List<Job> jobs = s.jobs();
         Tokens t = s.tokens();
@@ -94,15 +108,25 @@ public final class HudOverlay {
             b.append(" · ").append(jobs.size()).append(jobs.size() == 1 ? " job" : " jobs");
             if (t != null) b.append(" · ").append(tokensShort(t));
             if (x != null) b.append(" · refused ").append(x.code());
+            if (active != null) b.append(" · ").append(active.state());
+            if (queued > 0) b.append(" · ").append(queued).append(" queued");
             out.add(b.toString());
             return out;
         }
         out.add(r == null ? "Autosketch: no open request" : "Autosketch " + r.mode() + ": " + r.text());
+        if (active != null || queued > 0) out.add(requestLine(active, queued));
         out.add("Jobs: " + jobs.size());
         for (int i = jobs.size() - 1; i >= Math.max(0, jobs.size() - BRIEFS); i--) out.add("  " + jobs.get(i).brief());
         if (x != null) out.add("Refused " + x.code() + ": " + x.text());
         if (t != null) out.add("Tokens: " + tokensLong(t));
         return out;
+    }
+
+    /** The HUD's request line: the active status's line, then the queue length. */
+    public static String requestLine(@Nullable Status active, int queued) {
+        String q = queued + " queued";
+        if (active == null) return "Request: none running · " + q;
+        return queued > 0 ? active.line() + " · " + q : active.line();
     }
 
     static String tokensShort(Tokens t) {

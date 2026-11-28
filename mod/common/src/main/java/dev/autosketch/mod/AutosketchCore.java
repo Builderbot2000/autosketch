@@ -12,6 +12,7 @@ import dev.autosketch.mod.api.PatchStatus;
 import dev.autosketch.mod.bridge.BridgeServer;
 import dev.autosketch.mod.bridge.Dispatcher;
 import dev.autosketch.mod.command.AutosketchCommand;
+import dev.autosketch.mod.command.CanvasCommands;
 import dev.autosketch.mod.command.VolumeCommands;
 import dev.autosketch.mod.discovery.PointerFile;
 import dev.autosketch.mod.feedback.Feedback;
@@ -19,14 +20,18 @@ import dev.autosketch.mod.link.Link;
 import dev.autosketch.mod.platform.Platform;
 import dev.autosketch.mod.protocol.Frame;
 import dev.autosketch.mod.protocol.Messages;
+import dev.autosketch.mod.protocol.RequestMessages;
 import dev.autosketch.mod.volume.AirCommands;
 import dev.autosketch.mod.volume.AirMode;
+import dev.autosketch.mod.volume.CanvasManager;
+import dev.autosketch.mod.volume.CanvasMode;
 import dev.autosketch.mod.volume.ChunkTickets;
 import dev.autosketch.mod.volume.LinkVolumesHolder;
 import dev.autosketch.mod.volume.PlayerStates;
 import dev.autosketch.mod.volume.VolumeManager;
 import dev.autosketch.mod.volume.VolumeModes;
 import dev.autosketch.mod.volume.WandControl;
+import dev.autosketch.mod.world.SelectGrants;
 import java.io.IOException;
 import java.util.List;
 import java.util.function.Consumer;
@@ -52,16 +57,17 @@ public final class AutosketchCore {
     private final PlayerStates players = new PlayerStates();
     private final ChunkTickets tickets = new ChunkTickets();
     private final VolumeManager volumes;
+    private final CanvasManager canvas;
     private final Feedback feedback;
     private final WandControl wand;
     private final AirMode air;
     private List<CommandExtension> commands = List.of();
 
     /** Mod-internal pieces, for GameTests only. Not an API: other silos use {@link Autosketch}. */
-    public record Internals(VolumeManager volumes, ChunkTickets tickets, BridgeServer bridge, PlayerStates players, WandControl wand, AirMode air, Feedback feedback) {}
+    public record Internals(VolumeManager volumes, ChunkTickets tickets, BridgeServer bridge, PlayerStates players, WandControl wand, AirMode air, Feedback feedback, CanvasManager canvas) {}
 
     public Internals internals() {
-        return new Internals(volumes, tickets, bridge, players, wand, air, feedback);
+        return new Internals(volumes, tickets, bridge, players, wand, air, feedback, canvas);
     }
 
     /** Builds the pieces and loads the config; the platform must be installed first. */
@@ -71,6 +77,10 @@ public final class AutosketchCore {
         dispatcher = new Dispatcher(AutosketchCore::onServerThread);
         bridge = new BridgeServer(dispatcher, AutosketchCore::onServerThread);
         volumes = new VolumeManager(holder, bridge, tickets, () -> AutosketchConfig.get().volumes.contextCap);
+        // 19: the canvas, whose box is the world module's lasting read area; a work volume marked outside it clears it.
+        canvas = new CanvasManager(bridge, () -> AutosketchConfig.get().volumes.canvasChunks);
+        canvas.addListener(SelectGrants::canvas);
+        volumes.canvas(canvas);
         feedback = new Feedback(players, () -> AutosketchConfig.get().feedback.noticesDefault, Autosketch::wandModes, Autosketch::patchStatus);
         wand = new WandControl(players, Autosketch::wandModes, feedback);
         air = new AirMode(players, wand::mode, feedback);
@@ -81,6 +91,7 @@ public final class AutosketchCore {
             @Override
             public void connected(BridgeSession session) {
                 volumes.updateTickets();
+                canvas.sendIfListed(); // after hello and volumes (13, *Request control and canvas*)
             }
 
             @Override
@@ -114,8 +125,10 @@ public final class AutosketchCore {
         VolumeModes.Context contextMode = new VolumeModes.Context(volumes, players, feedback);
         setup.wandModes(new VolumeModes.Work(volumes, players, feedback));
         setup.wandModes(contextMode);
+        setup.wandModes(new CanvasMode(canvas, players, feedback));
         setup.commands(new VolumeCommands(volumes, players, wand, contextMode, feedback, bridge, Autosketch::wandModes, Autosketch::patchStatus));
         setup.commands(new AirCommands(air));
+        setup.commands(new CanvasCommands(canvas, players));
         setup.messages().register("volumes.extend", (m, ex) -> {
             Messages.VolumesExtend req = Messages.VolumesExtend.decode(m.frame());
             volumes.extend(req.id(), req.link(), req.work());
@@ -128,6 +141,12 @@ public final class AutosketchCore {
             volumes.setFromAgent(req.id(), req.dimension(), req.work(), req.context());
             MinecraftServer server = Platform.get().currentServer();
             if (server != null) feedback.notice(server, null, "Autosketch: the agent set the work volume to " + VolumeModes.size(req.work()));
+        });
+        setup.messages().register("canvas.set", (m, ex) -> {
+            RequestMessages.CanvasSet req = RequestMessages.CanvasSet.decode(m.frame());
+            var b = canvas.setFromAgent(req.id(), req.dimension(), req.box());
+            MinecraftServer server = Platform.get().currentServer();
+            if (server != null) feedback.notice(server, null, "Autosketch: the agent set the canvas to " + CanvasManager.chunks(b));
         });
         setup.messages().register("notice", (m, ex) -> {
             Messages.Notice n = Messages.Notice.decode(m.frame());
@@ -152,6 +171,7 @@ public final class AutosketchCore {
         Link.reset();
         feedback.serverStarted();
         volumes.serverStarted(server);
+        canvas.serverStarted(server);
         int port = AutosketchConfig.get().bridge.port;
         try {
             bridge.start(Platform.get().configDir(), port, new BridgeServer.Host() {
@@ -179,6 +199,7 @@ public final class AutosketchCore {
     public void serverStopping() {
         bridge.stop();
         volumes.serverStopping();
+        canvas.serverStopping();
     }
 
     /** End of a server tick: outlines and notices, and once a second a look at the config file. */
@@ -214,6 +235,8 @@ public final class AutosketchCore {
         // 19's requests: the prompt module's chat handler shows status lines, and it registers
         // /autosketch stop and queue with the other request subcommands.
         if (dispatcher.handles("chat")) out.add(dev.autosketch.mod.protocol.RequestMessages.FEATURE_REQUESTS);
+        // 19's canvas: canvas.set here, the reads inside it by the world module's select code.
+        if (dispatcher.handles("canvas.set") && dispatcher.handles("fill")) out.add(RequestMessages.FEATURE_CANVAS);
         return List.copyOf(out);
     }
 }

@@ -112,11 +112,8 @@ public final class WorldFill {
 
     // ── requests ──────────────────────────────────────────────────────────────────────────────
 
-    /** {@code no_grant}, {@code wrong_dimension}; the grant's level. */
-    private ServerLevel granted(long id, String dimension, SelectGrants.@Nullable Held held) throws ProtocolException {
-        if (held == null) throw ProtocolException.refuse(ErrorCodes.NO_GRANT, id, "no select request is open: the player sends /autosketch select first");
-        SelectGrants.Grant g = held.grant();
-        if (!g.in(dimension)) throw ProtocolException.refuse(ErrorCodes.WRONG_DIMENSION, id, "the select request is in " + g.dimension().location() + ", not " + dimension);
+    /** {@code no_grant}, {@code wrong_dimension}; the read area's level (the select grant and the canvas, 19). */
+    private ServerLevel granted(long id, SelectGrants.ReadArea g, String dimension) throws ProtocolException {
         ServerLevel level = levels.apply(g.dimension());
         if (level == null) throw ProtocolException.refuse(PatchApplier.INTERNAL, id, "the dimension " + dimension + " isn't loaded");
         return level;
@@ -125,11 +122,11 @@ public final class WorldFill {
     /** {@code fill}: replaces the grant's fill. Also {@code outside_volumes} for a seed outside the grant. */
     public void fill(SelectMessages.FillRequest req, Exchange ex) throws ProtocolException {
         long id = req.id();
+        SelectGrants.ReadArea g = SelectGrants.require(id, req.dimension());
         SelectGrants.Held held = SelectGrants.current();
-        ServerLevel level = granted(id, req.dimension(), held);
-        SelectGrants.Grant g = held.grant();
+        ServerLevel level = granted(id, g, req.dimension());
         BlockPos seed = req.seed();
-        if (!g.hasChunk(seed.getX() >> 4, seed.getZ() >> 4)) throw ProtocolException.refuse(ErrorCodes.OUTSIDE_VOLUMES, id, "the seed " + seed.toShortString() + " lies outside the select grant");
+        if (!g.hasChunk(seed.getX() >> 4, seed.getZ() >> 4)) throw ProtocolException.refuse(ErrorCodes.OUTSIDE_VOLUMES, id, "the seed " + seed.toShortString() + " lies outside " + g.what());
         int connectivity = req.connectivity() != null ? req.connectivity() : SelectMessages.FILL_CONNECTIVITY;
         int area = req.area() != null ? req.area() : SelectMessages.FILL_AREA;
         FillWalk walk = new FillWalk(seed, connectivity, area, k -> g.hasChunk(ChunkPos.getX(k), ChunkPos.getZ(k)), level.getMinBuildHeight(), level.getMaxBuildHeight() - 1);
@@ -141,8 +138,9 @@ public final class WorldFill {
     /** {@code expand}: grows the grant's fill's read area and resumes it; {@code bad_request} without one. */
     public void expand(SelectMessages.ExpandRequest req, Exchange ex) throws ProtocolException {
         long id = req.id();
+        SelectGrants.ReadArea g = SelectGrants.require(id, req.dimension());
         SelectGrants.Held held = SelectGrants.current();
-        ServerLevel level = granted(id, req.dimension(), held);
+        ServerLevel level = granted(id, g, req.dimension());
         State state = held.fill();
         if (state == null) throw ProtocolException.badRequest(id, "no fill to expand: send a fill first");
         start(new Job(level, state, req.by(), budget(req.budget()), req.id(), req.dimension(), ex));

@@ -53,8 +53,8 @@ public final class VolumeModes {
                 return;
             }
             try {
-                volumes.setWork(player.serverLevel(), Box.of(c.first, c.second));
-                feedback.actionBar(player, Component.literal("Autosketch: work volume " + size(volumes.work()) + " (link " + volumes.link() + ")"));
+                String note = volumes.setWork(player.serverLevel(), Box.of(c.first, c.second));
+                feedback.actionBar(player, Component.literal("Autosketch: work volume " + size(volumes.work()) + " (link " + volumes.link() + ")" + (note == null ? "" : "; " + note)));
             } catch (VolumeManager.Refused e) {
                 player.sendSystemMessage(Component.literal("Autosketch: " + e.getMessage()).withStyle(ChatFormatting.RED));
             }

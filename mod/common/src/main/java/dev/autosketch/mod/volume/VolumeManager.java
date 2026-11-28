@@ -51,6 +51,7 @@ public final class VolumeManager {
     private @Nullable Box extended;
     private int grow = DEFAULT_GROW;
     private final List<Box> extra = new ArrayList<>();
+    private @Nullable CanvasManager canvas;
 
     public VolumeManager(LinkVolumesHolder holder, Bridge bridge, ChunkTickets tickets, LongSupplier contextCap) {
         this.holder = holder;
@@ -97,10 +98,22 @@ public final class VolumeManager {
         return List.copyOf(extra);
     }
 
+    /** The canvas a work volume the player marks outside of clears (19, *Setting the canvas*). */
+    public void canvas(CanvasManager canvas) {
+        this.canvas = canvas;
+    }
+
+    /** What {@link #setWork} says when the new work volume cleared the canvas. */
+    public static final String CANVAS_CLEARED = "the canvas is cleared: the work volume lies outside it";
+
     // ── changes ───────────────────────────────────────────────────────────────────────────────
 
-    /** A new work volume: a relink (new link, extension dropped). Added context boxes are kept in the same dimension. */
-    public void setWork(ServerLevel level, Box box) throws Refused {
+    /**
+     * A new work volume the player marked: a relink (new link, extension dropped). Added context boxes
+     * are kept in the same dimension. One outside the canvas clears the canvas, after the
+     * {@code volumes}; then {@link #CANVAS_CLEARED} is returned for the player's line, else null.
+     */
+    public @Nullable String setWork(ServerLevel level, Box box) throws Refused {
         Box clipped = clip(level, box);
         if (clipped == null) throw new Refused("The work volume lies outside the build height.");
         boolean sameDim = level.dimension().equals(dimension);
@@ -115,6 +128,7 @@ public final class VolumeManager {
         extended = null;
         link++;
         refresh();
+        return canvas != null && canvas.workMarked(dimension, work) ? CANVAS_CLEARED : null;
     }
 
     /** Removes the work volume, which unlinks (a new link value, as 13 requires). */

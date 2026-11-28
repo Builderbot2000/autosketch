@@ -50,13 +50,14 @@ public final class FeedbackGameTests {
         return AutosketchMod.internals().feedback();
     }
 
-    /** One entry per wand mode in mode order: work's box in green, the context in blue, the other modes' (ghost, focus) boxes empty. */
+    /** One entry per wand mode in mode order: work's box in green, the context in blue, the other modes' (canvas, ghost, focus) boxes empty. */
     static String expected(ServerPlayer p, Box work, int contextGrow) {
         List<VolumeOutlines.Entry> out = new java.util.ArrayList<>();
         for (dev.autosketch.mod.api.WandMode m : Autosketch.wandModes())
             out.add(switch (m.name()) {
                 case "work" -> new VolumeOutlines.Entry(WORK, List.of(work));
                 case "context" -> new VolumeOutlines.Entry(CONTEXT, List.of(work.grow(contextGrow)));
+                case "canvas" -> new VolumeOutlines.Entry(m.colour(), List.of(), true, false); // faint, no grid without the wand (19)
                 default -> new VolumeOutlines.Entry(m.colour(), List.of());
             });
         return new VolumeOutlines(p.serverLevel().dimension().location().toString(), out).toJson();

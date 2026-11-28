@@ -127,12 +127,13 @@ public final class VolumeCommands implements CommandExtension {
         Box b = Box.of(k.first, k.second);
         if (consoleContextMode) return ok(c, "context box " + VolumeModes.size(b) + " marked; /autosketch context add adds it");
         k.clear(); // each pos1 + pos2 pair names one box, so a script never makes an in-between volume
+        String note;
         try {
-            volumes.setWork(level, b);
+            note = volumes.setWork(level, b);
         } catch (VolumeManager.Refused e) {
             return refused(c, e.getMessage());
         }
-        return ok(c, "work volume " + VolumeModes.size(volumes.work()) + " (link " + volumes.link() + ")");
+        return ok(c, "work volume " + VolumeModes.size(volumes.work()) + " (link " + volumes.link() + ")" + (note == null ? "" : "; " + note));
     }
 
     private int show(CommandContext<CommandSourceStack> c) throws CommandSyntaxException {

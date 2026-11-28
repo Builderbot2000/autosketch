@@ -1,0 +1,8 @@
+{
+  "description": "No canvas set (or the player cleared it)",
+  "sender": "mod",
+  "header": {
+    "type": "canvas",
+    "box": null
+  }
+}

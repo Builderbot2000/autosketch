@@ -1,0 +1,12 @@
+{
+  "description": "The undo refused by the undo rules: an entry wrote outside the current brush",
+  "sender": "mcp",
+  "header": {
+    "type": "ui.result",
+    "request": 45,
+    "player": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    "ok": false,
+    "error": "refused",
+    "message": "This entry wrote at (120,64,40)–(150,80,70); move the brush there first."
+  }
+}

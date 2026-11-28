@@ -1,0 +1,26 @@
+{
+  "description": "MCP hello listing every MCP feature, requests and canvas included (19): it sends status lines, handles request.control and request-control ui.requests, queues prompts, and handles canvas messages",
+  "sender": "mcp",
+  "header": {
+    "type": "hello",
+    "protocol": 4,
+    "token": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    "client": {
+      "name": "autosketch",
+      "version": "1.0.0"
+    },
+    "volatile": {},
+    "modes": [
+      "ask",
+      "plan",
+      "build",
+      "select"
+    ],
+    "features": [
+      "prompt.close",
+      "ui",
+      "requests",
+      "canvas"
+    ]
+  }
+}

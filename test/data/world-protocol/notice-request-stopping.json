@@ -1,0 +1,9 @@
+{
+  "description": "The MCP's answer to a stop, on that player's action bar",
+  "sender": "mcp",
+  "header": {
+    "type": "notice",
+    "text": "Autosketch: stopping request 14; the agent ends its turn at its next tool call.",
+    "player": "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+  }
+}

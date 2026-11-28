@@ -38,6 +38,8 @@ describe("golden vectors", () => {
   it("has a vector for every message kind", () => {
     const kinds = new Set(vectors.map((v) => (JSON.parse(readFileSync(join(DIR, `${v}.json`), "utf8")) as Sidecar).header.type));
     expect([...kinds].sort()).toEqual([
+      "canvas",
+      "canvas.set",
       "chat",
       "dirty",
       "error",
@@ -56,6 +58,7 @@ describe("golden vectors", () => {
       "registry",
       "registry.result",
       "replay.frame",
+      "request.control",
       "search",
       "search.result",
       "snapshot",

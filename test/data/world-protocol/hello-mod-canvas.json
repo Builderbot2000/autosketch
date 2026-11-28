@@ -1,0 +1,32 @@
+{
+  "description": "Mod hello listing every feature, requests and canvas included (19): it shows status lines, sends request.control for /autosketch stop and queue, has the canvas, sends canvas, accepts canvas.set and serves reads inside the canvas",
+  "sender": "mod",
+  "header": {
+    "type": "hello",
+    "protocol": 4,
+    "mod": {
+      "version": "0.2.0"
+    },
+    "game": {
+      "version": "1.21.1",
+      "dataVersion": 3955,
+      "loader": "neoforge",
+      "loaderVersion": "21.1.249"
+    },
+    "singleplayer": true,
+    "host": {
+      "name": "Kev",
+      "uuid": "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+    },
+    "features": [
+      "modes",
+      "volumes.set",
+      "registry",
+      "upgrade",
+      "ui",
+      "select",
+      "requests",
+      "canvas"
+    ]
+  }
+}

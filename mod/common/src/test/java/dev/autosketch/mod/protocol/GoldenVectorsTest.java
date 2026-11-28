@@ -58,7 +58,7 @@ class GoldenVectorsTest {
     @Test
     void everyMessageKindHasAVector() {
         List<String> names = Golden.frameNames();
-        assertTrue(names.size() >= 119, "found " + names.size() + " vectors in " + Golden.dir());
+        assertTrue(names.size() >= 150, "found " + names.size() + " vectors in " + Golden.dir());
         assertTrue(Golden.frameNames("v3/").size() >= 127, "the frozen version-3 vectors");
         assertTrue(Golden.frameNames("v2/").size() >= 48, "the frozen version-2 vectors");
         assertTrue(Golden.frameNames("v1/").size() >= 36, "the frozen version-1 vectors");
@@ -142,7 +142,8 @@ class GoldenVectorsTest {
             case "patch.ack" -> PatchAck.decode(f);
             case "dirty" -> Dirty.decode(f);
             case "notice" -> Notice.decode(f);
-            case "chat" -> Chat.decode(f);
+            case "chat" -> RequestMessages.isStatus(f) ? RequestMessages.Status.decode(f) : Chat.decode(f);
+            case "request.control", "canvas", "canvas.set" -> RequestMessages.decode(f);
             case "registry" -> RegistryRequest.decode(f);
             case "registry.result" -> RegistryResult.decode(f);
             case "upgrade" -> UpgradeRequest.decode(f);
@@ -193,6 +194,10 @@ class GoldenVectorsTest {
             case SelectMessages.MaskSnapshotRequest x -> x.encode();
             case SelectMessages.CoarseSnapshotRequest x -> x.encode();
             case SelectMessages.CoarseResult x -> x.encode();
+            case RequestMessages.Status x -> x.encode();
+            case RequestMessages.RequestControl x -> x.encode();
+            case RequestMessages.Canvas x -> x.encode();
+            case RequestMessages.CanvasSet x -> x.encode();
             default -> throw new IllegalArgumentException(m.toString());
         };
     }

@@ -1,0 +1,19 @@
+{
+  "description": "Done by a fallback (world_reply done or the idle timeout): no hook reported the turn's end",
+  "sender": "mcp",
+  "header": {
+    "type": "chat",
+    "request": 15,
+    "player": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    "kind": "status",
+    "lines": [
+      "✔ Done (no turn signal) · \"make the roof steeper\" · 6 calls · 0:51"
+    ],
+    "state": "done",
+    "text": "make the roof steeper",
+    "calls": 6,
+    "elapsedMs": 51000,
+    "noTurnSignal": true,
+    "actions": []
+  }
+}

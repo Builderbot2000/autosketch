@@ -1,0 +1,13 @@
+{
+  "description": "Select confirm sets the canvas to a shape's box plus margin; the mod widens it to whole chunk columns and the build height",
+  "sender": "mcp",
+  "header": {
+    "type": "canvas.set",
+    "id": 31,
+    "dimension": "minecraft:overworld",
+    "box": {
+      "min": [5, 60, -500],
+      "max": [1020, 120, 500]
+    }
+  }
+}

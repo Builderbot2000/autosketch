@@ -1,0 +1,13 @@
+{
+  "description": "Request 15 left the queue",
+  "sender": "mcp",
+  "header": {
+    "type": "ui.result",
+    "request": 43,
+    "player": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    "ok": true,
+    "result": {
+      "request": 15
+    }
+  }
+}

@@ -64,14 +64,21 @@ function materialIndex(list: readonly string[], tags: Record<string, readonly st
   };
 }
 
-/** The select-mode read grant (`13`, *Read grants in select mode*): chunks within `radius` of `centre`, in one dimension. */
+/**
+ * The select-mode read grant (`13`, *Read grants in select mode*): chunks within `radius` of `centre`,
+ * in one dimension; plus, with a canvas (`19`), the canvas's chunk rectangle `[cx, cz]`, which reads
+ * the same in every mode.
+ */
 export interface SelectGrant {
   dimension: string;
   centre: [number, number];
   radius: number;
+  canvas?: { min: [number, number]; max: [number, number] };
 }
 
 export function grantHasChunk(g: SelectGrant, cx: number, cz: number): boolean {
+  const c = g.canvas;
+  if (c && cx >= c.min[0] && cx <= c.max[0] && cz >= c.min[1] && cz <= c.max[1]) return true;
   return Math.max(Math.abs(cx - g.centre[0]), Math.abs(cz - g.centre[1])) <= g.radius;
 }
 

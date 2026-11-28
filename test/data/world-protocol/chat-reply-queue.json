@@ -1,0 +1,15 @@
+{
+  "description": "The MCP's answer to /autosketch queue: one line per queued prompt, numbered",
+  "sender": "mcp",
+  "header": {
+    "type": "chat",
+    "request": null,
+    "player": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    "kind": "reply",
+    "lines": [
+      "Queue: 2 prompts behind request 14.",
+      "1. \"make the roof steeper\"",
+      "2. \"add a banner over the gate\""
+    ]
+  }
+}

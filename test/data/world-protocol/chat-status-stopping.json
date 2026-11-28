@@ -1,0 +1,18 @@
+{
+  "description": "Stopped by the player, the turn not ended yet: no buttons",
+  "sender": "mcp",
+  "header": {
+    "type": "chat",
+    "request": 14,
+    "player": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    "kind": "status",
+    "lines": [
+      "■ Stopping… · \"build a gatehouse on the east wall\" · 9 calls · 0:25"
+    ],
+    "state": "stopping",
+    "text": "build a gatehouse on the east wall",
+    "calls": 9,
+    "elapsedMs": 25040,
+    "actions": []
+  }
+}

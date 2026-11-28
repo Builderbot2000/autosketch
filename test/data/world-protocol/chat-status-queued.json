@@ -1,0 +1,34 @@
+{
+  "description": "A prompt sent while request 14 runs, first in the queue, with Send now and Cancel",
+  "sender": "mcp",
+  "header": {
+    "type": "chat",
+    "request": 15,
+    "player": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    "kind": "status",
+    "lines": [
+      "⧗ Queued 1 · \"make the roof steeper\""
+    ],
+    "state": "queued",
+    "text": "make the roof steeper",
+    "calls": 0,
+    "elapsedMs": 0,
+    "queuePos": 1,
+    "actions": [
+      {
+        "label": "Send now",
+        "kind": "queue.send",
+        "args": {
+          "request": 15
+        }
+      },
+      {
+        "label": "Cancel",
+        "kind": "queue.cancel",
+        "args": {
+          "request": 15
+        }
+      }
+    ]
+  }
+}

@@ -16,6 +16,8 @@ import {
   HELLO_TIMEOUT_MS,
   MOD_FEATURES,
   PROTOCOL_VERSION,
+  CANVAS_CHUNKS,
+  type CanvasSet,
   type ChatMessage,
   type ErrorCode,
   type GameContext,
@@ -27,7 +29,10 @@ import {
   type PatchMessage,
   type PlayerRef,
   type PromptResult,
+  type RequestControl,
+  type RequestControlAction,
   type RequestMode,
+  type StatusMessage,
   type UpgradeData,
   type UpgradeRequest,
   type SnapshotRequest,
@@ -71,6 +76,18 @@ import { coarseRegion, grantHasBox, grantHasChunk, missingIn, newSearch, WorldFi
  * client at once. It records each `ui.*` and `replay.*` message in `ui` (`uiFor` filters by player),
  * and `playerUiRequest` sends a player's `ui.request` and resolves with its `ui.result`. Like the mod,
  * it does neither unless both hellos list `ui`, and keeps what arrives regardless in `uiUngated`.
+ *
+ * Request control (`requests`, `19` Part A): status lines are recorded in `statuses` (`statusOf`
+ * gives a request's latest), `playerControl` runs `/autosketch stop`, `queue` or `queue cancel <n>`
+ * as `request.control` and resolves with the MCP's answer, and `playerClickStatus` clicks a status
+ * line's button (its `ui.request`). Neither is sent unless both hellos list `requests`; status lines
+ * that arrive regardless go to `requestsUngated`.
+ *
+ * Canvas (`canvas`, `19` Part B): the host holds one canvas (`canvas`, set by `setCanvas` as the
+ * player would, or by the MCP's `canvas.set`), widened to whole chunk columns and the build height,
+ * at most `canvasChunks` across. It sends `canvas` after the hello and on every change when both
+ * hellos list `canvas`, and serves inside the canvas, in every mode, what it serves inside the
+ * select grant: blocks, mask, coarse and surface snapshots, `search`, `fill` and `expand`.
  */
 
 export interface Volumes {
@@ -110,6 +127,10 @@ export interface FakeHostOptions {
   enforceModes?: boolean;
   /** Positions one dirty notice may list (default `DIRTY_CAP`). */
   dirtyCap?: number;
+  /** `canvasChunks` (`19`): the most chunks a canvas spans on either horizontal axis; default 256. */
+  canvasChunks?: number;
+  /** The initial canvas (any box: widened to whole chunk columns and the build height); none by default. */
+  canvas?: { box: WireBox; dimension?: string } | null;
   /** Handshake timeout in ms (default `HELLO_TIMEOUT_MS`). */
   helloTimeoutMs?: number;
   /** How the game rewrites block-entity NBT when loading it (default: unchanged). */
@@ -164,6 +185,12 @@ export class FakeHost {
   /** `ui` messages that arrived although the two hellos don't both list `ui` (an MCP breaking the gate). */
   readonly uiUngated: UiMcpMessage[] = [];
   readonly notices: NoticeMessage[] = [];
+  /** Every `chat` kind `status` received while both hellos list `requests`, in order (`19`, *Status line*). */
+  readonly statuses: StatusMessage[] = [];
+  /** Status lines that arrived although the two hellos don't both list `requests`. */
+  readonly requestsUngated: StatusMessage[] = [];
+  /** The canvas (`19`), whole chunk columns and the build height; null when none is set. */
+  canvas: { box: WireBox; dimension: string } | null = null;
   /** The modes the MCP's last hello listed. */
   mcpModes: readonly RequestMode[] = [];
   /** The features the MCP's last hello listed (absent: none). */
@@ -188,6 +215,7 @@ export class FakeHost {
   private queue: Promise<void> = Promise.resolve();
   private promptId = 0;
   private readonly noticeWaiters: { player: string; resolve: (n: NoticeMessage) => void }[] = [];
+  private readonly controlWaiters: { player: string; resolve: (m: NoticeMessage | ChatMessage) => void }[] = [];
   private readonly prompts = new Map<number, (r: PromptResult) => void>();
   private uiRequestId = 0;
   private readonly uiRequests = new Map<number, (r: UiResult) => void>();
@@ -199,6 +227,7 @@ export class FakeHost {
   ) {
     this.knownStates = opts.knownStates ?? null;
     if (opts.volumes) this.volumes = this.normalize(opts.volumes);
+    if (opts.canvas) this.canvas = { box: widenToColumns(opts.canvas.box), dimension: opts.canvas.dimension ?? "minecraft:overworld" };
   }
 
   static async start(opts: FakeHostOptions = {}): Promise<FakeHost> {
@@ -365,6 +394,60 @@ export class FakeHost {
     return this.playerUiRequest(player, { kind: chat.action.kind, args: chat.action.args });
   }
 
+  // ── request control (`19`, Part A) ─────────────────────────────────────────────────────────
+
+  /** Whether both hellos list `requests`: only then do status lines and `request.control` travel. */
+  get requestsEnabled(): boolean {
+    return this.connected && this.has("requests") && this.mcpFeatures.includes("requests");
+  }
+
+  /** The latest status line of a request, if any arrived. */
+  statusOf(request: number): StatusMessage | undefined {
+    return this.statuses.findLast((m) => m.request === request);
+  }
+
+  /**
+   * A player runs `/autosketch stop`, `queue` or `queue cancel <position>` (`19`): sent as
+   * `request.control` when both hellos list `requests`, resolving with the MCP's answer (the next
+   * `notice`, or for `queue` the next `chat` reply, to that player). Without a connection the mod
+   * says `no_link` itself, and to an MCP whose hello doesn't list `requests`, `mcp_outdated`.
+   */
+  playerControl(player: PlayerRef, action: RequestControlAction, position?: number): Promise<NoticeMessage | ChatMessage | { local: "no_link" | "mcp_outdated" }> {
+    if (!this.connected) return Promise.resolve({ local: "no_link" });
+    if (!this.mcpFeatures.includes("requests")) return Promise.resolve({ local: "mcp_outdated" });
+    const m: RequestControl = { type: "request.control", player, action, ...(position !== undefined ? { position } : {}) };
+    return new Promise((resolve) => {
+      this.controlWaiters.push({ player: player.uuid, resolve });
+      this.send(m);
+    });
+  }
+
+  /** The player clicks button `index` of a status line: their client sends its `ui.request`. */
+  playerClickStatus(player: PlayerRef, status: StatusMessage, index: number): ReturnType<FakeHost["playerUiRequest"]> {
+    const a = status.actions[index];
+    if (!a) throw new Error(`fake host: this status line has no button ${index}`);
+    return this.playerUiRequest(player, { kind: a.kind, args: a.args });
+  }
+
+  // ── canvas (`19`, Part B) ──────────────────────────────────────────────────────────────────
+
+  /** Whether both hellos list `canvas`: only then does the host send `canvas`. */
+  get canvasEnabled(): boolean {
+    return this.connected && this.has("canvas") && this.mcpFeatures.includes("canvas");
+  }
+
+  /**
+   * The player sets the canvas (wand corners, `canvas here`) or clears it (`canvas clear`, null): the
+   * box is widened to whole chunk columns and the build height. Sends `canvas` when both hellos list
+   * it. A new canvas ends the search and fill it held, as a new select grant does.
+   */
+  setCanvas(c: { box: WireBox; dimension?: string } | null): void {
+    this.canvas = c && { box: widenToColumns(c.box), dimension: c.dimension ?? "minecraft:overworld" };
+    this.searchWalk = null;
+    this.worldFill = null;
+    if (this.canvasEnabled) this.sendCanvas();
+  }
+
   /** The `ui` messages received since index `from` that are for `player` (by `players`, or `player` on a result). */
   uiFor(player: string, from = 0): UiMcpMessage[] {
     return this.ui.slice(from).filter((m) => ("players" in m ? m.players.includes(player) : m.player === player));
@@ -510,6 +593,7 @@ export class FakeHost {
             ...(this.features ? { features: this.features } : {}),
           });
           this.sendVolumes();
+          if (this.canvasEnabled) this.sendCanvas();
           continue;
         }
         let m: McpMessage;
@@ -553,16 +637,32 @@ export class FakeHost {
       this.send({ type: "error", id: m.id, code: "unknown_type", message: `unknown message type ${m.type}` }, s);
       return undefined;
     }
-    const g = this.selectGrant;
-    if (!g) {
-      this.send({ type: "error", id: m.id, code: "no_grant", message: "no select request is open: the player sends /autosketch select first" }, s);
+    const g = this.readArea(m.dimension);
+    if (g) return g;
+    if (!this.selectGrant && !this.canvasReadable) {
+      this.send({ type: "error", id: m.id, code: "no_grant", message: "no select request is open and no canvas is set: the player sends /autosketch select or sets a canvas first" }, s);
       return undefined;
     }
-    if (m.dimension !== g.dimension) {
-      this.send({ type: "error", id: m.id, code: "wrong_dimension", message: `the select request is in ${g.dimension}` }, s);
-      return undefined;
-    }
-    return g;
+    this.send({ type: "error", id: m.id, code: "wrong_dimension", message: `the select request or canvas is in ${(this.selectGrant ?? this.canvas)!.dimension}` }, s);
+    return undefined;
+  }
+
+  /** Whether the host serves reads inside its canvas (it has one, and the feature). */
+  private get canvasReadable(): boolean {
+    return this.canvas !== null && this.has("canvas");
+  }
+
+  /**
+   * What the host may read in `dimension` beyond the volumes: the select grant, the canvas (`19`,
+   * in every mode), or both. Searches walk, and fills grow, inside it. Undefined when neither is there.
+   */
+  private readArea(dimension: string): SelectGrant | undefined {
+    const g = this.selectGrant && this.selectGrant.dimension === dimension ? this.selectGrant : undefined;
+    const c = this.canvasReadable && this.canvas!.dimension === dimension ? this.canvas!.box : undefined;
+    if (!c) return g;
+    const chunks = { min: [c.min[0] >> 4, c.min[2] >> 4] as [number, number], max: [c.max[0] >> 4, c.max[2] >> 4] as [number, number] };
+    // Without a select grant a search centres on the canvas's middle chunk; radius -1 makes the square empty.
+    return g ? { ...g, canvas: chunks } : { dimension, centre: [(chunks.min[0] + chunks.max[0]) >> 1, (chunks.min[1] + chunks.max[1]) >> 1], radius: -1, canvas: chunks };
   }
 
   /** `search` (`18`, piece 2): a new walk, or the grant's last walk continued. */
@@ -605,8 +705,8 @@ export class FakeHost {
 
   /** Whether a blocks read lies inside the select grant; over `contextCap` positions it is `too_large`. */
   private selectRead(dimension: string, boxes: WireBox[], positions: number): ErrorCode | "grant" | undefined {
-    const g = this.selectGrant;
-    if (!g || g.dimension !== dimension || !boxes.every((b) => grantHasBox(g, b))) return undefined;
+    const g = this.readArea(dimension);
+    if (!g || !boxes.every((b) => grantHasBox(g, b))) return undefined;
     return positions > (this.opts.contextCap ?? 4_194_304) ? "too_large" : "grant";
   }
 
@@ -640,6 +740,25 @@ export class FakeHost {
     if (!s || s.destroyed) return;
     this.sent.push(m);
     s.write(encodeMessage(m));
+  }
+
+  private sendCanvas(id?: number, s = this.socket): void {
+    const c = this.canvas;
+    this.send(c ? { type: "canvas", ...(id !== undefined ? { id } : {}), dimension: c.dimension, box: c.box } : { type: "canvas", box: null }, s);
+  }
+
+  /** `canvas.set` (`19`, *Setting the canvas*): widened as the player's canvas, confirmed by a `canvas` carrying the id. */
+  private canvasSet(m: CanvasSet, s: Socket): void {
+    if (!this.has("canvas")) return this.send({ type: "error", id: m.id, code: "unknown_type", message: "unknown message type canvas.set" }, s);
+    if (!DIMENSIONS.has(m.dimension)) return this.send({ type: "error", id: m.id, code: "wrong_dimension", message: `no dimension ${m.dimension} on this server` }, s);
+    const box = widenToColumns(m.box);
+    const cap = this.opts.canvasChunks ?? CANVAS_CHUNKS;
+    const across = Math.max((box.max[0] - box.min[0] + 1) >> 4, (box.max[2] - box.min[2] + 1) >> 4);
+    if (across > cap) return this.send({ type: "error", id: m.id, code: "bad_volumes", message: `the canvas would span ${across} chunks, more than canvasChunks (${cap})` }, s);
+    this.canvas = { box, dimension: m.dimension };
+    this.searchWalk = null;
+    this.worldFill = null;
+    this.sendCanvas(m.id, s);
   }
 
   private sendVolumes(): void {
@@ -677,6 +796,8 @@ export class FakeHost {
         if (m.type === "hashes") return this.send({ type: "hashes.result", id: m.id, sections: sectionHashes(m.boxes, (x, y, z) => this.get([x, y, z]), this.volatile) }, s);
         return this.snapshot({ type: "snapshot", id: m.id, dimension: m.dimension, boxes }, s, sel === "grant");
       }
+      case "canvas.set":
+        return this.canvasSet(m, s);
       case "volumes.set":
         if (!this.has("volumes.set")) return this.send({ type: "error", id: m.id, code: "unknown_type", message: "unknown message type volumes.set" }, s);
         return this.volumesSet(m, s);
@@ -712,10 +833,17 @@ export class FakeHost {
         this.notices.push(m);
         const i = this.noticeWaiters.findIndex((w) => w.player === m.player);
         if (i >= 0) this.noticeWaiters.splice(i, 1)[0]!.resolve(m);
+        else this.resolveControl(m.player, m);
         return;
       }
       case "chat":
+        if (m.kind === "status") {
+          // A mod without `requests` doesn't know the kind and drops it.
+          (this.requestsEnabled ? this.statuses : this.requestsUngated).push(m);
+          return;
+        }
         this.chats.push(m);
+        if (m.kind === "reply" && m.request === null) this.resolveControl(m.player, m);
         return;
       case "hello":
         return this.send({ type: "error", id: null, code: "bad_request", message: "hello after the handshake" }, s);
@@ -743,6 +871,12 @@ export class FakeHost {
     }
   }
 
+  /** Hands an answer to the oldest `playerControl` of that player still waiting. */
+  private resolveControl(player: string | null, m: NoticeMessage | ChatMessage): void {
+    const i = this.controlWaiters.findIndex((w) => w.player === player);
+    if (i >= 0) this.controlWaiters.splice(i, 1)[0]!.resolve(m);
+  }
+
   /** `volumes.set` (*Wire format*): the volumes as if the player had marked them, confirmed by a `volumes` carrying the id. */
   private volumesSet(m: VolumesSet, s: Socket): void {
     const refuse = (code: ErrorCode, message: string) => this.send({ type: "error", id: m.id, code, message }, s);
@@ -766,8 +900,8 @@ export class FakeHost {
   /** `snapshot` kind `surface`: per column the topmost non-air block, and the lowest one at or above `ceiling`. */
   private surface(m: SurfaceRequest, s: Socket): void {
     const a = m.columns;
-    const sg = this.selectGrant;
-    const inSelect = !!sg && sg.dimension === m.dimension && grantHasChunk(sg, a.min[0] >> 4, a.min[1] >> 4) && grantHasChunk(sg, a.max[0] >> 4, a.max[1] >> 4);
+    const sg = this.readArea(m.dimension);
+    const inSelect = !!sg && grantHasChunk(sg, a.min[0] >> 4, a.min[1] >> 4) && grantHasChunk(sg, a.max[0] >> 4, a.max[1] >> 4);
     if (!inSelect) {
       const box: WireBox = { min: [a.min[0], 0, a.min[1]], max: [a.max[0], 0, a.max[1]] };
       const err = this.checkRead(m.dimension, [box]);
@@ -907,8 +1041,13 @@ function containsBox(outer: WireBox, inner: WireBox): boolean {
   return [0, 1, 2].every((i) => outer.min[i]! <= inner.min[i]! && outer.max[i]! >= inner.max[i]!);
 }
 
+/** A box widened to whole chunk columns and the build height, as the mod widens a canvas (`19`). */
+function widenToColumns(b: WireBox): WireBox {
+  return { min: [(b.min[0] >> 4) * 16, BUILD_MIN_Y, (b.min[2] >> 4) * 16], max: [(b.max[0] >> 4) * 16 + 15, BUILD_MAX_Y, (b.max[2] >> 4) * 16 + 15] };
+}
+
 const DIMENSIONS = new Set(["minecraft:overworld", "minecraft:the_nether", "minecraft:the_end"]);
-const KNOWN = new Set(["hello", "error", "volumes.extend", "volumes.set", "hashes", "snapshot", "search", "fill", "expand", "patch", "registry", "upgrade", "prompt.result", "notice", "chat", ...UI_MCP_TYPES]);
+const KNOWN = new Set(["hello", "error", "volumes.extend", "volumes.set", "hashes", "snapshot", "search", "fill", "expand", "patch", "registry", "upgrade", "prompt.result", "notice", "chat", "canvas.set", ...UI_MCP_TYPES]);
 
 /** The features each protocol version's mod lists (*Versions and features*). */
 const FEATURES_BY_VERSION: Record<number, string[] | undefined> = { 1: undefined, 2: ["modes", "scan", "volumes.set"], 3: ["modes", "scan", "volumes.set", "registry", "upgrade", "ui", "select"], 4: [...MOD_FEATURES] };

@@ -193,18 +193,18 @@ public final class WorldReads {
     }
 
     /**
-     * Select (18; 13, *Where the mod serves reads*): the select grant's level when every box lies
-     * inside the grant's square in its dimension, so the snapshot is served without volumes, never
+     * Select (18; 13, *Where the mod serves reads*): the read area's level when every box lies
+     * inside the select grant's square or the canvas (19) in its dimension, so the snapshot is served without volumes, never
      * generating a chunk and listing the ungenerated ones; {@code too_large} there over
      * {@code contextCap} positions. Else null.
      */
     private @Nullable ServerLevel selectGranted(long id, String dimension, List<Box> boxes, long positions) throws ProtocolException {
-        SelectGrants.Held h = SelectGrants.current();
-        if (h == null || !h.grant().in(dimension)) return null;
-        for (Box b : boxes) if (!h.grant().hasBox(b)) return null;
+        SelectGrants.ReadArea a = SelectGrants.area(dimension);
+        if (a == null) return null;
+        for (Box b : boxes) if (!a.hasBox(b)) return null;
         long cap = dev.autosketch.mod.AutosketchConfig.get().volumes.contextCap;
         if (positions > cap) throw ProtocolException.refuse(ErrorCodes.TOO_LARGE, id, positions + " positions are over contextCap (" + cap + "); ask for less, or a coarse snapshot");
-        return levels.apply(h.grant().dimension());
+        return levels.apply(a.dimension());
     }
 
     /** {@code no_volumes}, {@code wrong_dimension}, {@code outside_volumes} (chunk columns the link keeps loaded). */

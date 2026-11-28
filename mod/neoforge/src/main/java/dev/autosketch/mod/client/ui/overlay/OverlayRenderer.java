@@ -22,7 +22,8 @@ import org.joml.Matrix4f;
  * strength where they're in view; labels as camera-facing text, also through blocks. A steady fill
  * (18, piece 8) draws its faces through blocks as pulses do but at its constant alpha, and its edges
  * as outlines are drawn, both exactly as sent. The player's own volumes (op 4) draw as job outlines do,
- * with wider lines and no fog, so they read from far off. Version
+ * with wider lines and no fog, so they read from far off; the canvas among them faint, and its chunk
+ * grid as plain lines on the ground (19). Version
  * sensitive: render types, {@code RenderLevelStageEvent} and {@code Font.drawInBatch} are where a port
  * to another Minecraft version looks first (1.21 changed vertex building to {@code addVertex}/
  * {@code setColor}/{@code setNormal}).
@@ -38,6 +39,10 @@ public final class OverlayRenderer {
     static final float PULSE_ALPHA = 0.45f;
     /** Width in pixels of the player's own volume lines (job lines are 2.5): a constant width on screen, so a far box still reads. */
     static final double VOLUME_WIDTH = 4.0;
+    /** The canvas's strength against its mode's other boxes (19: a faint box). */
+    static final float FAINT = 0.35f;
+    /** Alpha of the canvas's chunk grid, drawn where it is in view only (it lies on the ground). */
+    static final float GRID_ALPHA = 0.5f;
 
     /**
      * The render types. A subclass of {@link RenderType} only to reach its protected state shards;
@@ -169,8 +174,13 @@ public final class OverlayRenderer {
         for (int pass = 0; pass < 2 && !list.volumes().isEmpty(); pass++) {
             RenderType type = pass == 0 ? Types.WIDE_XRAY_LINES : Types.WIDE_LINES;
             VertexConsumer lines = buffers.getBuffer(type);
-            for (DrawList.Volume v : list.volumes()) edges(lines, m, v.box(), 0.01, v.colour(), pass == 0 ? XRAY_ALPHA : 1f, false);
+            for (DrawList.Volume v : list.volumes()) edges(lines, m, v.box(), 0.01, v.colour(), (pass == 0 ? XRAY_ALPHA : 1f) * (v.faint() ? FAINT : 1f), false);
             buffers.endBatch(type);
+        }
+        if (!list.grid().isEmpty()) {
+            VertexConsumer lines = buffers.getBuffer(Types.LINES);
+            for (DrawList.GridLine g : list.grid()) line(lines, m, g.x0(), g.y(), g.z0(), g.x1(), g.y(), g.z1(), g.colour(), GRID_ALPHA);
+            buffers.endBatch(Types.LINES);
         }
 
         Font font = Minecraft.getInstance().font;

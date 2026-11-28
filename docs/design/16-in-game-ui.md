@@ -112,6 +112,7 @@ The player is frozen during replay, so its keys can reuse movement-adjacent keys
 - **Job volumes:** a line box per open job's work volume in its colour, with the brief as a label facing the camera; context volumes as dashed boxes. They appear at fork and leave at merge or abandon.
 - **Change flashes:** a short pulse on boxes the agent just changed, in the job's colour, so edits behind the player are noticed.
 - **The player's own volumes** keep today's outlines (`13`).
+- **The canvas** (`19`) is drawn among them as a faint box, with a chunk grid on the ground near the player while the wand is held (op 4's `faint` and `grid`; `19`, step K1).
 - Drawn through blocks where useful, toggled with a key binding.
 
 ### HUD

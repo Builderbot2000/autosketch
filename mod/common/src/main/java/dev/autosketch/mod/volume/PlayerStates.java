@@ -10,7 +10,7 @@ import org.jetbrains.annotations.Nullable;
 
 /**
  * Per-player wand and feedback state: the current wand mode, pending corners of the work and context
- * modes, the {@code show} toggle and the notices setting. Kept in memory until the server stops.
+ * modes (and the canvas mode, 19), the {@code show} toggle and the notices setting. Kept in memory until the server stops.
  * Server thread only.
  */
 public final class PlayerStates {
@@ -18,6 +18,8 @@ public final class PlayerStates {
         public int mode;
         public final Corners work = new Corners();
         public final Corners context = new Corners();
+        /** The canvas mode's corners (19, *Setting the canvas*). */
+        public final Corners canvas = new Corners();
         public boolean show;
         public @Nullable Boolean notices;
         /** Game time until which the wand's mode line stays off the action bar (a notice is showing). */

@@ -27,6 +27,19 @@ class VolumeOutlinesTest {
     }
 
     @Test
+    void theCanvasEntryIsFaintAndHasAGridWhileTheWandIsHeld() throws Exception {
+        VolumeOutlines o = new VolumeOutlines("minecraft:overworld", List.of(
+                new VolumeOutlines.Entry(0xe8d86a, List.of(new Box(0, -64, 0, 63, 319, 31)), true, true),
+                new VolumeOutlines.Entry(0xe8d86a, List.of(), true, false)));
+        String json = o.toJson();
+        assertEquals("{\"dimension\":\"minecraft:overworld\",\"outlines\":["
+                + "{\"colour\":\"#e8d86a\",\"boxes\":[{\"min\":[0,-64,0],\"max\":[63,319,31]}],\"faint\":true,\"grid\":true},"
+                + "{\"colour\":\"#e8d86a\",\"boxes\":[],\"faint\":true}]}", json);
+        assertEquals(o, VolumeOutlines.parse(json));
+        assertThrows(ProtocolException.class, () -> VolumeOutlines.parse("{\"dimension\":\"x\",\"outlines\":[{\"colour\":\"#000000\",\"boxes\":[],\"grid\":1}]}"));
+    }
+
+    @Test
     void anEmptyListHidesThem() throws Exception {
         VolumeOutlines none = VolumeOutlines.none("minecraft:the_nether");
         assertEquals("{\"dimension\":\"minecraft:the_nether\",\"outlines\":[]}", none.toJson());

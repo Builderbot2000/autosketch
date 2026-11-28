@@ -106,6 +106,9 @@ public final class AutosketchConfig implements ConfigData {
         // Silo Y (B1): the wand is any stack of this item.
         @ConfigEntry.Gui.Tooltip(count = 2)
         public String wandItem = DEFAULT_WAND;
+        // Silo K of the canvas set (19, *Setting the canvas*): the widest canvas, in chunks on either axis.
+        @ConfigEntry.Gui.Tooltip(count = 2)
+        public int canvasChunks = 256;
     }
 
     @ConfigEntry.Gui.Excluded // not a setting: AutoConfig's screen would try to show it
@@ -194,6 +197,9 @@ public final class AutosketchConfig implements ConfigData {
                     null, c -> c.volumes.wandItem, (c, v) -> {
                         if (v instanceof String s && itemId(s) != null) c.volumes.wandItem = itemId(s);
                     }),
+            intKey("volumes", "canvasChunks", 1, 256, c -> c.volumes.canvasChunks, (c, v) -> c.volumes.canvasChunks = v,
+                    "The widest canvas (19): the most chunks it may span on either horizontal axis. The canvas is the area the agent may read",
+                    "and move its work volume in; a wider one, marked or asked for, is refused."),
             new Key("feedback", "noticesDefault", List.of("Whether action-bar notices are on for a player who hasn't set /autosketch notices."),
                     null, c -> c.feedback.noticesDefault, (c, v) -> {
                         if (v instanceof Boolean b) c.feedback.noticesDefault = b;

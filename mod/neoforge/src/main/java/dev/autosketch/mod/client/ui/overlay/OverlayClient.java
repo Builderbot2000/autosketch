@@ -86,7 +86,8 @@ public final class OverlayClient {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level == null) return DrawList.EMPTY;
         net.minecraft.world.phys.Vec3 cam = mc.gameRenderer.getMainCamera().getPosition();
-        return DrawList.build(STATE, Util.getMillis(), mc.level.dimension().location().toString(), cam.x, cam.y, cam.z, LinkState.connected(), UiToggles.volumes,
+        int ground = mc.player != null ? mc.player.getBlockY() : (int) Math.floor(cam.y);
+        return DrawList.build(STATE, Util.getMillis(), mc.level.dimension().location().toString(), cam.x, cam.y, cam.z, ground, LinkState.connected(), UiToggles.volumes,
                 UiToggles.flashes);
     }
 

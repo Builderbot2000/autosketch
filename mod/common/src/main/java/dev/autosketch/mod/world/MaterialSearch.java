@@ -100,11 +100,9 @@ public final class MaterialSearch {
     /** {@code no_grant}, {@code wrong_dimension}, {@code outside_volumes} ({@code around}), {@code bad_request} (nothing to continue). */
     public void search(SelectMessages.SearchRequest req, Exchange ex) throws ProtocolException {
         long id = req.id();
+        // The read area: the select grant, the canvas (19), or both; a search without around centres on the grant's player, else the canvas's middle chunk.
+        SelectGrants.ReadArea g = SelectGrants.require(id, req.dimension());
         SelectGrants.Held held = SelectGrants.current();
-        if (held == null) throw ProtocolException.refuse(ErrorCodes.NO_GRANT, id, "no select request is open: the player sends /autosketch select first");
-        SelectGrants.Grant g = held.grant();
-        if (!g.in(req.dimension()))
-            throw ProtocolException.refuse(ErrorCodes.WRONG_DIMENSION, id, "the select request is in " + g.dimension().location() + ", not " + req.dimension());
         ServerLevel level = levels.apply(g.dimension());
         if (level == null) throw ProtocolException.refuse(PatchApplier.INTERNAL, id, "the dimension " + req.dimension() + " isn't loaded");
         AutosketchConfig.Select cfg = AutosketchConfig.get().select;
@@ -117,7 +115,7 @@ public final class MaterialSearch {
             if (req.around() != null) {
                 cx = req.around().getX() >> 4;
                 cz = req.around().getZ() >> 4;
-                if (!g.hasChunk(cx, cz)) throw ProtocolException.refuse(ErrorCodes.OUTSIDE_VOLUMES, id, "around " + req.around().toShortString() + " lies outside the select grant");
+                if (!g.hasChunk(cx, cz)) throw ProtocolException.refuse(ErrorCodes.OUTSIDE_VOLUMES, id, "around " + req.around().toShortString() + " lies outside " + g.what());
             }
             int asked = req.radius() != null ? req.radius() : cfg.selectChunks;
             walk = new SearchWalk(req.materials(), cx, cz, Math.min(asked, cfg.selectChunks), asked > cfg.selectChunks, req.gap() != null ? req.gap() : cfg.searchGap);
@@ -302,7 +300,7 @@ public final class MaterialSearch {
 
     private final class Job {
         final ServerLevel level;
-        final SelectGrants.Grant grant;
+        final SelectGrants.ReadArea grant;
         final SearchWalk walk;
         final Matcher matcher;
         final int stop, minSection, maxSection;
@@ -319,7 +317,7 @@ public final class MaterialSearch {
         int ticks, rings, chunks, loaded, disk, fallback, missing, maybe, matched;
         long serverNanos;
 
-        Job(ServerLevel level, SelectGrants.Grant grant, SearchWalk walk, Matcher matcher, int stop, SelectMessages.SearchRequest req, Exchange ex) {
+        Job(ServerLevel level, SelectGrants.ReadArea grant, SearchWalk walk, Matcher matcher, int stop, SelectMessages.SearchRequest req, Exchange ex) {
             this.level = level;
             this.grant = grant;
             this.walk = walk;

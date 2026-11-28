@@ -100,14 +100,14 @@ public final class CoarseReads {
         tick();
     }
 
-    /** The select grant's level when every region lies inside it; {@code too_large} there over {@code contextCap} cells. Else null. */
+    /** The read area's level (select grant or canvas, 19) when every region lies inside it; {@code too_large} there over {@code contextCap} cells. Else null. */
     private @Nullable ServerLevel selectGranted(long id, String dimension, List<Box> regions, long cells) throws ProtocolException {
-        SelectGrants.Held h = SelectGrants.current();
-        if (h == null || !h.grant().in(dimension)) return null;
-        for (Box b : regions) if (!h.grant().hasBox(b)) return null;
+        SelectGrants.ReadArea a = SelectGrants.area(dimension);
+        if (a == null) return null;
+        for (Box b : regions) if (!a.hasBox(b)) return null;
         long cap = AutosketchConfig.get().volumes.contextCap;
         if (cells > cap) throw ProtocolException.refuse(ErrorCodes.TOO_LARGE, id, cells + " cells are over contextCap (" + cap + "); ask for less, or larger cells");
-        ServerLevel level = levels.apply(h.grant().dimension());
+        ServerLevel level = levels.apply(a.dimension());
         if (level == null) throw ProtocolException.refuse(PatchApplier.INTERNAL, id, "the dimension " + dimension + " isn't loaded");
         return level;
     }

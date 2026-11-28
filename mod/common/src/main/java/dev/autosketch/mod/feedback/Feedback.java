@@ -115,7 +115,7 @@ public final class Feedback {
             boolean shown = op && link != LinkStatus.OFFLINE && (holding || st.show);
             boolean channel = platform.hasUiChannel(p);
             // 13, *Relay to the client*, op 4: the client half draws them while linked; everyone else gets particles.
-            if (channel && link == LinkStatus.CONNECTED) send(platform, p, shown ? outlines(p, all) : VolumeOutlines.none(dimension(p)));
+            if (channel && link == LinkStatus.CONNECTED) send(platform, p, shown ? outlines(p, all, holding) : VolumeOutlines.none(dimension(p)));
             else {
                 if (channel) send(platform, p, VolumeOutlines.none(dimension(p)));
                 if (shown && particleTick) drawOutlines(p, all);
@@ -126,10 +126,13 @@ public final class Feedback {
         if (particleTick && sent.size() > online.size()) sent.keySet().removeIf(u -> server.getPlayerList().getPlayer(u) == null);
     }
 
-    /** What the player's client half draws (op 4): each wand mode's boxes in its colour, in mode order. */
-    static VolumeOutlines outlines(ServerPlayer p, List<WandMode> all) {
+    /** What the player's client half draws (op 4): each wand mode's boxes in its colour, in mode order; the canvas faint, with its chunk grid while the wand is held (19). */
+    static VolumeOutlines outlines(ServerPlayer p, List<WandMode> all, boolean holding) {
         List<VolumeOutlines.Entry> out = new ArrayList<>(all.size());
-        for (WandMode m : all) out.add(new VolumeOutlines.Entry(m.colour() & 0xFFFFFF, m.outline(p)));
+        for (WandMode m : all) {
+            boolean canvas = m instanceof dev.autosketch.mod.volume.CanvasMode;
+            out.add(new VolumeOutlines.Entry(m.colour() & 0xFFFFFF, m.outline(p), canvas, canvas && holding));
+        }
         return new VolumeOutlines(dimension(p), out);
     }
 

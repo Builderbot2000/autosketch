@@ -189,4 +189,41 @@ class DispatcherTest {
         d.freeze();
         assertThrows(IllegalStateException.class, () -> d.register("chat", (m, ex) -> {}));
     }
+
+    /** patch.drop (19, *Stop*, step 2): patches waiting behind a deferred one are answered `dropped` and never run; other requests stay. */
+    @Test
+    void dropQueuedAnswersWaitingRequestsOfOneTypeAndKeepsTheRest() throws ProtocolException {
+        Dispatcher d = new Dispatcher(Runnable::run);
+        List<String> log = new ArrayList<>();
+        AtomicReference<Exchange> held = new AtomicReference<>();
+        d.register("patch", (m, ex) -> {
+            log.add("patch " + m.id());
+            ex.defer();
+            held.set(ex);
+        });
+        d.register("snapshot", (m, ex) -> {
+            log.add("snapshot " + m.id());
+            ex.reply(req("snapshot.result", m.id()));
+        });
+        d.register("patch.drop", (m, ex) -> log.add("dropped " + d.dropQueued("patch", "dropped", "the request was stopped")));
+        d.freeze();
+        FakeConnection c = new FakeConnection();
+        d.submit(c, req("patch", 1));
+        d.submit(c, req("patch", 2));
+        d.submit(c, req("snapshot", 3));
+        d.submit(c, req("patch", 4));
+        d.submit(c, new Frame(Json.header("patch.drop")));
+        assertEquals(List.of("patch 1", "dropped 2"), log);
+        assertEquals(2, c.sent.size());
+        for (int i = 0; i < 2; i++) {
+            ErrorMessage e = ErrorMessage.decode(c.sent.get(i));
+            assertEquals("dropped", e.code());
+            assertEquals(i == 0 ? 2L : 4L, e.id());
+        }
+        assertEquals(1, d.queued());
+        held.get().reply(req("patch.ack", 1));
+        assertEquals(List.of("patch 1", "dropped 2", "snapshot 3"), log);
+        assertEquals(List.of("error", "error", "patch.ack", "snapshot.result"), c.sent.stream().map(Frame::type).toList());
+        assertFalse(d.busy());
+    }
 }

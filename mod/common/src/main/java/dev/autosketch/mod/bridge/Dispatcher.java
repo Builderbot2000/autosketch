@@ -11,8 +11,11 @@ import dev.autosketch.mod.protocol.ErrorMessage;
 import dev.autosketch.mod.protocol.Frame;
 import dev.autosketch.mod.protocol.ProtocolException;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Executor;
@@ -101,6 +104,22 @@ public final class Dispatcher implements MessageRegistry {
         synchronized (lock) {
             queue.removeIf(p -> p.connection == connection);
         }
+    }
+
+    @Override
+    public int dropQueued(String type, String code, String message) {
+        List<Pending> dropped = new ArrayList<>();
+        synchronized (lock) {
+            for (Iterator<Pending> it = queue.iterator(); it.hasNext(); ) {
+                Pending p = it.next();
+                if (p.frame.type().equals(type)) {
+                    it.remove();
+                    dropped.add(p);
+                }
+            }
+        }
+        for (Pending p : dropped) new ExchangeImpl(p.connection, p.frame.id(), false).error(code, message);
+        return dropped.size();
     }
 
     /** Messages queued and not yet started. */

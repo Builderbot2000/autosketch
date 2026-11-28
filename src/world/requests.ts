@@ -189,6 +189,8 @@ export class RequestLifecycle {
    * running turn, or starts one, and is `working`.
    */
   delivered(r: { id: number; player: PlayerRef; text: string }): void {
+    // Already running in this turn (an answer to a question the agent asked mid-turn): nothing to restart.
+    if (this.turn?.entries.some((x) => x.id === r.id && (x.state === "working" || x.state === "stopping"))) return this.touch();
     const e = this.known.get(r.id) ?? { id: r.id, player: r.player, text: r.text, state: "working" as const, calls: 0 };
     delete e.prompt;
     e.state = "working";

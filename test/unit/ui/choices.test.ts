@@ -213,6 +213,28 @@ describe("choices.pick and typed numbers (18, piece 7)", () => {
     expect(events).toHaveLength(before + 1);
   });
 
+  it("puts the question's request back to working when the answer arrives after the turn ended, click or typed", async () => {
+    const { host, call } = await setup();
+    await host.playerAsk(HOST, "which tower?", {}, { mode: "ask" });
+    await host.waitFor(() => inGame!.current?.id === 1);
+    await call("world_reply", { lines: ["Which?"], choices: ["north", "south"], done: true });
+    inGame!.lifecycle.turnEnded();
+    expect(inGame!.lifecycle.entry(1)!.state).toBe("done");
+    ok(await pick(host, { id: "q1", index: 1 }));
+    expect(inGame!.lifecycle.entry(1)!.state).toBe("working");
+    expect(inGame!.lifecycle.running.filter((e) => e.id === 1)).toHaveLength(1);
+    // Mid-turn: still one entry, still working.
+    await call("world_reply", { lines: ["And?"], choices: ["a", "b"] });
+    await host.playerAsk(HOST, "1", {}, { mode: "ask" });
+    expect(inGame!.lifecycle.running.filter((e) => e.id === 1)).toHaveLength(1);
+    inGame!.lifecycle.turnEnded();
+    await call("world_reply", { lines: ["Last?"], choices: ["x", "y"] });
+    await host.playerAsk(HOST, "2", {}, { mode: "ask" });
+    expect(inGame!.lifecycle.entry(1)!.state).toBe("working");
+    // The closed stream reopened, so the agent's next reply goes to request 1.
+    expect(inGame!.current).toMatchObject({ id: 1, mode: "ask" });
+  });
+
   it("reopens a closed request in its mode under the same id", async () => {
     const { host, call, events } = await setup();
     await host.playerAsk(HOST, "which tower?", {}, { mode: "ask" });

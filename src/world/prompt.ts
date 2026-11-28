@@ -316,11 +316,27 @@ export class InGameRequests implements InGameReplies {
     if (a.switchMode && a.mode) this.checkSwitch(id, a.mode, a.player);
     if (a.switchMode && a.mode && open) this.switchMode(id!, a.mode);
     await this.opts.notify(this.remind(a.text), { ...(id !== null ? { request: String(id) } : {}), player: a.player.name });
-    if (id === null || open) return;
-    if (this.link.state === "linked" && this.link.doc) this.modeRule.attach(this.link.doc);
-    this.open({ id, player: a.player, mode: a.mode ?? "build", text: a.question });
-    this.lifecycle.delivered({ id, player: a.player, text: a.question });
-    this.opts.log?.(`in-game ${a.mode ?? "build"} request ${id} reopened by ${a.player.name}'s answer`);
+    if (id === null) return;
+    this.resume(id, a.player, a.mode ?? this.heldOn(id) ?? "build", a.question);
+    if (!open) this.opts.log?.(`in-game ${a.mode ?? "build"} request ${id} reopened by ${a.player.name}'s answer`);
+  }
+
+  /** The mode held on request `id`, if it is the held one. */
+  private heldOn(id: number): RequestMode | undefined {
+    return this.held?.id === id ? this.held.mode : undefined;
+  }
+
+  /**
+   * An answer (a candidates pick or a choice) reached the agent on request `id`: the agent's next
+   * turn works on it, so its stream opens again when it had closed (replies and activity lines go to
+   * it) and its status line reads working again (`19`), as for a new request.
+   */
+  private resume(id: number, player: PlayerRef, mode: RequestMode, text: string): void {
+    if (this.stream.current?.id !== id) {
+      if (this.link.state === "linked" && this.link.doc) this.modeRule.attach(this.link.doc);
+      this.open({ id, player, mode, text });
+    }
+    this.lifecycle.delivered({ id, player, text });
   }
 
   /** A request event's text with the component set's reminder line appended while the set has entries (`17`, piece 1). */
@@ -418,6 +434,8 @@ export class InGameRequests implements InGameReplies {
       return true;
     }
     this.link.bridge.send({ type: "prompt.result", id: m.id, delivered: true });
+    // As a click: the question's request is working again while the agent takes the answer.
+    if (q.request !== null) this.resume(q.request, m.player, to ?? this.heldOn(q.request) ?? q.mode ?? "build", q.question);
     this.opts.log?.(`in-game request ${m.id} from ${m.player.name} taken as choice ${n} of ${q.id} (request ${q.request})`);
     return true;
   }

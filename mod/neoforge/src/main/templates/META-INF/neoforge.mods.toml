@@ -22,6 +22,10 @@ displayTest="IGNORE_ALL_VERSION"
 [[mixins]]
     config="autosketch.client.mixins.json"
 
+# Canvas set G1 (19): the client half rewrites its own status lines in chat in place (client only).
+[[mixins]]
+    config="autosketch.chat.mixins.json"
+
 [[dependencies.${mod_id}]]
     modId="neoforge"
     type="required"

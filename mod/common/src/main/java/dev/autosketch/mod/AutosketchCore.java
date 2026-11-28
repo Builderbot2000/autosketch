@@ -211,6 +211,9 @@ public final class AutosketchCore {
         // 18's select: the world module registers search, fill and expand with the mask and coarse
         // snapshots together, so its fill handler stands for all of them (13, *Versions and features*).
         if (dispatcher.handles("fill")) out.add(Messages.FEATURE_SELECT);
+        // 19's requests: the prompt module's chat handler shows status lines, and it registers
+        // /autosketch stop and queue with the other request subcommands.
+        if (dispatcher.handles("chat")) out.add(dev.autosketch.mod.protocol.RequestMessages.FEATURE_REQUESTS);
         return List.copyOf(out);
     }
 }

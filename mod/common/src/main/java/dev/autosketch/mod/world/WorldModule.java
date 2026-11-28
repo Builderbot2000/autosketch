@@ -113,6 +113,12 @@ public final class WorldModule {
         });
 
         e.messages().register("patch", (msg, ex) -> handlePatch(msg, ex));
+        // Stop (19, *Stop*, step 2): the MCP's patch.drop drops every queued patch not yet started,
+        // each answered with error `dropped`; the patch in progress finishes and acks as usual.
+        e.messages().register("patch.drop", (msg, ex) -> {
+            dev.autosketch.mod.protocol.RequestMessages.PatchDrop.decode(msg.frame());
+            services().patches().dropUnstarted(dev.autosketch.mod.protocol.ErrorCodes.DROPPED, "the request was stopped");
+        });
         e.messages().register("hashes", (msg, ex) -> reads.hashes(Messages.HashesRequest.decode(msg.frame()), ex, keysOf(msg)));
         e.messages().register("snapshot", (msg, ex) -> {
             switch (Messages.snapshotKind(msg.frame())) {
